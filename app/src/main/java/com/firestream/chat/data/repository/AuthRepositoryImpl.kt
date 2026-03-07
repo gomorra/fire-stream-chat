@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -7,13 +8,17 @@ import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthProvider
+import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val authSource: FirebaseAuthSource,
-    private val userDao: UserDao
+    private val userDao: UserDao,
+    private val signalManager: SignalManager,
+    private val firebaseMessaging: FirebaseMessaging
 ) : AuthRepository {
 
     override val currentUserId: String?
@@ -22,16 +27,15 @@ class AuthRepositoryImpl @Inject constructor(
     override val isLoggedIn: Boolean
         get() = authSource.isLoggedIn
 
-    override suspend fun sendOtp(phoneNumber: String): Result<String> {
-        // OTP sending is handled via PhoneAuthProvider callbacks in the ViewModel
-        // This returns a placeholder; actual verification ID comes from the callback
-        return Result.success("pending")
-    }
-
     override suspend fun verifyOtp(verificationId: String, otp: String): Result<User> {
         return try {
             val credential = PhoneAuthProvider.getCredential(verificationId, otp)
             val uid = authSource.signInWithCredential(credential)
+            // Sync FCM token now that we have a UID — onNewToken may have fired before login
+            try {
+                val token = firebaseMessaging.token.await()
+                authSource.updateFcmToken(uid, token)
+            } catch (_: Exception) { }
             val userData = authSource.getUserDocument(uid)
             if (userData != null) {
                 val user = User(
@@ -44,9 +48,10 @@ class AuthRepositoryImpl @Inject constructor(
                     isOnline = true
                 )
                 userDao.insertUser(UserEntity.fromDomain(user))
+                signalManager.ensureInitialized()
                 Result.success(user)
             } else {
-                // New user — needs profile setup
+                // New user — needs profile setup; keys will be initialised in createUserProfile
                 Result.success(User(uid = uid))
             }
         } catch (e: Exception) {
@@ -57,8 +62,9 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun createUserProfile(displayName: String, avatarUrl: String?): Result<User> {
         return try {
             val uid = currentUserId ?: throw Exception("Not authenticated")
-            val phoneNumber = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.phoneNumber ?: ""
+            val phoneNumber = authSource.currentUserPhone ?: ""
             authSource.createUserDocument(uid, phoneNumber, displayName, avatarUrl)
+            signalManager.ensureInitialized()
 
             val user = User(
                 uid = uid,

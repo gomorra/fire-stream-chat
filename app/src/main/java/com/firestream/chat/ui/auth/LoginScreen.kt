@@ -1,6 +1,8 @@
 package com.firestream.chat.ui.auth
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +36,15 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
+
+private fun Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 @Composable
 fun LoginScreen(
@@ -117,7 +128,8 @@ fun LoginScreen(
             Button(
                 onClick = {
                     val fullNumber = "$countryCode$phoneNumber"
-                    viewModel.sendOtp(fullNumber, context as Activity) { verificationId ->
+                    val activity = context.findActivity() ?: return@Button
+                    viewModel.sendOtp(fullNumber, activity) { verificationId ->
                         onOtpSent(verificationId, fullNumber)
                     }
                 },

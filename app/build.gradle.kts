@@ -33,6 +33,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -48,9 +49,12 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            // Exclude non-Android native libraries from libsignal
             excludes += "**/*.dylib"
             excludes += "**/*.dll"
+        }
+        jniLibs {
+            // libsignal_jni_testing.so is a test-only artifact (~316 MB across 4 ABIs)
+            excludes += "**/libsignal_jni_testing.so"
         }
     }
 }
@@ -100,6 +104,9 @@ dependencies {
 
     // Networking
     implementation(libs.okhttp)
+
+    // Core Library Desugaring
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
     // Testing
     testImplementation(libs.junit)

@@ -7,16 +7,27 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class FCMService : FirebaseMessagingService() {
 
+    @Inject lateinit var authRepository: AuthRepository
+
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        // Token will be updated via AuthRepository when user is logged in
+        if (authRepository.isLoggedIn) {
+            CoroutineScope(Dispatchers.IO).launch {
+                authRepository.updateFcmToken(token)
+            }
+        }
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
@@ -27,12 +38,10 @@ class FCMService : FirebaseMessagingService() {
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
 
-        // In E2E encryption, we show a generic notification
-        // The actual decryption happens when the app opens
-        showNotification(chatId, senderName, "New message")
+        showNotification(chatId, senderId, senderName, "New message")
     }
 
-    private fun showNotification(chatId: String, title: String, body: String) {
+    private fun showNotification(chatId: String, senderId: String, title: String, body: String) {
         val channelId = "fire_stream_messages"
 
         val notificationManager = getSystemService(NotificationManager::class.java)
@@ -45,6 +54,7 @@ class FCMService : FirebaseMessagingService() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("chatId", chatId)
+            putExtra("senderId", senderId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(

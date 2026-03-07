@@ -20,6 +20,9 @@ class FirebaseAuthSource @Inject constructor(
     val isLoggedIn: Boolean
         get() = auth.currentUser != null
 
+    val currentUserPhone: String?
+        get() = auth.currentUser?.phoneNumber
+
     fun getPhoneAuthOptions(
         phoneNumber: String,
         callbacks: PhoneAuthProvider.OnVerificationStateChangedCallbacks

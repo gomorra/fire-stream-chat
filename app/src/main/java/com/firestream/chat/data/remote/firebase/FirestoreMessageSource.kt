@@ -1,6 +1,5 @@
 package com.firestream.chat.data.remote.firebase
 
-import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.google.firebase.firestore.FirebaseFirestore
@@ -13,11 +12,32 @@ import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Raw Firestore message before decryption.
+ * [ciphertext] and [signalType] are non-null for encrypted messages.
+ * [content] is non-null for group/plaintext messages (Phase 4: group encryption).
+ */
+data class RawFirestoreMessage(
+    val id: String,
+    val chatId: String,
+    val senderId: String,
+    val content: String?,
+    val ciphertext: String?,
+    val signalType: Int?,
+    val type: String,
+    val mediaUrl: String?,
+    val mediaThumbnailUrl: String?,
+    val status: String,
+    val replyToId: String?,
+    val timestamp: Long,
+    val editedAt: Long?
+)
+
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
 ) {
-    fun observeMessages(chatId: String): Flow<List<Message>> = callbackFlow {
+    fun observeMessages(chatId: String): Flow<List<RawFirestoreMessage>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -28,37 +48,69 @@ class FirestoreMessageSource @Inject constructor(
                     return@addSnapshotListener
                 }
                 val messages = snapshot?.documents?.mapNotNull { doc ->
-                    doc.data?.let { mapToMessage(doc.id, chatId, it) }
+                    doc.data?.let { mapToRaw(doc.id, chatId, it) }
                 } ?: emptyList()
                 trySend(messages)
             }
         awaitClose { listener.remove() }
     }
 
-    suspend fun sendMessage(chatId: String, message: Message): String {
-        val messageData = hashMapOf(
-            "senderId" to message.senderId,
-            "content" to message.content,
-            "type" to message.type.name,
-            "mediaUrl" to message.mediaUrl,
-            "mediaThumbnailUrl" to message.mediaThumbnailUrl,
+    suspend fun sendMessage(
+        chatId: String,
+        senderId: String,
+        ciphertext: String,
+        signalType: Int,
+        type: MessageType,
+        replyToId: String?,
+        timestamp: Long
+    ): String {
+        val data = hashMapOf(
+            "senderId" to senderId,
+            "ciphertext" to ciphertext,
+            "signalType" to signalType,
+            "type" to type.name,
             "status" to MessageStatus.SENT.name,
-            "replyToId" to message.replyToId,
-            "timestamp" to message.timestamp
+            "replyToId" to replyToId,
+            "timestamp" to timestamp
         )
-
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
-            .add(messageData)
+            .add(data)
             .await()
 
-        // Update chat's last message
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to message.content,
-                "lastMessageSenderId" to message.senderId,
-                "lastMessageTimestamp" to message.timestamp
+                "lastMessageContent" to "New message",
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId
+            )
+        ).await()
+
+        return docRef.id
+    }
+
+    /** Fallback for unencrypted sends (group chats, Phase 4). */
+    suspend fun sendPlainMessage(chatId: String, senderId: String, content: String, type: MessageType, replyToId: String?, timestamp: Long): String {
+        val data = hashMapOf(
+            "senderId" to senderId,
+            "content" to content,
+            "type" to type.name,
+            "status" to MessageStatus.SENT.name,
+            "replyToId" to replyToId,
+            "timestamp" to timestamp
+        )
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .add(data)
+            .await()
+
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to content,
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId
             )
         ).await()
 
@@ -81,24 +133,18 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    private fun mapToMessage(id: String, chatId: String, data: Map<String, Any?>): Message {
-        return Message(
+    private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawFirestoreMessage {
+        return RawFirestoreMessage(
             id = id,
             chatId = chatId,
             senderId = data["senderId"] as? String ?: "",
-            content = data["content"] as? String ?: "",
-            type = try {
-                MessageType.valueOf(data["type"] as? String ?: "TEXT")
-            } catch (_: Exception) {
-                MessageType.TEXT
-            },
+            content = data["content"] as? String,
+            ciphertext = data["ciphertext"] as? String,
+            signalType = (data["signalType"] as? Long)?.toInt(),
+            type = data["type"] as? String ?: MessageType.TEXT.name,
             mediaUrl = data["mediaUrl"] as? String,
             mediaThumbnailUrl = data["mediaThumbnailUrl"] as? String,
-            status = try {
-                MessageStatus.valueOf(data["status"] as? String ?: "SENT")
-            } catch (_: Exception) {
-                MessageStatus.SENT
-            },
+            status = data["status"] as? String ?: MessageStatus.SENT.name,
             replyToId = data["replyToId"] as? String,
             timestamp = data["timestamp"] as? Long ?: 0L,
             editedAt = data["editedAt"] as? Long

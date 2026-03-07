@@ -107,11 +107,12 @@ fun ChatListScreen(
                 ) {
                     items(uiState.chats, key = { it.id }) { chat ->
                         val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
-                            chat.participants.firstOrNull { it != "" } ?: ""
+                            chat.participants.firstOrNull { it != uiState.currentUserId } ?: ""
                         } else ""
 
                         ChatListItem(
                             chat = chat,
+                            currentUserId = uiState.currentUserId,
                             onClick = { onChatClick(chat.id, recipientId) }
                         )
                     }
