@@ -1,18 +1,17 @@
 package com.firestream.chat.domain.usecase.message
 
+import android.net.Uri
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.MessageRepository
 import javax.inject.Inject
 
-class SendMessageUseCase @Inject constructor(
+class SendVoiceMessageUseCase @Inject constructor(
     private val messageRepository: MessageRepository
 ) {
     suspend operator fun invoke(
         chatId: String,
-        content: String,
+        uri: Uri,
         recipientId: String,
-        replyToId: String? = null
-    ): Result<Message> {
-        return messageRepository.sendMessage(chatId, content, recipientId, replyToId)
-    }
+        durationSeconds: Int
+    ): Result<Message> = messageRepository.sendVoiceMessage(chatId, uri, recipientId, durationSeconds)
 }

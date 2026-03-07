@@ -12,6 +12,8 @@ import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
 import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.chat.ChatScreen
+import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.chat.MessageInfoScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 
 object Routes {
@@ -21,12 +23,16 @@ object Routes {
     const val CHAT_LIST = "chat_list"
     const val CHAT = "chat/{chatId}/{recipientId}"
     const val CONTACTS = "contacts"
+    const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
 
     fun chat(chatId: String, recipientId: String) =
         "chat/$chatId/$recipientId"
+
+    fun messageInfo(messageId: String, chatId: String) =
+        "message_info/$messageId/$chatId"
 }
 
 @Composable
@@ -35,6 +41,11 @@ fun FireStreamNavGraph(
     initialSenderId: String? = null
 ) {
     val navController = rememberNavController()
+    // Shared state for MessageInfoScreen (passed via navigate args would require parcelize,
+    // so we use a simple holder instead)
+    val messageInfoHolder = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<Message?>(null)
+    }
 
     NavHost(
         navController = navController,
@@ -113,7 +124,11 @@ fun FireStreamNavGraph(
             )
         ) {
             ChatScreen(
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.popBackStack() },
+                onMessageInfoClick = { message ->
+                    messageInfoHolder.value = message
+                    navController.navigate(Routes.messageInfo(message.id, message.chatId))
+                }
             )
         }
 
@@ -126,6 +141,22 @@ fun FireStreamNavGraph(
                 },
                 onBackClick = { navController.popBackStack() }
             )
+        }
+
+        composable(
+            route = Routes.MESSAGE_INFO,
+            arguments = listOf(
+                navArgument("messageId") { type = NavType.StringType },
+                navArgument("chatId") { type = NavType.StringType }
+            )
+        ) {
+            val message = messageInfoHolder.value
+            if (message != null) {
+                MessageInfoScreen(
+                    message = message,
+                    onBackClick = { navController.popBackStack() }
+                )
+            }
         }
     }
 }

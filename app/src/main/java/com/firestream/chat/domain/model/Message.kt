@@ -11,5 +11,11 @@ data class Message(
     val status: MessageStatus = MessageStatus.SENDING,
     val replyToId: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
-    val editedAt: Long? = null
+    val editedAt: Long? = null,
+    // Phase 1: reactions — map of userId → emoji
+    val reactions: Map<String, String> = emptyMap(),
+    // Phase 1: forwarding
+    val isForwarded: Boolean = false,
+    // Phase 1: voice messages — duration in seconds
+    val duration: Int? = null
 )

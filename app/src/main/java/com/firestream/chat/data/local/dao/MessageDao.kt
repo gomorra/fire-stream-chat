@@ -32,4 +32,7 @@ interface MessageDao {
 
     @Query("UPDATE messages SET content = :content, editedAt = :editedAt WHERE id = :messageId")
     suspend fun editMessage(messageId: String, content: String, editedAt: Long)
+
+    @Query("UPDATE messages SET reactions = :reactionsJson WHERE id = :messageId")
+    suspend fun updateReactions(messageId: String, reactionsJson: String)
 }
