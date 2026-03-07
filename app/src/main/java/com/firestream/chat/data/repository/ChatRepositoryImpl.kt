@@ -5,7 +5,9 @@ import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.ChatRepository
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.channels.awaitClose
@@ -61,7 +63,6 @@ class ChatRepositoryImpl @Inject constructor(
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
             val participants = listOf(uid, participantId).sorted()
 
-            // Check if chat already exists
             val existing = firestore.collection("chats")
                 .whereEqualTo("type", ChatType.INDIVIDUAL.name)
                 .whereEqualTo("participants", participants)
@@ -71,7 +72,6 @@ class ChatRepositoryImpl @Inject constructor(
                 val doc = existing.documents.first()
                 Result.success(mapToChat(doc.id, doc.data!!))
             } else {
-                // Create new chat
                 val chatData = hashMapOf(
                     "type" to ChatType.INDIVIDUAL.name,
                     "participants" to participants,
@@ -141,7 +141,7 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun addGroupMember(chatId: String, userId: String): Result<Unit> {
         return try {
             firestore.collection("chats").document(chatId)
-                .update("participants", com.google.firebase.firestore.FieldValue.arrayUnion(userId))
+                .update("participants", FieldValue.arrayUnion(userId))
                 .await()
             Result.success(Unit)
         } catch (e: Exception) {
@@ -152,7 +152,7 @@ class ChatRepositoryImpl @Inject constructor(
     override suspend fun removeGroupMember(chatId: String, userId: String): Result<Unit> {
         return try {
             firestore.collection("chats").document(chatId)
-                .update("participants", com.google.firebase.firestore.FieldValue.arrayRemove(userId))
+                .update("participants", FieldValue.arrayRemove(userId))
                 .await()
             Result.success(Unit)
         } catch (e: Exception) {
@@ -160,8 +160,65 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
-    @Suppress("UNCHECKED_CAST")
+    override fun observeTyping(chatId: String): Flow<List<String>> = callbackFlow {
+        val listener: ListenerRegistration = firestore
+            .collection("chats").document(chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val typingUsers = (snapshot?.get("typingUsers") as? Map<*, *>)
+                    ?.entries
+                    ?.filter { (_, v) ->
+                        val ts = v as? Long ?: return@filter false
+                        System.currentTimeMillis() - ts < 10_000
+                    }
+                    ?.mapNotNull { it.key as? String }
+                    ?: emptyList()
+                trySend(typingUsers)
+            }
+        awaitClose { listener.remove() }
+    }
+
+    override suspend fun setTyping(chatId: String, isTyping: Boolean) {
+        val uid = authSource.currentUserId ?: return
+        try {
+            val update = if (isTyping) {
+                mapOf("typingUsers.$uid" to System.currentTimeMillis())
+            } else {
+                mapOf("typingUsers.$uid" to FieldValue.delete())
+            }
+            firestore.collection("chats").document(chatId).update(update).await()
+        } catch (_: Exception) {
+            // Typing updates are best-effort; ignore errors
+        }
+    }
+
     private fun mapToChat(id: String, data: Map<String, Any?>): Chat {
+        val lastMessageContent = data["lastMessageContent"] as? String
+        val lastMessageTimestamp = data["lastMessageTimestamp"] as? Long
+        val lastMessageSenderId = data["lastMessageSenderId"] as? String
+
+        val lastMessage = if (lastMessageContent != null && lastMessageTimestamp != null && lastMessageSenderId != null) {
+            Message(
+                id = "",
+                chatId = id,
+                senderId = lastMessageSenderId,
+                content = lastMessageContent,
+                timestamp = lastMessageTimestamp
+            )
+        } else null
+
+        val typingUserIds = (data["typingUsers"] as? Map<*, *>)
+            ?.entries
+            ?.filter { (_, v) ->
+                val ts = v as? Long ?: return@filter false
+                System.currentTimeMillis() - ts < 10_000
+            }
+            ?.mapNotNull { it.key as? String }
+            ?: emptyList()
+
         return Chat(
             id = id,
             type = try {
@@ -171,11 +228,13 @@ class ChatRepositoryImpl @Inject constructor(
             },
             name = data["name"] as? String,
             avatarUrl = data["avatarUrl"] as? String,
-            participants = (data["participants"] as? List<String>) ?: emptyList(),
+            participants = (data["participants"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            lastMessage = lastMessage,
             unreadCount = (data["unreadCount"] as? Long)?.toInt() ?: 0,
             createdAt = data["createdAt"] as? Long ?: 0L,
             createdBy = data["createdBy"] as? String,
-            admins = (data["admins"] as? List<String>) ?: emptyList()
+            admins = (data["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            typingUserIds = typingUserIds
         )
     }
 }

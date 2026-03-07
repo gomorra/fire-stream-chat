@@ -10,5 +10,6 @@ data class Chat(
     val unreadCount: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
     val createdBy: String? = null,
-    val admins: List<String> = emptyList()
+    val admins: List<String> = emptyList(),
+    val typingUserIds: List<String> = emptyList()
 )

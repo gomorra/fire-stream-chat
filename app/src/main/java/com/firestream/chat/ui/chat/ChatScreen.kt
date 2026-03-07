@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -121,6 +122,15 @@ fun ChatScreen(
                 }
             }
 
+            if (uiState.typingUserIds.isNotEmpty()) {
+                Text(
+                    text = "typing...",
+                    style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                )
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -129,7 +139,10 @@ fun ChatScreen(
             ) {
                 OutlinedTextField(
                     value = messageText,
-                    onValueChange = { messageText = it },
+                    onValueChange = {
+                        messageText = it
+                        viewModel.onTyping(it)
+                    },
                     modifier = Modifier.weight(1f),
                     placeholder = { Text(stringResource(R.string.type_message)) },
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -137,6 +150,7 @@ fun ChatScreen(
                         onSend = {
                             viewModel.sendMessage(messageText)
                             messageText = ""
+                            viewModel.onTyping("")
                         }
                     ),
                     maxLines = 4,
@@ -147,6 +161,7 @@ fun ChatScreen(
                     onClick = {
                         viewModel.sendMessage(messageText)
                         messageText = ""
+                        viewModel.onTyping("")
                     },
                     enabled = messageText.isNotBlank() && !uiState.isSending
                 ) {

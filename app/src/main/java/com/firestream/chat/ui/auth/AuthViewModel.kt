@@ -31,7 +31,8 @@ data class AuthUiState(
 class AuthViewModel @Inject constructor(
     private val verifyOtpUseCase: VerifyOtpUseCase,
     private val getCurrentUserUseCase: GetCurrentUserUseCase,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
@@ -81,7 +82,7 @@ class AuthViewModel @Inject constructor(
             }
         }
 
-        val options = PhoneAuthOptions.newBuilder(FirebaseAuth.getInstance())
+        val options = PhoneAuthOptions.newBuilder(firebaseAuth)
             .setPhoneNumber(phoneNumber)
             .setTimeout(60L, TimeUnit.SECONDS)
             .setActivity(activity)

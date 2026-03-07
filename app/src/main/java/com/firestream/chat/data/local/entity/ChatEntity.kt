@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
 
 @Entity(tableName = "chats")
 data class ChatEntity(
@@ -11,11 +12,11 @@ data class ChatEntity(
     val type: String,
     val name: String?,
     val avatarUrl: String?,
-    val participants: String, // JSON array of UIDs
+    val participants: List<String>,
     val unreadCount: Int,
     val createdAt: Long,
     val createdBy: String?,
-    val admins: String, // JSON array of UIDs
+    val admins: List<String>,
     val lastMessageId: String?,
     val lastMessageContent: String?,
     val lastMessageTimestamp: Long?
@@ -25,11 +26,20 @@ data class ChatEntity(
         type = ChatType.valueOf(type),
         name = name,
         avatarUrl = avatarUrl,
-        participants = participants.split(",").filter { it.isNotEmpty() },
+        participants = participants,
         unreadCount = unreadCount,
         createdAt = createdAt,
         createdBy = createdBy,
-        admins = admins.split(",").filter { it.isNotEmpty() }
+        admins = admins,
+        lastMessage = if (lastMessageContent != null && lastMessageTimestamp != null) {
+            Message(
+                id = lastMessageId ?: "",
+                chatId = id,
+                senderId = "",
+                content = lastMessageContent,
+                timestamp = lastMessageTimestamp
+            )
+        } else null
     )
 
     companion object {
@@ -38,11 +48,11 @@ data class ChatEntity(
             type = chat.type.name,
             name = chat.name,
             avatarUrl = chat.avatarUrl,
-            participants = chat.participants.joinToString(","),
+            participants = chat.participants,
             unreadCount = chat.unreadCount,
             createdAt = chat.createdAt,
             createdBy = chat.createdBy,
-            admins = chat.admins.joinToString(","),
+            admins = chat.admins,
             lastMessageId = chat.lastMessage?.id,
             lastMessageContent = chat.lastMessage?.content,
             lastMessageTimestamp = chat.lastMessage?.timestamp

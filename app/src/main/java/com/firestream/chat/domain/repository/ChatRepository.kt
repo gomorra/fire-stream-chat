@@ -11,4 +11,6 @@ interface ChatRepository {
     suspend fun updateGroup(chatId: String, name: String?, avatarUrl: String?): Result<Unit>
     suspend fun addGroupMember(chatId: String, userId: String): Result<Unit>
     suspend fun removeGroupMember(chatId: String, userId: String): Result<Unit>
+    fun observeTyping(chatId: String): Flow<List<String>>
+    suspend fun setTyping(chatId: String, isTyping: Boolean)
 }

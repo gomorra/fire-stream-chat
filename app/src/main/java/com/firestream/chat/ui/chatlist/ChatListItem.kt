@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Chat
@@ -30,6 +31,7 @@ import java.util.Locale
 @Composable
 fun ChatListItem(
     chat: Chat,
+    currentUserId: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -73,14 +75,25 @@ fun ChatListItem(
                 }
             }
 
-            chat.lastMessage?.content?.let { content ->
+            val someoneElseTyping = chat.typingUserIds.any { it != currentUserId }
+            if (someoneElseTyping) {
                 Text(
-                    text = content,
-                    style = MaterialTheme.typography.bodyMedium,
+                    text = "typing...",
+                    style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            } else {
+                chat.lastMessage?.content?.let { content ->
+                    Text(
+                        text = content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
     }

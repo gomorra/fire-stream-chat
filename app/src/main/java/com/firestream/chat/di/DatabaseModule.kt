@@ -6,6 +6,7 @@ import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.SignalDao
 import com.firestream.chat.data.local.dao.UserDao
 import dagger.Module
 import dagger.Provides
@@ -25,7 +26,7 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "fire_stream_chat.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides
@@ -39,4 +40,7 @@ object DatabaseModule {
 
     @Provides
     fun provideContactDao(db: AppDatabase): ContactDao = db.contactDao()
+
+    @Provides
+    fun provideSignalDao(db: AppDatabase): SignalDao = db.signalDao()
 }

@@ -1,6 +1,7 @@
 package com.firestream.chat.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -29,7 +30,10 @@ object Routes {
 }
 
 @Composable
-fun FireStreamNavGraph() {
+fun FireStreamNavGraph(
+    initialChatId: String? = null,
+    initialSenderId: String? = null
+) {
     val navController = rememberNavController()
 
     NavHost(
@@ -86,6 +90,11 @@ fun FireStreamNavGraph() {
         }
 
         composable(Routes.CHAT_LIST) {
+            LaunchedEffect(Unit) {
+                if (initialChatId != null && initialSenderId != null) {
+                    navController.navigate(Routes.chat(initialChatId, initialSenderId))
+                }
+            }
             ChatListScreen(
                 onChatClick = { chatId, recipientId ->
                     navController.navigate(Routes.chat(chatId, recipientId))
