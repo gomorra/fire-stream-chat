@@ -222,5 +222,9 @@ class SignalProtocolStoreImpl @Inject constructor(
         signalDao.saveIdentity(SignalIdentityEntity(identityKeyPair = pair.serialize(), registrationId = registrationId))
     }
 
+    fun deleteTrustedIdentity(name: String) {
+        signalDao.deleteTrustedIdentity(name)
+    }
+
     private fun SignalProtocolAddress.toKey() = "$name:$deviceId"
 }

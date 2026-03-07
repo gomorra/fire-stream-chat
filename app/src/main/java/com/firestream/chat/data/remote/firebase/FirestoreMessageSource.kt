@@ -62,7 +62,8 @@ class FirestoreMessageSource @Inject constructor(
         signalType: Int,
         type: MessageType,
         replyToId: String?,
-        timestamp: Long
+        timestamp: Long,
+        mediaUrl: String? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -71,7 +72,8 @@ class FirestoreMessageSource @Inject constructor(
             "type" to type.name,
             "status" to MessageStatus.SENT.name,
             "replyToId" to replyToId,
-            "timestamp" to timestamp
+            "timestamp" to timestamp,
+            "mediaUrl" to mediaUrl
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -79,9 +81,14 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
+        val lastContent = when (type) {
+            MessageType.IMAGE -> "📷 Photo"
+            MessageType.DOCUMENT -> "📎 File"
+            else -> "New message"
+        }
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to "New message",
+                "lastMessageContent" to lastContent,
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )
@@ -91,14 +98,23 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     /** Fallback for unencrypted sends (group chats, Phase 4). */
-    suspend fun sendPlainMessage(chatId: String, senderId: String, content: String, type: MessageType, replyToId: String?, timestamp: Long): String {
+    suspend fun sendPlainMessage(
+        chatId: String,
+        senderId: String,
+        content: String,
+        type: MessageType,
+        replyToId: String?,
+        timestamp: Long,
+        mediaUrl: String? = null
+    ): String {
         val data = hashMapOf(
             "senderId" to senderId,
             "content" to content,
             "type" to type.name,
             "status" to MessageStatus.SENT.name,
             "replyToId" to replyToId,
-            "timestamp" to timestamp
+            "timestamp" to timestamp,
+            "mediaUrl" to mediaUrl
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -106,15 +122,28 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
+        val lastContent = when (type) {
+            MessageType.IMAGE -> "📷 Photo"
+            MessageType.DOCUMENT -> "📎 File"
+            else -> content
+        }
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to content,
+                "lastMessageContent" to lastContent,
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )
         ).await()
 
         return docRef.id
+    }
+
+    suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update(mapOf("content" to newContent, "editedAt" to editedAt))
+            .await()
     }
 
     suspend fun deleteMessage(chatId: String, messageId: String) {

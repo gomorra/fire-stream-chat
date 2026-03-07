@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,12 +18,14 @@ data class ChatListUiState(
     val chats: List<Chat> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null,
-    val currentUserId: String = ""
+    val currentUserId: String = "",
+    val pendingDeleteChatId: String? = null
 )
 
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
     private val getChatsUseCase: GetChatsUseCase,
+    private val deleteChatUseCase: DeleteChatUseCase,
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
@@ -49,6 +52,22 @@ class ChatListViewModel @Inject constructor(
                         isLoading = false
                     )
                 }
+        }
+    }
+
+    fun requestDeleteChat(chatId: String) {
+        _uiState.value = _uiState.value.copy(pendingDeleteChatId = chatId)
+    }
+
+    fun cancelDeleteChat() {
+        _uiState.value = _uiState.value.copy(pendingDeleteChatId = null)
+    }
+
+    fun confirmDeleteChat() {
+        val chatId = _uiState.value.pendingDeleteChatId ?: return
+        _uiState.value = _uiState.value.copy(pendingDeleteChatId = null)
+        viewModelScope.launch {
+            deleteChatUseCase(chatId)
         }
     }
 }

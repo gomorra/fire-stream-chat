@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import android.util.Log
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
@@ -74,6 +75,13 @@ class AuthRepositoryImpl @Inject constructor(
                 isOnline = true
             )
             userDao.insertUser(UserEntity.fromDomain(user))
+            
+            // Sync FCM token for the new profile
+            try {
+                val token = firebaseMessaging.token.await()
+                authSource.updateFcmToken(uid, token)
+            } catch (_: Exception) { }
+
             Result.success(user)
         } catch (e: Exception) {
             Result.failure(e)
@@ -83,6 +91,17 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun getCurrentUser(): Result<User?> {
         return try {
             val uid = currentUserId ?: return Result.success(null)
+            
+            // Proactively sync FCM token on every app start/user fetch
+            try {
+                Log.d("AuthRepository", "Syncing FCM token for user: $uid")
+                val token = firebaseMessaging.token.await()
+                authSource.updateFcmToken(uid, token)
+                Log.d("AuthRepository", "FCM token synced successfully")
+            } catch (e: Exception) {
+                Log.e("AuthRepository", "FCM token sync failed", e)
+            }
+
             val cached = userDao.getUserById(uid)
             if (cached != null) {
                 Result.success(cached.toDomain())

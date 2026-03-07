@@ -64,10 +64,23 @@ class SignalManager @Inject constructor(
         withContext(Dispatchers.IO) {
             val address = SignalProtocolAddress(recipientId, deviceId)
 
-            // Build session if we don't have one yet
+            // Always fetch the current bundle so we can detect if the remote party re-registered
+            // (e.g. after clearing app data or reinstalling). If their identity key changed we
+            // must throw away the stale session and establish a fresh one — otherwise we would
+            // send WHISPER_TYPE ciphertext that the recipient can no longer decrypt.
+            val bundle = keySource.fetchPreKeyBundle(recipientId)
+                ?: error("No key bundle found for $recipientId — they may not have set up encryption")
+
+            val storedIdentity = store.getIdentity(address)
+            val remoteIdentityChanged = storedIdentity != null && storedIdentity != bundle.identityKey
+            if (remoteIdentityChanged) {
+                // Remote party re-registered: clear stale session and trust record so that
+                // isTrustedIdentity() falls back to TOFU and allows the new identity.
+                store.deleteAllSessions(recipientId)
+                store.deleteTrustedIdentity(recipientId)
+            }
+
             if (!store.containsSession(address)) {
-                val bundle = keySource.fetchPreKeyBundle(recipientId)
-                    ?: error("No key bundle found for $recipientId — they may not have set up encryption")
                 SessionBuilder(store, address).process(bundle)
             }
 

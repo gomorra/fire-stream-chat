@@ -109,4 +109,7 @@ interface SignalDao {
 
     @Query("SELECT * FROM signal_trusted_identities WHERE address = :address LIMIT 1")
     fun getTrustedIdentity(address: String): SignalTrustedIdentityEntity?
+
+    @Query("DELETE FROM signal_trusted_identities WHERE address = :address")
+    fun deleteTrustedIdentity(address: String)
 }
