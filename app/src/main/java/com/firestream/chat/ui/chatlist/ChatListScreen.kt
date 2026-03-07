@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -15,6 +16,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -113,11 +115,30 @@ fun ChatListScreen(
                         ChatListItem(
                             chat = chat,
                             currentUserId = uiState.currentUserId,
-                            onClick = { onChatClick(chat.id, recipientId) }
+                            onClick = { onChatClick(chat.id, recipientId) },
+                            onLongClick = { viewModel.requestDeleteChat(chat.id) }
                         )
                     }
                 }
             }
+        }
+
+        if (uiState.pendingDeleteChatId != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelDeleteChat() },
+                title = { Text("Delete chat") },
+                text = { Text("Delete this chat? It will be removed from your device.") },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmDeleteChat() }) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.cancelDeleteChat() }) {
+                        Text("Cancel")
+                    }
+                }
+            )
         }
     }
 }

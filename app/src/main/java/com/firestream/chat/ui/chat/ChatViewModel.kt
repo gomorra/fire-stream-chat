@@ -1,13 +1,17 @@
 package com.firestream.chat.ui.chat
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.repository.ChatRepository
-import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
-import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
+import com.firestream.chat.domain.usecase.message.EditMessageUseCase
+import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
+import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -24,7 +28,8 @@ data class ChatUiState(
     val error: String? = null,
     val currentUserId: String = "",
     val isSending: Boolean = false,
-    val typingUserIds: List<String> = emptyList()
+    val typingUserIds: List<String> = emptyList(),
+    val editingMessage: Message? = null
 )
 
 @HiltViewModel
@@ -32,6 +37,9 @@ class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val getMessagesUseCase: GetMessagesUseCase,
     private val sendMessageUseCase: SendMessageUseCase,
+    private val deleteMessageUseCase: DeleteMessageUseCase,
+    private val editMessageUseCase: EditMessageUseCase,
+    private val sendMediaMessageUseCase: SendMediaMessageUseCase,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository
 ) : ViewModel() {
@@ -109,6 +117,40 @@ class ChatViewModel @Inject constructor(
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(isSending = false)
                 }
+        }
+    }
+
+    fun deleteMessage(messageId: String) {
+        viewModelScope.launch {
+            deleteMessageUseCase(chatId, messageId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun startEdit(message: Message) {
+        _uiState.value = _uiState.value.copy(editingMessage = message)
+    }
+
+    fun cancelEdit() {
+        _uiState.value = _uiState.value.copy(editingMessage = null)
+    }
+
+    fun confirmEdit(newContent: String) {
+        val msg = _uiState.value.editingMessage ?: return
+        if (newContent.isBlank()) return
+        _uiState.value = _uiState.value.copy(editingMessage = null)
+        viewModelScope.launch {
+            editMessageUseCase(chatId, msg.id, newContent)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun sendMediaMessage(uri: Uri, mimeType: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSending = true)
+            sendMediaMessageUseCase(chatId, uri, mimeType, recipientId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
+                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
         }
     }
 

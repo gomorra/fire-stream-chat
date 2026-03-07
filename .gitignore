@@ -15,3 +15,18 @@ google-services.json
 *.aab
 *.jks
 *.keystore
+
+# Firebase / Cloud Functions
+firebase-debug.log
+firebase-debug.*.log
+.firebase/
+functions/node_modules/
+
+# JVM crash logs
+hs_err_pid*.log
+replay_pid*.log
+
+# Misc scripts
+login_script.py
+firebase_login.log
+firebase.log

@@ -1,6 +1,7 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ChatDao
+import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.Chat
@@ -21,6 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val chatDao: ChatDao,
+    private val messageDao: MessageDao,
     private val firestore: FirebaseFirestore,
     private val authSource: FirebaseAuthSource
 ) : ChatRepository {
@@ -154,6 +156,20 @@ class ChatRepositoryImpl @Inject constructor(
             firestore.collection("chats").document(chatId)
                 .update("participants", FieldValue.arrayRemove(userId))
                 .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun deleteChat(chatId: String): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            firestore.collection("chats").document(chatId)
+                .update("participants", FieldValue.arrayRemove(uid))
+                .await()
+            messageDao.deleteMessagesByChatId(chatId)
+            chatDao.deleteChat(chatId)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
