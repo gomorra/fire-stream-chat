@@ -19,7 +19,11 @@ data class ChatEntity(
     val admins: List<String>,
     val lastMessageId: String?,
     val lastMessageContent: String?,
-    val lastMessageTimestamp: Long?
+    val lastMessageTimestamp: Long?,
+    // Phase 2: chat organisation
+    val isPinned: Boolean = false,
+    val isArchived: Boolean = false,
+    val muteUntil: Long = 0L
 ) {
     fun toDomain() = Chat(
         id = id,
@@ -39,7 +43,10 @@ data class ChatEntity(
                 content = lastMessageContent,
                 timestamp = lastMessageTimestamp
             )
-        } else null
+        } else null,
+        isPinned = isPinned,
+        isArchived = isArchived,
+        muteUntil = muteUntil
     )
 
     companion object {
@@ -55,7 +62,10 @@ data class ChatEntity(
             admins = chat.admins,
             lastMessageId = chat.lastMessage?.id,
             lastMessageContent = chat.lastMessage?.content,
-            lastMessageTimestamp = chat.lastMessage?.timestamp
+            lastMessageTimestamp = chat.lastMessage?.timestamp,
+            isPinned = chat.isPinned,
+            isArchived = chat.isArchived,
+            muteUntil = chat.muteUntil
         )
     }
 }

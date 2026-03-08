@@ -406,4 +406,33 @@ class MessageRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> {
+        return try {
+            messageDao.setStarred(messageId, starred)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override fun getStarredMessages(): Flow<List<Message>> {
+        return messageDao.getStarredMessages().map { entities -> entities.map { it.toDomain() } }
+    }
+
+    override suspend fun searchMessages(query: String): List<Message> {
+        return try {
+            messageDao.searchMessages(query).map { it.toDomain() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> {
+        return try {
+            messageDao.searchMessagesInChat(chatId, query).map { it.toDomain() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
 }

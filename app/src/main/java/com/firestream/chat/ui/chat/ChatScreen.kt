@@ -125,6 +125,7 @@ private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "
 fun ChatScreen(
     onBackClick: () -> Unit,
     onMessageInfoClick: (Message) -> Unit = {},
+    onProfileClick: (userId: String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -268,6 +269,7 @@ fun ChatScreen(
                                 onReplyClick = { viewModel.setReplyTo(message) },
                                 onReactionClick = { reactionTargetMessage = message },
                                 onForwardClick = { forwardTargetMessage = message },
+                                onStarClick = { viewModel.toggleStar(message) },
                                 onInfoClick = if (isOwn) {
                                     { onMessageInfoClick(message) }
                                 } else null,
@@ -767,6 +769,7 @@ private fun MessageBubble(
     onReplyClick: () -> Unit,
     onReactionClick: () -> Unit,
     onForwardClick: () -> Unit,
+    onStarClick: () -> Unit = {},
     onInfoClick: (() -> Unit)?,
     onImageClick: (String) -> Unit = {}
 ) {
@@ -989,6 +992,10 @@ private fun MessageBubble(
                     text = { Text("Forward") },
                     leadingIcon = { Icon(Icons.Default.Share, null) },
                     onClick = { showMenu = false; onForwardClick() }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (message.isStarred) "Unstar" else "Star") },
+                    onClick = { showMenu = false; onStarClick() }
                 )
                 onEditClick?.let {
                     DropdownMenuItem(

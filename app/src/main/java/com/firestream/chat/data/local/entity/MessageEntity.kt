@@ -25,7 +25,9 @@ data class MessageEntity(
     // Phase 1 additions
     val reactions: Map<String, String> = emptyMap(),
     val isForwarded: Boolean = false,
-    val duration: Int? = null
+    val duration: Int? = null,
+    // Phase 2: starred messages
+    val isStarred: Boolean = false
 ) {
     fun toDomain() = Message(
         id = id,
@@ -41,7 +43,8 @@ data class MessageEntity(
         editedAt = editedAt,
         reactions = reactions,
         isForwarded = isForwarded,
-        duration = duration
+        duration = duration,
+        isStarred = isStarred
     )
 
     companion object {
@@ -59,7 +62,8 @@ data class MessageEntity(
             editedAt = message.editedAt,
             reactions = message.reactions,
             isForwarded = message.isForwarded,
-            duration = message.duration
+            duration = message.duration,
+            isStarred = message.isStarred
         )
     }
 }

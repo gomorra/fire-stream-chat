@@ -18,6 +18,7 @@ import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
 import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
+import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -53,6 +54,7 @@ class ChatViewModel @Inject constructor(
     private val removeReactionUseCase: RemoveReactionUseCase,
     private val forwardMessageUseCase: ForwardMessageUseCase,
     private val sendVoiceMessageUseCase: SendVoiceMessageUseCase,
+    private val starMessageUseCase: StarMessageUseCase,
     private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository
@@ -223,6 +225,14 @@ class ChatViewModel @Inject constructor(
             sendVoiceMessageUseCase(chatId, uri, recipientId, durationSeconds)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
                 .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    // Phase 2: star/unstar a message
+    fun toggleStar(message: Message) {
+        viewModelScope.launch {
+            starMessageUseCase(message.id, !message.isStarred)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 

@@ -18,4 +18,10 @@ interface MessageRepository {
     suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message>
     // Phase 1: voice messages
     suspend fun sendVoiceMessage(chatId: String, uri: Uri, recipientId: String, durationSeconds: Int): Result<Message>
+    // Phase 2: starred messages
+    suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit>
+    fun getStarredMessages(): Flow<List<Message>>
+    // Phase 2: search
+    suspend fun searchMessages(query: String): List<Message>
+    suspend fun searchMessagesInChat(chatId: String, query: String): List<Message>
 }

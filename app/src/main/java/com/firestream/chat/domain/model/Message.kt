@@ -17,5 +17,7 @@ data class Message(
     // Phase 1: forwarding
     val isForwarded: Boolean = false,
     // Phase 1: voice messages — duration in seconds
-    val duration: Int? = null
+    val duration: Int? = null,
+    // Phase 2: starred messages
+    val isStarred: Boolean = false
 )

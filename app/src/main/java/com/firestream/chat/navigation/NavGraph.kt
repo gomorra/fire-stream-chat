@@ -7,14 +7,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.auth.LoginScreen
 import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
-import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.chat.ChatScreen
-import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.chat.MessageInfoScreen
+import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
+import com.firestream.chat.ui.profile.ProfileScreen
+import com.firestream.chat.ui.settings.SettingsScreen
+import com.firestream.chat.ui.starred.StarredMessagesScreen
 
 object Routes {
     const val LOGIN = "login"
@@ -24,6 +27,10 @@ object Routes {
     const val CHAT = "chat/{chatId}/{recipientId}"
     const val CONTACTS = "contacts"
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
+    // Phase 2 routes
+    const val SETTINGS = "settings"
+    const val USER_PROFILE = "user_profile/{userId}"
+    const val STARRED_MESSAGES = "starred_messages"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -33,6 +40,8 @@ object Routes {
 
     fun messageInfo(messageId: String, chatId: String) =
         "message_info/$messageId/$chatId"
+
+    fun userProfile(userId: String) = "user_profile/$userId"
 }
 
 @Composable
@@ -41,8 +50,6 @@ fun FireStreamNavGraph(
     initialSenderId: String? = null
 ) {
     val navController = rememberNavController()
-    // Shared state for MessageInfoScreen (passed via navigate args would require parcelize,
-    // so we use a simple holder instead)
     val messageInfoHolder = androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<Message?>(null)
     }
@@ -112,6 +119,9 @@ fun FireStreamNavGraph(
                 },
                 onNewChatClick = {
                     navController.navigate(Routes.CONTACTS)
+                },
+                onSettingsClick = {
+                    navController.navigate(Routes.SETTINGS)
                 }
             )
         }
@@ -122,12 +132,16 @@ fun FireStreamNavGraph(
                 navArgument("chatId") { type = NavType.StringType },
                 navArgument("recipientId") { type = NavType.StringType }
             )
-        ) {
+        ) { backStackEntry ->
+            val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
             ChatScreen(
                 onBackClick = { navController.popBackStack() },
                 onMessageInfoClick = { message ->
                     messageInfoHolder.value = message
                     navController.navigate(Routes.messageInfo(message.id, message.chatId))
+                },
+                onProfileClick = { userId ->
+                    navController.navigate(Routes.userProfile(userId))
                 }
             )
         }
@@ -157,6 +171,28 @@ fun FireStreamNavGraph(
                     onBackClick = { navController.popBackStack() }
                 )
             }
+        }
+
+        // Phase 2: Settings
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                onStarredMessagesClick = { navController.navigate(Routes.STARRED_MESSAGES) },
+                onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) }
+            )
+        }
+
+        // Phase 2: User Profile
+        composable(
+            route = Routes.USER_PROFILE,
+            arguments = listOf(navArgument("userId") { type = NavType.StringType })
+        ) {
+            ProfileScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Phase 2: Starred Messages
+        composable(Routes.STARRED_MESSAGES) {
+            StarredMessagesScreen(onBackClick = { navController.popBackStack() })
         }
     }
 }
