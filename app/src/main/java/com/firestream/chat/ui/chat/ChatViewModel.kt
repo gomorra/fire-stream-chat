@@ -4,14 +4,21 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.remote.LinkPreview
+import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.usecase.message.AddReactionUseCase
 import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
 import com.firestream.chat.domain.usecase.message.EditMessageUseCase
+import com.firestream.chat.domain.usecase.message.ForwardMessageUseCase
 import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
+import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
 import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
+import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -29,7 +36,10 @@ data class ChatUiState(
     val currentUserId: String = "",
     val isSending: Boolean = false,
     val typingUserIds: List<String> = emptyList(),
-    val editingMessage: Message? = null
+    val editingMessage: Message? = null,
+    // Phase 1 state
+    val replyToMessage: Message? = null,
+    val linkPreviews: Map<String, LinkPreview> = emptyMap()
 )
 
 @HiltViewModel
@@ -40,6 +50,12 @@ class ChatViewModel @Inject constructor(
     private val deleteMessageUseCase: DeleteMessageUseCase,
     private val editMessageUseCase: EditMessageUseCase,
     private val sendMediaMessageUseCase: SendMediaMessageUseCase,
+    private val addReactionUseCase: AddReactionUseCase,
+    private val removeReactionUseCase: RemoveReactionUseCase,
+    private val forwardMessageUseCase: ForwardMessageUseCase,
+    private val sendVoiceMessageUseCase: SendVoiceMessageUseCase,
+    private val starMessageUseCase: StarMessageUseCase,
+    private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository
 ) : ViewModel() {
@@ -72,7 +88,24 @@ class ChatViewModel @Inject constructor(
                         messages = messages,
                         isLoading = false
                     )
+                    // Fetch link previews for text messages with URLs
+                    fetchLinkPreviewsFor(messages)
                 }
+        }
+    }
+
+    private fun fetchLinkPreviewsFor(messages: List<Message>) {
+        messages.forEach { msg ->
+            if (msg.type.name == "TEXT") {
+                val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
+                if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
+                viewModelScope.launch {
+                    val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
+                    _uiState.value = _uiState.value.copy(
+                        linkPreviews = _uiState.value.linkPreviews + (url to preview)
+                    )
+                }
+            }
         }
     }
 
@@ -104,10 +137,11 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(content: String) {
         if (content.isBlank()) return
         typingDebounceJob?.cancel()
+        val replyToId = _uiState.value.replyToMessage?.id
         viewModelScope.launch {
             chatRepository.setTyping(chatId, false)
-            _uiState.value = _uiState.value.copy(isSending = true)
-            sendMessageUseCase(chatId, content, recipientId)
+            _uiState.value = _uiState.value.copy(isSending = true, replyToMessage = null)
+            sendMessageUseCase(chatId, content, recipientId, replyToId)
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         error = e.message,
@@ -151,6 +185,54 @@ class ChatViewModel @Inject constructor(
             sendMediaMessageUseCase(chatId, uri, mimeType, recipientId)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
                 .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    // Phase 1: reply-to
+    fun setReplyTo(message: Message) {
+        _uiState.value = _uiState.value.copy(replyToMessage = message)
+    }
+
+    fun clearReplyTo() {
+        _uiState.value = _uiState.value.copy(replyToMessage = null)
+    }
+
+    // Phase 1: reactions
+    fun toggleReaction(messageId: String, emoji: String) {
+        val currentUserId = _uiState.value.currentUserId
+        val message = _uiState.value.messages.find { it.id == messageId } ?: return
+        viewModelScope.launch {
+            if (message.reactions[currentUserId] == emoji) {
+                removeReactionUseCase(chatId, messageId, currentUserId)
+            } else {
+                addReactionUseCase(chatId, messageId, currentUserId, emoji)
+            }
+        }
+    }
+
+    // Phase 1: forwarding
+    fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) {
+        viewModelScope.launch {
+            forwardMessageUseCase(message, targetChatId, targetRecipientId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    // Phase 1: voice messages
+    fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSending = true)
+            sendVoiceMessageUseCase(chatId, uri, recipientId, durationSeconds)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
+                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    // Phase 2: star/unstar a message
+    fun toggleStar(message: Message) {
+        viewModelScope.launch {
+            starMessageUseCase(message.id, !message.isStarred)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 

@@ -29,6 +29,9 @@ libsignal = "0.86.5"
 # Image Loading
 coil = "2.7.0"
 
+# DataStore
+datastore = "1.1.1"
+
 # Networking
 okhttp = "4.12.0"
 
@@ -82,6 +85,9 @@ libsignal-client = { group = "org.signal", name = "libsignal-client", version.re
 
 # Image Loading
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# DataStore
+datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
 
 # Networking
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }

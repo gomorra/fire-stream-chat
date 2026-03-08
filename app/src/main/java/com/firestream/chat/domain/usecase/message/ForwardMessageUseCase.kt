@@ -4,15 +4,12 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.MessageRepository
 import javax.inject.Inject
 
-class SendMessageUseCase @Inject constructor(
+class ForwardMessageUseCase @Inject constructor(
     private val messageRepository: MessageRepository
 ) {
     suspend operator fun invoke(
-        chatId: String,
-        content: String,
-        recipientId: String,
-        replyToId: String? = null
-    ): Result<Message> {
-        return messageRepository.sendMessage(chatId, content, recipientId, replyToId)
-    }
+        message: Message,
+        targetChatId: String,
+        recipientId: String
+    ): Result<Message> = messageRepository.forwardMessage(message, targetChatId, recipientId)
 }
