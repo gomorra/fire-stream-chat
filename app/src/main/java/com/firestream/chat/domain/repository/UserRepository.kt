@@ -9,4 +9,8 @@ interface UserRepository {
     suspend fun updateProfile(displayName: String?, statusText: String?, avatarUrl: String?): Result<Unit>
     suspend fun setOnlineStatus(isOnline: Boolean): Result<Unit>
     suspend fun updateLastSeen(): Result<Unit>
+    suspend fun blockUser(userId: String): Result<Unit>
+    suspend fun unblockUser(userId: String): Result<Unit>
+    suspend fun isUserBlocked(userId: String): Boolean
+    suspend fun updateReadReceipts(enabled: Boolean): Result<Unit>
 }

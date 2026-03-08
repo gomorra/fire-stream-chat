@@ -27,24 +27,28 @@ data class MessageEntity(
     val isForwarded: Boolean = false,
     val duration: Int? = null,
     // Phase 2: starred messages
-    val isStarred: Boolean = false
+    val isStarred: Boolean = false,
+    val readBy: Map<String, Long> = emptyMap(),
+    val deliveredTo: Map<String, Long> = emptyMap()
 ) {
     fun toDomain() = Message(
         id = id,
         chatId = chatId,
         senderId = senderId,
         content = content,
-        type = MessageType.valueOf(type),
+        type = runCatching { MessageType.valueOf(type) }.getOrDefault(MessageType.TEXT),
         mediaUrl = mediaUrl,
         mediaThumbnailUrl = mediaThumbnailUrl,
-        status = MessageStatus.valueOf(status),
+        status = runCatching { MessageStatus.valueOf(status) }.getOrDefault(MessageStatus.SENT),
         replyToId = replyToId,
         timestamp = timestamp,
         editedAt = editedAt,
         reactions = reactions,
         isForwarded = isForwarded,
         duration = duration,
-        isStarred = isStarred
+        isStarred = isStarred,
+        readBy = readBy,
+        deliveredTo = deliveredTo
     )
 
     companion object {
@@ -63,7 +67,9 @@ data class MessageEntity(
             reactions = message.reactions,
             isForwarded = message.isForwarded,
             duration = message.duration,
-            isStarred = message.isStarred
+            isStarred = message.isStarred,
+            readBy = message.readBy,
+            deliveredTo = message.deliveredTo
         )
     }
 }

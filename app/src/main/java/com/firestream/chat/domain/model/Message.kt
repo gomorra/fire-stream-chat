@@ -19,5 +19,8 @@ data class Message(
     // Phase 1: voice messages — duration in seconds
     val duration: Int? = null,
     // Phase 2: starred messages
-    val isStarred: Boolean = false
+    val isStarred: Boolean = false,
+    // Per-recipient delivery/read tracking for group chats
+    val readBy: Map<String, Long> = emptyMap(),
+    val deliveredTo: Map<String, Long> = emptyMap()
 )

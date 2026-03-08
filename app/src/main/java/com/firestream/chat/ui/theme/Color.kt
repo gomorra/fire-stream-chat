@@ -29,6 +29,7 @@ val ReceivedBubbleDark = Color(0xFF2D2D2D)
 val OnlineGreen = Color(0xFF00B894)
 val ErrorRed = Color(0xFFE74C3C)
 val WarningYellow = Color(0xFFF39C12)
+val ReadReceiptBlue = Color(0xFF34B7F1)
 
 // Text
 val TextPrimary = Color(0xFF2D3436)

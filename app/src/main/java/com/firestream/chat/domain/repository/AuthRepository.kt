@@ -10,5 +10,5 @@ interface AuthRepository {
     suspend fun createUserProfile(displayName: String, avatarUrl: String?): Result<User>
     suspend fun getCurrentUser(): Result<User?>
     suspend fun updateFcmToken(token: String): Result<Unit>
-    fun signOut()
+    suspend fun signOut()
 }

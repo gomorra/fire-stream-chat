@@ -1,0 +1,74 @@
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:mergeReleaseArtProfile
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:checkReleaseAarMetadata
+> Task :app:generateReleaseResValues
+> Task :app:expandReleaseL8ArtProfileWildcards
+> Task :app:processReleaseGoogleServices
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:parseReleaseLocalResources
+> Task :app:extractDeepLinksRelease
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:mergeReleaseNativeLibs
+> Task :app:mergeReleaseResources
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseStartupProfile UP-TO-DATE
+> Task :app:javaPreCompileRelease
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:compressReleaseAssets
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libandroidx.graphics.path.so, libdatastore_shared_counter.so, libsignal_jni.so.
+
+> Task :app:collectReleaseDependencies
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:sdkReleaseDependencyData
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:writeReleaseAppMetadata
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:processReleaseManifestForPackage
+> Task :app:processReleaseResources
+> Task :app:convertLinkedResourcesToProtoRelease
+> Task :app:kspReleaseKotlin
+
+> Task :app:compileReleaseKotlin
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt:498:53 'val Icons.Filled.Reply: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Reply.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt:996:49 'val Icons.Filled.Reply: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Reply.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt:1181:56 'val Icons.Filled.Reply: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Reply.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/chatlist/ChatListScreen.kt:119:49 'val Icons.Filled.Chat: ImageVector' is deprecated. Use the AutoMirrored version at Icons.AutoMirrored.Filled.Chat.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/chatlist/ChatListScreen.kt:294:24 'fun rememberSwipeToDismissBoxState(initialValue: SwipeToDismissBoxValue = ..., confirmValueChange: (SwipeToDismissBoxValue) -> Boolean = ..., positionalThreshold: (@ParameterName(...) Float) -> Float = ...): SwipeToDismissBoxState' is deprecated. confirmValueChange is deprecated without replacement. Rather than relying on a callback to veto state changes, the anchor set should not include disallowed anchors. See androidx.compose.foundation.samples.AnchoredDraggableDynamicAnchorsSample for an example of using dynamic anchors over confirmValueChange.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/starred/StarredMessagesScreen.kt:119:24 'fun rememberSwipeToDismissBoxState(initialValue: SwipeToDismissBoxValue = ..., confirmValueChange: (SwipeToDismissBoxValue) -> Boolean = ..., positionalThreshold: (@ParameterName(...) Float) -> Float = ...): SwipeToDismissBoxState' is deprecated. confirmValueChange is deprecated without replacement. Rather than relying on a callback to veto state changes, the anchor set should not include disallowed anchors. See androidx.compose.foundation.samples.AnchoredDraggableDynamicAnchorsSample for an example of using dynamic anchors over confirmValueChange.
+w: file:///home/hanz3000/repo/fire-stream-chat/app/src/main/java/com/firestream/chat/ui/theme/Theme.kt:63:20 'var statusBarColor: Int' is deprecated. Deprecated in Java.
+
+> Task :app:compileReleaseJavaWithJavac
+> Task :app:hiltAggregateDepsRelease
+> Task :app:hiltJavaCompileRelease
+> Task :app:processReleaseJavaRes
+> Task :app:transformReleaseClassesWithAsm
+> Task :app:mergeReleaseGeneratedProguardFiles
+> Task :app:expandReleaseArtProfileWildcards
+> Task :app:mergeReleaseJavaResource
+> Task :app:minifyReleaseWithR8
+> Task :app:l8DexDesugarLibRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:shrinkReleaseRes
+> Task :app:convertShrunkResourcesToBinaryRelease
+> Task :app:optimizeReleaseResources
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:assembleRelease
+
+BUILD SUCCESSFUL in 56s
+52 actionable tasks: 51 executed, 1 up-to-date

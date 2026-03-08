@@ -39,4 +39,21 @@ class Converters {
             emptyMap()
         }
     }
+
+    @TypeConverter
+    fun fromLongMap(map: Map<String, Long>): String {
+        val obj = JSONObject()
+        map.forEach { (k, v) -> obj.put(k, v) }
+        return obj.toString()
+    }
+
+    @TypeConverter
+    fun toLongMap(json: String): Map<String, Long> {
+        return try {
+            val obj = JSONObject(json)
+            buildMap { obj.keys().forEach { key -> put(key, obj.getLong(key)) } }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
 }

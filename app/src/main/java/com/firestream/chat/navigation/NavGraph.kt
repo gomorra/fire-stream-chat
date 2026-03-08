@@ -13,6 +13,7 @@ import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
+import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
 import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.profile.ProfileScreen
@@ -31,6 +32,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
+    const val ARCHIVED_CHATS = "archived_chats"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -52,6 +54,9 @@ fun FireStreamNavGraph(
     val navController = rememberNavController()
     val messageInfoHolder = androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<Message?>(null)
+    }
+    val participantsHolder = androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     }
 
     NavHost(
@@ -115,7 +120,9 @@ fun FireStreamNavGraph(
             }
             ChatListScreen(
                 onChatClick = { chatId, recipientId ->
-                    navController.navigate(Routes.chat(chatId, recipientId))
+                    navController.navigate(Routes.chat(chatId, recipientId)) {
+                        launchSingleTop = true
+                    }
                 },
                 onNewChatClick = {
                     navController.navigate(Routes.CONTACTS)
@@ -136,8 +143,9 @@ fun FireStreamNavGraph(
             val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
             ChatScreen(
                 onBackClick = { navController.popBackStack() },
-                onMessageInfoClick = { message ->
+                onMessageInfoClick = { message, participants ->
                     messageInfoHolder.value = message
+                    participantsHolder.value = participants
                     navController.navigate(Routes.messageInfo(message.id, message.chatId))
                 },
                 onProfileClick = { userId ->
@@ -168,6 +176,7 @@ fun FireStreamNavGraph(
             if (message != null) {
                 MessageInfoScreen(
                     message = message,
+                    participants = participantsHolder.value,
                     onBackClick = { navController.popBackStack() }
                 )
             }
@@ -178,7 +187,13 @@ fun FireStreamNavGraph(
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onStarredMessagesClick = { navController.navigate(Routes.STARRED_MESSAGES) },
-                onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) }
+                onArchivedChatsClick = { navController.navigate(Routes.ARCHIVED_CHATS) },
+                onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) },
+                onSignedOut = {
+                    navController.navigate(Routes.LOGIN) {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
             )
         }
 
@@ -193,6 +208,18 @@ fun FireStreamNavGraph(
         // Phase 2: Starred Messages
         composable(Routes.STARRED_MESSAGES) {
             StarredMessagesScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Phase 2: Archived Chats
+        composable(Routes.ARCHIVED_CHATS) {
+            ArchivedChatsScreen(
+                onChatClick = { chatId, recipientId ->
+                    navController.navigate(Routes.chat(chatId, recipientId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onBackClick = { navController.popBackStack() }
+            )
         }
     }
 }

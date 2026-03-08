@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import android.util.Log
 import com.firestream.chat.data.crypto.SignalManager
+import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -17,6 +18,7 @@ import javax.inject.Singleton
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
     private val authSource: FirebaseAuthSource,
+    private val database: AppDatabase,
     private val userDao: UserDao,
     private val signalManager: SignalManager,
     private val firebaseMessaging: FirebaseMessaging
@@ -138,7 +140,8 @@ class AuthRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun signOut() {
+    override suspend fun signOut() {
+        database.clearAllTables()
         authSource.signOut()
     }
 }

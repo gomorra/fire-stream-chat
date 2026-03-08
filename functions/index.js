@@ -54,7 +54,8 @@ exports.sendPushNotification = onDocumentCreated(
                 data: {
                     chatId: chatId,
                     senderId: senderId,
-                    senderName: senderName || "New Message"
+                    senderName: senderName || "New Message",
+                    messageId: event.params.messageId
                     // Note: We don't send the message content here in the push payload 
                     // because it is (or will be) end-to-end encrypted in the database.
                     // The client app will wake up, sync the encrypted content, and display it.

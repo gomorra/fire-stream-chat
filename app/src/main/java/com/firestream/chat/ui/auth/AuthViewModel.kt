@@ -21,6 +21,7 @@ import javax.inject.Inject
 data class AuthUiState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
+    val isCheckingAuth: Boolean = true,
     val error: String? = null,
     val verificationId: String? = null,
     val isNewUser: Boolean = false,
@@ -48,10 +49,12 @@ class AuthViewModel @Inject constructor(
                 val result = getCurrentUserUseCase()
                 result.onSuccess { user ->
                     if (user != null && user.displayName.isNotEmpty()) {
-                        _uiState.value = _uiState.value.copy(isLoggedIn = true, user = user)
+                        _uiState.value = _uiState.value.copy(isLoggedIn = true, isCheckingAuth = false, user = user)
+                        return@launch
                     }
                 }
             }
+            _uiState.value = _uiState.value.copy(isCheckingAuth = false)
         }
     }
 

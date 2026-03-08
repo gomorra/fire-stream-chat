@@ -50,6 +50,28 @@ class FirestoreUserSource @Inject constructor(
         ).await()
     }
 
+    suspend fun blockUser(currentUserId: String, targetUserId: String) {
+        firestore.collection("users").document(currentUserId)
+            .collection("blockedUsers").document(targetUserId)
+            .set(mapOf("blockedAt" to System.currentTimeMillis()))
+            .await()
+    }
+
+    suspend fun unblockUser(currentUserId: String, targetUserId: String) {
+        firestore.collection("users").document(currentUserId)
+            .collection("blockedUsers").document(targetUserId)
+            .delete()
+            .await()
+    }
+
+    suspend fun isUserBlocked(currentUserId: String, targetUserId: String): Boolean {
+        val doc = firestore.collection("users").document(currentUserId)
+            .collection("blockedUsers").document(targetUserId)
+            .get()
+            .await()
+        return doc.exists()
+    }
+
     private fun mapToUser(data: Map<String, Any?>): User {
         return User(
             uid = data["uid"] as? String ?: "",
@@ -59,7 +81,8 @@ class FirestoreUserSource @Inject constructor(
             statusText = data["statusText"] as? String ?: "",
             lastSeen = data["lastSeen"] as? Long ?: 0L,
             isOnline = data["isOnline"] as? Boolean ?: false,
-            publicIdentityKey = data["publicIdentityKey"] as? String ?: ""
+            publicIdentityKey = data["publicIdentityKey"] as? String ?: "",
+            readReceiptsEnabled = data["readReceiptsEnabled"] as? Boolean ?: true
         )
     }
 }

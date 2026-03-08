@@ -4,16 +4,26 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.firestream.chat.data.local.entity.MessageEntity
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MessageDao {
+
+    @Transaction
+    suspend fun replaceMessage(oldId: String, newMessage: MessageEntity) {
+        deleteMessage(oldId)
+        insertMessage(newMessage)
+    }
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
     fun getMessagesByChatId(chatId: String): Flow<List<MessageEntity>>
 
     @Query("SELECT * FROM messages WHERE id = :messageId")
     suspend fun getMessageById(messageId: String): MessageEntity?
+
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND timestamp = :timestamp AND senderId = :senderId AND status = 'SENDING' LIMIT 1")
+    suspend fun getPendingSendingMessage(chatId: String, timestamp: Long, senderId: String): MessageEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)
@@ -49,4 +59,11 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT 50")
     suspend fun searchMessagesInChat(chatId: String, query: String): List<MessageEntity>
+
+    // Shared media queries
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND mediaUrl IS NOT NULL ORDER BY timestamp DESC")
+    fun getSharedMedia(chatId: String): Flow<List<MessageEntity>>
+
+    @Query("SELECT * FROM messages WHERE senderId = :userId AND mediaUrl IS NOT NULL ORDER BY timestamp DESC LIMIT 100")
+    fun getSharedMediaForUser(userId: String): Flow<List<MessageEntity>>
 }

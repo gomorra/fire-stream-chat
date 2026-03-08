@@ -33,7 +33,7 @@ class LinkPreviewSource @Inject constructor(
                     .header("User-Agent", "Mozilla/5.0 (compatible; FireStreamBot/1.0)")
                     .build()
                 val response = okHttpClient.newCall(request).execute()
-                val html = response.body?.string() ?: return@withContext null
+                val html = response.use { it.body?.string() } ?: return@withContext null
                 val preview = parseOgTags(url, html)
                 cache[url] = preview
                 preview

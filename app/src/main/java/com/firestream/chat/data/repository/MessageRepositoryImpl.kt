@@ -50,7 +50,17 @@ class MessageRepositoryImpl @Inject constructor(
                         }
 
                         if (raw.senderId == currentUid) {
-                            if (existing != null) continue
+                            if (existing != null) {
+                                // Update status from remote if it changed (e.g. DELIVERED, READ)
+                                val remoteStatus = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT)
+                                if (existing.status != remoteStatus.name) {
+                                    messageDao.updateMessageStatus(raw.id, remoteStatus.name)
+                                }
+                                continue
+                            }
+                            // Skip if there's a pending optimistic message being replaced
+                            val pending = messageDao.getPendingSendingMessage(raw.chatId, raw.timestamp, raw.senderId)
+                            if (pending != null) continue
                             val content = raw.content ?: "[Sent message]"
                             val message = Message(
                                 id = raw.id,
@@ -66,7 +76,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 editedAt = raw.editedAt,
                                 reactions = raw.reactions,
                                 isForwarded = raw.isForwarded,
-                                duration = raw.duration
+                                duration = raw.duration,
+                                readBy = raw.readBy,
+                                deliveredTo = raw.deliveredTo
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -103,7 +115,9 @@ class MessageRepositoryImpl @Inject constructor(
                             editedAt = raw.editedAt,
                             reactions = raw.reactions,
                             isForwarded = raw.isForwarded,
-                            duration = raw.duration
+                            duration = raw.duration,
+                            readBy = raw.readBy,
+                            deliveredTo = raw.deliveredTo
                         )
                         messageDao.insertMessage(MessageEntity.fromDomain(message))
                     }
@@ -163,9 +177,8 @@ class MessageRepositoryImpl @Inject constructor(
                 )
             }
 
-            messageDao.deleteMessage(tempId)
             val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.insertMessage(MessageEntity.fromDomain(sentMessage))
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
             Result.success(sentMessage)
         } catch (e: Exception) {
@@ -251,9 +264,8 @@ class MessageRepositoryImpl @Inject constructor(
                 )
             }
 
-            messageDao.deleteMessage(tempId)
             val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-            messageDao.insertMessage(MessageEntity.fromDomain(sentMessage))
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
             Result.success(sentMessage)
         } catch (e: Exception) {
@@ -339,9 +351,8 @@ class MessageRepositoryImpl @Inject constructor(
                 )
             }
 
-            messageDao.deleteMessage(tempId)
             val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.insertMessage(MessageEntity.fromDomain(sentMessage))
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
             Result.success(sentMessage)
         } catch (e: Exception) {
@@ -397,9 +408,8 @@ class MessageRepositoryImpl @Inject constructor(
                 )
             }
 
-            messageDao.deleteMessage(tempId)
             val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-            messageDao.insertMessage(MessageEntity.fromDomain(sentMessage))
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
             Result.success(sentMessage)
         } catch (e: Exception) {
@@ -434,5 +444,61 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {
+        return try {
+            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val now = System.currentTimeMillis()
+            val undeliveredIds = messageSource.getUndeliveredMessageIds(chatId, userId)
+            for (id in undeliveredIds) {
+                try {
+                    messageSource.markDelivered(chatId, id, userId, now)
+                } catch (_: Exception) { }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit> {
+        return try {
+            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val now = System.currentTimeMillis()
+            for (id in messageIds) {
+                try {
+                    messageSource.markDelivered(chatId, id, userId, now)
+                    messageDao.updateMessageStatus(id, MessageStatus.DELIVERED.name)
+                } catch (_: Exception) { }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> {
+        return try {
+            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val now = System.currentTimeMillis()
+            for (id in messageIds) {
+                try {
+                    messageSource.markRead(chatId, id, userId, now)
+                    messageDao.updateMessageStatus(id, MessageStatus.READ.name)
+                } catch (_: Exception) { }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override fun getSharedMedia(chatId: String): Flow<List<Message>> {
+        return messageDao.getSharedMedia(chatId).map { entities -> entities.map { it.toDomain() } }
+    }
+
+    override fun getSharedMediaForUser(userId: String): Flow<List<Message>> {
+        return messageDao.getSharedMediaForUser(userId).map { entities -> entities.map { it.toDomain() } }
     }
 }

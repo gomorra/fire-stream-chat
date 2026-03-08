@@ -27,7 +27,7 @@ data class ChatEntity(
 ) {
     fun toDomain() = Chat(
         id = id,
-        type = ChatType.valueOf(type),
+        type = runCatching { ChatType.valueOf(type) }.getOrDefault(ChatType.INDIVIDUAL),
         name = name,
         avatarUrl = avatarUrl,
         participants = participants,

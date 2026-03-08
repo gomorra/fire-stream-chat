@@ -8,11 +8,13 @@ import androidx.core.app.NotificationCompat
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.MessageRepository
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -20,11 +22,14 @@ import javax.inject.Inject
 class FCMService : FirebaseMessagingService() {
 
     @Inject lateinit var authRepository: AuthRepository
+    @Inject lateinit var messageRepository: MessageRepository
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         if (authRepository.isLoggedIn) {
-            CoroutineScope(Dispatchers.IO).launch {
+            serviceScope.launch {
                 authRepository.updateFcmToken(token)
             }
         }
@@ -37,6 +42,14 @@ class FCMService : FirebaseMessagingService() {
         val senderId = data["senderId"] ?: return
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
+        val messageId = data["messageId"]
+
+        // Mark message as delivered when push notification is received
+        if (messageId != null) {
+            serviceScope.launch {
+                messageRepository.markMessagesAsDelivered(chatId, listOf(messageId))
+            }
+        }
 
         showNotification(chatId, senderId, senderName, "New message")
     }

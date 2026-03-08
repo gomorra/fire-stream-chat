@@ -16,8 +16,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
@@ -248,51 +246,6 @@ fun ChatListScreen(
                             )
                         }
 
-                        if (archivedChats.isNotEmpty()) {
-                            item(key = "archived_toggle") {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { viewModel.toggleShowArchived() }
-                                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Archive,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "Archived (${archivedChats.size})",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .padding(start = 16.dp)
-                                    )
-                                    Icon(
-                                        imageVector = if (uiState.showArchived) Icons.Default.KeyboardArrowDown
-                                        else Icons.Default.KeyboardArrowRight,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
-
-                            if (uiState.showArchived) {
-                                items(archivedChats, key = { "arch_${it.id}" }) { chat ->
-                                    SwipeableChatItem(
-                                        chat = chat,
-                                        currentUserId = uiState.currentUserId,
-                                        onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
-                                        onDelete = { viewModel.requestDeleteChat(chat.id) },
-                                        onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
-                                        onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
-                                        onMute = { viewModel.requestMuteChat(chat.id) }
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }

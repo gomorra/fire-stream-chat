@@ -3,6 +3,7 @@ package com.firestream.chat.data.local
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -14,13 +15,34 @@ import javax.inject.Singleton
 
 enum class AppTheme { SYSTEM, LIGHT, DARK }
 
+enum class AutoDownloadOption { WIFI_ONLY, ALWAYS, NEVER }
+
+enum class NotificationSound { DEFAULT, SILENT }
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "fire_stream_prefs")
 
 @Singleton
 class PreferencesDataStore @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    // Appearance
     private val themeKey = stringPreferencesKey("app_theme")
+
+    // Privacy
+    private val readReceiptsKey = booleanPreferencesKey("read_receipts")
+    private val lastSeenKey = booleanPreferencesKey("last_seen_visible")
+    private val screenSecurityKey = booleanPreferencesKey("screen_security")
+
+    // Notifications
+    private val messageNotificationsKey = booleanPreferencesKey("message_notifications")
+    private val groupNotificationsKey = booleanPreferencesKey("group_notifications")
+    private val notificationSoundKey = stringPreferencesKey("notification_sound")
+    private val vibrationKey = booleanPreferencesKey("vibration")
+
+    // Storage
+    private val autoDownloadKey = stringPreferencesKey("auto_download")
+
+    // --- Theme ---
 
     val appThemeFlow: Flow<AppTheme> = context.dataStore.data.map { prefs ->
         runCatching { AppTheme.valueOf(prefs[themeKey] ?: AppTheme.SYSTEM.name) }
@@ -31,5 +53,77 @@ class PreferencesDataStore @Inject constructor(
         context.dataStore.edit { prefs ->
             prefs[themeKey] = theme.name
         }
+    }
+
+    // --- Privacy ---
+
+    val readReceiptsFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[readReceiptsKey] ?: true
+    }
+
+    suspend fun setReadReceipts(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[readReceiptsKey] = enabled }
+    }
+
+    val lastSeenVisibleFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[lastSeenKey] ?: true
+    }
+
+    suspend fun setLastSeenVisible(visible: Boolean) {
+        context.dataStore.edit { prefs -> prefs[lastSeenKey] = visible }
+    }
+
+    val screenSecurityFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[screenSecurityKey] ?: false
+    }
+
+    suspend fun setScreenSecurity(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[screenSecurityKey] = enabled }
+    }
+
+    // --- Notifications ---
+
+    val messageNotificationsFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[messageNotificationsKey] ?: true
+    }
+
+    suspend fun setMessageNotifications(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[messageNotificationsKey] = enabled }
+    }
+
+    val groupNotificationsFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[groupNotificationsKey] ?: true
+    }
+
+    suspend fun setGroupNotifications(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[groupNotificationsKey] = enabled }
+    }
+
+    val notificationSoundFlow: Flow<NotificationSound> = context.dataStore.data.map { prefs ->
+        runCatching { NotificationSound.valueOf(prefs[notificationSoundKey] ?: NotificationSound.DEFAULT.name) }
+            .getOrDefault(NotificationSound.DEFAULT)
+    }
+
+    suspend fun setNotificationSound(sound: NotificationSound) {
+        context.dataStore.edit { prefs -> prefs[notificationSoundKey] = sound.name }
+    }
+
+    val vibrationFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[vibrationKey] ?: true
+    }
+
+    suspend fun setVibration(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[vibrationKey] = enabled }
+    }
+
+    // --- Storage ---
+
+    val autoDownloadFlow: Flow<AutoDownloadOption> = context.dataStore.data.map { prefs ->
+        runCatching { AutoDownloadOption.valueOf(prefs[autoDownloadKey] ?: AutoDownloadOption.WIFI_ONLY.name) }
+            .getOrDefault(AutoDownloadOption.WIFI_ONLY)
+    }
+
+    suspend fun setAutoDownload(option: AutoDownloadOption) {
+        context.dataStore.edit { prefs -> prefs[autoDownloadKey] = option.name }
     }
 }

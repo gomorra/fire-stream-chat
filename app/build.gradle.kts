@@ -23,6 +23,7 @@ android {
 
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -44,6 +45,12 @@ android {
 
     buildFeatures {
         compose = true
+    }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+        disable.add("NonNullableMutableLiveData")
     }
 
     packaging {

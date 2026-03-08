@@ -67,4 +67,43 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun updateLastSeen(): Result<Unit> {
         return setOnlineStatus(true)
     }
+
+    override suspend fun blockUser(userId: String): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            userSource.blockUser(uid, userId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun unblockUser(userId: String): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            userSource.unblockUser(uid, userId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun isUserBlocked(userId: String): Boolean {
+        val uid = authSource.currentUserId ?: return false
+        return try {
+            userSource.isUserBlocked(uid, userId)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    override suspend fun updateReadReceipts(enabled: Boolean): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            userSource.updateProfile(uid, mapOf("readReceiptsEnabled" to enabled))
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }

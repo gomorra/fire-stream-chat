@@ -15,6 +15,9 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE id = :chatId")
     suspend fun getChatById(chatId: String): ChatEntity?
 
+    @Query("SELECT * FROM chats WHERE id IN (:chatIds)")
+    suspend fun getChatsByIds(chatIds: List<String>): List<ChatEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertChat(chat: ChatEntity)
 

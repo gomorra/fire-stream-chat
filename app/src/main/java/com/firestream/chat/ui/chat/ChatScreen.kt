@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,11 +15,20 @@ import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,13 +61,18 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Reply
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,6 +93,9 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -90,6 +108,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import com.firestream.chat.ui.theme.ReadReceiptBlue
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -124,7 +144,7 @@ private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "
 @Composable
 fun ChatScreen(
     onBackClick: () -> Unit,
-    onMessageInfoClick: (Message) -> Unit = {},
+    onMessageInfoClick: (Message, List<String>) -> Unit = { _, _ -> },
     onProfileClick: (userId: String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
@@ -149,6 +169,30 @@ fun ChatScreen(
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mediaRecorder.value?.release()
+            mediaRecorder.value = null
+        }
+    }
+
+    // Track screen visibility for read receipts — only mark READ when chat is in foreground
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> viewModel.setScreenVisible(true)
+                Lifecycle.Event.ON_PAUSE -> viewModel.setScreenVisible(false)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            viewModel.setScreenVisible(false)
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(isRecording) {
         if (isRecording) {
@@ -217,6 +261,15 @@ fun ChatScreen(
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
+                actions = {
+                    IconButton(onClick = { viewModel.toggleSearch() }) {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search messages",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
@@ -231,6 +284,113 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding()
         ) {
+            // In-chat search bar
+            AnimatedVisibility(
+                visible = uiState.isSearchActive,
+                enter = slideInVertically() + fadeIn(),
+                exit = slideOutVertically() + fadeOut()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = uiState.searchQuery,
+                        onValueChange = { viewModel.onSearchQueryChange(it) },
+                        modifier = Modifier.weight(1f),
+                        placeholder = { Text("Search in conversation...") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(20.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+                    )
+                    IconButton(onClick = { viewModel.clearSearch() }) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close search",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Search results overlay
+            if (uiState.isSearchActive && uiState.searchQuery.isNotBlank()) {
+                if (uiState.searchResults.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No results found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "${uiState.searchResults.size} result(s)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        items(uiState.searchResults, key = { "search_${it.id}" }) { message ->
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        // Scroll to the message in the main list
+                                        val idx = uiState.messages.indexOfFirst { it.id == message.id }
+                                        if (idx >= 0) {
+                                            scope.launch { listState.animateScrollToItem(idx) }
+                                        }
+                                        viewModel.clearSearch()
+                                    }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = message.senderId.take(12),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = message.content,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+                                        .format(Date(message.timestamp)),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+
+            val showingSearchResults = uiState.isSearchActive && uiState.searchQuery.isNotBlank() && uiState.searchResults.isNotEmpty()
+            if (!showingSearchResults) {
             when {
                 uiState.isLoading -> {
                     Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -260,6 +420,7 @@ fun ChatScreen(
                                 replyToMessage = replyToMessage,
                                 linkPreview = linkPreview,
                                 currentUserId = uiState.currentUserId,
+                                readReceiptsAllowed = uiState.readReceiptsAllowed,
                                 onDeleteClick = if (isOwn) {
                                     { viewModel.deleteMessage(message.id) }
                                 } else null,
@@ -271,7 +432,12 @@ fun ChatScreen(
                                 onForwardClick = { forwardTargetMessage = message },
                                 onStarClick = { viewModel.toggleStar(message) },
                                 onInfoClick = if (isOwn) {
-                                    { onMessageInfoClick(message) }
+                                    {
+                                        val chatParticipants = uiState.availableChats
+                                            .find { it.id == message.chatId }
+                                            ?.participants ?: emptyList()
+                                        onMessageInfoClick(message, chatParticipants)
+                                    }
                                 } else null,
                                 onImageClick = { url -> fullscreenImageUrl = url }
                             )
@@ -279,6 +445,7 @@ fun ChatScreen(
                     }
                 }
             }
+            } // end if: hide message list when search results shown
 
             // Typing indicator
             if (uiState.typingUserIds.isNotEmpty()) {
@@ -546,61 +713,38 @@ fun ChatScreen(
         }
     }
 
-    // Reaction picker bottom sheet
+    // Reaction picker bottom sheet with full emoji picker
     reactionTargetMessage?.let { targetMsg ->
         ModalBottomSheet(
             onDismissRequest = { reactionTargetMessage = null }
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp, ),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "React",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
-                ) {
-                    QUICK_REACTIONS.forEach { emoji ->
-                        val isSelected = targetMsg.reactions[uiState.currentUserId] == emoji
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                                    else androidx.compose.ui.graphics.Color.Transparent
-                                )
-                                .clickable {
-                                    viewModel.toggleReaction(targetMsg.id, emoji)
-                                    reactionTargetMessage = null
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(text = emoji, style = MaterialTheme.typography.headlineMedium)
-                        }
-                    }
+            EmojiPicker(
+                currentReaction = targetMsg.reactions[uiState.currentUserId],
+                onEmojiSelected = { emoji ->
+                    viewModel.toggleReaction(targetMsg.id, emoji)
+                    reactionTargetMessage = null
                 }
-                Spacer(modifier = Modifier.height(24.dp))
-            }
+            )
         }
     }
 
     // Forward picker
     forwardTargetMessage?.let { targetMsg ->
         ForwardChatPicker(
-            chats = emptyList(), // In a full implementation, inject GetChatsUseCase here
+            chats = uiState.availableChats,
+            currentUserId = uiState.currentUserId,
             onDismiss = { forwardTargetMessage = null },
             onForward = { chatId, recipientId ->
                 viewModel.forwardMessage(targetMsg, chatId, recipientId)
                 forwardTargetMessage = null
             }
         )
+    }
+
+    // Intercept system back while fullscreen image is open so it closes the overlay
+    // instead of popping the chat screen off the nav stack.
+    BackHandler(enabled = fullscreenImageUrl != null) {
+        fullscreenImageUrl = null
     }
 
     // Fullscreen image viewer
@@ -722,30 +866,66 @@ private fun FullscreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
 
 @Composable
 private fun ForwardChatPicker(
-    chats: List<Pair<String, String>>, // chatId to displayName pairs
+    chats: List<com.firestream.chat.domain.model.Chat>,
+    currentUserId: String,
     onDismiss: () -> Unit,
     onForward: (chatId: String, recipientId: String) -> Unit
 ) {
-    // Simple dialog — in a real app, list recent chats from GetChatsUseCase
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Forward to") },
         text = {
             if (chats.isEmpty()) {
                 Text(
-                    "Open a chat first, then use Forward from within that chat.",
+                    "No chats available to forward to.",
                     style = MaterialTheme.typography.bodyMedium
                 )
             } else {
-                Column {
-                    chats.forEach { (chatId, name) ->
-                        Text(
-                            text = name,
+                LazyColumn {
+                    items(chats, key = { it.id }) { chat ->
+                        val displayName = chat.name
+                            ?: chat.participants.firstOrNull { it != currentUserId }
+                            ?: "Chat"
+                        val recipientId = chat.participants.firstOrNull { it != currentUserId } ?: ""
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { onForward(chatId, "") }
-                                .padding(vertical = 8.dp)
-                        )
+                                .clickable { onForward(chat.id, recipientId) }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primaryContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = displayName.take(1).uppercase(),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = displayName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                chat.lastMessage?.let { lastMsg ->
+                                    Text(
+                                        text = lastMsg.content.take(40),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -764,6 +944,7 @@ private fun MessageBubble(
     replyToMessage: Message?,
     linkPreview: LinkPreview?,
     currentUserId: String,
+    readReceiptsAllowed: Boolean = true,
     onDeleteClick: (() -> Unit)?,
     onEditClick: (() -> Unit)?,
     onReplyClick: () -> Unit,
@@ -888,7 +1069,9 @@ private fun MessageBubble(
                         MessageType.IMAGE -> {
                             if (message.status == MessageStatus.SENDING || message.mediaUrl == null) {
                                 Box(
-                                    modifier = Modifier.fillMaxWidth(0.65f).height(160.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.65f)
+                                        .aspectRatio(4 / 3f),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     CircularProgressIndicator(color = textColor)
@@ -897,7 +1080,7 @@ private fun MessageBubble(
                                 AsyncImage(
                                     model = message.mediaUrl,
                                     contentDescription = "Image",
-                                    contentScale = ContentScale.Crop,
+                                    contentScale = ContentScale.FillWidth,
                                     modifier = Modifier
                                         .fillMaxWidth(0.65f)
                                         .clip(RoundedCornerShape(8.dp))
@@ -958,19 +1141,33 @@ private fun MessageBubble(
                         )
                         if (isOwnMessage) {
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = when (message.status) {
-                                    MessageStatus.SENDING -> "○"
-                                    MessageStatus.SENT -> "✓"
-                                    MessageStatus.DELIVERED -> "✓✓"
-                                    MessageStatus.READ -> "✓✓"
-                                    MessageStatus.FAILED -> "!"
+                            // Cap status at DELIVERED when read receipts are disabled
+                            val displayStatus = if (!readReceiptsAllowed && message.status == MessageStatus.READ) {
+                                MessageStatus.DELIVERED
+                            } else {
+                                message.status
+                            }
+                            Icon(
+                                imageVector = when (displayStatus) {
+                                    MessageStatus.SENDING -> Icons.Default.Schedule
+                                    MessageStatus.SENT -> Icons.Default.Check
+                                    MessageStatus.DELIVERED -> Icons.Default.DoneAll
+                                    MessageStatus.READ -> Icons.Default.DoneAll
+                                    MessageStatus.FAILED -> Icons.Default.ErrorOutline
                                 },
-                                color = if (message.status == MessageStatus.READ)
-                                    MaterialTheme.colorScheme.inversePrimary
-                                else textColor.copy(alpha = 0.7f),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (message.status == MessageStatus.READ) FontWeight.Bold else null
+                                contentDescription = when (displayStatus) {
+                                    MessageStatus.SENDING -> "Sending"
+                                    MessageStatus.SENT -> "Sent"
+                                    MessageStatus.DELIVERED -> "Delivered"
+                                    MessageStatus.READ -> "Read"
+                                    MessageStatus.FAILED -> "Failed"
+                                },
+                                tint = when (displayStatus) {
+                                    MessageStatus.READ -> ReadReceiptBlue
+                                    MessageStatus.FAILED -> MaterialTheme.colorScheme.error
+                                    else -> textColor.copy(alpha = 0.7f)
+                                },
+                                modifier = Modifier.size(16.dp)
                             )
                         }
                     }
@@ -1036,9 +1233,11 @@ private fun MessageBubble(
                             )
                         },
                         modifier = Modifier.height(28.dp),
-                        border = if (myReaction) androidx.compose.material3.AssistChipDefaults.assistChipBorder(
-                            borderColor = MaterialTheme.colorScheme.primary
-                        ) else androidx.compose.material3.AssistChipDefaults.assistChipBorder()
+                        border = BorderStroke(
+                            width = 1.dp,
+                            color = if (myReaction) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.outline
+                        )
                     )
                 }
             }
@@ -1207,4 +1406,155 @@ private fun formatDuration(seconds: Int): String {
     val m = seconds / 60
     val s = seconds % 60
     return "$m:${s.toString().padStart(2, '0')}"
+}
+
+// --- Full Emoji Picker ---
+
+private data class EmojiCategory(val icon: String, val label: String, val emojis: List<String>)
+
+private val EMOJI_CATEGORIES = listOf(
+    EmojiCategory("😀", "Smileys", listOf(
+        "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃",
+        "😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙",
+        "🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🫢",
+        "🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏",
+        "😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷"
+    )),
+    EmojiCategory("👋", "People", listOf(
+        "👋","🤚","🖐️","✋","🖖","🫱","🫲","👌","🤌","🤏",
+        "✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","🖕",
+        "👇","☝️","🫵","👍","👎","✊","👊","🤛","🤜","👏",
+        "🙌","🫶","👐","🤲","🤝","🙏","💪","🦾","🦿","🦵"
+    )),
+    EmojiCategory("🐶", "Animals", listOf(
+        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨",
+        "🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐒",
+        "🐔","🐧","🐦","🐤","🐣","🐥","🦆","🦅","🦉","🦇",
+        "🐺","🐗","🐴","🦄","🐝","🪱","🐛","🦋","🐌","🐞"
+    )),
+    EmojiCategory("🍎", "Food", listOf(
+        "🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈",
+        "🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🍆","🥔",
+        "🥕","🌽","🌶️","🫑","🥒","🥬","🥦","🧄","🧅","🍄",
+        "🥜","🫘","🌰","🍞","🥐","🥖","🫓","🥨","🥯","🥞"
+    )),
+    EmojiCategory("⚽", "Activities", listOf(
+        "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱",
+        "🪀","🏓","🏸","🏒","🏑","🥍","🏏","🪃","🥅","⛳",
+        "🪁","🏹","🎣","🤿","🥊","🥋","🎽","🛹","🛼","🛷",
+        "⛸️","🥌","🎿","⛷️","🏂","🪂","🏋️","🤸","🤼","🤺"
+    )),
+    EmojiCategory("❤️", "Symbols", listOf(
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔",
+        "❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟",
+        "☮️","✝️","☪️","🕉️","☸️","✡️","🔯","🕎","☯️","☦️",
+        "♈","♉","♊","♋","♌","♍","♎","♏","♐","♑"
+    )),
+    EmojiCategory("🚗", "Travel", listOf(
+        "🚗","🚕","🚙","🚌","🚎","🏎️","🚓","🚑","🚒","🚐",
+        "🛻","🚚","🚛","🚜","🏍️","🛵","🚲","🛴","🛺","🚔",
+        "🚍","🚘","🚖","🛞","🚡","🚠","🚟","🚃","🚋","🚞",
+        "🚝","🚄","🚅","🚈","🚂","🚆","🚇","🚊","🚉","✈️"
+    )),
+    EmojiCategory("💡", "Objects", listOf(
+        "💡","🔦","🕯️","🪔","📱","💻","⌨️","🖥️","🖨️","🖱️",
+        "🖲️","💾","💿","📀","📼","📷","📸","📹","🎥","📽️",
+        "🎬","📺","📻","🎙️","🎚️","🎛️","🧭","⏱️","⏲️","⏰",
+        "🔔","🔕","📢","📣","🔉","🔊","📯","🔇","🔈","🎵"
+    ))
+)
+
+@Composable
+private fun EmojiPicker(
+    currentReaction: String?,
+    onEmojiSelected: (String) -> Unit
+) {
+    var selectedCategory by remember { mutableIntStateOf(0) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        Text(
+            text = "React",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        // Quick reactions row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            QUICK_REACTIONS.forEach { emoji ->
+                val isSelected = currentReaction == emoji
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable { onEmojiSelected(emoji) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = emoji, style = MaterialTheme.typography.headlineMedium)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Category tabs
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            itemsIndexed(EMOJI_CATEGORIES) { index, category ->
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (index == selectedCategory) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable { selectedCategory = index },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = category.icon, style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Emoji grid
+        val emojis = EMOJI_CATEGORIES[selectedCategory].emojis
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(8),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(240.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            items(emojis.size) { index ->
+                Box(
+                    modifier = Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { onEmojiSelected(emojis[index]) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = emojis[index], style = MaterialTheme.typography.titleLarge)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
 }

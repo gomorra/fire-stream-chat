@@ -34,7 +34,9 @@ data class RawFirestoreMessage(
     // Phase 1
     val reactions: Map<String, String> = emptyMap(),
     val isForwarded: Boolean = false,
-    val duration: Int? = null
+    val duration: Int? = null,
+    val readBy: Map<String, Long> = emptyMap(),
+    val deliveredTo: Map<String, Long> = emptyMap()
 )
 
 @Singleton
@@ -177,6 +179,37 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
+    suspend fun getUndeliveredMessageIds(chatId: String, currentUserId: String): List<String> {
+        val snapshot = firestore.collection("chats").document(chatId)
+            .collection("messages")
+            .whereEqualTo("status", MessageStatus.SENT.name)
+            .get()
+            .await()
+        return snapshot.documents
+            .filter { doc -> (doc.getString("senderId") ?: "") != currentUserId }
+            .map { it.id }
+    }
+
+    suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long) {
+        firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update(mapOf(
+                "deliveredTo.$userId" to timestamp,
+                "status" to MessageStatus.DELIVERED.name
+            ))
+            .await()
+    }
+
+    suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long) {
+        firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update(mapOf(
+                "readBy.$userId" to timestamp,
+                "status" to MessageStatus.READ.name
+            ))
+            .await()
+    }
+
     suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) {
         firestore
             .collection("chats").document(chatId)
@@ -212,7 +245,20 @@ class FirestoreMessageSource @Inject constructor(
             editedAt = data["editedAt"] as? Long,
             reactions = rawReactions,
             isForwarded = data["isForwarded"] as? Boolean ?: false,
-            duration = (data["duration"] as? Long)?.toInt()
+            duration = (data["duration"] as? Long)?.toInt(),
+            readBy = parseLongMap(data["readBy"]),
+            deliveredTo = parseLongMap(data["deliveredTo"])
         )
+    }
+
+    private fun parseLongMap(raw: Any?): Map<String, Long> {
+        return (raw as? Map<*, *>)
+            ?.entries
+            ?.mapNotNull { (k, v) ->
+                val key = k as? String ?: return@mapNotNull null
+                val value = (v as? Long) ?: (v as? Number)?.toLong() ?: return@mapNotNull null
+                key to value
+            }
+            ?.toMap() ?: emptyMap()
     }
 }

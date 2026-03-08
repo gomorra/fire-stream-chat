@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -37,8 +38,11 @@ import java.util.Locale
 @Composable
 fun MessageInfoScreen(
     message: Message,
+    participants: List<String>,
     onBackClick: () -> Unit
 ) {
+    val isGroupMessage = participants.size > 2
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -96,28 +100,117 @@ fun MessageInfoScreen(
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            // Status section
-            item {
-                Text(
-                    text = "Delivery Status",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-            }
+            // Per-recipient status for group chats
+            if (isGroupMessage && (message.readBy.isNotEmpty() || message.deliveredTo.isNotEmpty())) {
+                // Read by section
+                if (message.readBy.isNotEmpty()) {
+                    item {
+                        Text(
+                            text = "Read by",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(message.readBy.entries.toList()) { (userId, timestamp) ->
+                        RecipientStatusRow(
+                            userId = userId,
+                            timestamp = timestamp,
+                            isRead = true
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
 
-            val statusRows = buildStatusRows(message)
-            items(statusRows) { row ->
-                StatusRow(label = row.first, detail = row.second, isRead = row.third)
-                Spacer(modifier = Modifier.height(8.dp))
-            }
+                // Delivered to section
+                val deliveredOnly = message.deliveredTo.filter { it.key !in message.readBy }
+                if (deliveredOnly.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Delivered to",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(deliveredOnly.entries.toList()) { (userId, timestamp) ->
+                        RecipientStatusRow(
+                            userId = userId,
+                            timestamp = timestamp,
+                            isRead = false
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+                }
 
-            // Reactions section (if any)
-            if (message.reactions.isNotEmpty()) {
+                // Not yet delivered
+                val otherParticipants = participants.filter { it != message.senderId }
+                val notDelivered = otherParticipants.filter {
+                    it !in message.readBy && it !in message.deliveredTo
+                }
+                if (notDelivered.isNotEmpty()) {
+                    item {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Not yet delivered",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    items(notDelivered) { userId ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Schedule,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(end = 12.dp)
+                            )
+                            Text(
+                                text = userId.take(12),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
                 item {
                     Spacer(modifier = Modifier.height(8.dp))
                     HorizontalDivider()
                     Spacer(modifier = Modifier.height(16.dp))
+                }
+            } else {
+                // Fallback: generic status display for 1-to-1 chats or when no per-recipient data
+                item {
+                    Text(
+                        text = "Delivery Status",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                val statusRows = buildStatusRows(message)
+                items(statusRows) { row ->
+                    StatusRow(label = row.first, detail = row.second, isRead = row.third)
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+
+            // Reactions section
+            if (message.reactions.isNotEmpty()) {
+                item {
                     Text(
                         text = "Reactions",
                         style = MaterialTheme.typography.labelLarge,
@@ -133,7 +226,7 @@ fun MessageInfoScreen(
                         Text(text = emoji, style = MaterialTheme.typography.titleMedium)
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = userId,
+                            text = userId.take(12),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -144,9 +237,36 @@ fun MessageInfoScreen(
     }
 }
 
+@Composable
+private fun RecipientStatusRow(userId: String, timestamp: Long, isRead: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (isRead) Icons.Default.DoneAll else Icons.Default.Check,
+            contentDescription = null,
+            tint = if (isRead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 12.dp)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = userId.take(12),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = formatFull(timestamp),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
 private fun buildStatusRows(message: Message): List<Triple<String, String, Boolean>> {
     return when (message.status) {
-        MessageStatus.SENDING -> listOf(Triple("Sending", "In progress…", false))
+        MessageStatus.SENDING -> listOf(Triple("Sending", "In progress...", false))
         MessageStatus.SENT -> listOf(Triple("Sent", formatFull(message.timestamp), false))
         MessageStatus.DELIVERED -> listOf(
             Triple("Sent", formatFull(message.timestamp), false),

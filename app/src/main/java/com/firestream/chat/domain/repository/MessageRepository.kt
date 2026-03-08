@@ -24,4 +24,11 @@ interface MessageRepository {
     // Phase 2: search
     suspend fun searchMessages(query: String): List<Message>
     suspend fun searchMessagesInChat(chatId: String, query: String): List<Message>
+    // Delivery / read receipts
+    suspend fun markChatAsDelivered(chatId: String): Result<Unit>
+    suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit>
+    suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit>
+    // Shared media
+    fun getSharedMedia(chatId: String): Flow<List<Message>>
+    fun getSharedMediaForUser(userId: String): Flow<List<Message>>
 }

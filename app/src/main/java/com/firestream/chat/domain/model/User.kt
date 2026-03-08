@@ -8,5 +8,6 @@ data class User(
     val statusText: String = "Hey there! I'm using Fire Stream",
     val lastSeen: Long = 0L,
     val isOnline: Boolean = false,
-    val publicIdentityKey: String = ""
+    val publicIdentityKey: String = "",
+    val readReceiptsEnabled: Boolean = true
 )

@@ -16,10 +16,27 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.filled.ScreenLockPortrait
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsBrightness
+import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -28,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -47,18 +65,25 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.data.local.AppTheme
+import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.data.local.NotificationSound
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     onBackClick: () -> Unit,
     onStarredMessagesClick: () -> Unit,
+    onArchivedChatsClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
+    onSignedOut: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showThemePicker by remember { mutableStateOf(false) }
     var showSignOutDialog by remember { mutableStateOf(false) }
+    var showSoundPicker by remember { mutableStateOf(false) }
+    var showAutoDownloadPicker by remember { mutableStateOf(false) }
+    var showClearCacheDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -126,6 +151,13 @@ fun SettingsScreen(
                 onClick = onStarredMessagesClick
             )
 
+            SettingsItem(
+                icon = Icons.Default.Archive,
+                title = "Archived Chats",
+                subtitle = "Chats you've archived",
+                onClick = onArchivedChatsClick
+            )
+
             Spacer(Modifier.height(8.dp))
             SectionHeader("Appearance")
 
@@ -146,6 +178,136 @@ fun SettingsScreen(
                 onClick = { showThemePicker = true }
             )
 
+            // Privacy section
+            Spacer(Modifier.height(8.dp))
+            SectionHeader("Privacy")
+
+            SettingsToggleItem(
+                icon = Icons.Default.RemoveRedEye,
+                title = "Read Receipts",
+                subtitle = "Show when you've read messages",
+                checked = uiState.readReceipts,
+                onCheckedChange = { viewModel.setReadReceipts(it) }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.Visibility,
+                title = "Last Seen",
+                subtitle = "Show your last seen status to others",
+                checked = uiState.lastSeenVisible,
+                onCheckedChange = { viewModel.setLastSeenVisible(it) }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.ScreenLockPortrait,
+                title = "Screen Security",
+                subtitle = "Prevent screenshots in the app",
+                checked = uiState.screenSecurity,
+                onCheckedChange = { viewModel.setScreenSecurity(it) }
+            )
+
+            // Notifications section
+            Spacer(Modifier.height(8.dp))
+            SectionHeader("Notifications")
+
+            SettingsToggleItem(
+                icon = Icons.Default.Notifications,
+                title = "Message Notifications",
+                subtitle = "Receive notifications for new messages",
+                checked = uiState.messageNotifications,
+                onCheckedChange = { viewModel.setMessageNotifications(it) }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.NotificationsActive,
+                title = "Group Notifications",
+                subtitle = "Receive notifications for group messages",
+                checked = uiState.groupNotifications,
+                onCheckedChange = { viewModel.setGroupNotifications(it) }
+            )
+
+            val soundLabel = when (uiState.notificationSound) {
+                NotificationSound.DEFAULT -> "Default"
+                NotificationSound.SILENT -> "Silent"
+            }
+            SettingsItem(
+                icon = Icons.Default.MusicNote,
+                title = "Notification Sound",
+                subtitle = soundLabel,
+                onClick = { showSoundPicker = true }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.Vibration,
+                title = "Vibration",
+                subtitle = "Vibrate on new notifications",
+                checked = uiState.vibration,
+                onCheckedChange = { viewModel.setVibration(it) }
+            )
+
+            // Storage section
+            Spacer(Modifier.height(8.dp))
+            SectionHeader("Storage")
+
+            SettingsItem(
+                icon = Icons.Default.Storage,
+                title = "Storage Used",
+                subtitle = formatCacheSize(uiState.cacheSize),
+                onClick = { }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Delete,
+                title = "Clear Cache",
+                subtitle = "Free up space by clearing cached media",
+                onClick = { showClearCacheDialog = true }
+            )
+
+            val autoDownloadLabel = when (uiState.autoDownload) {
+                AutoDownloadOption.WIFI_ONLY -> "WiFi only"
+                AutoDownloadOption.ALWAYS -> "Always"
+                AutoDownloadOption.NEVER -> "Never"
+            }
+            SettingsItem(
+                icon = Icons.Default.Download,
+                title = "Auto-download Media",
+                subtitle = autoDownloadLabel,
+                onClick = { showAutoDownloadPicker = true }
+            )
+
+            // Help section
+            Spacer(Modifier.height(8.dp))
+            SectionHeader("Help")
+
+            SettingsItem(
+                icon = Icons.Default.Info,
+                title = "App Version",
+                subtitle = "1.0.0",
+                onClick = { }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Description,
+                title = "Terms of Service",
+                subtitle = "Read our terms of service",
+                onClick = { /* Placeholder */ }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Security,
+                title = "Privacy Policy",
+                subtitle = "Read our privacy policy",
+                onClick = { /* Placeholder */ }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.Email,
+                title = "Contact Support",
+                subtitle = "Get help from our support team",
+                onClick = { /* Placeholder */ }
+            )
+
+            // Account section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Account")
 
@@ -156,6 +318,8 @@ fun SettingsScreen(
                 onClick = { showSignOutDialog = true },
                 tintError = true
             )
+
+            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -170,6 +334,49 @@ fun SettingsScreen(
         )
     }
 
+    if (showSoundPicker) {
+        SoundPickerDialog(
+            currentSound = uiState.notificationSound,
+            onSelect = { sound ->
+                viewModel.setNotificationSound(sound)
+                showSoundPicker = false
+            },
+            onDismiss = { showSoundPicker = false }
+        )
+    }
+
+    if (showAutoDownloadPicker) {
+        AutoDownloadPickerDialog(
+            currentOption = uiState.autoDownload,
+            onSelect = { option ->
+                viewModel.setAutoDownload(option)
+                showAutoDownloadPicker = false
+            },
+            onDismiss = { showAutoDownloadPicker = false }
+        )
+    }
+
+    if (showClearCacheDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearCacheDialog = false },
+            title = { Text("Clear Cache") },
+            text = { Text("Are you sure you want to clear the media cache? This will free up ${formatCacheSize(uiState.cacheSize)} of storage.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.clearCache()
+                    showClearCacheDialog = false
+                }) {
+                    Text("Clear")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearCacheDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     if (showSignOutDialog) {
         AlertDialog(
             onDismissRequest = { showSignOutDialog = false },
@@ -179,6 +386,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     viewModel.signOut()
                     showSignOutDialog = false
+                    onSignedOut()
                 }) {
                     Text("Sign Out", color = MaterialTheme.colorScheme.error)
                 }
@@ -222,6 +430,25 @@ private fun SettingsItem(
 }
 
 @Composable
+private fun SettingsToggleItem(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    ListItem(
+        headlineContent = { Text(title) },
+        supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
+        leadingContent = { Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurface) },
+        trailingContent = {
+            Switch(checked = checked, onCheckedChange = onCheckedChange)
+        },
+        modifier = Modifier.clickable { onCheckedChange(!checked) }
+    )
+}
+
+@Composable
 private fun ThemePickerDialog(
     currentTheme: AppTheme,
     onSelect: (AppTheme) -> Unit,
@@ -256,4 +483,86 @@ private fun ThemePickerDialog(
             TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+private fun SoundPickerDialog(
+    currentSound: NotificationSound,
+    onSelect: (NotificationSound) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Notification Sound") },
+        text = {
+            Column {
+                NotificationSound.entries.forEach { sound ->
+                    val label = when (sound) {
+                        NotificationSound.DEFAULT -> "Default"
+                        NotificationSound.SILENT -> "Silent"
+                    }
+                    TextButton(
+                        onClick = { onSelect(sound) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (sound == currentSound) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun AutoDownloadPickerDialog(
+    currentOption: AutoDownloadOption,
+    onSelect: (AutoDownloadOption) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Auto-download Media") },
+        text = {
+            Column {
+                AutoDownloadOption.entries.forEach { option ->
+                    val label = when (option) {
+                        AutoDownloadOption.WIFI_ONLY -> "WiFi only"
+                        AutoDownloadOption.ALWAYS -> "Always"
+                        AutoDownloadOption.NEVER -> "Never"
+                    }
+                    TextButton(
+                        onClick = { onSelect(option) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (option == currentOption) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+private fun formatCacheSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
+        bytes < 1024 * 1024 * 1024 -> "%.1f MB".format(bytes / (1024.0 * 1024.0))
+        else -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
+    }
 }

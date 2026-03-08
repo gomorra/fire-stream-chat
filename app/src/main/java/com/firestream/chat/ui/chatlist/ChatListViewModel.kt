@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
 import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
@@ -45,7 +46,8 @@ class ChatListViewModel @Inject constructor(
     private val archiveChatUseCase: ArchiveChatUseCase,
     private val muteChatUseCase: MuteChatUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val messageRepository: MessageRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -57,6 +59,8 @@ class ChatListViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         loadChats()
     }
+
+    private val deliveredTimestamps = mutableMapOf<String, Long>()
 
     private fun loadChats() {
         viewModelScope.launch {
@@ -72,7 +76,25 @@ class ChatListViewModel @Inject constructor(
                         chats = chats,
                         isLoading = false
                     )
+                    // Mark undelivered messages as DELIVERED for all chats
+                    markAllChatsAsDelivered(chats)
                 }
+        }
+    }
+
+    private fun markAllChatsAsDelivered(chats: List<Chat>) {
+        val currentUserId = _uiState.value.currentUserId
+        if (currentUserId.isEmpty()) return
+        for (chat in chats) {
+            val lastMsg = chat.lastMessage ?: continue
+            if (lastMsg.senderId == currentUserId) continue
+            // Skip if we already processed this chat for this timestamp
+            val lastProcessed = deliveredTimestamps[chat.id]
+            if (lastProcessed != null && lastProcessed >= lastMsg.timestamp) continue
+            deliveredTimestamps[chat.id] = lastMsg.timestamp
+            viewModelScope.launch {
+                messageRepository.markChatAsDelivered(chat.id)
+            }
         }
     }
 

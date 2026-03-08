@@ -13,7 +13,8 @@ data class UserEntity(
     val statusText: String,
     val lastSeen: Long,
     val isOnline: Boolean,
-    val publicIdentityKey: String
+    val publicIdentityKey: String,
+    val readReceiptsEnabled: Boolean = true
 ) {
     fun toDomain() = User(
         uid = uid,
@@ -23,7 +24,8 @@ data class UserEntity(
         statusText = statusText,
         lastSeen = lastSeen,
         isOnline = isOnline,
-        publicIdentityKey = publicIdentityKey
+        publicIdentityKey = publicIdentityKey,
+        readReceiptsEnabled = readReceiptsEnabled
     )
 
     companion object {
@@ -35,7 +37,8 @@ data class UserEntity(
             statusText = user.statusText,
             lastSeen = user.lastSeen,
             isOnline = user.isOnline,
-            publicIdentityKey = user.publicIdentityKey
+            publicIdentityKey = user.publicIdentityKey,
+            readReceiptsEnabled = user.readReceiptsEnabled
         )
     }
 }

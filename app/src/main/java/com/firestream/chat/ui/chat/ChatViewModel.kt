@@ -4,28 +4,39 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import com.firestream.chat.domain.usecase.message.AddReactionUseCase
 import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
 import com.firestream.chat.domain.usecase.message.EditMessageUseCase
 import com.firestream.chat.domain.usecase.message.ForwardMessageUseCase
 import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
 import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
+import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,7 +50,15 @@ data class ChatUiState(
     val editingMessage: Message? = null,
     // Phase 1 state
     val replyToMessage: Message? = null,
-    val linkPreviews: Map<String, LinkPreview> = emptyMap()
+    val linkPreviews: Map<String, LinkPreview> = emptyMap(),
+    // Forward picker
+    val availableChats: List<Chat> = emptyList(),
+    // In-chat search
+    val searchQuery: String = "",
+    val searchResults: List<Message> = emptyList(),
+    val isSearchActive: Boolean = false,
+    // Read receipts — true only when BOTH users have read receipts enabled
+    val readReceiptsAllowed: Boolean = true
 )
 
 @HiltViewModel
@@ -55,9 +74,14 @@ class ChatViewModel @Inject constructor(
     private val forwardMessageUseCase: ForwardMessageUseCase,
     private val sendVoiceMessageUseCase: SendVoiceMessageUseCase,
     private val starMessageUseCase: StarMessageUseCase,
+    private val getChatsUseCase: GetChatsUseCase,
+    private val searchMessagesUseCase: SearchMessagesUseCase,
     private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    private val messageRepository: MessageRepository,
+    private val userRepository: UserRepository,
+    private val preferencesDataStore: PreferencesDataStore
 ) : ViewModel() {
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
@@ -67,11 +91,63 @@ class ChatViewModel @Inject constructor(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     private var typingDebounceJob: Job? = null
+    private var searchJob: Job? = null
+    private var screenVisible = false
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         loadMessages()
         observeTyping()
+        loadAvailableChats()
+        observeReadReceiptsAllowed()
+    }
+
+    /**
+     * Observe both the local user's read receipts preference AND the recipient's
+     * Firestore setting. Read receipts are only allowed when BOTH are enabled.
+     */
+    private fun observeReadReceiptsAllowed() {
+        // Local user's setting
+        viewModelScope.launch {
+            preferencesDataStore.readReceiptsFlow.collect { localEnabled ->
+                updateReadReceiptsAllowed(localEnabled = localEnabled)
+            }
+        }
+        // Recipient's setting from Firestore
+        viewModelScope.launch {
+            userRepository.observeUser(recipientId)
+                .catch { /* ignore — defaults to true */ }
+                .collect { recipientUser ->
+                    updateReadReceiptsAllowed(recipientEnabled = recipientUser.readReceiptsEnabled)
+                }
+        }
+    }
+
+    private var localReadReceipts: Boolean = true
+    private var recipientReadReceipts: Boolean = true
+
+    private fun updateReadReceiptsAllowed(
+        localEnabled: Boolean = localReadReceipts,
+        recipientEnabled: Boolean = recipientReadReceipts
+    ) {
+        localReadReceipts = localEnabled
+        recipientReadReceipts = recipientEnabled
+        val allowed = localEnabled && recipientEnabled
+        _uiState.value = _uiState.value.copy(readReceiptsAllowed = allowed)
+    }
+
+    fun setScreenVisible(visible: Boolean) {
+        screenVisible = visible
+        if (visible) {
+            // When screen becomes visible, check for unread messages
+            val messages = _uiState.value.messages
+            if (messages.isNotEmpty()) {
+                markIncomingMessagesAsRead(messages)
+            }
+        } else {
+            // Cancel pending read receipt when leaving the screen
+            readReceiptJob?.cancel()
+        }
     }
 
     private fun loadMessages() {
@@ -88,9 +164,50 @@ class ChatViewModel @Inject constructor(
                         messages = messages,
                         isLoading = false
                     )
+                    // Mark incoming messages as read
+                    markIncomingMessagesAsRead(messages)
                     // Fetch link previews for text messages with URLs
                     fetchLinkPreviewsFor(messages)
                 }
+        }
+    }
+
+    private var readReceiptJob: Job? = null
+
+    private fun markIncomingMessagesAsRead(messages: List<Message>) {
+        if (!screenVisible) return
+        val currentUserId = _uiState.value.currentUserId
+        if (currentUserId.isEmpty()) return
+
+        // Step 1: Any SENT messages need to be marked DELIVERED first
+        val needsDelivery = messages
+            .filter { it.senderId != currentUserId && it.status == MessageStatus.SENT }
+            .map { it.id }
+        if (needsDelivery.isNotEmpty()) {
+            viewModelScope.launch {
+                messageRepository.markMessagesAsDelivered(chatId, needsDelivery)
+            }
+            // Return here — the Firestore update will trigger a new collect emission
+            // with DELIVERED status, at which point we'll proceed to mark READ below.
+            // This ensures the sender sees ✓✓ before it turns blue.
+            return
+        }
+
+        // Step 2: Skip READ marking if either user has disabled read receipts
+        if (!_uiState.value.readReceiptsAllowed) return
+
+        // Step 3: Mark DELIVERED messages as READ after a short delay
+        val needsRead = messages
+            .filter { it.senderId != currentUserId && it.status == MessageStatus.DELIVERED }
+            .map { it.id }
+        if (needsRead.isEmpty()) return
+
+        readReceiptJob?.cancel()
+        readReceiptJob = viewModelScope.launch {
+            delay(1500)
+            if (screenVisible) {
+                messageRepository.markMessagesAsRead(chatId, needsRead)
+            }
         }
     }
 
@@ -236,6 +353,56 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // Load available chats for the forward picker
+    private fun loadAvailableChats() {
+        viewModelScope.launch {
+            try {
+                val chats = getChatsUseCase().first()
+                _uiState.value = _uiState.value.copy(availableChats = chats)
+            } catch (_: Exception) {
+                // Non-critical — forward picker will show empty
+            }
+        }
+    }
+
+    // In-chat search with debounce
+    fun onSearchQueryChange(query: String) {
+        _uiState.value = _uiState.value.copy(searchQuery = query)
+        searchJob?.cancel()
+        if (query.isBlank()) {
+            _uiState.value = _uiState.value.copy(searchResults = emptyList())
+            return
+        }
+        searchJob = viewModelScope.launch {
+            delay(300)
+            try {
+                val results = searchMessagesUseCase(query, chatId)
+                _uiState.value = _uiState.value.copy(searchResults = results)
+            } catch (_: Exception) {
+                _uiState.value = _uiState.value.copy(searchResults = emptyList())
+            }
+        }
+    }
+
+    fun toggleSearch() {
+        val newActive = !_uiState.value.isSearchActive
+        _uiState.value = _uiState.value.copy(
+            isSearchActive = newActive,
+            searchQuery = if (newActive) _uiState.value.searchQuery else "",
+            searchResults = if (newActive) _uiState.value.searchResults else emptyList()
+        )
+        if (!newActive) searchJob?.cancel()
+    }
+
+    fun clearSearch() {
+        searchJob?.cancel()
+        _uiState.value = _uiState.value.copy(
+            isSearchActive = false,
+            searchQuery = "",
+            searchResults = emptyList()
+        )
+    }
+
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
     }
@@ -243,6 +410,8 @@ class ChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         typingDebounceJob?.cancel()
-        viewModelScope.launch { chatRepository.setTyping(chatId, false) }
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            chatRepository.setTyping(chatId, false)
+        }
     }
 }

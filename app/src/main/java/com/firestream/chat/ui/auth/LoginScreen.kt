@@ -58,11 +58,14 @@ fun LoginScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    LaunchedEffect(uiState.isLoggedIn) {
-        if (uiState.isLoggedIn) {
+    LaunchedEffect(uiState.isLoggedIn, uiState.isCheckingAuth) {
+        if (!uiState.isCheckingAuth && uiState.isLoggedIn) {
             onAlreadyLoggedIn()
         }
     }
+
+    // Show nothing while the auth check is in progress to prevent login screen flash
+    if (uiState.isCheckingAuth) return
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {

@@ -14,7 +14,10 @@ import com.google.firebase.firestore.ListenerRegistration
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,7 +30,7 @@ class ChatRepositoryImpl @Inject constructor(
     private val authSource: FirebaseAuthSource
 ) : ChatRepository {
 
-    override fun getChats(): Flow<List<Chat>> = callbackFlow {
+    private fun observeRemoteChats(): Flow<List<Chat>> = callbackFlow {
         val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
         val listener: ListenerRegistration = firestore
             .collection("chats")
@@ -43,8 +46,31 @@ class ChatRepositoryImpl @Inject constructor(
                 trySend(chats)
             }
         awaitClose { listener.remove() }
-    }.onEach { chats ->
-        chatDao.insertChats(chats.map { ChatEntity.fromDomain(it) })
+    }
+
+    override fun getChats(): Flow<List<Chat>> = channelFlow {
+        // Sync remote chats to Room, preserving local-only fields
+        launch {
+            observeRemoteChats().collectLatest { chats ->
+                val existingMap = chatDao.getChatsByIds(chats.map { it.id }).associateBy { it.id }
+                val entities = chats.map { chat ->
+                    val existing = existingMap[chat.id]
+                    val entity = ChatEntity.fromDomain(chat)
+                    if (existing != null) {
+                        entity.copy(
+                            isPinned = existing.isPinned,
+                            isArchived = existing.isArchived,
+                            muteUntil = existing.muteUntil
+                        )
+                    } else entity
+                }
+                chatDao.insertChats(entities)
+            }
+        }
+        // Emit from Room (which has local fields)
+        chatDao.getAllChats()
+            .map { entities -> entities.map { it.toDomain() } }
+            .collect { send(it) }
     }
 
     override suspend fun getChatById(chatId: String): Result<Chat> {
