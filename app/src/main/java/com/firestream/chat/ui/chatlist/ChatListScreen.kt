@@ -1,43 +1,95 @@
 package com.firestream.chat.ui.chatlist
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SearchBar
+import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageType
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ChatListScreen(
     onChatClick: (chatId: String, recipientId: String) -> Unit,
     onNewChatClick: () -> Unit,
+    onSettingsClick: () -> Unit,
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+
+    val allChats = uiState.chats
+    val activeChats = allChats.filter { !it.isArchived }
+    val pinnedChats = activeChats.filter { it.isPinned }
+        .sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
+    val regularChats = activeChats.filter { !it.isPinned }
+        .sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
+    val archivedChats = allChats.filter { it.isArchived }
 
     Scaffold(
         topBar = {
@@ -50,8 +102,14 @@ fun ChatListScreen(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
-                )
+                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                actions = {
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
+                }
             )
         },
         floatingActionButton = {
@@ -65,59 +123,176 @@ fun ChatListScreen(
                     tint = MaterialTheme.colorScheme.onPrimary
                 )
             }
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        when {
-            uiState.isLoading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-
-            uiState.chats.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            // Search bar
+            SearchBar(
+                inputField = {
+                    SearchBarDefaults.InputField(
+                        query = uiState.searchQuery,
+                        onQueryChange = viewModel::onSearchQueryChange,
+                        onSearch = {},
+                        expanded = uiState.isSearchActive,
+                        onExpandedChange = { if (!it) viewModel.clearSearch() },
+                        placeholder = { Text("Search messages…") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        trailingIcon = {
+                            if (uiState.searchQuery.isNotEmpty()) {
+                                IconButton(onClick = viewModel::clearSearch) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear")
+                                }
+                            }
+                        }
+                    )
+                },
+                expanded = uiState.isSearchActive,
+                onExpandedChange = { if (!it) viewModel.clearSearch() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            ) {
+                if (uiState.searchResults.isEmpty() && uiState.searchQuery.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Text(
-                            text = stringResource(R.string.no_chats_yet),
-                            style = MaterialTheme.typography.titleMedium
+                            text = "No messages found",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                        Text(
-                            text = stringResource(R.string.start_chatting),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                    }
+                } else {
+                    LazyColumn {
+                        items(uiState.searchResults, key = { it.id }) { message ->
+                            SearchResultItem(
+                                message = message,
+                                onClick = {
+                                    viewModel.clearSearch()
+                                    onChatClick(message.chatId, "")
+                                }
+                            )
+                        }
                     }
                 }
             }
 
-            else -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                ) {
-                    items(uiState.chats, key = { it.id }) { chat ->
-                        val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
-                            chat.participants.firstOrNull { it != uiState.currentUserId } ?: ""
-                        } else ""
+            when {
+                uiState.isLoading -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) { CircularProgressIndicator() }
+                }
 
-                        ChatListItem(
-                            chat = chat,
-                            currentUserId = uiState.currentUserId,
-                            onClick = { onChatClick(chat.id, recipientId) },
-                            onLongClick = { viewModel.requestDeleteChat(chat.id) }
-                        )
+                activeChats.isEmpty() && archivedChats.isEmpty() -> {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = stringResource(R.string.no_chats_yet),
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = stringResource(R.string.start_chatting),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+                }
+
+                else -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        if (pinnedChats.isNotEmpty()) {
+                            stickyHeader(key = "header_pinned") {
+                                ChatSectionHeader("Pinned")
+                            }
+                            items(pinnedChats, key = { "pin_${it.id}" }) { chat ->
+                                SwipeableChatItem(
+                                    chat = chat,
+                                    currentUserId = uiState.currentUserId,
+                                    onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                    onDelete = { viewModel.requestDeleteChat(chat.id) },
+                                    onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
+                                    onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
+                                    onMute = { viewModel.requestMuteChat(chat.id) }
+                                )
+                            }
+                        }
+
+                        if (regularChats.isNotEmpty() && pinnedChats.isNotEmpty()) {
+                            stickyHeader(key = "header_chats") {
+                                ChatSectionHeader("Chats")
+                            }
+                        }
+                        items(regularChats, key = { it.id }) { chat ->
+                            SwipeableChatItem(
+                                chat = chat,
+                                currentUserId = uiState.currentUserId,
+                                onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                onDelete = { viewModel.requestDeleteChat(chat.id) },
+                                onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
+                                onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
+                                onMute = { viewModel.requestMuteChat(chat.id) }
+                            )
+                        }
+
+                        if (archivedChats.isNotEmpty()) {
+                            item(key = "archived_toggle") {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.toggleShowArchived() }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Archive,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = "Archived (${archivedChats.size})",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .padding(start = 16.dp)
+                                    )
+                                    Icon(
+                                        imageVector = if (uiState.showArchived) Icons.Default.KeyboardArrowDown
+                                        else Icons.Default.KeyboardArrowRight,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            if (uiState.showArchived) {
+                                items(archivedChats, key = { "arch_${it.id}" }) { chat ->
+                                    SwipeableChatItem(
+                                        chat = chat,
+                                        currentUserId = uiState.currentUserId,
+                                        onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                        onDelete = { viewModel.requestDeleteChat(chat.id) },
+                                        onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
+                                        onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
+                                        onMute = { viewModel.requestMuteChat(chat.id) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -140,5 +315,178 @@ fun ChatListScreen(
                 }
             )
         }
+
+        if (uiState.pendingMuteChatId != null) {
+            MuteDialog(
+                onSelect = { viewModel.confirmMuteChat(it) },
+                onDismiss = { viewModel.cancelMuteChat() }
+            )
+        }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableChatItem(
+    chat: Chat,
+    currentUserId: String,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    onPin: () -> Unit,
+    onArchive: () -> Unit,
+    onMute: () -> Unit
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            when (value) {
+                SwipeToDismissBoxValue.StartToEnd -> { onPin(); false }
+                SwipeToDismissBoxValue.EndToStart -> { onArchive(); false }
+                else -> false
+            }
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = {
+            val direction = dismissState.dismissDirection
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (direction == SwipeToDismissBoxValue.StartToEnd) {
+                    Icon(
+                        imageVector = Icons.Default.PushPin,
+                        contentDescription = if (chat.isPinned) "Unpin" else "Pin",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (direction == SwipeToDismissBoxValue.EndToStart) {
+                    Icon(
+                        imageVector = Icons.Default.Archive,
+                        contentDescription = if (chat.isArchived) "Unarchive" else "Archive",
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                }
+            }
+        }
+    ) {
+        Box {
+            ChatListItem(
+                chat = chat,
+                currentUserId = currentUserId,
+                onClick = onClick,
+                onLongClick = { showMenu = true }
+            )
+            val isMuted = chat.muteUntil == Long.MAX_VALUE ||
+                (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
+            DropdownMenu(
+                expanded = showMenu,
+                onDismissRequest = { showMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(if (chat.isPinned) "Unpin" else "Pin") },
+                    leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                    onClick = { showMenu = false; onPin() }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (chat.isArchived) "Unarchive" else "Archive") },
+                    leadingIcon = { Icon(Icons.Default.Archive, null) },
+                    onClick = { showMenu = false; onArchive() }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (isMuted) "Unmute" else "Mute") },
+                    leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
+                    onClick = { showMenu = false; onMute() }
+                )
+                DropdownMenuItem(
+                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                    onClick = { showMenu = false; onDelete() }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    )
+}
+
+@Composable
+private fun SearchResultItem(
+    message: Message,
+    onClick: () -> Unit
+) {
+    val dateStr = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+        .format(Date(message.timestamp))
+    ListItem(
+        headlineContent = {
+            Text(
+                text = when (message.type) {
+                    MessageType.IMAGE -> "📷 Photo"
+                    MessageType.VOICE -> "🎤 Voice message"
+                    MessageType.DOCUMENT -> "📄 ${message.content}"
+                    else -> message.content
+                },
+                maxLines = 1
+            )
+        },
+        supportingContent = {
+            Text(text = dateStr, style = MaterialTheme.typography.labelSmall)
+        },
+        modifier = Modifier.clickable(onClick = onClick)
+    )
+}
+
+@Composable
+private fun MuteDialog(
+    onSelect: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val now = System.currentTimeMillis()
+    val options = listOf(
+        "1 hour" to now + 3_600_000L,
+        "8 hours" to now + 28_800_000L,
+        "1 week" to now + 604_800_000L,
+        "Always" to Long.MAX_VALUE,
+        "Unmute" to 0L
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Mute notifications") },
+        text = {
+            Column {
+                options.forEach { (label, value) ->
+                    TextButton(
+                        onClick = { onSelect(value) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(label)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+private fun Chat.recipientId(currentUserId: String): String =
+    if (type == ChatType.INDIVIDUAL) participants.firstOrNull { it != currentUserId } ?: ""
+    else ""

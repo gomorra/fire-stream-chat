@@ -2,11 +2,14 @@ package com.firestream.chat.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.TypeConverters
+import com.firestream.chat.data.local.Converters
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 
 @Entity(tableName = "messages")
+@TypeConverters(Converters::class)
 data class MessageEntity(
     @PrimaryKey val id: String,
     val chatId: String,
@@ -18,7 +21,13 @@ data class MessageEntity(
     val status: String,
     val replyToId: String?,
     val timestamp: Long,
-    val editedAt: Long?
+    val editedAt: Long?,
+    // Phase 1 additions
+    val reactions: Map<String, String> = emptyMap(),
+    val isForwarded: Boolean = false,
+    val duration: Int? = null,
+    // Phase 2: starred messages
+    val isStarred: Boolean = false
 ) {
     fun toDomain() = Message(
         id = id,
@@ -31,7 +40,11 @@ data class MessageEntity(
         status = MessageStatus.valueOf(status),
         replyToId = replyToId,
         timestamp = timestamp,
-        editedAt = editedAt
+        editedAt = editedAt,
+        reactions = reactions,
+        isForwarded = isForwarded,
+        duration = duration,
+        isStarred = isStarred
     )
 
     companion object {
@@ -46,7 +59,11 @@ data class MessageEntity(
             status = message.status.name,
             replyToId = message.replyToId,
             timestamp = message.timestamp,
-            editedAt = message.editedAt
+            editedAt = message.editedAt,
+            reactions = message.reactions,
+            isForwarded = message.isForwarded,
+            duration = message.duration,
+            isStarred = message.isStarred
         )
     }
 }

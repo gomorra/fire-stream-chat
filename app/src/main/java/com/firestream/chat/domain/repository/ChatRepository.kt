@@ -14,4 +14,8 @@ interface ChatRepository {
     suspend fun deleteChat(chatId: String): Result<Unit>
     fun observeTyping(chatId: String): Flow<List<String>>
     suspend fun setTyping(chatId: String, isTyping: Boolean)
+    // Phase 2: chat organisation
+    suspend fun pinChat(chatId: String, pinned: Boolean): Result<Unit>
+    suspend fun archiveChat(chatId: String, archived: Boolean): Result<Unit>
+    suspend fun muteChat(chatId: String, muteUntil: Long): Result<Unit>
 }

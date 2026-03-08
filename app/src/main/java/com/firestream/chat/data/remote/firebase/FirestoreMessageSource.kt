@@ -15,7 +15,7 @@ import javax.inject.Singleton
 /**
  * Raw Firestore message before decryption.
  * [ciphertext] and [signalType] are non-null for encrypted messages.
- * [content] is non-null for group/plaintext messages (Phase 4: group encryption).
+ * [content] is non-null for group/plaintext messages.
  */
 data class RawFirestoreMessage(
     val id: String,
@@ -30,7 +30,11 @@ data class RawFirestoreMessage(
     val status: String,
     val replyToId: String?,
     val timestamp: Long,
-    val editedAt: Long?
+    val editedAt: Long?,
+    // Phase 1
+    val reactions: Map<String, String> = emptyMap(),
+    val isForwarded: Boolean = false,
+    val duration: Int? = null
 )
 
 @Singleton
@@ -63,7 +67,9 @@ class FirestoreMessageSource @Inject constructor(
         type: MessageType,
         replyToId: String?,
         timestamp: Long,
-        mediaUrl: String? = null
+        mediaUrl: String? = null,
+        isForwarded: Boolean = false,
+        duration: Int? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -73,7 +79,10 @@ class FirestoreMessageSource @Inject constructor(
             "status" to MessageStatus.SENT.name,
             "replyToId" to replyToId,
             "timestamp" to timestamp,
-            "mediaUrl" to mediaUrl
+            "mediaUrl" to mediaUrl,
+            "reactions" to emptyMap<String, String>(),
+            "isForwarded" to isForwarded,
+            "duration" to duration
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -84,6 +93,7 @@ class FirestoreMessageSource @Inject constructor(
         val lastContent = when (type) {
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
+            MessageType.VOICE -> "🎤 Voice message"
             else -> "New message"
         }
         firestore.collection("chats").document(chatId).update(
@@ -97,7 +107,6 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    /** Fallback for unencrypted sends (group chats, Phase 4). */
     suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,
@@ -105,7 +114,9 @@ class FirestoreMessageSource @Inject constructor(
         type: MessageType,
         replyToId: String?,
         timestamp: Long,
-        mediaUrl: String? = null
+        mediaUrl: String? = null,
+        isForwarded: Boolean = false,
+        duration: Int? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -114,7 +125,10 @@ class FirestoreMessageSource @Inject constructor(
             "status" to MessageStatus.SENT.name,
             "replyToId" to replyToId,
             "timestamp" to timestamp,
-            "mediaUrl" to mediaUrl
+            "mediaUrl" to mediaUrl,
+            "reactions" to emptyMap<String, String>(),
+            "isForwarded" to isForwarded,
+            "duration" to duration
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -125,6 +139,7 @@ class FirestoreMessageSource @Inject constructor(
         val lastContent = when (type) {
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
+            MessageType.VOICE -> "🎤 Voice message"
             else -> content
         }
         firestore.collection("chats").document(chatId).update(
@@ -162,7 +177,25 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
+    suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update("reactions", reactions)
+            .await()
+    }
+
+    @Suppress("UNCHECKED_CAST")
     private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawFirestoreMessage {
+        val rawReactions = (data["reactions"] as? Map<*, *>)
+            ?.entries
+            ?.mapNotNull { (k, v) ->
+                val key = k as? String ?: return@mapNotNull null
+                val value = v as? String ?: return@mapNotNull null
+                key to value
+            }
+            ?.toMap() ?: emptyMap()
+
         return RawFirestoreMessage(
             id = id,
             chatId = chatId,
@@ -176,7 +209,10 @@ class FirestoreMessageSource @Inject constructor(
             status = data["status"] as? String ?: MessageStatus.SENT.name,
             replyToId = data["replyToId"] as? String,
             timestamp = data["timestamp"] as? Long ?: 0L,
-            editedAt = data["editedAt"] as? Long
+            editedAt = data["editedAt"] as? Long,
+            reactions = rawReactions,
+            isForwarded = data["isForwarded"] as? Boolean ?: false,
+            duration = (data["duration"] as? Long)?.toInt()
         )
     }
 }

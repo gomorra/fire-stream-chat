@@ -102,6 +102,9 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
 
+    // DataStore
+    implementation(libs.datastore.preferences)
+
     // Networking
     implementation(libs.okhttp)
 

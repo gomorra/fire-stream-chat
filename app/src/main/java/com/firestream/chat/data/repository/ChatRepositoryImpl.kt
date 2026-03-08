@@ -211,6 +211,33 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun pinChat(chatId: String, pinned: Boolean): Result<Unit> {
+        return try {
+            chatDao.setPinned(chatId, pinned)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun archiveChat(chatId: String, archived: Boolean): Result<Unit> {
+        return try {
+            chatDao.setArchived(chatId, archived)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun muteChat(chatId: String, muteUntil: Long): Result<Unit> {
+        return try {
+            chatDao.setMuteUntil(chatId, muteUntil)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun mapToChat(id: String, data: Map<String, Any?>): Chat {
         val lastMessageContent = data["lastMessageContent"] as? String
         val lastMessageTimestamp = data["lastMessageTimestamp"] as? Long
