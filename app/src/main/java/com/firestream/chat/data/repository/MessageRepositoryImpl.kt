@@ -15,6 +15,7 @@ import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -125,6 +126,7 @@ class MessageRepositoryImpl @Inject constructor(
             }
 
             messageDao.getMessagesByChatId(chatId)
+                .conflate()
                 .map { entities -> entities.map { it.toDomain() } }
                 .collect { send(it) }
         }
@@ -469,9 +471,10 @@ class MessageRepositoryImpl @Inject constructor(
             for (id in messageIds) {
                 try {
                     messageSource.markDelivered(chatId, id, userId, now)
-                    messageDao.updateMessageStatus(id, MessageStatus.DELIVERED.name)
                 } catch (_: Exception) { }
             }
+            // Batch-update Room in one shot so the DAO flow emits only once
+            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -485,9 +488,10 @@ class MessageRepositoryImpl @Inject constructor(
             for (id in messageIds) {
                 try {
                     messageSource.markRead(chatId, id, userId, now)
-                    messageDao.updateMessageStatus(id, MessageStatus.READ.name)
                 } catch (_: Exception) { }
             }
+            // Batch-update Room in one shot so the DAO flow emits only once
+            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
