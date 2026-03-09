@@ -68,6 +68,9 @@ fun FireStreamNavGraph(
         androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     }
 
+    val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
+    val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
+
     NavHost(
         navController = navController,
         startDestination = Routes.LOGIN
@@ -122,9 +125,13 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(Unit) {
-                if (initialChatId != null && initialSenderId != null) {
-                    navController.navigate(Routes.chat(initialChatId, initialSenderId))
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value) {
+                val chatId = pendingChatId.value
+                val senderId = pendingSenderId.value
+                if (chatId != null && senderId != null) {
+                    pendingChatId.value = null
+                    pendingSenderId.value = null
+                    navController.navigate(Routes.chat(chatId, senderId))
                 }
             }
             ChatListScreen(
