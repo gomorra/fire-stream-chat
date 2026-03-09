@@ -1,10 +1,11 @@
-/mode# FireStream Chat Spec and Architecture
+# FireStream Chat Spec and Architecture
 
 This document provides a detailed specification and architectural overview of the **FireStream Chat** application, a real-time messaging Android application built with modern Android development practices, end-to-end encryption, and a robust feature set resembling modern chat apps (e.g., WhatsApp, Signal).
 
 ## 1. Specification / Features
 
 ### Core Messaging
+
 - **1-on-1 Chat**: Text messaging with real-time syncing.
 - **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed.
 - **End-to-End Encryption (E2EE)**: All messages are encrypted natively on the client device using the **Signal Protocol** before transmission.
@@ -16,6 +17,7 @@ This document provides a detailed specification and architectural overview of th
 - **Typing Indicators**: Real-time "typing..." status.
 
 ### Message Interactions
+
 - **Reply**: Swipe-to-reply or long-press context menu to quote/reply to specific messages.
 - **React**: Emoji reactions on messages.
 - **Forward**: Share messages to other active chats.
@@ -25,6 +27,7 @@ This document provides a detailed specification and architectural overview of th
 - **Link Previews**: Automatic rich preview card generation for URLs included in messages.
 
 ### Organization & User Management
+
 - **Local & Global Search**: Full-text search support to locate messages either within a specific conversation or globally across all chats.
 - **Shared Media**: Dedicated screens in User Profile to browse shared images.
 - **Online/Last Seen Presence**: Live presence indicating user availability. Privacy controls exist to configure who can view the last seen status.
@@ -74,13 +77,13 @@ graph TD
 
     subgraph Data_Layer [Data Layer]
         repoImpl[Repository Implementations]
-        
+
         subgraph Local_Source [Local Data Sources]
             room[(Room Database)]
             dataStore(Preferences DataStore)
             signalStore(Signal Protocol Store)
         end
-        
+
         subgraph Remote_Source [Remote Data Sources]
             firestore(Firebase Firestore)
             storage(Firebase Storage)
@@ -92,29 +95,34 @@ graph TD
     %% Define Relationships
     UI -->|Triggers Intent| VM
     VM -->|Observes State| UI
-    
+
     VM -->|Executes| UC
     UC -->|Relies On| repoInt
     UC -->|Returns| models
-    
+
     repoImpl -. Implements .-> repoInt
     repoImpl --> Local_Source
     repoImpl --> Remote_Source
 ```
 
 ### 3.1 Domain Layer
+
 The most isolated layer, containing enterprise-wide and application-specific business logic.
+
 - **Models**: Plain Kotlin Data Classes (e.g., `Message`, `User`, `Chat`). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
-- **Repository Interfaces**: Abstractions (e.g., `MessageRepository`, `UserRepository`) dictating what required data operations are available without knowing *how* they're implemented.
-- **Use Cases**: Single-responsibility executors (e.g., `SendMessageUseCase`, `GetMessagesUseCase`) that encapsulate business logic (e.g., encrypting a message *before* delegating to the repository).
+- **Repository Interfaces**: Abstractions (e.g., `MessageRepository`, `UserRepository`) dictating what required data operations are available without knowing _how_ they're implemented.
+- **Use Cases**: Single-responsibility executors (e.g., `SendMessageUseCase`, `GetMessagesUseCase`) that encapsulate business logic (e.g., encrypting a message _before_ delegating to the repository).
 
 ### 3.2 Data Layer
+
 The concrete implementation resolving the Repository Interfaces. It serves as the single source of truth (SSOT) via Offline-First syncing mechanisms.
+
 - **Local Sources**: Room DB handles the reactive caching. The app primarily drives the UI from Room via `Flow`.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firebase, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: The `SignalManager` and KeyStores orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
 
 ### 3.3 UI / Presentation Layer
+
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). They handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
 
@@ -139,15 +147,15 @@ sequenceDiagram
     App_A->>App_A: Encrypts message using Signal Protocol
     App_A->>App_A: Saves unencrypted msg to Local Room DB
     App_A->>Firestore: Uploads Encrypted Payload
-    
+
     Firestore-->>FCM: Triggers Cloud Function
     FCM-->>App_B: Delivers High Priority Push Notification (Data payload)
-    
+
     App_B->>Firestore: Fetches new encrypted payloads
     App_B->>App_B: Decrypts message using Signal Protocol
     App_B->>App_B: Saves unencrypted msg to Local Room DB
     App_B->>Firestore: Marks Message as "Delivered"
-    
+
     Bob->>App_B: Opens Chat Screen
     App_B->>Firestore: Marks Message as "Read" (if receipts enabled)
 ```
@@ -201,21 +209,22 @@ stateDiagram-v2
     [*] --> SENDING : Locally enqueued
     SENDING --> SENT : Successfully uploaded to Firestore
     SENDING --> FAILED : Network/Encryption Error
-    
+
     SENT --> DELIVERED : Recipient's FCM or Foreground app receives Payload
     DELIVERED --> READ : Recipient opens Chat Screen
-    
+
     state "Privacy Check (Read Receipts)" as PrivacyCheck {
         direction LR
         Check: Are both Sender & Receiver receipts ENABLED?
         Check --> Yes: Output = Blue Ticks
         Check --> No: Output = Gray Ticks (Stops at Delivered visually)
     }
-    
+
     READ --> PrivacyCheck : UI evaluates how to render rendering
 ```
 
 ### Status Implementation Details
+
 1. **SENT**: Initial state assigned directly after a successful suspend function call executing `firestore.document(id).set(...)`.
 2. **DELIVERED**: The recipient device triggers an acknowledgment update back to Firestore over two vectors:
    - **Background**: The `FCMService` intercepts a background data push, extracts the `messageId`, and updates the Firestore document status to `DELIVERED`.
@@ -239,7 +248,7 @@ erDiagram
         String publicIdentityKey
         Boolean readReceiptsEnabled
     }
-    
+
     chats {
         String id PK
         String name
@@ -273,4 +282,47 @@ erDiagram
     users ||--o{ contacts : "has"
 ```
 
-*Note: The actual DB also contains specialized tables for Signal keys (`SignalSessionEntity`, `SignalPreKeyEntity`, etc.) necessary to preserve the persistent cryptographic state.*
+_Note: The actual DB also contains specialized tables for Signal keys (`SignalSessionEntity`, `SignalPreKeyEntity`, etc.) necessary to preserve the persistent cryptographic state._
+
+---
+
+## 8. Screen Navigation Architecture
+
+The application has various screens connected through Jetpack Compose Navigation. The following diagram illustrates the flow between the screens:
+
+```mermaid
+graph TD
+    %% Auth Flow
+    Login[LoginScreen] -->|Already Logged In| ChatList[ChatListScreen]
+    Login -->|OTP Sent| Otp[OtpScreen]
+    Otp -->|Existing User| ChatList
+    Otp -->|New User| ProfileSetup[ProfileSetupScreen]
+    ProfileSetup -->|Profile Complete| ChatList
+    Settings[SettingsScreen] -->|Sign Out| Login
+
+    %% Main Flow
+    ChatList -->|Settings| Settings
+    ChatList -->|New Chat| Contacts[ContactsScreen]
+    ChatList -->|New Group| CreateGroup[CreateGroupScreen]
+    ChatList -->|New Broadcast| CreateBroadcast[CreateBroadcastScreen]
+    ChatList -->|Open Chat| Chat[ChatScreen]
+
+    %% From Settings
+    Settings -->|Starred Messages| StarredMessages[StarredMessagesScreen]
+    Settings -->|Archived Chats| ArchivedChats[ArchivedChatsScreen]
+    Settings -->|View Profile| Profile[ProfileScreen]
+    
+    %% From Archived Chats
+    ArchivedChats -->|Open Chat| Chat
+
+    %% Chat Connective Flows
+    Contacts -->|Contact Selected| Chat
+    CreateGroup -->|Group Created| Chat
+    CreateBroadcast -->|Broadcast Created| Chat
+    
+    Chat -->|Message Info| MessageInfo[MessageInfoScreen]
+    Chat -->|View Profile| Profile
+    Chat -->|Group Settings| GroupSettings[GroupSettingsScreen]
+    
+    GroupSettings -->|Add Member| Contacts
+```
