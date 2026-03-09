@@ -32,6 +32,7 @@ data class SettingsUiState(
     // Notifications
     val messageNotifications: Boolean = true,
     val groupNotifications: Boolean = true,
+    val mentionOnlyNotifications: Boolean = false,
     val notificationSound: NotificationSound = NotificationSound.DEFAULT,
     val vibration: Boolean = true,
     // Storage
@@ -99,6 +100,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            preferencesDataStore.mentionOnlyNotificationsFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(mentionOnlyNotifications = enabled)
+            }
+        }
+        viewModelScope.launch {
             preferencesDataStore.notificationSoundFlow.collect { sound ->
                 _uiState.value = _uiState.value.copy(notificationSound = sound)
             }
@@ -142,6 +148,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setGroupNotifications(enabled: Boolean) {
         viewModelScope.launch { preferencesDataStore.setGroupNotifications(enabled) }
+    }
+
+    fun setMentionOnlyNotifications(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setMentionOnlyNotifications(enabled) }
     }
 
     fun setNotificationSound(sound: NotificationSound) {

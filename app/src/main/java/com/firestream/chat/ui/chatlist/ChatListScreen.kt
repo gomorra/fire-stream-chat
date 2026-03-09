@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PushPin
@@ -69,6 +70,7 @@ import java.util.Locale
 fun ChatListScreen(
     onChatClick: (chatId: String, recipientId: String) -> Unit,
     onNewChatClick: () -> Unit,
+    onNewGroupClick: () -> Unit = {},
     onNewBroadcastClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
     viewModel: ChatListViewModel = hiltViewModel()
@@ -114,6 +116,11 @@ fun ChatListScreen(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("New Group") },
+                            leadingIcon = { Icon(Icons.Default.Group, null) },
+                            onClick = { showMenu = false; onNewGroupClick() }
+                        )
                         DropdownMenuItem(
                             text = { Text("New Broadcast") },
                             leadingIcon = { Icon(Icons.Default.Campaign, null) },

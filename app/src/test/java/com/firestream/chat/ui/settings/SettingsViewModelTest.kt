@@ -60,6 +60,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.screenSecurityFlow } returns flowOf(false)
         every { preferencesDataStore.messageNotificationsFlow } returns flowOf(true)
         every { preferencesDataStore.groupNotificationsFlow } returns flowOf(true)
+        every { preferencesDataStore.mentionOnlyNotificationsFlow } returns flowOf(false)
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.DEFAULT)
         every { preferencesDataStore.vibrationFlow } returns flowOf(true)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)

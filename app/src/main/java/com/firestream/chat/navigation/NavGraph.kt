@@ -19,6 +19,7 @@ import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.profile.ProfileScreen
 import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.group.GroupSettingsScreen
+import com.firestream.chat.ui.group.CreateGroupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 
@@ -38,6 +39,7 @@ object Routes {
     // Phase 5 routes
     const val GROUP_SETTINGS = "group_settings/{chatId}"
     const val CREATE_BROADCAST = "create_broadcast"
+    const val CREATE_GROUP = "create_group"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -133,6 +135,9 @@ fun FireStreamNavGraph(
                 },
                 onNewChatClick = {
                     navController.navigate(Routes.CONTACTS)
+                },
+                onNewGroupClick = {
+                    navController.navigate(Routes.CREATE_GROUP)
                 },
                 onNewBroadcastClick = {
                     navController.navigate(Routes.CREATE_BROADCAST)
@@ -230,6 +235,18 @@ fun FireStreamNavGraph(
             GroupSettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onAddMemberClick = { navController.navigate(Routes.CONTACTS) }
+            )
+        }
+
+        // Phase 5: Create Group
+        composable(Routes.CREATE_GROUP) {
+            CreateGroupScreen(
+                onGroupCreated = { chatId ->
+                    navController.navigate(Routes.chat(chatId, "")) {
+                        popUpTo(Routes.CHAT_LIST)
+                    }
+                },
+                onBackClick = { navController.popBackStack() }
             )
         }
 

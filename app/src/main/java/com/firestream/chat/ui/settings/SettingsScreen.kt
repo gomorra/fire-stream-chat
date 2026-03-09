@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -224,6 +225,14 @@ fun SettingsScreen(
                 subtitle = "Receive notifications for group messages",
                 checked = uiState.groupNotifications,
                 onCheckedChange = { viewModel.setGroupNotifications(it) }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.AlternateEmail,
+                title = "Mention-only Notifications",
+                subtitle = "Only notify for group messages that mention you",
+                checked = uiState.mentionOnlyNotifications,
+                onCheckedChange = { viewModel.setMentionOnlyNotifications(it) }
             )
 
             val soundLabel = when (uiState.notificationSound) {
