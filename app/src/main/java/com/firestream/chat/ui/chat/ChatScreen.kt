@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -55,6 +56,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -217,13 +219,24 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = uiState.chatName ?: "Chat",
+                    Column(
                         modifier = Modifier.clickable {
                             if (uiState.isGroupChat) onGroupSettingsClick()
-                            else onProfileClick(viewModel.recipientId)
+                            else if (!uiState.isBroadcast) onProfileClick(viewModel.recipientId)
                         }
-                    )
+                    ) {
+                        Text(
+                            text = uiState.chatName ?: "Chat",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        if (uiState.isBroadcast && uiState.broadcastRecipientCount > 0) {
+                            Text(
+                                text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                            )
+                        }
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
@@ -309,7 +322,7 @@ fun ChatScreen(
                     }
                 } else {
                     Text(
-                        text = "${uiState.searchResults.size} result(s)",
+                        text = "${uiState.searchResults.size} ${if (uiState.searchResults.size == 1) "result" else "results"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -397,7 +410,8 @@ fun ChatScreen(
                                         replyToMessage = replyToMessage,
                                         linkPreview = linkPreview,
                                         currentUserId = uiState.currentUserId,
-                                        readReceiptsAllowed = uiState.readReceiptsAllowed,
+                                        readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
+                                        userIdToDisplayName = uiState.participantNameMap,
                                         onDeleteClick = if (isOwn) {
                                             { viewModel.deleteMessage(message.id) }
                                         } else null,
@@ -583,6 +597,26 @@ fun ChatScreen(
                 }
             }
 
+            // Mention autocomplete picker
+            if (uiState.mentionCandidates.isNotEmpty()) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 180.dp)
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    items(uiState.mentionCandidates, key = { it.uid }) { user ->
+                        ListItem(
+                            headlineContent = { Text(user.displayName) },
+                            modifier = Modifier.clickable {
+                                messageText = viewModel.selectMention(user, messageText)
+                            }
+                        )
+                        HorizontalDivider()
+                    }
+                }
+            }
+
             // Input row
             if (uiState.canSendMessages) Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -602,7 +636,7 @@ fun ChatScreen(
                     value = messageText,
                     onValueChange = {
                         messageText = it
-                        if (uiState.editingMessage == null) viewModel.onTyping(it)
+                        if (uiState.editingMessage == null) viewModel.onTypingWithMentions(it)
                     },
                     modifier = Modifier.weight(1f),
                     placeholder = {

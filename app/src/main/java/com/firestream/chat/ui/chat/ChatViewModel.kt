@@ -33,6 +33,8 @@ import com.firestream.chat.domain.usecase.message.VotePollUseCase
 import com.firestream.chat.domain.usecase.message.ClosePollUseCase
 import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
 import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -74,16 +76,15 @@ data class ChatUiState(
     // Phase 5.2: group permissions
     val canSendMessages: Boolean = true,
     val isAnnouncementMode: Boolean = false,
-    // Phase 5.4: mentions
+    // Phase 5.4: mentions — non-empty list means picker is visible
     val mentionCandidates: List<User> = emptyList(),
-    val showMentionPicker: Boolean = false,
-    val mentionQuery: String = "",
     val participantNameMap: Map<String, String> = emptyMap(),
     // Phase 5.5: broadcast
     val isBroadcast: Boolean = false,
-    val broadcastRecipientCount: Int = 0,
     val broadcastRecipientIds: List<String> = emptyList()
-)
+) {
+    val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
+}
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -101,6 +102,7 @@ class ChatViewModel @Inject constructor(
     private val sendPollUseCase: SendPollUseCase,
     private val votePollUseCase: VotePollUseCase,
     private val closePollUseCase: ClosePollUseCase,
+    private val parseMentionsUseCase: ParseMentionsUseCase,
     private val sendBroadcastMessageUseCase: SendBroadcastMessageUseCase,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
     private val getChatsUseCase: GetChatsUseCase,
@@ -122,6 +124,9 @@ class ChatViewModel @Inject constructor(
     private var typingDebounceJob: Job? = null
     private var searchJob: Job? = null
     private var screenVisible = false
+    private var allGroupParticipants: List<User> = emptyList()
+    // Cached inverse of participantNameMap (displayName -> userId) for mention extraction on send
+    private var displayNameToUserId: Map<String, String> = emptyMap()
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
@@ -138,13 +143,31 @@ class ChatViewModel @Inject constructor(
                 .onSuccess { chat ->
                     val uid = _uiState.value.currentUserId
                     val isGroup = chat.type == ChatType.GROUP
+                    val isBroadcast = chat.type == ChatType.BROADCAST
+                    val broadcastRecipientIds = if (isBroadcast) chat.participants.filter { it != uid } else emptyList()
                     _uiState.value = _uiState.value.copy(
                         isGroupChat = isGroup,
                         chatName = chat.name,
                         canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
-                        isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode
+                        isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
+                        isBroadcast = isBroadcast,
+                        broadcastRecipientIds = broadcastRecipientIds
                     )
+                    if (isGroup) loadGroupParticipants(chat.participants)
                 }
+        }
+    }
+
+    private fun loadGroupParticipants(participantIds: List<String>) {
+        viewModelScope.launch {
+            val users = participantIds
+                .map { userId -> async { userRepository.getUserById(userId).getOrNull() } }
+                .awaitAll()
+                .filterNotNull()
+            val nameMap = users.associate { it.uid to it.displayName }
+            allGroupParticipants = users
+            displayNameToUserId = nameMap.entries.associate { it.value to it.key }
+            _uiState.value = _uiState.value.copy(participantNameMap = nameMap)
         }
     }
 
@@ -300,21 +323,55 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(content: String) {
         if (content.isBlank()) return
         typingDebounceJob?.cancel()
-        val replyToId = _uiState.value.replyToMessage?.id
+        val state = _uiState.value
         viewModelScope.launch {
             chatRepository.setTyping(chatId, false)
-            _uiState.value = _uiState.value.copy(isSending = true, replyToMessage = null)
-            sendMessageUseCase(chatId, content, recipientId, replyToId)
-                .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(
-                        error = e.message,
-                        isSending = false
-                    )
-                }
-                .onSuccess {
-                    _uiState.value = _uiState.value.copy(isSending = false)
-                }
+            _uiState.value = _uiState.value.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList())
+            if (state.isBroadcast) {
+                sendBroadcastMessageUseCase(chatId, content, state.broadcastRecipientIds)
+                    .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
+                    .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+            } else {
+                val replyToId = state.replyToMessage?.id
+                val mentions = if (state.isGroupChat) parseMentionsUseCase(content, displayNameToUserId) else emptyList()
+                sendMessageUseCase(chatId, content, recipientId, replyToId, mentions)
+                    .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
+                    .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+            }
         }
+    }
+
+    fun onTypingWithMentions(text: String) {
+        onTyping(text)
+        if (!_uiState.value.isGroupChat) return
+        val query = extractMentionQuery(text)
+        if (query != null) {
+            val candidates = allGroupParticipants.filter {
+                query.isEmpty() || it.displayName.contains(query, ignoreCase = true)
+            }.take(8)
+            _uiState.value = _uiState.value.copy(mentionCandidates = candidates)
+        } else {
+            _uiState.value = _uiState.value.copy(mentionCandidates = emptyList())
+        }
+    }
+
+    /** Returns the new text with the selected mention inserted; caller must update their text field. */
+    fun selectMention(user: User, currentText: String): String {
+        val atIndex = currentText.lastIndexOf('@')
+        val newText = if (atIndex >= 0) {
+            currentText.substring(0, atIndex + 1) + user.displayName + " "
+        } else {
+            currentText
+        }
+        _uiState.value = _uiState.value.copy(mentionCandidates = emptyList())
+        return newText
+    }
+
+    private fun extractMentionQuery(text: String): String? {
+        val atIndex = text.lastIndexOf('@')
+        if (atIndex < 0) return null
+        val afterAt = text.substring(atIndex + 1)
+        return if (afterAt.contains(' ')) null else afterAt
     }
 
     fun deleteMessage(messageId: String) {

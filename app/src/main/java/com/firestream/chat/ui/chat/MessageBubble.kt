@@ -51,6 +51,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
+import com.firestream.chat.domain.util.MentionParser
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -70,6 +71,7 @@ internal fun MessageBubble(
     linkPreview: LinkPreview?,
     currentUserId: String,
     readReceiptsAllowed: Boolean = true,
+    userIdToDisplayName: Map<String, String> = emptyMap(),
     onDeleteClick: (() -> Unit)?,
     onEditClick: (() -> Unit)?,
     onReplyClick: () -> Unit,
@@ -232,8 +234,18 @@ internal fun MessageBubble(
                             }
                         }
                         else -> {
+                            val highlightColor = MaterialTheme.colorScheme.primary
+                            val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor) {
+                                MentionParser.formatMentionText(
+                                    text = message.content,
+                                    mentions = message.mentions,
+                                    currentUserId = currentUserId,
+                                    highlightColor = highlightColor,
+                                    userIdToDisplayName = userIdToDisplayName
+                                )
+                            }
                             Text(
-                                text = message.content,
+                                text = displayText,
                                 color = textColor,
                                 style = MaterialTheme.typography.bodyMedium
                             )
