@@ -22,5 +22,9 @@ data class Message(
     val isStarred: Boolean = false,
     // Per-recipient delivery/read tracking for group chats
     val readBy: Map<String, Long> = emptyMap(),
-    val deliveredTo: Map<String, Long> = emptyMap()
+    val deliveredTo: Map<String, Long> = emptyMap(),
+    // Phase 5.3: polls
+    val pollData: Poll? = null,
+    // Phase 5.4: mentions — userIds; "everyone" for @everyone
+    val mentions: List<String> = emptyList()
 )

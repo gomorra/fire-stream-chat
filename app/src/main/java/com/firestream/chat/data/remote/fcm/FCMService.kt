@@ -7,6 +7,8 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -15,6 +17,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -23,6 +26,7 @@ class FCMService : FirebaseMessagingService() {
 
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var messageRepository: MessageRepository
+    @Inject lateinit var preferencesDataStore: PreferencesDataStore
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -43,6 +47,8 @@ class FCMService : FirebaseMessagingService() {
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
         val messageId = data["messageId"]
+        val chatType = data["chatType"] ?: "INDIVIDUAL"
+        val mentions = data["mentions"]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
 
         // Mark message as delivered when push notification is received
         if (messageId != null) {
@@ -51,7 +57,20 @@ class FCMService : FirebaseMessagingService() {
             }
         }
 
-        showNotification(chatId, senderId, senderName, "New message")
+        serviceScope.launch {
+            // For group chats: if mention-only notifications are enabled,
+            // suppress notification unless the current user is mentioned
+            if (chatType == ChatType.GROUP.name) {
+                val mentionOnly = preferencesDataStore.mentionOnlyNotificationsFlow.first()
+                if (mentionOnly) {
+                    val currentUserId = authRepository.currentUserId ?: return@launch
+                    val isMentioned = mentions.contains(currentUserId) || mentions.contains("everyone")
+                    if (!isMentioned) return@launch
+                }
+            }
+
+            showNotification(chatId, senderId, senderName, "New message")
+        }
     }
 
     private fun showNotification(chatId: String, senderId: String, title: String, body: String) {

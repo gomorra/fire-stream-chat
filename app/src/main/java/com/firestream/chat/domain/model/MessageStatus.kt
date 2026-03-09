@@ -13,10 +13,12 @@ enum class MessageType {
     IMAGE,
     VIDEO,
     VOICE,
-    DOCUMENT
+    DOCUMENT,
+    POLL
 }
 
 enum class ChatType {
     INDIVIDUAL,
-    GROUP
+    GROUP,
+    BROADCAST
 }

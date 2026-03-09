@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
@@ -51,7 +52,11 @@ fun ChatListItem(
             color = MaterialTheme.colorScheme.primaryContainer
         ) {
             Icon(
-                imageVector = if (chat.type == ChatType.GROUP) Icons.Default.Group else Icons.Default.Person,
+                imageVector = when (chat.type) {
+                    ChatType.BROADCAST -> Icons.Default.Campaign
+                    ChatType.GROUP -> Icons.Default.Group
+                    else -> Icons.Default.Person
+                },
                 contentDescription = null,
                 modifier = Modifier.padding(12.dp),
                 tint = MaterialTheme.colorScheme.onPrimaryContainer

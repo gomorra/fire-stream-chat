@@ -8,12 +8,15 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
+import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import com.firestream.chat.domain.usecase.message.AddReactionUseCase
 import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
@@ -25,6 +28,11 @@ import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendPollUseCase
+import com.firestream.chat.domain.usecase.message.VotePollUseCase
+import com.firestream.chat.domain.usecase.message.ClosePollUseCase
+import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
+import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CoroutineScope
@@ -59,7 +67,22 @@ data class ChatUiState(
     val searchResults: List<Message> = emptyList(),
     val isSearchActive: Boolean = false,
     // Read receipts — true only when BOTH users have read receipts enabled
-    val readReceiptsAllowed: Boolean = true
+    val readReceiptsAllowed: Boolean = true,
+    // Phase 5: group management
+    val isGroupChat: Boolean = false,
+    val chatName: String? = null,
+    // Phase 5.2: group permissions
+    val canSendMessages: Boolean = true,
+    val isAnnouncementMode: Boolean = false,
+    // Phase 5.4: mentions
+    val mentionCandidates: List<User> = emptyList(),
+    val showMentionPicker: Boolean = false,
+    val mentionQuery: String = "",
+    val participantNameMap: Map<String, String> = emptyMap(),
+    // Phase 5.5: broadcast
+    val isBroadcast: Boolean = false,
+    val broadcastRecipientCount: Int = 0,
+    val broadcastRecipientIds: List<String> = emptyList()
 )
 
 @HiltViewModel
@@ -75,6 +98,11 @@ class ChatViewModel @Inject constructor(
     private val forwardMessageUseCase: ForwardMessageUseCase,
     private val sendVoiceMessageUseCase: SendVoiceMessageUseCase,
     private val starMessageUseCase: StarMessageUseCase,
+    private val sendPollUseCase: SendPollUseCase,
+    private val votePollUseCase: VotePollUseCase,
+    private val closePollUseCase: ClosePollUseCase,
+    private val sendBroadcastMessageUseCase: SendBroadcastMessageUseCase,
+    private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
     private val getChatsUseCase: GetChatsUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
     private val linkPreviewSource: LinkPreviewSource,
@@ -101,6 +129,23 @@ class ChatViewModel @Inject constructor(
         observeTyping()
         loadAvailableChats()
         observeReadReceiptsAllowed()
+        loadChatInfo()
+    }
+
+    private fun loadChatInfo() {
+        viewModelScope.launch {
+            chatRepository.getChatById(chatId)
+                .onSuccess { chat ->
+                    val uid = _uiState.value.currentUserId
+                    val isGroup = chat.type == ChatType.GROUP
+                    _uiState.value = _uiState.value.copy(
+                        isGroupChat = isGroup,
+                        chatName = chat.name,
+                        canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
+                        isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode
+                    )
+                }
+        }
     }
 
     /**
@@ -402,6 +447,30 @@ class ChatViewModel @Inject constructor(
             searchQuery = "",
             searchResults = emptyList()
         )
+    }
+
+    // Phase 5.3: polls
+    fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSending = true)
+            sendPollUseCase(chatId, question, options, isMultipleChoice, isAnonymous)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
+                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+        }
+    }
+
+    fun votePoll(messageId: String, optionIds: List<String>) {
+        viewModelScope.launch {
+            votePollUseCase(chatId, messageId, optionIds)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun closePoll(messageId: String) {
+        viewModelScope.launch {
+            closePollUseCase(chatId, messageId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
     }
 
     fun clearError() {

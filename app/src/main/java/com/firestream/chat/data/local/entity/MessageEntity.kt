@@ -7,6 +7,10 @@ import com.firestream.chat.data.local.Converters
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.Poll
+import com.firestream.chat.domain.model.PollOption
+import org.json.JSONArray
+import org.json.JSONObject
 
 @Entity(tableName = "messages")
 @TypeConverters(Converters::class)
@@ -29,7 +33,9 @@ data class MessageEntity(
     // Phase 2: starred messages
     val isStarred: Boolean = false,
     val readBy: Map<String, Long> = emptyMap(),
-    val deliveredTo: Map<String, Long> = emptyMap()
+    val deliveredTo: Map<String, Long> = emptyMap(),
+    val pollData: String? = null,
+    val mentions: List<String> = emptyList()
 ) {
     fun toDomain() = Message(
         id = id,
@@ -48,7 +54,9 @@ data class MessageEntity(
         duration = duration,
         isStarred = isStarred,
         readBy = readBy,
-        deliveredTo = deliveredTo
+        deliveredTo = deliveredTo,
+        pollData = pollData?.let { parsePollJson(it) },
+        mentions = mentions
     )
 
     companion object {
@@ -69,7 +77,55 @@ data class MessageEntity(
             duration = message.duration,
             isStarred = message.isStarred,
             readBy = message.readBy,
-            deliveredTo = message.deliveredTo
+            deliveredTo = message.deliveredTo,
+            pollData = message.pollData?.let { pollToJson(it) },
+            mentions = message.mentions
         )
+
+        private fun pollToJson(poll: Poll): String {
+            val obj = JSONObject().apply {
+                put("question", poll.question)
+                put("isMultipleChoice", poll.isMultipleChoice)
+                put("isAnonymous", poll.isAnonymous)
+                put("isClosed", poll.isClosed)
+                put("options", JSONArray().apply {
+                    poll.options.forEach { option ->
+                        put(JSONObject().apply {
+                            put("id", option.id)
+                            put("text", option.text)
+                            put("voterIds", JSONArray(option.voterIds))
+                        })
+                    }
+                })
+            }
+            return obj.toString()
+        }
+
+        private fun parsePollJson(json: String): Poll? {
+            return try {
+                val obj = JSONObject(json)
+                val optionsArr = obj.getJSONArray("options")
+                val options = List(optionsArr.length()) { i ->
+                    val o = optionsArr.getJSONObject(i)
+                    val voterIds = o.optJSONArray("voterIds")?.let { arr ->
+                        List(arr.length()) { j -> arr.getString(j) }
+                    } ?: emptyList()
+                    PollOption(
+                        id = o.getString("id"),
+                        text = o.getString("text"),
+                        voterIds = voterIds
+                    )
+                }
+                Poll(
+                    question = obj.getString("question"),
+                    options = options,
+                    isMultipleChoice = obj.optBoolean("isMultipleChoice", false),
+                    isAnonymous = obj.optBoolean("isAnonymous", false),
+                    isClosed = obj.optBoolean("isClosed", false)
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
     }
 }

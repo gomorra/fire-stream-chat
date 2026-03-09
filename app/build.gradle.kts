@@ -115,6 +115,9 @@ dependencies {
     // Networking
     implementation(libs.okhttp)
 
+    // QR Code
+    implementation(libs.zxing.core)
+
     // Core Library Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 

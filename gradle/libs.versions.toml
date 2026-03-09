@@ -35,6 +35,9 @@ datastore = "1.1.1"
 # Networking
 okhttp = "4.12.0"
 
+# QR Code
+zxing = "3.5.3"
+
 # Testing
 junit = "4.13.2"
 mockk = "1.13.13"
@@ -91,6 +94,9 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 
 # Networking
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+
+# QR Code
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

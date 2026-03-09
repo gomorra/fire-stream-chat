@@ -3,7 +3,6 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -17,41 +16,25 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -61,27 +44,17 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CameraAlt
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.DoneAll
-import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Reply
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -98,7 +71,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -107,28 +79,18 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import com.firestream.chat.ui.theme.ReadReceiptBlue
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -136,9 +98,6 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
-
-private val QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -146,6 +105,7 @@ fun ChatScreen(
     onBackClick: () -> Unit,
     onMessageInfoClick: (Message, List<String>) -> Unit = { _, _ -> },
     onProfileClick: (userId: String) -> Unit = {},
+    onGroupSettingsClick: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -154,6 +114,7 @@ fun ChatScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showAttachmentSheet by remember { mutableStateOf(false) }
+    var showCreatePollSheet by remember { mutableStateOf(false) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
@@ -255,7 +216,15 @@ fun ChatScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(text = "Chat") },
+                title = {
+                    Text(
+                        text = uiState.chatName ?: "Chat",
+                        modifier = Modifier.clickable {
+                            if (uiState.isGroupChat) onGroupSettingsClick()
+                            else onProfileClick(viewModel.recipientId)
+                        }
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -356,7 +325,6 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        // Scroll to the message in the main list
                                         val idx = uiState.messages.indexOfFirst { it.id == message.id }
                                         if (idx >= 0) {
                                             scope.launch { listState.animateScrollToItem(idx) }
@@ -391,61 +359,71 @@ fun ChatScreen(
 
             val showingSearchResults = uiState.isSearchActive && uiState.searchQuery.isNotBlank() && uiState.searchResults.isNotEmpty()
             if (!showingSearchResults) {
-            when {
-                uiState.isLoading -> {
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator()
+                when {
+                    uiState.isLoading -> {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
+                        }
                     }
-                }
-                else -> {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(uiState.messages, key = { it.id }) { message ->
-                            val isOwn = message.senderId == uiState.currentUserId
-                            val replyToMessage = message.replyToId?.let { id ->
-                                uiState.messages.find { it.id == id }
-                            }
-                            val linkPreview = if (message.type == MessageType.TEXT) {
-                                uiState.linkPreviews.entries.firstOrNull { (url, _) ->
-                                    message.content.contains(url)
-                                }?.value
-                            } else null
+                    else -> {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(uiState.messages, key = { it.id }) { message ->
+                                val isOwn = message.senderId == uiState.currentUserId
+                                val replyToMessage = message.replyToId?.let { id ->
+                                    uiState.messages.find { it.id == id }
+                                }
+                                val linkPreview = if (message.type == MessageType.TEXT) {
+                                    uiState.linkPreviews.entries.firstOrNull { (url, _) ->
+                                        message.content.contains(url)
+                                    }?.value
+                                } else null
 
-                            MessageBubble(
-                                message = message,
-                                isOwnMessage = isOwn,
-                                replyToMessage = replyToMessage,
-                                linkPreview = linkPreview,
-                                currentUserId = uiState.currentUserId,
-                                readReceiptsAllowed = uiState.readReceiptsAllowed,
-                                onDeleteClick = if (isOwn) {
-                                    { viewModel.deleteMessage(message.id) }
-                                } else null,
-                                onEditClick = if (isOwn && message.type == MessageType.TEXT) {
-                                    { viewModel.startEdit(message) }
-                                } else null,
-                                onReplyClick = { viewModel.setReplyTo(message) },
-                                onReactionClick = { reactionTargetMessage = message },
-                                onForwardClick = { forwardTargetMessage = message },
-                                onStarClick = { viewModel.toggleStar(message) },
-                                onInfoClick = if (isOwn) {
-                                    {
-                                        val chatParticipants = uiState.availableChats
-                                            .find { it.id == message.chatId }
-                                            ?.participants ?: emptyList()
-                                        onMessageInfoClick(message, chatParticipants)
-                                    }
-                                } else null,
-                                onImageClick = { url -> fullscreenImageUrl = url }
-                            )
+                                if (message.type == MessageType.POLL) {
+                                    PollBubble(
+                                        message = message,
+                                        isOwnMessage = isOwn,
+                                        currentUserId = uiState.currentUserId,
+                                        onVote = { optionIds -> viewModel.votePoll(message.id, optionIds) },
+                                        onClose = { viewModel.closePoll(message.id) }
+                                    )
+                                } else {
+                                    MessageBubble(
+                                        message = message,
+                                        isOwnMessage = isOwn,
+                                        replyToMessage = replyToMessage,
+                                        linkPreview = linkPreview,
+                                        currentUserId = uiState.currentUserId,
+                                        readReceiptsAllowed = uiState.readReceiptsAllowed,
+                                        onDeleteClick = if (isOwn) {
+                                            { viewModel.deleteMessage(message.id) }
+                                        } else null,
+                                        onEditClick = if (isOwn && message.type == MessageType.TEXT) {
+                                            { viewModel.startEdit(message) }
+                                        } else null,
+                                        onReplyClick = { viewModel.setReplyTo(message) },
+                                        onReactionClick = { reactionTargetMessage = message },
+                                        onForwardClick = { forwardTargetMessage = message },
+                                        onStarClick = { viewModel.toggleStar(message) },
+                                        onInfoClick = if (isOwn) {
+                                            {
+                                                val chatParticipants = uiState.availableChats
+                                                    .find { it.id == message.chatId }
+                                                    ?.participants ?: emptyList()
+                                                onMessageInfoClick(message, chatParticipants)
+                                            }
+                                        } else null,
+                                        onImageClick = { url -> fullscreenImageUrl = url }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
-            } // end if: hide message list when search results shown
 
             // Typing indicator
             if (uiState.typingUserIds.isNotEmpty()) {
@@ -551,7 +529,6 @@ fun ChatScreen(
                         stopRecording(mediaRecorder)
                         isRecording = false
                         recordedDuration = recordingSeconds
-                        // Discard
                         recordedFileUri = null
                         recordedDuration = 0
                     }) {
@@ -581,8 +558,33 @@ fun ChatScreen(
                 }
             }
 
+            // Announcement mode banner (when user can't send)
+            if (!uiState.canSendMessages && uiState.isAnnouncementMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Only admins can send messages",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Input row
-            Row(
+            if (uiState.canSendMessages) Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -622,7 +624,6 @@ fun ChatScreen(
                 Spacer(modifier = Modifier.width(8.dp))
 
                 if (messageText.isBlank() && uiState.editingMessage == null && !isRecording) {
-                    // Mic button for voice recording
                     IconButton(onClick = {
                         if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
                             == PackageManager.PERMISSION_GRANTED) {
@@ -709,11 +710,32 @@ fun ChatScreen(
                         }
                     }
                 )
+                AttachmentOption(
+                    icon = Icons.Default.Add,
+                    label = "Create Poll",
+                    onClick = {
+                        scope.launch { sheetState.hide() }.invokeOnCompletion {
+                            showAttachmentSheet = false
+                            showCreatePollSheet = true
+                        }
+                    }
+                )
             }
         }
     }
 
-    // Reaction picker bottom sheet with full emoji picker
+    // Create Poll bottom sheet
+    if (showCreatePollSheet) {
+        CreatePollSheet(
+            onDismiss = { showCreatePollSheet = false },
+            onCreatePoll = { question, options, isMultipleChoice, isAnonymous ->
+                viewModel.sendPoll(question, options, isMultipleChoice, isAnonymous)
+                showCreatePollSheet = false
+            }
+        )
+    }
+
+    // Reaction picker bottom sheet
     reactionTargetMessage?.let { targetMsg ->
         ModalBottomSheet(
             onDismissRequest = { reactionTargetMessage = null }
@@ -741,13 +763,10 @@ fun ChatScreen(
         )
     }
 
-    // Intercept system back while fullscreen image is open so it closes the overlay
-    // instead of popping the chat screen off the nav stack.
     BackHandler(enabled = fullscreenImageUrl != null) {
         fullscreenImageUrl = null
     }
 
-    // Fullscreen image viewer
     AnimatedVisibility(visible = fullscreenImageUrl != null, enter = fadeIn(), exit = fadeOut()) {
         fullscreenImageUrl?.let { url ->
             FullscreenImageViewer(imageUrl = url, onDismiss = { fullscreenImageUrl = null })
@@ -826,735 +845,5 @@ private fun AttachmentOption(
         Icon(imageVector = icon, contentDescription = label, tint = MaterialTheme.colorScheme.primary)
         Spacer(modifier = Modifier.width(16.dp))
         Text(text = label, style = MaterialTheme.typography.bodyLarge)
-    }
-}
-
-@Composable
-private fun FullscreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(androidx.compose.ui.graphics.Color.Black)
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.Center
-    ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = "Full screen image",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(12.dp)
-                .size(36.dp)
-                .background(color = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Close",
-                tint = androidx.compose.ui.graphics.Color.White,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-@Composable
-private fun ForwardChatPicker(
-    chats: List<com.firestream.chat.domain.model.Chat>,
-    currentUserId: String,
-    onDismiss: () -> Unit,
-    onForward: (chatId: String, recipientId: String) -> Unit
-) {
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Forward to") },
-        text = {
-            if (chats.isEmpty()) {
-                Text(
-                    "No chats available to forward to.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                LazyColumn {
-                    items(chats, key = { it.id }) { chat ->
-                        val displayName = chat.name
-                            ?: chat.participants.firstOrNull { it != currentUserId }
-                            ?: "Chat"
-                        val recipientId = chat.participants.firstOrNull { it != currentUserId } ?: ""
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onForward(chat.id, recipientId) }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = displayName.take(1).uppercase(),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = displayName,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                chat.lastMessage?.let { lastMsg ->
-                                    Text(
-                                        text = lastMsg.content.take(40),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel") }
-        }
-    )
-}
-
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
-@Composable
-private fun MessageBubble(
-    message: Message,
-    isOwnMessage: Boolean,
-    replyToMessage: Message?,
-    linkPreview: LinkPreview?,
-    currentUserId: String,
-    readReceiptsAllowed: Boolean = true,
-    onDeleteClick: (() -> Unit)?,
-    onEditClick: (() -> Unit)?,
-    onReplyClick: () -> Unit,
-    onReactionClick: () -> Unit,
-    onForwardClick: () -> Unit,
-    onStarClick: () -> Unit = {},
-    onInfoClick: (() -> Unit)?,
-    onImageClick: (String) -> Unit = {}
-) {
-    val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurfaceVariant
-    val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
-
-    var showMenu by remember { mutableStateOf(false) }
-    var swipeOffset by remember { mutableFloatStateOf(0f) }
-
-    // Grouped reactions: emoji → count
-    val groupedReactions = message.reactions.values
-        .groupBy { it }
-        .mapValues { it.value.size }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .offset { IntOffset(swipeOffset.roundToInt(), 0) }
-            .pointerInput(Unit) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        if (swipeOffset > 60f) {
-                            onReplyClick()
-                        }
-                        swipeOffset = 0f
-                    },
-                    onHorizontalDrag = { _, dragAmount ->
-                        if (!isOwnMessage || dragAmount > 0) {
-                            swipeOffset = (swipeOffset + dragAmount).coerceIn(0f, 80f)
-                        }
-                    }
-                )
-            },
-        horizontalAlignment = alignment
-    ) {
-        // Swipe-to-reply hint icon
-        if (swipeOffset > 20f) {
-            Box(modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Reply,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = swipeOffset / 80f),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        Box {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 280.dp)
-                    .background(
-                        color = bubbleColor,
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                        )
-                    )
-                    .combinedClickable(
-                        onClick = {},
-                        onLongClick = { showMenu = true }
-                    )
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
-            ) {
-                Column {
-                    // Forwarded label
-                    if (message.isForwarded) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Share,
-                                contentDescription = null,
-                                tint = textColor.copy(alpha = 0.6f),
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = "Forwarded",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = textColor.copy(alpha = 0.6f),
-                                fontStyle = FontStyle.Italic
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-
-                    // Quoted reply snippet
-                    if (replyToMessage != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(
-                                    color = textColor.copy(alpha = 0.1f),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = replyToMessage.content.take(80),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = textColor.copy(alpha = 0.8f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                fontStyle = FontStyle.Italic
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                    }
-
-                    // Message content
-                    when (message.type) {
-                        MessageType.IMAGE -> {
-                            if (message.status == MessageStatus.SENDING || message.mediaUrl == null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.65f)
-                                        .aspectRatio(4 / 3f),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(color = textColor)
-                                }
-                            } else {
-                                AsyncImage(
-                                    model = message.mediaUrl,
-                                    contentDescription = "Image",
-                                    contentScale = ContentScale.FillWidth,
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.65f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { message.mediaUrl?.let { onImageClick(it) } }
-                                )
-                            }
-                        }
-                        MessageType.VOICE -> {
-                            VoiceMessagePlayer(
-                                mediaUrl = message.mediaUrl,
-                                durationSeconds = message.duration ?: 0,
-                                textColor = textColor
-                            )
-                        }
-                        MessageType.DOCUMENT -> {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.AttachFile,
-                                    contentDescription = null,
-                                    tint = textColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = message.content,
-                                    color = textColor,
-                                    style = MaterialTheme.typography.bodyMedium
-                                )
-                            }
-                        }
-                        else -> {
-                            Text(
-                                text = message.content,
-                                color = textColor,
-                                style = MaterialTheme.typography.bodyMedium
-                            )
-                            if (message.editedAt != null) {
-                                Text(
-                                    text = "(edited)",
-                                    color = textColor.copy(alpha = 0.6f),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                            // Link preview card
-                            if (linkPreview != null) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                LinkPreviewCard(preview = linkPreview, textColor = textColor)
-                            }
-                        }
-                    }
-
-                    // Timestamp + status row
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = formatTimestamp(message.timestamp),
-                            color = textColor.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.labelSmall
-                        )
-                        if (isOwnMessage) {
-                            Spacer(modifier = Modifier.width(4.dp))
-                            // Cap status at DELIVERED when read receipts are disabled
-                            val displayStatus = if (!readReceiptsAllowed && message.status == MessageStatus.READ) {
-                                MessageStatus.DELIVERED
-                            } else {
-                                message.status
-                            }
-                            Icon(
-                                imageVector = when (displayStatus) {
-                                    MessageStatus.SENDING -> Icons.Default.Schedule
-                                    MessageStatus.SENT -> Icons.Default.Check
-                                    MessageStatus.DELIVERED -> Icons.Default.DoneAll
-                                    MessageStatus.READ -> Icons.Default.DoneAll
-                                    MessageStatus.FAILED -> Icons.Default.ErrorOutline
-                                },
-                                contentDescription = when (displayStatus) {
-                                    MessageStatus.SENDING -> "Sending"
-                                    MessageStatus.SENT -> "Sent"
-                                    MessageStatus.DELIVERED -> "Delivered"
-                                    MessageStatus.READ -> "Read"
-                                    MessageStatus.FAILED -> "Failed"
-                                },
-                                tint = when (displayStatus) {
-                                    MessageStatus.READ -> ReadReceiptBlue
-                                    MessageStatus.FAILED -> MaterialTheme.colorScheme.error
-                                    else -> textColor.copy(alpha = 0.7f)
-                                },
-                                modifier = Modifier.size(16.dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Context menu
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text("Reply") },
-                    leadingIcon = { Icon(Icons.Default.Reply, null) },
-                    onClick = { showMenu = false; onReplyClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text("React") },
-                    onClick = { showMenu = false; onReactionClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text("Forward") },
-                    leadingIcon = { Icon(Icons.Default.Share, null) },
-                    onClick = { showMenu = false; onForwardClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (message.isStarred) "Unstar" else "Star") },
-                    onClick = { showMenu = false; onStarClick() }
-                )
-                onEditClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        onClick = { showMenu = false; it() }
-                    )
-                }
-                onInfoClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Message Info") },
-                        leadingIcon = { Icon(Icons.Default.Info, null) },
-                        onClick = { showMenu = false; it() }
-                    )
-                }
-                onDeleteClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) },
-                        onClick = { showMenu = false; it() }
-                    )
-                }
-            }
-        }
-
-        // Reaction chips below bubble
-        if (groupedReactions.isNotEmpty()) {
-            FlowRow(
-                modifier = Modifier.padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                groupedReactions.forEach { (emoji, count) ->
-                    val myReaction = message.reactions[currentUserId] == emoji
-                    AssistChip(
-                        onClick = { /* handled by reaction picker */ },
-                        label = {
-                            Text(
-                                text = if (count > 1) "$emoji $count" else emoji,
-                                style = MaterialTheme.typography.labelSmall
-                            )
-                        },
-                        modifier = Modifier.height(28.dp),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (myReaction) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outline
-                        )
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun VoiceMessagePlayer(
-    mediaUrl: String?,
-    durationSeconds: Int,
-    textColor: androidx.compose.ui.graphics.Color
-) {
-    var isPlaying by remember { mutableStateOf(false) }
-    var progress by remember { mutableFloatStateOf(0f) }
-    var speed by remember { mutableFloatStateOf(1f) }
-    val mediaPlayer = remember { mutableStateOf<MediaPlayer?>(null) }
-
-    DisposableEffect(mediaUrl) {
-        onDispose {
-            mediaPlayer.value?.release()
-            mediaPlayer.value = null
-        }
-    }
-
-    LaunchedEffect(isPlaying) {
-        if (isPlaying) {
-            val total = (mediaPlayer.value?.duration ?: (durationSeconds * 1000)).toFloat()
-            while (isPlaying) {
-                val current = mediaPlayer.value?.currentPosition ?: 0
-                progress = if (total > 0) current / total else 0f
-                if (mediaPlayer.value?.isPlaying == false) {
-                    isPlaying = false
-                    progress = 0f
-                }
-                delay(100)
-            }
-        }
-    }
-
-    Column(modifier = Modifier.widthIn(min = 160.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(
-                onClick = {
-                    if (mediaUrl == null) return@IconButton
-                    if (isPlaying) {
-                        mediaPlayer.value?.pause()
-                        isPlaying = false
-                    } else {
-                        if (mediaPlayer.value == null) {
-                            mediaPlayer.value = MediaPlayer().apply {
-                                setDataSource(mediaUrl)
-                                playbackParams = playbackParams.setSpeed(speed)
-                                prepare()
-                            }
-                        }
-                        mediaPlayer.value?.let {
-                            it.playbackParams = it.playbackParams.setSpeed(speed)
-                            it.start()
-                        }
-                        isPlaying = true
-                    }
-                },
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = textColor
-                )
-            }
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier.weight(1f).height(3.dp),
-                color = textColor,
-                trackColor = textColor.copy(alpha = 0.3f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            // Speed toggle
-            AssistChip(
-                onClick = {
-                    speed = when (speed) {
-                        1f -> 1.5f
-                        1.5f -> 2f
-                        else -> 1f
-                    }
-                    mediaPlayer.value?.let {
-                        if (it.isPlaying) it.playbackParams = it.playbackParams.setSpeed(speed)
-                    }
-                },
-                label = { Text("${speed}x", style = MaterialTheme.typography.labelSmall) },
-                modifier = Modifier.height(24.dp)
-            )
-        }
-        Text(
-            text = formatDuration(durationSeconds),
-            style = MaterialTheme.typography.labelSmall,
-            color = textColor.copy(alpha = 0.7f),
-            modifier = Modifier.padding(start = 36.dp)
-        )
-    }
-}
-
-@Composable
-private fun LinkPreviewCard(
-    preview: LinkPreview,
-    textColor: androidx.compose.ui.graphics.Color
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(
-                color = textColor.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(8.dp)
-            )
-            .padding(8.dp)
-    ) {
-        Column {
-            if (preview.imageUrl != null) {
-                AsyncImage(
-                    model = preview.imageUrl,
-                    contentDescription = "Link preview image",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(80.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-            }
-            if (preview.title != null) {
-                Text(
-                    text = preview.title,
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = textColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            if (preview.description != null) {
-                Text(
-                    text = preview.description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = textColor.copy(alpha = 0.7f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Text(
-                text = preview.url,
-                style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
-                color = textColor.copy(alpha = 0.6f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
-private fun formatTimestamp(timestamp: Long): String {
-    val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())
-    return sdf.format(Date(timestamp))
-}
-
-private fun formatDuration(seconds: Int): String {
-    val m = seconds / 60
-    val s = seconds % 60
-    return "$m:${s.toString().padStart(2, '0')}"
-}
-
-// --- Full Emoji Picker ---
-
-private data class EmojiCategory(val icon: String, val label: String, val emojis: List<String>)
-
-private val EMOJI_CATEGORIES = listOf(
-    EmojiCategory("😀", "Smileys", listOf(
-        "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃",
-        "😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙",
-        "🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🫢",
-        "🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏",
-        "😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷"
-    )),
-    EmojiCategory("👋", "People", listOf(
-        "👋","🤚","🖐️","✋","🖖","🫱","🫲","👌","🤌","🤏",
-        "✌️","🤞","🫰","🤟","🤘","🤙","👈","👉","👆","🖕",
-        "👇","☝️","🫵","👍","👎","✊","👊","🤛","🤜","👏",
-        "🙌","🫶","👐","🤲","🤝","🙏","💪","🦾","🦿","🦵"
-    )),
-    EmojiCategory("🐶", "Animals", listOf(
-        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨",
-        "🐯","🦁","🐮","🐷","🐸","🐵","🙈","🙉","🙊","🐒",
-        "🐔","🐧","🐦","🐤","🐣","🐥","🦆","🦅","🦉","🦇",
-        "🐺","🐗","🐴","🦄","🐝","🪱","🐛","🦋","🐌","🐞"
-    )),
-    EmojiCategory("🍎", "Food", listOf(
-        "🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈",
-        "🍒","🍑","🥭","🍍","🥥","🥝","🍅","🥑","🍆","🥔",
-        "🥕","🌽","🌶️","🫑","🥒","🥬","🥦","🧄","🧅","🍄",
-        "🥜","🫘","🌰","🍞","🥐","🥖","🫓","🥨","🥯","🥞"
-    )),
-    EmojiCategory("⚽", "Activities", listOf(
-        "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱",
-        "🪀","🏓","🏸","🏒","🏑","🥍","🏏","🪃","🥅","⛳",
-        "🪁","🏹","🎣","🤿","🥊","🥋","🎽","🛹","🛼","🛷",
-        "⛸️","🥌","🎿","⛷️","🏂","🪂","🏋️","🤸","🤼","🤺"
-    )),
-    EmojiCategory("❤️", "Symbols", listOf(
-        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔",
-        "❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟",
-        "☮️","✝️","☪️","🕉️","☸️","✡️","🔯","🕎","☯️","☦️",
-        "♈","♉","♊","♋","♌","♍","♎","♏","♐","♑"
-    )),
-    EmojiCategory("🚗", "Travel", listOf(
-        "🚗","🚕","🚙","🚌","🚎","🏎️","🚓","🚑","🚒","🚐",
-        "🛻","🚚","🚛","🚜","🏍️","🛵","🚲","🛴","🛺","🚔",
-        "🚍","🚘","🚖","🛞","🚡","🚠","🚟","🚃","🚋","🚞",
-        "🚝","🚄","🚅","🚈","🚂","🚆","🚇","🚊","🚉","✈️"
-    )),
-    EmojiCategory("💡", "Objects", listOf(
-        "💡","🔦","🕯️","🪔","📱","💻","⌨️","🖥️","🖨️","🖱️",
-        "🖲️","💾","💿","📀","📼","📷","📸","📹","🎥","📽️",
-        "🎬","📺","📻","🎙️","🎚️","🎛️","🧭","⏱️","⏲️","⏰",
-        "🔔","🔕","📢","📣","🔉","🔊","📯","🔇","🔈","🎵"
-    ))
-)
-
-@Composable
-private fun EmojiPicker(
-    currentReaction: String?,
-    onEmojiSelected: (String) -> Unit
-) {
-    var selectedCategory by remember { mutableIntStateOf(0) }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = "React",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-
-        // Quick reactions row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            QUICK_REACTIONS.forEach { emoji ->
-                val isSelected = currentReaction == emoji
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape)
-                        .background(
-                            if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
-                        )
-                        .clickable { onEmojiSelected(emoji) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = emoji, style = MaterialTheme.typography.headlineMedium)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        HorizontalDivider()
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Category tabs
-        LazyRow(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            itemsIndexed(EMOJI_CATEGORIES) { index, category ->
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(
-                            if (index == selectedCategory) MaterialTheme.colorScheme.primaryContainer
-                            else Color.Transparent
-                        )
-                        .clickable { selectedCategory = index },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = category.icon, style = MaterialTheme.typography.titleMedium)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Emoji grid
-        val emojis = EMOJI_CATEGORIES[selectedCategory].emojis
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(8),
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            items(emojis.size) { index ->
-                Box(
-                    modifier = Modifier
-                        .aspectRatio(1f)
-                        .clip(RoundedCornerShape(4.dp))
-                        .clickable { onEmojiSelected(emojis[index]) },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(text = emojis[index], style = MaterialTheme.typography.titleLarge)
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }

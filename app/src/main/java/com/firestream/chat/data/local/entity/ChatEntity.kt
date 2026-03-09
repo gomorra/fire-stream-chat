@@ -4,6 +4,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.GroupPermissions
 import com.firestream.chat.domain.model.Message
 
 @Entity(tableName = "chats")
@@ -23,7 +24,15 @@ data class ChatEntity(
     // Phase 2: chat organisation
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
-    val muteUntil: Long = 0L
+    val muteUntil: Long = 0L,
+    // Phase 5: group management
+    val description: String? = null,
+    val inviteLink: String? = null,
+    val requireApproval: Boolean = false,
+    val pendingMembers: List<String> = emptyList(),
+    // Phase 5.2: group permissions
+    val owner: String? = null,
+    val permissions: GroupPermissions = GroupPermissions()
 ) {
     fun toDomain() = Chat(
         id = id,
@@ -46,7 +55,13 @@ data class ChatEntity(
         } else null,
         isPinned = isPinned,
         isArchived = isArchived,
-        muteUntil = muteUntil
+        muteUntil = muteUntil,
+        description = description,
+        inviteLink = inviteLink,
+        requireApproval = requireApproval,
+        pendingMembers = pendingMembers,
+        owner = owner,
+        permissions = permissions
     )
 
     companion object {
@@ -65,7 +80,13 @@ data class ChatEntity(
             lastMessageTimestamp = chat.lastMessage?.timestamp,
             isPinned = chat.isPinned,
             isArchived = chat.isArchived,
-            muteUntil = chat.muteUntil
+            muteUntil = chat.muteUntil,
+            description = chat.description,
+            inviteLink = chat.inviteLink,
+            requireApproval = chat.requireApproval,
+            pendingMembers = chat.pendingMembers,
+            owner = chat.owner,
+            permissions = chat.permissions
         )
     }
 }

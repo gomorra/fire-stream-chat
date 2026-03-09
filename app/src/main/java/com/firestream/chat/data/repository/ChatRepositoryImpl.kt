@@ -6,6 +6,8 @@ import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.GroupPermissions
+import com.firestream.chat.domain.model.GroupRole
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.ChatRepository
 import com.google.firebase.firestore.FieldValue
@@ -132,6 +134,7 @@ class ChatRepositoryImpl @Inject constructor(
                 "name" to name,
                 "participants" to allParticipants,
                 "admins" to listOf(uid),
+                "owner" to uid,
                 "createdAt" to System.currentTimeMillis(),
                 "createdBy" to uid
             )
@@ -142,6 +145,7 @@ class ChatRepositoryImpl @Inject constructor(
                 name = name,
                 participants = allParticipants,
                 admins = listOf(uid),
+                owner = uid,
                 createdAt = System.currentTimeMillis(),
                 createdBy = uid
             )
@@ -264,6 +268,253 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun updateGroupDescription(chatId: String, description: String): Result<Unit> {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("description", description)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun generateInviteLink(chatId: String): Result<String> {
+        return try {
+            val token = java.util.UUID.randomUUID().toString()
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val batch = firestore.batch()
+            batch.update(
+                firestore.collection("chats").document(chatId),
+                "inviteLink", token
+            )
+            batch.set(
+                firestore.collection("inviteLinks").document(token),
+                mapOf("chatId" to chatId, "createdAt" to System.currentTimeMillis(), "createdBy" to uid)
+            )
+            batch.commit().await()
+            Result.success(token)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun revokeInviteLink(chatId: String): Result<Unit> {
+        return try {
+            val doc = firestore.collection("chats").document(chatId).get().await()
+            val existingToken = doc.getString("inviteLink")
+            val batch = firestore.batch()
+            batch.update(
+                firestore.collection("chats").document(chatId),
+                "inviteLink", FieldValue.delete()
+            )
+            if (existingToken != null) {
+                batch.delete(firestore.collection("inviteLinks").document(existingToken))
+            }
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun joinGroupViaLink(inviteToken: String): Result<Chat> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val linkDoc = firestore.collection("inviteLinks").document(inviteToken).get().await()
+            if (!linkDoc.exists()) throw Exception("Invalid or expired invite link")
+            val chatId = linkDoc.getString("chatId") ?: throw Exception("Invalid invite link data")
+
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            if (!chatDoc.exists()) throw Exception("Group no longer exists")
+            val chat = mapToChat(chatId, chatDoc.data!!)
+
+            if (uid in chat.participants) throw Exception("Already a member of this group")
+
+            val requireApproval = chatDoc.getBoolean("requireApproval") ?: false
+            if (requireApproval) {
+                firestore.collection("chats").document(chatId)
+                    .update("pendingMembers", FieldValue.arrayUnion(uid))
+                    .await()
+                Result.success(chat.copy(pendingMembers = chat.pendingMembers + uid))
+            } else {
+                firestore.collection("chats").document(chatId)
+                    .update("participants", FieldValue.arrayUnion(uid))
+                    .await()
+                val updatedChat = chat.copy(participants = chat.participants + uid)
+                chatDao.insertChat(ChatEntity.fromDomain(updatedChat))
+                Result.success(updatedChat)
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun setRequireApproval(chatId: String, enabled: Boolean): Result<Unit> {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("requireApproval", enabled)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun approveMember(chatId: String, userId: String): Result<Unit> {
+        return try {
+            val batch = firestore.batch()
+            val chatRef = firestore.collection("chats").document(chatId)
+            batch.update(chatRef, "pendingMembers", FieldValue.arrayRemove(userId))
+            batch.update(chatRef, "participants", FieldValue.arrayUnion(userId))
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun rejectMember(chatId: String, userId: String): Result<Unit> {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("pendingMembers", FieldValue.arrayRemove(userId))
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun leaveGroup(chatId: String): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val chatDoc = firestore.collection("chats").document(chatId).get().await()
+            if (!chatDoc.exists()) throw Exception("Chat not found")
+            val chat = mapToChat(chatId, chatDoc.data!!)
+
+            val isAdmin = uid in chat.admins
+            val otherParticipants = chat.participants.filter { it != uid }
+
+            if (otherParticipants.isEmpty()) {
+                // Last member — delete the group
+                firestore.collection("chats").document(chatId).delete().await()
+            } else if (isAdmin && chat.admins.size == 1) {
+                // Only admin leaving — promote first remaining participant atomically
+                val newAdmin = otherParticipants.first()
+                val batch = firestore.batch()
+                val chatRef = firestore.collection("chats").document(chatId)
+                batch.update(chatRef, "participants", FieldValue.arrayRemove(uid))
+                batch.update(chatRef, "admins", FieldValue.arrayRemove(uid))
+                batch.update(chatRef, "admins", FieldValue.arrayUnion(newAdmin))
+                batch.commit().await()
+            } else {
+                firestore.collection("chats").document(chatId).update(
+                    mapOf(
+                        "participants" to FieldValue.arrayRemove(uid),
+                        "admins" to FieldValue.arrayRemove(uid)
+                    )
+                ).await()
+            }
+            chatDao.deleteChat(chatId)
+            messageDao.deleteMessagesByChatId(chatId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateGroupPermissions(chatId: String, permissions: GroupPermissions): Result<Unit> {
+        return try {
+            val permissionsMap = mapOf(
+                "sendMessages" to permissions.sendMessages.name,
+                "editGroupInfo" to permissions.editGroupInfo.name,
+                "addMembers" to permissions.addMembers.name,
+                "createPolls" to permissions.createPolls.name,
+                "isAnnouncementMode" to permissions.isAnnouncementMode
+            )
+            firestore.collection("chats").document(chatId)
+                .update("permissions", permissionsMap)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun promoteToAdmin(chatId: String, userId: String): Result<Unit> {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("admins", FieldValue.arrayUnion(userId))
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun demoteFromAdmin(chatId: String, userId: String): Result<Unit> {
+        return try {
+            firestore.collection("chats").document(chatId)
+                .update("admins", FieldValue.arrayRemove(userId))
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun transferOwnership(chatId: String, newOwnerId: String): Result<Unit> {
+        return try {
+            val batch = firestore.batch()
+            val chatRef = firestore.collection("chats").document(chatId)
+            batch.update(chatRef, "owner", newOwnerId)
+            batch.update(chatRef, "admins", FieldValue.arrayUnion(newOwnerId))
+            batch.commit().await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun createBroadcastList(name: String, recipientIds: List<String>): Result<Chat> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val allParticipants = (recipientIds + uid).distinct()
+
+            val chatData = hashMapOf(
+                "type" to ChatType.BROADCAST.name,
+                "name" to name,
+                "participants" to allParticipants,
+                "createdAt" to System.currentTimeMillis(),
+                "createdBy" to uid
+            )
+            val docRef = firestore.collection("chats").add(chatData).await()
+            val chat = Chat(
+                id = docRef.id,
+                type = ChatType.BROADCAST,
+                name = name,
+                participants = allParticipants,
+                createdAt = System.currentTimeMillis(),
+                createdBy = uid
+            )
+            chatDao.insertChat(ChatEntity.fromDomain(chat))
+            Result.success(chat)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun mapToGroupPermissions(raw: Any?): GroupPermissions {
+        val data = raw as? Map<*, *> ?: return GroupPermissions()
+        return GroupPermissions(
+            sendMessages = runCatching { GroupRole.valueOf(data["sendMessages"] as String) }.getOrDefault(GroupRole.MEMBER),
+            editGroupInfo = runCatching { GroupRole.valueOf(data["editGroupInfo"] as String) }.getOrDefault(GroupRole.ADMIN),
+            addMembers = runCatching { GroupRole.valueOf(data["addMembers"] as String) }.getOrDefault(GroupRole.ADMIN),
+            createPolls = runCatching { GroupRole.valueOf(data["createPolls"] as String) }.getOrDefault(GroupRole.MEMBER),
+            isAnnouncementMode = data["isAnnouncementMode"] as? Boolean ?: false
+        )
+    }
+
     private fun mapToChat(id: String, data: Map<String, Any?>): Chat {
         val lastMessageContent = data["lastMessageContent"] as? String
         val lastMessageTimestamp = data["lastMessageTimestamp"] as? Long
@@ -303,7 +554,13 @@ class ChatRepositoryImpl @Inject constructor(
             createdAt = data["createdAt"] as? Long ?: 0L,
             createdBy = data["createdBy"] as? String,
             admins = (data["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-            typingUserIds = typingUserIds
+            typingUserIds = typingUserIds,
+            description = data["description"] as? String,
+            inviteLink = data["inviteLink"] as? String,
+            requireApproval = data["requireApproval"] as? Boolean ?: false,
+            pendingMembers = (data["pendingMembers"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            owner = data["owner"] as? String,
+            permissions = mapToGroupPermissions(data["permissions"])
         )
     }
 }

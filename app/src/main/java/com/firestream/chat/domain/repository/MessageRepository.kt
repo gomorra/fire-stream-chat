@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface MessageRepository {
     fun getMessages(chatId: String): Flow<List<Message>>
-    suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null): Result<Message>
+    suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null, mentions: List<String> = emptyList()): Result<Message>
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit>
     suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit>
@@ -31,4 +31,10 @@ interface MessageRepository {
     // Shared media
     fun getSharedMedia(chatId: String): Flow<List<Message>>
     fun getSharedMediaForUser(userId: String): Flow<List<Message>>
+    // Phase 5.3: polls
+    suspend fun sendPoll(chatId: String, question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean): Result<Message>
+    suspend fun votePoll(chatId: String, messageId: String, optionIds: List<String>): Result<Unit>
+    suspend fun closePoll(chatId: String, messageId: String): Result<Unit>
+    // Phase 5.5: broadcast
+    suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
 }

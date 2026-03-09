@@ -11,8 +11,9 @@ class SendMessageUseCase @Inject constructor(
         chatId: String,
         content: String,
         recipientId: String,
-        replyToId: String? = null
+        replyToId: String? = null,
+        mentions: List<String> = emptyList()
     ): Result<Message> {
-        return messageRepository.sendMessage(chatId, content, recipientId, replyToId)
+        return messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions)
     }
 }

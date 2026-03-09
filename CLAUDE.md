@@ -31,6 +31,46 @@ cd functions && npm install && firebase deploy --only functions
 - Version catalog: `gradle/libs.versions.toml`
 - Gradle version: 8.11.1
 
+## Model & Effort Guidelines
+
+When creating implementation plans, include a model/effort recommendation per step using these rules:
+
+| Task Characteristics | Model | Effort |
+|---------------------|-------|--------|
+| Foundation/architecture work, new patterns, complex state management | Opus | High |
+| Extends existing patterns with moderate complexity | Opus | Medium |
+| New features following established patterns, multiple files | Sonnet | High |
+| Straightforward feature work, well-scoped changes | Sonnet | Medium |
+| Simple bug fixes, typos, single-file changes | Sonnet | Low |
+
+**Decision factors:**
+- **Opus** when: defining architecture others build on, complex permission/security logic, multiple interacting systems
+- **Sonnet** when: following patterns already in the codebase, isolated features, UI components
+- **High effort** when: many new files (>5), critical infrastructure, cross-cutting changes
+- **Medium effort** when: extending existing patterns, moderate file count (2–5)
+
+Plans must include a recommendation table per step:
+
+| Step | Model | Effort | Rationale |
+|------|-------|--------|-----------|
+
+## Plan Execution Workflow
+
+**After each sub-feature (in order):**
+1. `/simplify` — review changed code for quality
+2. `./gradlew test` — unit tests pass
+3. `./gradlew assembleDebug` — builds clean
+4. Git commit — checkpoint before next sub-feature
+5. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+
+**Parallel vs. sequential:** Run sub-features in parallel only when they touch different files. If two steps modify the same files, run them sequentially. When in doubt, sequential is safer.
+
+**Token efficiency:**
+- When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
+- When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
+
+**Optional:** After completing an entire phase, run `/simplify` on the full phase diff as a final quality pass.
+
 ## Architecture
 
 Clean Architecture with three layers:

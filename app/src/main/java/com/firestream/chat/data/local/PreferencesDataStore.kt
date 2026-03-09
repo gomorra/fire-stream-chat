@@ -39,6 +39,9 @@ class PreferencesDataStore @Inject constructor(
     private val notificationSoundKey = stringPreferencesKey("notification_sound")
     private val vibrationKey = booleanPreferencesKey("vibration")
 
+    // Mention-only notifications (group chats)
+    private val mentionOnlyNotificationsKey = booleanPreferencesKey("mention_only_notifications")
+
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
 
@@ -114,6 +117,16 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setVibration(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[vibrationKey] = enabled }
+    }
+
+    // --- Mention-only notifications ---
+
+    val mentionOnlyNotificationsFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[mentionOnlyNotificationsKey] ?: false
+    }
+
+    suspend fun setMentionOnlyNotifications(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[mentionOnlyNotificationsKey] = enabled }
     }
 
     // --- Storage ---

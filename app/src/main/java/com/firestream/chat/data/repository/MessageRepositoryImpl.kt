@@ -11,7 +11,12 @@ import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.Poll
+import com.firestream.chat.domain.model.PollOption
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -29,7 +34,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val messageSource: FirestoreMessageSource,
     private val authSource: FirebaseAuthSource,
     private val signalManager: SignalManager,
-    private val storageSource: FirebaseStorageSource
+    private val storageSource: FirebaseStorageSource,
+    private val chatRepository: dagger.Lazy<ChatRepository>
 ) : MessageRepository {
 
     override fun getMessages(chatId: String): Flow<List<Message>> {
@@ -79,7 +85,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 isForwarded = raw.isForwarded,
                                 duration = raw.duration,
                                 readBy = raw.readBy,
-                                deliveredTo = raw.deliveredTo
+                                deliveredTo = raw.deliveredTo,
+                                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                                mentions = raw.mentions
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -118,7 +126,9 @@ class MessageRepositoryImpl @Inject constructor(
                             isForwarded = raw.isForwarded,
                             duration = raw.duration,
                             readBy = raw.readBy,
-                            deliveredTo = raw.deliveredTo
+                            deliveredTo = raw.deliveredTo,
+                            pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                            mentions = raw.mentions
                         )
                         messageDao.insertMessage(MessageEntity.fromDomain(message))
                     }
@@ -136,7 +146,8 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         content: String,
         recipientId: String,
-        replyToId: String?
+        replyToId: String?,
+        mentions: List<String>
     ): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
@@ -151,7 +162,8 @@ class MessageRepositoryImpl @Inject constructor(
                 type = MessageType.TEXT,
                 status = MessageStatus.SENDING,
                 timestamp = timestamp,
-                replyToId = replyToId
+                replyToId = replyToId,
+                mentions = mentions
             )
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
@@ -166,7 +178,8 @@ class MessageRepositoryImpl @Inject constructor(
                     signalType = encrypted.signalType,
                     type = MessageType.TEXT,
                     replyToId = replyToId,
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    mentions = mentions
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -175,7 +188,8 @@ class MessageRepositoryImpl @Inject constructor(
                     content = content,
                     type = MessageType.TEXT,
                     replyToId = replyToId,
-                    timestamp = timestamp
+                    timestamp = timestamp,
+                    mentions = mentions
                 )
             }
 
@@ -504,5 +518,199 @@ class MessageRepositoryImpl @Inject constructor(
 
     override fun getSharedMediaForUser(userId: String): Flow<List<Message>> {
         return messageDao.getSharedMediaForUser(userId).map { entities -> entities.map { it.toDomain() } }
+    }
+
+    override suspend fun sendPoll(
+        chatId: String,
+        question: String,
+        options: List<String>,
+        isMultipleChoice: Boolean,
+        isAnonymous: Boolean
+    ): Result<Message> {
+        return try {
+            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val timestamp = System.currentTimeMillis()
+
+            val pollOptions = options.mapIndexed { index, text ->
+                PollOption(id = "opt_$index", text = text)
+            }
+            val poll = Poll(
+                question = question,
+                options = pollOptions,
+                isMultipleChoice = isMultipleChoice,
+                isAnonymous = isAnonymous
+            )
+
+            val pollDataMap = buildPollFirestoreMap(poll)
+
+            val remoteId = messageSource.sendPollMessage(
+                chatId = chatId,
+                senderId = senderId,
+                pollData = pollDataMap,
+                timestamp = timestamp
+            )
+
+            val message = Message(
+                id = remoteId,
+                chatId = chatId,
+                senderId = senderId,
+                content = "📊 Poll",
+                type = MessageType.POLL,
+                status = MessageStatus.SENT,
+                timestamp = timestamp,
+                pollData = poll
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(message))
+
+            Result.success(message)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun votePoll(chatId: String, messageId: String, optionIds: List<String>): Result<Unit> {
+        return try {
+            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val entity = messageDao.getMessageById(messageId) ?: throw Exception("Message not found")
+            val poll = entity.toDomain().pollData ?: throw Exception("Not a poll message")
+
+            messageSource.votePoll(chatId, messageId, userId, optionIds, poll.isMultipleChoice)
+
+            // Update local cache
+            val updatedOptions = poll.options.map { option ->
+                val voters = option.voterIds.toMutableList()
+                if (optionIds.contains(option.id)) {
+                    if (!voters.contains(userId)) voters.add(userId)
+                } else if (!poll.isMultipleChoice) {
+                    voters.remove(userId)
+                }
+                option.copy(voterIds = voters)
+            }
+            val updatedPoll = poll.copy(options = updatedOptions)
+            val updatedMessage = entity.toDomain().copy(pollData = updatedPoll)
+            messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun closePoll(chatId: String, messageId: String): Result<Unit> {
+        return try {
+            messageSource.closePoll(chatId, messageId)
+
+            val entity = messageDao.getMessageById(messageId)
+            if (entity != null) {
+                val msg = entity.toDomain()
+                val updatedPoll = msg.pollData?.copy(isClosed = true)
+                messageDao.insertMessage(MessageEntity.fromDomain(msg.copy(pollData = updatedPoll)))
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun parsePollFromFirestore(data: Map<String, Any?>): Poll {
+        val options = (data["options"] as? List<Map<String, Any?>>)?.map { opt ->
+            PollOption(
+                id = opt["id"] as? String ?: "",
+                text = opt["text"] as? String ?: "",
+                voterIds = (opt["voterIds"] as? List<String>) ?: emptyList()
+            )
+        } ?: emptyList()
+
+        return Poll(
+            question = data["question"] as? String ?: "",
+            options = options,
+            isMultipleChoice = data["isMultipleChoice"] as? Boolean ?: false,
+            isAnonymous = data["isAnonymous"] as? Boolean ?: false,
+            isClosed = data["isClosed"] as? Boolean ?: false
+        )
+    }
+
+    override suspend fun sendBroadcastMessage(
+        broadcastChatId: String,
+        content: String,
+        recipientIds: List<String>
+    ): Result<Message> {
+        return try {
+            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val timestamp = System.currentTimeMillis()
+
+            // 1. Save message to broadcast chat (sender's record)
+            val broadcastRemoteId = messageSource.sendPlainMessage(
+                chatId = broadcastChatId,
+                senderId = senderId,
+                content = content,
+                type = MessageType.TEXT,
+                replyToId = null,
+                timestamp = timestamp
+            )
+            val broadcastMessage = Message(
+                id = broadcastRemoteId,
+                chatId = broadcastChatId,
+                senderId = senderId,
+                content = content,
+                type = MessageType.TEXT,
+                status = MessageStatus.SENT,
+                timestamp = timestamp
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(broadcastMessage))
+
+            // 2. Fan out to each recipient's individual chat
+            val semaphore = kotlinx.coroutines.sync.Semaphore(5)
+            kotlinx.coroutines.coroutineScope {
+                recipientIds.map { recipientId ->
+                    async {
+                        semaphore.acquire()
+                        try {
+                            // Get or create the 1:1 chat with each recipient
+                            val chatResult = chatRepository.get().getOrCreateChat(recipientId)
+                            val individualChat = chatResult.getOrThrow()
+                            // Send as encrypted 1:1 message
+                            signalManager.ensureInitialized()
+                            val encrypted = signalManager.encrypt(recipientId, content)
+                            messageSource.sendMessage(
+                                chatId = individualChat.id,
+                                senderId = senderId,
+                                ciphertext = encrypted.ciphertext,
+                                signalType = encrypted.signalType,
+                                type = MessageType.TEXT,
+                                replyToId = null,
+                                timestamp = timestamp
+                            )
+                        } catch (_: Exception) {
+                            // Best-effort delivery to each recipient
+                        } finally {
+                            semaphore.release()
+                        }
+                    }
+                }.awaitAll()
+            }
+
+            Result.success(broadcastMessage)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    private fun buildPollFirestoreMap(poll: Poll): Map<String, Any?> {
+        return mapOf(
+            "question" to poll.question,
+            "isMultipleChoice" to poll.isMultipleChoice,
+            "isAnonymous" to poll.isAnonymous,
+            "isClosed" to poll.isClosed,
+            "options" to poll.options.map { option ->
+                mapOf(
+                    "id" to option.id,
+                    "text" to option.text,
+                    "voterIds" to option.voterIds
+                )
+            }
+        )
     }
 }

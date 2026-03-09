@@ -1,6 +1,8 @@
 package com.firestream.chat.data.local
 
 import androidx.room.TypeConverter
+import com.firestream.chat.domain.model.GroupPermissions
+import com.firestream.chat.domain.model.GroupRole
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -54,6 +56,33 @@ class Converters {
             buildMap { obj.keys().forEach { key -> put(key, obj.getLong(key)) } }
         } catch (_: Exception) {
             emptyMap()
+        }
+    }
+
+    @TypeConverter
+    fun fromGroupPermissions(permissions: GroupPermissions): String {
+        val obj = JSONObject()
+        obj.put("sendMessages", permissions.sendMessages.name)
+        obj.put("editGroupInfo", permissions.editGroupInfo.name)
+        obj.put("addMembers", permissions.addMembers.name)
+        obj.put("createPolls", permissions.createPolls.name)
+        obj.put("isAnnouncementMode", permissions.isAnnouncementMode)
+        return obj.toString()
+    }
+
+    @TypeConverter
+    fun toGroupPermissions(json: String): GroupPermissions {
+        return try {
+            val obj = JSONObject(json)
+            GroupPermissions(
+                sendMessages = runCatching { GroupRole.valueOf(obj.getString("sendMessages")) }.getOrDefault(GroupRole.MEMBER),
+                editGroupInfo = runCatching { GroupRole.valueOf(obj.getString("editGroupInfo")) }.getOrDefault(GroupRole.ADMIN),
+                addMembers = runCatching { GroupRole.valueOf(obj.getString("addMembers")) }.getOrDefault(GroupRole.ADMIN),
+                createPolls = runCatching { GroupRole.valueOf(obj.getString("createPolls")) }.getOrDefault(GroupRole.MEMBER),
+                isAnnouncementMode = obj.optBoolean("isAnnouncementMode", false)
+            )
+        } catch (_: Exception) {
+            GroupPermissions()
         }
     }
 }

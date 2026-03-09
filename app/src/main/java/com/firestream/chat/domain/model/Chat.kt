@@ -15,5 +15,13 @@ data class Chat(
     // Phase 2: chat organisation
     val isPinned: Boolean = false,
     val isArchived: Boolean = false,
-    val muteUntil: Long = 0L  // epoch ms; 0 = not muted, Long.MAX_VALUE = always muted
+    val muteUntil: Long = 0L,  // epoch ms; 0 = not muted, Long.MAX_VALUE = always muted
+    // Phase 5: group management
+    val description: String? = null,
+    val inviteLink: String? = null,
+    val requireApproval: Boolean = false,
+    val pendingMembers: List<String> = emptyList(),
+    // Phase 5.2: group permissions
+    val owner: String? = null,
+    val permissions: GroupPermissions = GroupPermissions()
 )

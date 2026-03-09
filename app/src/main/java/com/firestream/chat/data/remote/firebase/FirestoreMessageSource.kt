@@ -2,6 +2,7 @@ package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.Query
@@ -36,7 +37,9 @@ data class RawFirestoreMessage(
     val isForwarded: Boolean = false,
     val duration: Int? = null,
     val readBy: Map<String, Long> = emptyMap(),
-    val deliveredTo: Map<String, Long> = emptyMap()
+    val deliveredTo: Map<String, Long> = emptyMap(),
+    val pollData: Map<String, Any?>? = null,
+    val mentions: List<String> = emptyList()
 )
 
 @Singleton
@@ -71,7 +74,8 @@ class FirestoreMessageSource @Inject constructor(
         timestamp: Long,
         mediaUrl: String? = null,
         isForwarded: Boolean = false,
-        duration: Int? = null
+        duration: Int? = null,
+        mentions: List<String> = emptyList()
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -84,7 +88,8 @@ class FirestoreMessageSource @Inject constructor(
             "mediaUrl" to mediaUrl,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to isForwarded,
-            "duration" to duration
+            "duration" to duration,
+            "mentions" to mentions
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -96,6 +101,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
+            MessageType.POLL -> "📊 Poll"
             else -> "New message"
         }
         firestore.collection("chats").document(chatId).update(
@@ -118,7 +124,8 @@ class FirestoreMessageSource @Inject constructor(
         timestamp: Long,
         mediaUrl: String? = null,
         isForwarded: Boolean = false,
-        duration: Int? = null
+        duration: Int? = null,
+        mentions: List<String> = emptyList()
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -130,7 +137,8 @@ class FirestoreMessageSource @Inject constructor(
             "mediaUrl" to mediaUrl,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to isForwarded,
-            "duration" to duration
+            "duration" to duration,
+            "mentions" to mentions
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -142,6 +150,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
+            MessageType.POLL -> "📊 Poll"
             else -> content
         }
         firestore.collection("chats").document(chatId).update(
@@ -210,6 +219,81 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
+    suspend fun sendPollMessage(
+        chatId: String,
+        senderId: String,
+        pollData: Map<String, Any?>,
+        timestamp: Long
+    ): String {
+        val data = hashMapOf(
+            "senderId" to senderId,
+            "content" to "📊 Poll",
+            "type" to MessageType.POLL.name,
+            "status" to MessageStatus.SENT.name,
+            "timestamp" to timestamp,
+            "reactions" to emptyMap<String, String>(),
+            "isForwarded" to false,
+            "pollData" to pollData
+        )
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .add(data)
+            .await()
+
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to "📊 Poll",
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId
+            )
+        ).await()
+
+        return docRef.id
+    }
+
+    suspend fun votePoll(
+        chatId: String,
+        messageId: String,
+        userId: String,
+        optionIds: List<String>,
+        isMultipleChoice: Boolean
+    ) {
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+
+        val snapshot = docRef.get().await()
+        @Suppress("UNCHECKED_CAST")
+        val rawPoll = snapshot.get("pollData") as? Map<String, Any?> ?: return
+        @Suppress("UNCHECKED_CAST")
+        val options = (rawPoll["options"] as? List<Map<String, Any?>>)?.toMutableList() ?: return
+
+        val updatedOptions = options.map { option ->
+            val optId = option["id"] as? String ?: return@map option
+            @Suppress("UNCHECKED_CAST")
+            val voters = (option["voterIds"] as? List<String>)?.toMutableList() ?: mutableListOf()
+
+            if (optionIds.contains(optId)) {
+                if (!voters.contains(userId)) voters.add(userId)
+            } else if (!isMultipleChoice) {
+                voters.remove(userId)
+            }
+
+            option.toMutableMap().apply { put("voterIds", voters) }
+        }
+
+        docRef.update("pollData.options", updatedOptions).await()
+    }
+
+    suspend fun closePoll(chatId: String, messageId: String) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update("pollData.isClosed", true)
+            .await()
+    }
+
     suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) {
         firestore
             .collection("chats").document(chatId)
@@ -247,7 +331,9 @@ class FirestoreMessageSource @Inject constructor(
             isForwarded = data["isForwarded"] as? Boolean ?: false,
             duration = (data["duration"] as? Long)?.toInt(),
             readBy = parseLongMap(data["readBy"]),
-            deliveredTo = parseLongMap(data["deliveredTo"])
+            deliveredTo = parseLongMap(data["deliveredTo"]),
+            pollData = data["pollData"] as? Map<String, Any?>,
+            mentions = (data["mentions"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
         )
     }
 

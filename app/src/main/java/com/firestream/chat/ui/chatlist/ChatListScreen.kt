@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -68,6 +69,7 @@ import java.util.Locale
 fun ChatListScreen(
     onChatClick: (chatId: String, recipientId: String) -> Unit,
     onNewChatClick: () -> Unit,
+    onNewBroadcastClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
@@ -104,6 +106,20 @@ fun ChatListScreen(
                     actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 actions = {
+                    var showMenu by remember { mutableStateOf(false) }
+                    IconButton(onClick = { showMenu = true }) {
+                        Icon(Icons.Default.Campaign, contentDescription = "More")
+                    }
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("New Broadcast") },
+                            leadingIcon = { Icon(Icons.Default.Campaign, null) },
+                            onClick = { showMenu = false; onNewBroadcastClick() }
+                        )
+                    }
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }

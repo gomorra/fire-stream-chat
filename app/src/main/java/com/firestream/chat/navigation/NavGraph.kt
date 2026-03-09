@@ -18,6 +18,8 @@ import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.profile.ProfileScreen
 import com.firestream.chat.ui.settings.SettingsScreen
+import com.firestream.chat.ui.group.GroupSettingsScreen
+import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 
 object Routes {
@@ -33,6 +35,9 @@ object Routes {
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
     const val ARCHIVED_CHATS = "archived_chats"
+    // Phase 5 routes
+    const val GROUP_SETTINGS = "group_settings/{chatId}"
+    const val CREATE_BROADCAST = "create_broadcast"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -44,6 +49,8 @@ object Routes {
         "message_info/$messageId/$chatId"
 
     fun userProfile(userId: String) = "user_profile/$userId"
+
+    fun groupSettings(chatId: String) = "group_settings/$chatId"
 }
 
 @Composable
@@ -127,6 +134,9 @@ fun FireStreamNavGraph(
                 onNewChatClick = {
                     navController.navigate(Routes.CONTACTS)
                 },
+                onNewBroadcastClick = {
+                    navController.navigate(Routes.CREATE_BROADCAST)
+                },
                 onSettingsClick = {
                     navController.navigate(Routes.SETTINGS)
                 }
@@ -140,6 +150,7 @@ fun FireStreamNavGraph(
                 navArgument("recipientId") { type = NavType.StringType }
             )
         ) { backStackEntry ->
+            val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
             val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
             ChatScreen(
                 onBackClick = { navController.popBackStack() },
@@ -150,7 +161,8 @@ fun FireStreamNavGraph(
                 },
                 onProfileClick = { userId ->
                     navController.navigate(Routes.userProfile(userId))
-                }
+                },
+                onGroupSettingsClick = { navController.navigate(Routes.groupSettings(chatId)) }
             )
         }
 
@@ -208,6 +220,29 @@ fun FireStreamNavGraph(
         // Phase 2: Starred Messages
         composable(Routes.STARRED_MESSAGES) {
             StarredMessagesScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Phase 5: Group Settings
+        composable(
+            route = Routes.GROUP_SETTINGS,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) {
+            GroupSettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                onAddMemberClick = { navController.navigate(Routes.CONTACTS) }
+            )
+        }
+
+        // Phase 5.5: Create Broadcast
+        composable(Routes.CREATE_BROADCAST) {
+            CreateBroadcastScreen(
+                onBroadcastCreated = { chatId ->
+                    navController.navigate(Routes.chat(chatId, "")) {
+                        popUpTo(Routes.CHAT_LIST)
+                    }
+                },
+                onBackClick = { navController.popBackStack() }
+            )
         }
 
         // Phase 2: Archived Chats
