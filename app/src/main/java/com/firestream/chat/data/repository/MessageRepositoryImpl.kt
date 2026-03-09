@@ -28,6 +28,8 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private const val POLL_CONTENT = "📊 Poll"
+
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
@@ -554,7 +556,7 @@ class MessageRepositoryImpl @Inject constructor(
                 id = remoteId,
                 chatId = chatId,
                 senderId = senderId,
-                content = "📊 Poll",
+                content = POLL_CONTENT,
                 type = MessageType.POLL,
                 status = MessageStatus.SENT,
                 timestamp = timestamp,
@@ -573,8 +575,9 @@ class MessageRepositoryImpl @Inject constructor(
             val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
             val entity = messageDao.getMessageById(messageId) ?: throw Exception("Message not found")
             val poll = entity.toDomain().pollData ?: throw Exception("Not a poll message")
+            if (poll.isClosed) throw Exception("Poll is closed")
 
-            messageSource.votePoll(chatId, messageId, userId, optionIds, poll.isMultipleChoice)
+            messageSource.votePoll(chatId, messageId, userId, optionIds)
 
             // Update local cache
             val updatedOptions = poll.options.map { option ->

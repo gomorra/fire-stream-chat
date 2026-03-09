@@ -42,6 +42,8 @@ data class RawFirestoreMessage(
     val mentions: List<String> = emptyList()
 )
 
+private const val POLL_CONTENT = "📊 Poll"
+
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
@@ -101,7 +103,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
-            MessageType.POLL -> "📊 Poll"
+            MessageType.POLL -> POLL_CONTENT
             else -> "New message"
         }
         firestore.collection("chats").document(chatId).update(
@@ -150,7 +152,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.IMAGE -> "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
-            MessageType.POLL -> "📊 Poll"
+            MessageType.POLL -> POLL_CONTENT
             else -> content
         }
         firestore.collection("chats").document(chatId).update(
@@ -227,7 +229,7 @@ class FirestoreMessageSource @Inject constructor(
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
-            "content" to "📊 Poll",
+            "content" to POLL_CONTENT,
             "type" to MessageType.POLL.name,
             "status" to MessageStatus.SENT.name,
             "timestamp" to timestamp,
@@ -243,7 +245,7 @@ class FirestoreMessageSource @Inject constructor(
 
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to "📊 Poll",
+                "lastMessageContent" to POLL_CONTENT,
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )
@@ -256,8 +258,7 @@ class FirestoreMessageSource @Inject constructor(
         chatId: String,
         messageId: String,
         userId: String,
-        optionIds: List<String>,
-        isMultipleChoice: Boolean
+        optionIds: List<String>
     ) {
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -268,6 +269,7 @@ class FirestoreMessageSource @Inject constructor(
         val rawPoll = snapshot.get("pollData") as? Map<String, Any?> ?: return
         @Suppress("UNCHECKED_CAST")
         val options = (rawPoll["options"] as? List<Map<String, Any?>>)?.toMutableList() ?: return
+        val isMultipleChoice = rawPoll["isMultipleChoice"] as? Boolean ?: false
 
         val updatedOptions = options.map { option ->
             val optId = option["id"] as? String ?: return@map option

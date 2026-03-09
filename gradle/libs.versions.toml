@@ -42,6 +42,7 @@ zxing = "3.5.3"
 junit = "4.13.2"
 mockk = "1.13.13"
 coroutines-test = "1.9.0"
+org-json = "20231013"
 compose-ui-test = "1.7.6"
 espresso = "3.6.1"
 test-ext-junit = "1.2.1"
@@ -101,6 +102,7 @@ zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+org-json = { group = "org.json", name = "json", version.ref = "org-json" }
 coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines-test" }
 compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }

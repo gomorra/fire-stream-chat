@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,8 +43,8 @@ fun PollBubble(
     else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
-    val totalVotes = poll.options.sumOf { it.voterIds.size }
-    val hasVoted = poll.options.any { it.voterIds.contains(currentUserId) }
+    val totalVotes = remember(poll) { poll.options.sumOf { it.voterIds.size } }
+    val hasVoted = remember(poll, currentUserId) { poll.options.any { it.voterIds.contains(currentUserId) } }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -172,9 +173,9 @@ private fun PollOptionRow(
     onClick: () -> Unit
 ) {
     val showResults = hasVoted || isClosed
-    val percentage = if (totalVotes > 0 && showResults) {
-        (option.voterIds.size * 100) / totalVotes
-    } else 0
+    val percentage = remember(option.voterIds.size, totalVotes, showResults) {
+        if (totalVotes > 0 && showResults) (option.voterIds.size * 100) / totalVotes else 0
+    }
 
     val barColor = if (isOwnMessage) {
         textColor.copy(alpha = 0.2f)
