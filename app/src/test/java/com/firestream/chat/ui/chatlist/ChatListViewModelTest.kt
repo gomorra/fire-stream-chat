@@ -3,12 +3,14 @@ package com.firestream.chat.ui.chatlist
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
 import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import com.firestream.chat.domain.usecase.chat.MuteChatUseCase
 import com.firestream.chat.domain.usecase.chat.PinChatUseCase
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import io.mockk.coEvery
 import io.mockk.every
@@ -40,8 +42,10 @@ class ChatListViewModelTest {
     private lateinit var archiveChatUseCase: ArchiveChatUseCase
     private lateinit var muteChatUseCase: MuteChatUseCase
     private lateinit var searchMessagesUseCase: SearchMessagesUseCase
+    private lateinit var syncContactsUseCase: SyncContactsUseCase
     private lateinit var authRepository: AuthRepository
     private lateinit var messageRepository: MessageRepository
+    private lateinit var contactRepository: ContactRepository
     private lateinit var viewModel: ChatListViewModel
 
     private val chat1 = Chat(
@@ -65,13 +69,17 @@ class ChatListViewModelTest {
         archiveChatUseCase = mockk()
         muteChatUseCase = mockk()
         searchMessagesUseCase = mockk()
+        syncContactsUseCase = mockk()
         authRepository = mockk()
         messageRepository = mockk()
+        contactRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
         every { getChatsUseCase() } returns flowOf(listOf(chat1, chat2))
         coEvery { searchMessagesUseCase(any(), any()) } returns emptyList()
         coEvery { pinChatUseCase(any(), any()) } returns Result.success(Unit)
+        coEvery { syncContactsUseCase() } returns Result.success(emptyList())
+        every { contactRepository.getContacts() } returns flowOf(emptyList())
 
         viewModel = ChatListViewModel(
             getChatsUseCase = getChatsUseCase,
@@ -80,8 +88,10 @@ class ChatListViewModelTest {
             archiveChatUseCase = archiveChatUseCase,
             muteChatUseCase = muteChatUseCase,
             searchMessagesUseCase = searchMessagesUseCase,
+            syncContactsUseCase = syncContactsUseCase,
             authRepository = authRepository,
-            messageRepository = messageRepository
+            messageRepository = messageRepository,
+            contactRepository = contactRepository
         )
     }
 
@@ -132,8 +142,10 @@ class ChatListViewModelTest {
             archiveChatUseCase = archiveChatUseCase,
             muteChatUseCase = muteChatUseCase,
             searchMessagesUseCase = searchMessagesUseCase,
+            syncContactsUseCase = syncContactsUseCase,
             authRepository = authRepository,
-            messageRepository = messageRepository
+            messageRepository = messageRepository,
+            contactRepository = contactRepository
         )
         advanceUntilIdle()
 

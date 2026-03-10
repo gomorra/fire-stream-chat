@@ -13,6 +13,7 @@ import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import com.firestream.chat.domain.usecase.chat.MuteChatUseCase
 import com.firestream.chat.domain.usecase.chat.PinChatUseCase
+import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -49,6 +50,7 @@ class ChatListViewModel @Inject constructor(
     private val archiveChatUseCase: ArchiveChatUseCase,
     private val muteChatUseCase: MuteChatUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
+    private val syncContactsUseCase: SyncContactsUseCase,
     private val authRepository: AuthRepository,
     private val messageRepository: MessageRepository,
     private val contactRepository: ContactRepository
@@ -62,7 +64,15 @@ class ChatListViewModel @Inject constructor(
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         loadChats()
+        syncContacts()
         loadContacts()
+    }
+
+    private fun syncContacts() {
+        viewModelScope.launch {
+            syncContactsUseCase()
+                .onFailure { /* non-fatal: contacts sync is best-effort */ }
+        }
     }
 
     private fun loadContacts() {
