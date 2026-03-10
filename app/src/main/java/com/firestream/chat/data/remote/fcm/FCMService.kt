@@ -5,6 +5,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationCompat.MessagingStyle
+import androidx.core.app.Person
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -48,6 +50,7 @@ class FCMService : FirebaseMessagingService() {
         val chatId = data["chatId"] ?: return
         val messageId = data["messageId"]
         val chatType = data["chatType"] ?: "INDIVIDUAL"
+        val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
         val mentions = data["mentions"]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
 
         // Mark message as delivered when push notification is received
@@ -69,20 +72,36 @@ class FCMService : FirebaseMessagingService() {
                 }
             }
 
-            showNotification(chatId, senderId, senderName, "New message")
+            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name)
         }
     }
 
-    private fun showNotification(chatId: String, senderId: String, title: String, body: String) {
+    private fun showNotification(
+        chatId: String,
+        senderId: String,
+        senderName: String,
+        chatName: String?,
+        isGroup: Boolean
+    ) {
         val channelId = "fire_stream_messages"
-
+        val notifId = chatId.hashCode()
         val notificationManager = getSystemService(NotificationManager::class.java)
-        val channel = NotificationChannel(
-            channelId,
-            "Messages",
-            NotificationManager.IMPORTANCE_HIGH
+
+        notificationManager.createNotificationChannel(
+            NotificationChannel(channelId, "Messages", NotificationManager.IMPORTANCE_HIGH)
         )
-        notificationManager.createNotificationChannel(channel)
+
+        val me = Person.Builder().setName("Me").build()
+        val sender = Person.Builder().setName(senderName).build()
+
+        // Recover existing MessagingStyle so messages from the same chat bundle together
+        val existing = notificationManager.activeNotifications.find { it.id == notifId }
+        val style = existing?.let { MessagingStyle.extractMessagingStyleFromNotification(it.notification) }
+            ?: MessagingStyle(me)
+        if (isGroup) {
+            style.setGroupConversation(true).setConversationTitle(chatName ?: chatId)
+        }
+        style.addMessage("New message", System.currentTimeMillis(), sender)
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("chatId", chatId)
@@ -90,19 +109,18 @@ class FCMService : FirebaseMessagingService() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
-            this, chatId.hashCode(), intent,
+            this, notifId, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setContentTitle(title)
-            .setContentText(body)
+            .setStyle(style)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .build()
 
-        notificationManager.notify(chatId.hashCode(), notification)
+        notificationManager.notify(notifId, notification)
     }
 }

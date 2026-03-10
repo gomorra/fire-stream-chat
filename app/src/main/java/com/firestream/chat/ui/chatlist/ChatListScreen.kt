@@ -59,6 +59,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import java.text.SimpleDateFormat
@@ -243,6 +244,7 @@ fun ChatListScreen(
                                 SwipeableChatItem(
                                     chat = chat,
                                     currentUserId = uiState.currentUserId,
+                                    contacts = uiState.contacts,
                                     onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
                                     onDelete = { viewModel.requestDeleteChat(chat.id) },
                                     onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -261,6 +263,7 @@ fun ChatListScreen(
                             SwipeableChatItem(
                                 chat = chat,
                                 currentUserId = uiState.currentUserId,
+                                contacts = uiState.contacts,
                                 onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
                                 onDelete = { viewModel.requestDeleteChat(chat.id) },
                                 onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -306,6 +309,7 @@ fun ChatListScreen(
 private fun SwipeableChatItem(
     chat: Chat,
     currentUserId: String,
+    contacts: Map<String, Contact> = emptyMap(),
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onPin: () -> Unit,
@@ -356,6 +360,7 @@ private fun SwipeableChatItem(
             ChatListItem(
                 chat = chat,
                 currentUserId = currentUserId,
+                contacts = contacts,
                 onClick = onClick,
                 onLongClick = { showMenu = true }
             )

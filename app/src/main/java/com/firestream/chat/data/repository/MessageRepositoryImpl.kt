@@ -52,6 +52,12 @@ class MessageRepositoryImpl @Inject constructor(
                     for (raw in rawList) {
                         val existing = messageDao.getMessageById(raw.id)
 
+                        // Handle deletion update for any message (own or incoming)
+                        if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
+                            messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
+                            continue
+                        }
+
                         // Update reactions from remote even if message is already cached
                         if (existing != null && existing.reactions != raw.reactions) {
                             val reactionsJson = JSONObject().apply {
@@ -91,20 +97,21 @@ class MessageRepositoryImpl @Inject constructor(
                                 readBy = raw.readBy,
                                 deliveredTo = raw.deliveredTo,
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                                mentions = raw.mentions
+                                mentions = raw.mentions,
+                                deletedAt = raw.deletedAt
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
                         }
 
-                        if (existing != null && existing.editedAt == raw.editedAt) continue
+                        if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) continue
 
                         // Determine whether this message needs Signal decryption.
                         val needsDecryption = raw.ciphertext != null && raw.signalType != null
                                 && !(raw.editedAt != null && raw.content != null)
 
-                        // Guard: skip messages with no usable content.
-                        if (!needsDecryption && raw.content == null) continue
+                        // Guard: skip messages with no usable content (unless deleted).
+                        if (raw.deletedAt == null && !needsDecryption && raw.content == null) continue
 
                         // Wrap decrypt+save in NonCancellable so that a collectLatest
                         // cancellation (from a new Firestore snapshot) cannot interrupt
@@ -114,18 +121,21 @@ class MessageRepositoryImpl @Inject constructor(
                         // ciphertext again against an already-advanced ratchet, causing
                         // sporadic "unable to decrypt" errors.
                         withContext(NonCancellable) {
-                            val content = try {
-                                when {
-                                    raw.editedAt != null && raw.content != null -> raw.content
-                                    needsDecryption ->
-                                        signalManager.decrypt(
-                                            raw.senderId,
-                                            EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
-                                        )
-                                    else -> raw.content!!
+                            val content = when {
+                                raw.deletedAt != null -> ""
+                                else -> try {
+                                    when {
+                                        raw.editedAt != null && raw.content != null -> raw.content
+                                        needsDecryption ->
+                                            signalManager.decrypt(
+                                                raw.senderId,
+                                                EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                                            )
+                                        else -> raw.content!!
+                                    }
+                                } catch (_: Exception) {
+                                    "[Encrypted message — unable to decrypt]"
                                 }
-                            } catch (_: Exception) {
-                                "[Encrypted message — unable to decrypt]"
                             }
 
                             val message = Message(
@@ -146,7 +156,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 readBy = raw.readBy,
                                 deliveredTo = raw.deliveredTo,
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                                mentions = raw.mentions
+                                mentions = raw.mentions,
+                                deletedAt = raw.deletedAt
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                         }
@@ -223,8 +234,9 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> {
         return try {
+            val deletedAt = System.currentTimeMillis()
             messageSource.deleteMessage(chatId, messageId)
-            messageDao.deleteMessage(messageId)
+            messageDao.softDeleteMessage(messageId, deletedAt)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

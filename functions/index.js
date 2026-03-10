@@ -62,6 +62,7 @@ exports.sendPushNotification = onDocumentCreated(
                             senderName: senderName || "New Message",
                             messageId: event.params.messageId,
                             chatType: chatType,
+                            chatName: chatData.name || "",
                             mentions: mentionsStr
                             // Note: We don't send the message content here in the push payload
                             // because it is (or will be) end-to-end encrypted in the database.

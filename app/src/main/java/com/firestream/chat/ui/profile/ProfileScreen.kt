@@ -1,5 +1,18 @@
 package com.firestream.chat.ui.profile
 
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Circle
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -47,14 +61,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.chat.FullscreenImageViewer
 import com.firestream.chat.ui.theme.OnlineGreen
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -66,7 +86,26 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+
     var showBlockDialog by remember { mutableStateOf(false) }
+    var showPhotoSourceDialog by remember { mutableStateOf(false) }
+    var fullscreenAvatar by remember { mutableStateOf(false) }
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { viewModel.uploadAvatar(it) }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) cameraUri?.let { viewModel.uploadAvatar(it) }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val uri = createAvatarCameraUri(context)
+            cameraUri = uri
+            cameraLauncher.launch(uri)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -104,14 +143,54 @@ fun ProfileScreen(
                     Spacer(Modifier.height(24.dp))
 
                     Box {
-                        AsyncImage(
-                            model = user.avatarUrl,
-                            contentDescription = "Avatar",
+                        // Avatar — clickable for fullscreen when a photo exists
+                        Box(
                             modifier = Modifier
                                 .size(96.dp)
                                 .clip(CircleShape)
-                        )
-                        if (user.isOnline) {
+                                .clickable(enabled = user.avatarUrl != null) { fullscreenAvatar = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (user.avatarUrl != null) {
+                                AsyncImage(
+                                    model = user.avatarUrl,
+                                    contentDescription = "Avatar",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = user.displayName.take(1).uppercase(),
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            // Upload progress overlay
+                            if (uiState.isUploading) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.45f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(32.dp),
+                                        color = Color.White,
+                                        strokeWidth = 3.dp
+                                    )
+                                }
+                            }
+                        }
+
+                        // Online indicator (non-current-user only — edit badge occupies that spot)
+                        if (user.isOnline && !uiState.isCurrentUser) {
                             Icon(
                                 imageVector = Icons.Default.Circle,
                                 contentDescription = "Online",
@@ -120,6 +199,25 @@ fun ProfileScreen(
                                     .size(20.dp)
                                     .align(Alignment.BottomEnd)
                             )
+                        }
+
+                        // Edit badge (current user only)
+                        if (uiState.isCurrentUser) {
+                            Box(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                    .clickable(enabled = !uiState.isUploading) { showPhotoSourceDialog = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = "Change photo",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
 
@@ -145,6 +243,16 @@ fun ProfileScreen(
                             text = "Last seen $formatted",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Upload error
+                    if (uiState.uploadError != null) {
+                        Text(
+                            text = uiState.uploadError!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp)
                         )
                     }
 
@@ -293,6 +401,54 @@ fun ProfileScreen(
         }
     }
 
+    // Fullscreen avatar viewer
+    val avatarUrl = uiState.user?.avatarUrl
+    BackHandler(enabled = fullscreenAvatar) { fullscreenAvatar = false }
+    AnimatedVisibility(visible = fullscreenAvatar && avatarUrl != null, enter = fadeIn(), exit = fadeOut()) {
+        if (avatarUrl != null) {
+            FullscreenImageViewer(imageUrl = avatarUrl, onDismiss = { fullscreenAvatar = false })
+        }
+    }
+
+    // Photo source picker dialog (current user only)
+    if (showPhotoSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showPhotoSourceDialog = false },
+            title = { Text("Profile photo") },
+            text = {
+                Column {
+                    TextButton(
+                        onClick = {
+                            showPhotoSourceDialog = false
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                                == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                val uri = createAvatarCameraUri(context)
+                                cameraUri = uri
+                                cameraLauncher.launch(uri)
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Take photo") }
+
+                    TextButton(
+                        onClick = {
+                            showPhotoSourceDialog = false
+                            galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Choose from gallery") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPhotoSourceDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+
     // Block/Unblock confirmation dialog
     if (showBlockDialog) {
         val isBlocked = uiState.isBlocked
@@ -359,4 +515,10 @@ private fun SharedMediaGrid(
             }
         }
     }
+}
+
+private fun createAvatarCameraUri(context: Context): Uri {
+    val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
+    val file = File(cacheDir, "avatar_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }

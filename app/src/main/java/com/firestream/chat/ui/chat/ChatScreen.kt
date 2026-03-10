@@ -3,7 +3,6 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -35,6 +34,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -48,7 +48,6 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,7 +72,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -94,7 +92,6 @@ import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -120,25 +117,11 @@ fun ChatScreen(
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
 
-    // Voice recording state
-    var isRecording by remember { mutableStateOf(false) }
-    var recordingSeconds by remember { mutableIntStateOf(0) }
-    var recordedFileUri by remember { mutableStateOf<Uri?>(null) }
-    var recordedDuration by remember { mutableIntStateOf(0) }
-    val mediaRecorder = remember { mutableStateOf<MediaRecorder?>(null) }
-
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
-
-    DisposableEffect(Unit) {
-        onDispose {
-            mediaRecorder.value?.release()
-            mediaRecorder.value = null
-        }
-    }
 
     // Track screen visibility for read receipts — only mark READ when chat is in foreground
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -154,16 +137,6 @@ fun ChatScreen(
         onDispose {
             viewModel.setScreenVisible(false)
             lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            recordingSeconds = 0
-            while (isRecording) {
-                delay(1000)
-                recordingSeconds++
-            }
         }
     }
 
@@ -206,14 +179,6 @@ fun ChatScreen(
         galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
     }
 
-    val audioPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            startRecording(context, mediaRecorder) { uri ->
-                recordedFileUri = uri
-                isRecording = true
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -384,7 +349,12 @@ fun ChatScreen(
                             modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            items(uiState.messages, key = { it.id }) { message ->
+                            itemsIndexed(uiState.messages, key = { _, msg -> msg.id }) { index, message ->
+                                val showSeparator = index == 0 ||
+                                    !isSameDay(message.timestamp, uiState.messages[index - 1].timestamp)
+                                if (showSeparator) {
+                                    DateSeparator(formatDateSeparator(message.timestamp))
+                                }
                                 val isOwn = message.senderId == uiState.currentUserId
                                 val replyToMessage = message.replyToId?.let { id ->
                                     uiState.messages.find { it.id == id }
@@ -517,61 +487,6 @@ fun ChatScreen(
                 }
             }
 
-            // Voice recording indicator
-            if (isRecording) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer)
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Mic,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Recording  ${recordingSeconds / 60}:${(recordingSeconds % 60).toString().padStart(2, '0')}",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = {
-                        stopRecording(mediaRecorder)
-                        isRecording = false
-                        recordedDuration = recordingSeconds
-                        recordedFileUri = null
-                        recordedDuration = 0
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Cancel recording",
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                    }
-                    IconButton(onClick = {
-                        val uri = recordedFileUri
-                        stopRecording(mediaRecorder)
-                        isRecording = false
-                        recordedDuration = recordingSeconds
-                        if (uri != null && recordedDuration > 0) {
-                            viewModel.sendVoiceMessage(uri, recordedDuration)
-                        }
-                        recordedFileUri = null
-                        recordedDuration = 0
-                    }) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send voice message",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-
             // Announcement mode banner (when user can't send)
             if (!uiState.canSendMessages && uiState.isAnnouncementMode) {
                 Row(
@@ -622,7 +537,7 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (uiState.editingMessage == null && !isRecording) {
+                if (uiState.editingMessage == null) {
                     IconButton(onClick = { showAttachmentSheet = true }) {
                         Icon(
                             imageVector = Icons.Default.Add,
@@ -657,39 +572,19 @@ fun ChatScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
 
-                if (messageText.isBlank() && uiState.editingMessage == null && !isRecording) {
-                    IconButton(onClick = {
-                        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-                            == PackageManager.PERMISSION_GRANTED) {
-                            startRecording(context, mediaRecorder) { uri ->
-                                recordedFileUri = uri
-                                isRecording = true
-                            }
-                        } else {
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Record voice message",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                } else {
-                    IconButton(
-                        onClick = {
-                            handleSend(viewModel, uiState, messageText)
-                            messageText = ""
-                        },
-                        enabled = messageText.isNotBlank() && !uiState.isSending
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = stringResource(R.string.send),
-                            tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                        )
-                    }
+                IconButton(
+                    onClick = {
+                        handleSend(viewModel, uiState, messageText)
+                        messageText = ""
+                    },
+                    enabled = messageText.isNotBlank() && !uiState.isSending
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.Send,
+                        contentDescription = stringResource(R.string.send),
+                        tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                    )
                 }
             }
         }
@@ -808,6 +703,25 @@ fun ChatScreen(
     }
 }
 
+@Composable
+private fun DateSeparator(label: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f))
+    }
+}
+
 private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: String) {
     if (uiState.editingMessage != null) {
         viewModel.confirmEdit(text)
@@ -823,44 +737,6 @@ private fun createCameraUri(context: Context): Uri {
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }
 
-private fun startRecording(
-    context: Context,
-    recorderHolder: androidx.compose.runtime.MutableState<MediaRecorder?>,
-    onReady: (Uri) -> Unit
-) {
-    try {
-        val audioDir = File(context.cacheDir, "voice").also { it.mkdirs() }
-        val file = File(audioDir, "voice_${System.currentTimeMillis()}.aac")
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-
-        @Suppress("DEPRECATION")
-        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            MediaRecorder(context)
-        } else {
-            MediaRecorder()
-        }
-        recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-        recorder.setOutputFormat(MediaRecorder.OutputFormat.AAC_ADTS)
-        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-        recorder.setOutputFile(file.absolutePath)
-        recorder.prepare()
-        recorder.start()
-        recorderHolder.value = recorder
-        onReady(uri)
-    } catch (_: Exception) {
-        /* permission or hardware unavailable */
-    }
-}
-
-private fun stopRecording(recorderHolder: androidx.compose.runtime.MutableState<MediaRecorder?>) {
-    try {
-        recorderHolder.value?.apply {
-            stop()
-            release()
-        }
-    } catch (_: Exception) { /* ignore stop errors */ }
-    recorderHolder.value = null
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable

@@ -146,6 +146,20 @@ internal fun MessageBubble(
                     .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
                 Column {
+                    if (message.deletedAt != null) {
+                        Text(
+                            text = "This message was deleted",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                            color = textColor.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = formatTimestamp(message.timestamp),
+                            color = textColor.copy(alpha = 0.5f),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.align(Alignment.End)
+                        )
+                    } else {
+
                     if (message.isForwarded) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
@@ -300,10 +314,12 @@ internal fun MessageBubble(
                             )
                         }
                     }
+
+                    } // end else (not deleted)
                 }
             }
 
-            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+            DropdownMenu(expanded = showMenu && message.deletedAt == null, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(
                     text = { Text("Reply") },
                     leadingIcon = { Icon(Icons.Default.Reply, null) },

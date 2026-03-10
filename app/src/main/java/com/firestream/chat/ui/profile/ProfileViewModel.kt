@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.profile
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -23,7 +24,9 @@ data class ProfileUiState(
     val isCurrentUser: Boolean = false,
     val isBlocked: Boolean = false,
     val isBlockLoading: Boolean = false,
-    val sharedMedia: List<Message> = emptyList()
+    val sharedMedia: List<Message> = emptyList(),
+    val isUploading: Boolean = false,
+    val uploadError: String? = null
 )
 
 @HiltViewModel
@@ -88,6 +91,17 @@ class ProfileViewModel @Inject constructor(
                         error = e.message ?: "Failed to block user",
                         isBlockLoading = false
                     )
+                }
+        }
+    }
+
+    fun uploadAvatar(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isUploading = true, uploadError = null)
+            userRepository.uploadAvatar(uri)
+                .onSuccess { _uiState.value = _uiState.value.copy(isUploading = false) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(isUploading = false, uploadError = e.message)
                 }
         }
     }

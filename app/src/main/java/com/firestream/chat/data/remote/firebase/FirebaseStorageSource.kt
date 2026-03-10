@@ -16,6 +16,12 @@ class FirebaseStorageSource @Inject constructor(
         return ref.downloadUrl.await().toString()
     }
 
+    suspend fun uploadGroupAvatar(chatId: String, uri: Uri): String {
+        val ref = storage.reference.child("avatars/groups/$chatId/group.jpg")
+        ref.putFile(uri).await()
+        return ref.downloadUrl.await().toString()
+    }
+
     suspend fun uploadMedia(chatId: String, messageId: String, uri: Uri, mimeType: String): String {
         val extension = mimeType.substringAfter("/")
         val ref = storage.reference.child("media/$chatId/$messageId.$extension")

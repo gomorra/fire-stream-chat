@@ -39,7 +39,8 @@ data class RawFirestoreMessage(
     val readBy: Map<String, Long> = emptyMap(),
     val deliveredTo: Map<String, Long> = emptyMap(),
     val pollData: Map<String, Any?>? = null,
-    val mentions: List<String> = emptyList()
+    val mentions: List<String> = emptyList(),
+    val deletedAt: Long? = null
 )
 
 private const val POLL_CONTENT = "📊 Poll"
@@ -178,7 +179,13 @@ class FirestoreMessageSource @Inject constructor(
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .delete()
+            .update(mapOf(
+                "deletedAt" to System.currentTimeMillis(),
+                "content" to "",
+                "ciphertext" to null,
+                "mediaUrl" to null,
+                "mediaThumbnailUrl" to null
+            ))
             .await()
     }
 
@@ -335,7 +342,8 @@ class FirestoreMessageSource @Inject constructor(
             readBy = parseLongMap(data["readBy"]),
             deliveredTo = parseLongMap(data["deliveredTo"]),
             pollData = data["pollData"] as? Map<String, Any?>,
-            mentions = (data["mentions"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+            mentions = (data["mentions"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+            deletedAt = data["deletedAt"] as? Long
         )
     }
 

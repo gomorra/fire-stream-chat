@@ -35,7 +35,8 @@ data class MessageEntity(
     val readBy: Map<String, Long> = emptyMap(),
     val deliveredTo: Map<String, Long> = emptyMap(),
     val pollData: String? = null,
-    val mentions: List<String> = emptyList()
+    val mentions: List<String> = emptyList(),
+    val deletedAt: Long? = null
 ) {
     fun toDomain() = Message(
         id = id,
@@ -56,7 +57,8 @@ data class MessageEntity(
         readBy = readBy,
         deliveredTo = deliveredTo,
         pollData = pollData?.let { parsePollJson(it) },
-        mentions = mentions
+        mentions = mentions,
+        deletedAt = deletedAt
     )
 
     companion object {
@@ -79,7 +81,8 @@ data class MessageEntity(
             readBy = message.readBy,
             deliveredTo = message.deliveredTo,
             pollData = message.pollData?.let { pollToJson(it) },
-            mentions = message.mentions
+            mentions = message.mentions,
+            deletedAt = message.deletedAt
         )
 
         private fun pollToJson(poll: Poll): String {

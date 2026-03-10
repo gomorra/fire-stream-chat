@@ -1,10 +1,21 @@
 package com.firestream.chat.ui.group
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +37,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -64,8 +76,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
+import com.firestream.chat.ui.chat.FullscreenImageViewer
+import java.io.File
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -89,6 +108,23 @@ fun GroupSettingsScreen(
     var showQrDialog by remember { mutableStateOf(false) }
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf<String?>(null) }
+    var fullscreenGroupAvatar by remember { mutableStateOf(false) }
+    var showPhotoSourceDialog by remember { mutableStateOf(false) }
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { viewModel.uploadGroupAvatar(it) }
+    }
+    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
+        if (success) cameraUri?.let { viewModel.uploadGroupAvatar(it) }
+    }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val uri = createGroupAvatarCameraUri(context)
+            cameraUri = uri
+            cameraLauncher.launch(uri)
+        }
+    }
 
     LaunchedEffect(uiState.leftGroup) {
         if (uiState.leftGroup) onBackClick()
@@ -145,18 +181,70 @@ fun GroupSettingsScreen(
                         .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(80.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = (chat.name ?: "G").take(1).uppercase(),
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+                    Box {
+                        // Avatar — clickable for fullscreen when a photo exists
+                        Box(
+                            modifier = Modifier
+                                .size(80.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = chat.avatarUrl != null) { fullscreenGroupAvatar = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (chat.avatarUrl != null) {
+                                AsyncImage(
+                                    model = chat.avatarUrl,
+                                    contentDescription = "Group avatar",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = (chat.name ?: "G").take(1).uppercase(),
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                            // Upload progress overlay
+                            if (uiState.isUploading) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.45f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(32.dp),
+                                        color = Color.White,
+                                        strokeWidth = 3.dp
+                                    )
+                                }
+                            }
+                        }
+                        // Edit badge (admin only)
+                        if (isAdmin) {
+                            Box(
+                                modifier = Modifier
+                                    .size(26.dp)
+                                    .align(Alignment.BottomEnd)
+                                    .background(MaterialTheme.colorScheme.primary, CircleShape)
+                                    .clickable(enabled = !uiState.isUploading) { showPhotoSourceDialog = true },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CameraAlt,
+                                    contentDescription = "Change group photo",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -169,6 +257,14 @@ fun GroupSettingsScreen(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    if (uiState.uploadError != null) {
+                        Text(
+                            text = uiState.uploadError!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 }
             }
 
@@ -462,6 +558,60 @@ fun GroupSettingsScreen(
             }
         )
     }
+
+    // Fullscreen group avatar viewer
+    val avatarUrl = uiState.chat?.avatarUrl
+    BackHandler(enabled = fullscreenGroupAvatar) { fullscreenGroupAvatar = false }
+    AnimatedVisibility(visible = fullscreenGroupAvatar && avatarUrl != null, enter = fadeIn(), exit = fadeOut()) {
+        if (avatarUrl != null) {
+            FullscreenImageViewer(imageUrl = avatarUrl, onDismiss = { fullscreenGroupAvatar = false })
+        }
+    }
+
+    // Photo source picker dialog (admin only)
+    if (showPhotoSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showPhotoSourceDialog = false },
+            title = { Text("Group photo") },
+            text = {
+                Column {
+                    TextButton(
+                        onClick = {
+                            showPhotoSourceDialog = false
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
+                                == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                val uri = createGroupAvatarCameraUri(context)
+                                cameraUri = uri
+                                cameraLauncher.launch(uri)
+                            } else {
+                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Take photo") }
+
+                    TextButton(
+                        onClick = {
+                            showPhotoSourceDialog = false
+                            galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Choose from gallery") }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showPhotoSourceDialog = false }) { Text("Cancel") }
+            }
+        )
+    }
+}
+
+private fun createGroupAvatarCameraUri(context: Context): Uri {
+    val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
+    val file = File(cacheDir, "group_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }
 
 @Composable

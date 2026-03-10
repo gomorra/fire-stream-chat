@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.group
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -34,7 +35,9 @@ data class GroupSettingsUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val inviteLinkGenerated: Boolean = false,
-    val leftGroup: Boolean = false
+    val leftGroup: Boolean = false,
+    val isUploading: Boolean = false,
+    val uploadError: String? = null
 )
 
 data class MemberInfo(
@@ -131,6 +134,22 @@ class GroupSettingsViewModel @Inject constructor(
                 }
             }.awaitAll()
             _uiState.value = _uiState.value.copy(pendingMembers = pending)
+        }
+    }
+
+    fun uploadGroupAvatar(uri: Uri) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isUploading = true, uploadError = null)
+            chatRepository.uploadGroupAvatar(chatId, uri)
+                .onSuccess { url ->
+                    _uiState.value = _uiState.value.copy(
+                        isUploading = false,
+                        chat = _uiState.value.chat?.copy(avatarUrl = url)
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(isUploading = false, uploadError = e.message)
+                }
         }
     }
 

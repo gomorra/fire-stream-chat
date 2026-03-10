@@ -1,5 +1,6 @@
 package com.firestream.chat.domain.repository
 
+import android.net.Uri
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GroupPermissions
 import kotlinx.coroutines.flow.Flow
@@ -9,6 +10,7 @@ interface ChatRepository {
     suspend fun getChatById(chatId: String): Result<Chat>
     suspend fun getOrCreateChat(participantId: String): Result<Chat>
     suspend fun createGroup(name: String, participantIds: List<String>): Result<Chat>
+    suspend fun uploadGroupAvatar(chatId: String, uri: Uri): Result<String>
     suspend fun updateGroup(chatId: String, name: String?, avatarUrl: String?): Result<Unit>
     suspend fun addGroupMember(chatId: String, userId: String): Result<Unit>
     suspend fun removeGroupMember(chatId: String, userId: String): Result<Unit>

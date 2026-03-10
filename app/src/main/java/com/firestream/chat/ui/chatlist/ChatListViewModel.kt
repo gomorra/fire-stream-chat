@@ -3,8 +3,10 @@ package com.firestream.chat.ui.chatlist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
 import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
@@ -35,7 +37,8 @@ data class ChatListUiState(
     // Phase 2: archived section toggle
     val showArchived: Boolean = false,
     // Phase 2: mute dialog
-    val pendingMuteChatId: String? = null
+    val pendingMuteChatId: String? = null,
+    val contacts: Map<String, Contact> = emptyMap()
 )
 
 @HiltViewModel
@@ -47,7 +50,8 @@ class ChatListViewModel @Inject constructor(
     private val muteChatUseCase: MuteChatUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
     private val authRepository: AuthRepository,
-    private val messageRepository: MessageRepository
+    private val messageRepository: MessageRepository,
+    private val contactRepository: ContactRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -58,6 +62,19 @@ class ChatListViewModel @Inject constructor(
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         loadChats()
+        loadContacts()
+    }
+
+    private fun loadContacts() {
+        viewModelScope.launch {
+            contactRepository.getContacts()
+                .catch { /* non-fatal: contacts are best-effort */ }
+                .collect { contacts ->
+                    _uiState.value = _uiState.value.copy(
+                        contacts = contacts.associateBy { it.uid }
+                    )
+                }
+        }
     }
 
     private val deliveredTimestamps = mutableMapOf<String, Long>()

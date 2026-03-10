@@ -1,9 +1,11 @@
 package com.firestream.chat.data.repository
 
+import android.net.Uri
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.GroupPermissions
@@ -29,7 +31,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val firestore: FirebaseFirestore,
-    private val authSource: FirebaseAuthSource
+    private val authSource: FirebaseAuthSource,
+    private val storageSource: FirebaseStorageSource
 ) : ChatRepository {
 
     private fun observeRemoteChats(): Flow<List<Chat>> = callbackFlow {
@@ -151,6 +154,16 @@ class ChatRepositoryImpl @Inject constructor(
             )
             chatDao.insertChat(ChatEntity.fromDomain(chat))
             Result.success(chat)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun uploadGroupAvatar(chatId: String, uri: Uri): Result<String> {
+        return try {
+            val url = storageSource.uploadGroupAvatar(chatId, uri)
+            updateGroup(chatId, name = null, avatarUrl = url).getOrThrow()
+            Result.success(url)
         } catch (e: Exception) {
             Result.failure(e)
         }

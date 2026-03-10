@@ -1,6 +1,8 @@
 package com.firestream.chat.ui.chat
 
+import android.content.Context
 import android.net.Uri
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -37,6 +39,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -112,7 +115,8 @@ class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val userRepository: UserRepository,
-    private val preferencesDataStore: PreferencesDataStore
+    private val preferencesDataStore: PreferencesDataStore,
+    @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
@@ -276,6 +280,7 @@ class ChatViewModel @Inject constructor(
             delay(1500)
             if (screenVisible) {
                 messageRepository.markMessagesAsRead(chatId, needsRead)
+                NotificationManagerCompat.from(context).cancel(chatId.hashCode())
             }
         }
     }

@@ -18,6 +18,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,6 +29,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Contact
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -35,10 +39,19 @@ import java.util.Locale
 fun ChatListItem(
     chat: Chat,
     currentUserId: String,
+    contacts: Map<String, Contact> = emptyMap(),
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
+        chat.participants.firstOrNull { it != currentUserId }
+    } else null
+    val displayName = recipientId
+        ?.let { contacts[it]?.displayName?.takeIf { n -> n.isNotBlank() } }
+        ?: chat.name ?: "Chat"
+    val avatarUrl = recipientId?.let { contacts[it]?.avatarUrl } ?: chat.avatarUrl
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -46,21 +59,32 @@ fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Surface(
-            modifier = Modifier.size(52.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer
-        ) {
-            Icon(
-                imageVector = when (chat.type) {
-                    ChatType.BROADCAST -> Icons.Default.Campaign
-                    ChatType.GROUP -> Icons.Default.Group
-                    else -> Icons.Default.Person
-                },
-                contentDescription = null,
-                modifier = Modifier.padding(12.dp),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
+        if (avatarUrl != null) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = displayName,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
             )
+        } else {
+            Surface(
+                modifier = Modifier.size(52.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Icon(
+                    imageVector = when (chat.type) {
+                        ChatType.BROADCAST -> Icons.Default.Campaign
+                        ChatType.GROUP -> Icons.Default.Group
+                        else -> Icons.Default.Person
+                    },
+                    contentDescription = null,
+                    modifier = Modifier.padding(12.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -68,7 +92,7 @@ fun ChatListItem(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = chat.name ?: "Chat",
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                     maxLines = 1,

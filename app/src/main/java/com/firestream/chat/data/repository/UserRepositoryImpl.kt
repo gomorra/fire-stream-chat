@@ -1,8 +1,10 @@
 package com.firestream.chat.data.repository
 
+import android.net.Uri
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
@@ -15,7 +17,8 @@ import javax.inject.Singleton
 class UserRepositoryImpl @Inject constructor(
     private val userDao: UserDao,
     private val userSource: FirestoreUserSource,
-    private val authSource: FirebaseAuthSource
+    private val authSource: FirebaseAuthSource,
+    private val storageSource: FirebaseStorageSource
 ) : UserRepository {
 
     override fun observeUser(userId: String): Flow<User> {
@@ -35,6 +38,17 @@ class UserRepositoryImpl @Inject constructor(
                 userDao.insertUser(UserEntity.fromDomain(remote))
                 Result.success(remote)
             }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun uploadAvatar(uri: Uri): Result<String> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val url = storageSource.uploadAvatar(uid, uri)
+            userSource.updateProfile(uid, mapOf("avatarUrl" to url))
+            Result.success(url)
         } catch (e: Exception) {
             Result.failure(e)
         }
