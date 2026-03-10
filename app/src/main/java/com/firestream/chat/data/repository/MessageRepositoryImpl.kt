@@ -15,6 +15,7 @@ import com.firestream.chat.domain.model.Poll
 import com.firestream.chat.domain.model.PollOption
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
@@ -23,6 +24,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
 import javax.inject.Inject
@@ -97,42 +99,57 @@ class MessageRepositoryImpl @Inject constructor(
 
                         if (existing != null && existing.editedAt == raw.editedAt) continue
 
-                        val content = try {
-                            when {
-                                raw.editedAt != null && raw.content != null -> raw.content
-                                raw.ciphertext != null && raw.signalType != null ->
-                                    signalManager.decrypt(
-                                        raw.senderId,
-                                        EncryptedMessage(raw.ciphertext, raw.signalType)
-                                    )
-                                raw.content != null -> raw.content
-                                else -> continue
-                            }
-                        } catch (_: Exception) {
-                            "[Encrypted message — unable to decrypt]"
-                        }
+                        // Determine whether this message needs Signal decryption.
+                        val needsDecryption = raw.ciphertext != null && raw.signalType != null
+                                && !(raw.editedAt != null && raw.content != null)
 
-                        val message = Message(
-                            id = raw.id,
-                            chatId = raw.chatId,
-                            senderId = raw.senderId,
-                            content = content,
-                            type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
-                            mediaUrl = raw.mediaUrl,
-                            mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                            status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
-                            replyToId = raw.replyToId,
-                            timestamp = raw.timestamp,
-                            editedAt = raw.editedAt,
-                            reactions = raw.reactions,
-                            isForwarded = raw.isForwarded,
-                            duration = raw.duration,
-                            readBy = raw.readBy,
-                            deliveredTo = raw.deliveredTo,
-                            pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                            mentions = raw.mentions
-                        )
-                        messageDao.insertMessage(MessageEntity.fromDomain(message))
+                        // Guard: skip messages with no usable content.
+                        if (!needsDecryption && raw.content == null) continue
+
+                        // Wrap decrypt+save in NonCancellable so that a collectLatest
+                        // cancellation (from a new Firestore snapshot) cannot interrupt
+                        // between Signal decryption (which advances the ratchet) and the
+                        // Room insert (which records that decryption happened). Without
+                        // this, a re-emitted snapshot would attempt to decrypt the same
+                        // ciphertext again against an already-advanced ratchet, causing
+                        // sporadic "unable to decrypt" errors.
+                        withContext(NonCancellable) {
+                            val content = try {
+                                when {
+                                    raw.editedAt != null && raw.content != null -> raw.content
+                                    needsDecryption ->
+                                        signalManager.decrypt(
+                                            raw.senderId,
+                                            EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                                        )
+                                    else -> raw.content!!
+                                }
+                            } catch (_: Exception) {
+                                "[Encrypted message — unable to decrypt]"
+                            }
+
+                            val message = Message(
+                                id = raw.id,
+                                chatId = raw.chatId,
+                                senderId = raw.senderId,
+                                content = content,
+                                type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                                mediaUrl = raw.mediaUrl,
+                                mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                                status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                                replyToId = raw.replyToId,
+                                timestamp = raw.timestamp,
+                                editedAt = raw.editedAt,
+                                reactions = raw.reactions,
+                                isForwarded = raw.isForwarded,
+                                duration = raw.duration,
+                                readBy = raw.readBy,
+                                deliveredTo = raw.deliveredTo,
+                                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                                mentions = raw.mentions
+                            )
+                            messageDao.insertMessage(MessageEntity.fromDomain(message))
+                        }
                     }
                 }
             }
