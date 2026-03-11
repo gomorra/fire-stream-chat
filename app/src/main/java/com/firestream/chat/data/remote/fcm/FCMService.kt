@@ -53,11 +53,14 @@ class FCMService : FirebaseMessagingService() {
         val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
         val mentions = data["mentions"]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
 
-        // Mark message as delivered when push notification is received
-        if (messageId != null) {
-            serviceScope.launch {
-                messageRepository.markMessagesAsDelivered(chatId, listOf(messageId))
-            }
+        // Mark ALL pending messages in this chat as delivered when a push arrives.
+        // FCM may collapse multiple pushes when the device has been offline/idle for
+        // an extended period (e.g. 2+ hours), so only the latest messageId reaches
+        // onMessageReceived(). Marking only that one ID leaves earlier messages stuck
+        // in SENT state on the sender's side. markChatAsDelivered queries Firestore
+        // for every SENT message in the chat and marks them all DELIVERED at once.
+        serviceScope.launch {
+            messageRepository.markChatAsDelivered(chatId)
         }
 
         serviceScope.launch {
