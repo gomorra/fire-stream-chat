@@ -3,11 +3,13 @@ package com.firestream.chat.ui.chatlist
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
 import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
@@ -53,13 +55,15 @@ class ChatListViewModel @Inject constructor(
     private val syncContactsUseCase: SyncContactsUseCase,
     private val authRepository: AuthRepository,
     private val messageRepository: MessageRepository,
-    private val contactRepository: ContactRepository
+    private val contactRepository: ContactRepository,
+    private val userRepository: UserRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
     val uiState: StateFlow<ChatListUiState> = _uiState.asStateFlow()
 
     private var searchJob: Job? = null
+    private val recipientObservers = mutableMapOf<String, Job>()
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
@@ -103,9 +107,45 @@ class ChatListViewModel @Inject constructor(
                         chats = chats,
                         isLoading = false
                     )
+                    observeRecipientAvatars(chats)
                     // Mark undelivered messages as DELIVERED for all chats
                     markAllChatsAsDelivered(chats)
                 }
+        }
+    }
+
+    private fun observeRecipientAvatars(chats: List<Chat>) {
+        val currentUserId = _uiState.value.currentUserId
+        val recipientIds = chats
+            .filter { it.type == ChatType.INDIVIDUAL }
+            .mapNotNull { chat -> chat.participants.firstOrNull { it != currentUserId } }
+            .toSet()
+
+        // Cancel observers for recipients no longer in chat list
+        val toRemove = recipientObservers.keys - recipientIds
+        toRemove.forEach { recipientObservers.remove(it)?.cancel() }
+
+        // Start observers for new recipients
+        val newIds = recipientIds - recipientObservers.keys
+        for (recipientId in newIds) {
+            recipientObservers[recipientId] = viewModelScope.launch {
+                userRepository.observeUser(recipientId)
+                    .catch { }
+                    .collect { user ->
+                        val updated = _uiState.value.contacts[user.uid]
+                            ?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
+                            ?: Contact(
+                                uid = user.uid,
+                                phoneNumber = user.phoneNumber,
+                                displayName = user.displayName,
+                                avatarUrl = user.avatarUrl,
+                                isRegistered = true
+                            )
+                        _uiState.value = _uiState.value.copy(
+                            contacts = _uiState.value.contacts + (user.uid to updated)
+                        )
+                    }
+            }
         }
     }
 
