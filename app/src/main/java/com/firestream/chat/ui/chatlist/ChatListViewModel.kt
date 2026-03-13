@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -64,6 +65,7 @@ class ChatListViewModel @Inject constructor(
 
     private var searchJob: Job? = null
     private val recipientObservers = mutableMapOf<String, Job>()
+    private var cachedRecipientIds: Set<String> = emptySet()
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
@@ -121,6 +123,9 @@ class ChatListViewModel @Inject constructor(
             .mapNotNull { chat -> chat.participants.firstOrNull { it != currentUserId } }
             .toSet()
 
+        if (recipientIds == cachedRecipientIds) return
+        cachedRecipientIds = recipientIds
+
         // Cancel observers for recipients no longer in chat list
         val toRemove = recipientObservers.keys - recipientIds
         toRemove.forEach { recipientObservers.remove(it)?.cancel() }
@@ -130,6 +135,9 @@ class ChatListViewModel @Inject constructor(
         for (recipientId in newIds) {
             recipientObservers[recipientId] = viewModelScope.launch {
                 userRepository.observeUser(recipientId)
+                    .distinctUntilChanged { old, new ->
+                        old.avatarUrl == new.avatarUrl && old.displayName == new.displayName
+                    }
                     .catch { }
                     .collect { user ->
                         val updated = _uiState.value.contacts[user.uid]
