@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -46,8 +47,10 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -91,7 +94,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -184,22 +189,40 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Column(
+                    Row(
                         modifier = Modifier.clickable {
                             if (uiState.isGroupChat) onGroupSettingsClick()
                             else if (!uiState.isBroadcast) onProfileClick(viewModel.recipientId)
-                        }
+                        },
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = uiState.chatName ?: "Chat",
-                            style = MaterialTheme.typography.titleMedium
+                        UserAvatar(
+                            avatarUrl = uiState.avatarUrl,
+                            contentDescription = null,
+                            icon = if (uiState.isGroupChat) Icons.Default.Group else Icons.Default.Person,
+                            size = 36.dp,
+                            modifier = Modifier.size(36.dp)
                         )
-                        if (uiState.isBroadcast && uiState.broadcastRecipientCount > 0) {
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
                             Text(
-                                text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                text = uiState.chatName ?: "Chat",
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
+                            when {
+                                uiState.isRecipientOnline -> Text(
+                                    text = "Online",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                )
+                                uiState.isBroadcast && uiState.broadcastRecipientCount > 0 -> Text(
+                                    text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                )
+                            }
                         }
                     }
                 },
@@ -305,7 +328,18 @@ fun ChatScreen(
                                     .clickable {
                                         val idx = uiState.messages.indexOfFirst { it.id == message.id }
                                         if (idx >= 0) {
-                                            scope.launch { listState.animateScrollToItem(idx) }
+                                            scope.launch {
+                                                listState.scrollToItem(idx)
+                                                delay(16)
+                                                val viewportHeight = listState.layoutInfo.viewportSize.height
+                                                val itemInfo = listState.layoutInfo.visibleItemsInfo
+                                                    .firstOrNull { it.index == idx }
+                                                if (itemInfo != null && viewportHeight > 0) {
+                                                    listState.animateScrollBy(
+                                                        -(viewportHeight - itemInfo.size) / 2f
+                                                    )
+                                                }
+                                            }
                                         }
                                         viewModel.clearSearch()
                                     }

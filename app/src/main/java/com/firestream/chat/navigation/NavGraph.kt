@@ -21,6 +21,7 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
+import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 
 object Routes {
@@ -40,6 +41,7 @@ object Routes {
     const val GROUP_SETTINGS = "group_settings/{chatId}"
     const val CREATE_BROADCAST = "create_broadcast"
     const val CREATE_GROUP = "create_group"
+    const val SHARE_PICKER = "share_picker"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -58,7 +60,8 @@ object Routes {
 @Composable
 fun FireStreamNavGraph(
     initialChatId: String? = null,
-    initialSenderId: String? = null
+    initialSenderId: String? = null,
+    isShareIntent: Boolean = false
 ) {
     val navController = rememberNavController()
     val messageInfoHolder = androidx.compose.runtime.remember {
@@ -70,6 +73,7 @@ fun FireStreamNavGraph(
 
     val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
     val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
+    val pendingShare = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(isShareIntent) }
 
     NavHost(
         navController = navController,
@@ -125,13 +129,18 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(pendingChatId.value, pendingSenderId.value) {
-                val chatId = pendingChatId.value
-                val senderId = pendingSenderId.value
-                if (chatId != null && senderId != null) {
-                    pendingChatId.value = null
-                    pendingSenderId.value = null
-                    navController.navigate(Routes.chat(chatId, senderId))
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value) {
+                if (pendingShare.value) {
+                    pendingShare.value = false
+                    navController.navigate(Routes.SHARE_PICKER)
+                } else {
+                    val chatId = pendingChatId.value
+                    val senderId = pendingSenderId.value
+                    if (chatId != null && senderId != null) {
+                        pendingChatId.value = null
+                        pendingSenderId.value = null
+                        navController.navigate(Routes.chat(chatId, senderId))
+                    }
                 }
             }
             ChatListScreen(
@@ -263,6 +272,24 @@ fun FireStreamNavGraph(
                 onBroadcastCreated = { chatId ->
                     navController.navigate(Routes.chat(chatId, "")) {
                         popUpTo(Routes.CHAT_LIST)
+                    }
+                },
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        // Share target
+        composable(Routes.SHARE_PICKER) {
+            SharePickerScreen(
+                onDone = { chatId, recipientId ->
+                    if (chatId != null) {
+                        navController.navigate(Routes.chat(chatId, recipientId ?: "")) {
+                            popUpTo(Routes.CHAT_LIST)
+                        }
+                    } else {
+                        navController.navigate(Routes.CHAT_LIST) {
+                            popUpTo(Routes.CHAT_LIST) { inclusive = true }
+                        }
                     }
                 },
                 onBackClick = { navController.popBackStack() }

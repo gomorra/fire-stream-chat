@@ -37,10 +37,15 @@ exports.sendPushNotification = onDocumentCreated(
                 return null;
             }
 
-            // 4. Send push notification to each recipient
-            const mentionsStr = Array.isArray(mentions) ? mentions.join(",") : "";
+            // 4. Increment per-user unread counts + send push notifications concurrently
+            const unreadUpdates = {};
+            recipients.forEach(recipientId => {
+                unreadUpdates[`unreadCounts.${recipientId}`] = admin.firestore.FieldValue.increment(1);
+            });
+            const unreadPromise = admin.firestore().collection("chats").doc(chatId).update(unreadUpdates);
 
-            await Promise.all(recipients.map(async (recipientId) => {
+            const mentionsStr = Array.isArray(mentions) ? mentions.join(",") : "";
+            const pushPromise = Promise.all(recipients.map(async (recipientId) => {
                 try {
                     const receiverSnap = await admin.firestore().collection("users").doc(recipientId).get();
                     if (!receiverSnap.exists) {
@@ -79,6 +84,7 @@ exports.sendPushNotification = onDocumentCreated(
                 }
             }));
 
+            await Promise.all([unreadPromise, pushPromise]);
             return null;
         } catch (error) {
             logger.error("Error sending push notification:", error);

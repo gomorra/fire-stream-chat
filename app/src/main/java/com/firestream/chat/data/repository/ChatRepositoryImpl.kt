@@ -46,7 +46,7 @@ class ChatRepositoryImpl @Inject constructor(
                     return@addSnapshotListener
                 }
                 val chats = snapshot?.documents?.mapNotNull { doc ->
-                    doc.data?.let { mapToChat(doc.id, it) }
+                    doc.data?.let { mapToChat(doc.id, it, uid) }
                 } ?: emptyList()
                 trySend(chats)
             }
@@ -80,9 +80,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun getChatById(chatId: String): Result<Chat> {
         return try {
+            val uid = authSource.currentUserId ?: ""
             val doc = firestore.collection("chats").document(chatId).get().await()
             if (doc.exists()) {
-                Result.success(mapToChat(doc.id, doc.data!!))
+                Result.success(mapToChat(doc.id, doc.data!!, uid))
             } else {
                 Result.failure(Exception("Chat not found"))
             }
@@ -103,7 +104,7 @@ class ChatRepositoryImpl @Inject constructor(
 
             if (!existing.isEmpty) {
                 val doc = existing.documents.first()
-                Result.success(mapToChat(doc.id, doc.data!!))
+                Result.success(mapToChat(doc.id, doc.data!!, uid))
             } else {
                 val chatData = hashMapOf(
                     "type" to ChatType.INDIVIDUAL.name,
@@ -340,7 +341,7 @@ class ChatRepositoryImpl @Inject constructor(
 
             val chatDoc = firestore.collection("chats").document(chatId).get().await()
             if (!chatDoc.exists()) throw Exception("Group no longer exists")
-            val chat = mapToChat(chatId, chatDoc.data!!)
+            val chat = mapToChat(chatId, chatDoc.data!!, uid)
 
             if (uid in chat.participants) throw Exception("Already a member of this group")
 
@@ -403,7 +404,7 @@ class ChatRepositoryImpl @Inject constructor(
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
             val chatDoc = firestore.collection("chats").document(chatId).get().await()
             if (!chatDoc.exists()) throw Exception("Chat not found")
-            val chat = mapToChat(chatId, chatDoc.data!!)
+            val chat = mapToChat(chatId, chatDoc.data!!, uid)
 
             val isAdmin = uid in chat.admins
             val otherParticipants = chat.participants.filter { it != uid }
@@ -517,6 +518,19 @@ class ChatRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun resetUnreadCount(chatId: String): Result<Unit> {
+        return try {
+            val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            chatDao.updateUnreadCount(chatId, 0)
+            firestore.collection("chats").document(chatId)
+                .update("unreadCounts.$uid", 0)
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private fun mapToGroupPermissions(raw: Any?): GroupPermissions {
         val data = raw as? Map<*, *> ?: return GroupPermissions()
         return GroupPermissions(
@@ -528,7 +542,7 @@ class ChatRepositoryImpl @Inject constructor(
         )
     }
 
-    private fun mapToChat(id: String, data: Map<String, Any?>): Chat {
+    private fun mapToChat(id: String, data: Map<String, Any?>, currentUserId: String): Chat {
         val lastMessageContent = data["lastMessageContent"] as? String
         val lastMessageTimestamp = data["lastMessageTimestamp"] as? Long
         val lastMessageSenderId = data["lastMessageSenderId"] as? String
@@ -542,6 +556,9 @@ class ChatRepositoryImpl @Inject constructor(
                 timestamp = lastMessageTimestamp
             )
         } else null
+
+        val perUserUnread = (data["unreadCounts"] as? Map<*, *>)
+            ?.get(currentUserId) as? Long
 
         val typingUserIds = (data["typingUsers"] as? Map<*, *>)
             ?.entries
@@ -563,7 +580,7 @@ class ChatRepositoryImpl @Inject constructor(
             avatarUrl = data["avatarUrl"] as? String,
             participants = (data["participants"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             lastMessage = lastMessage,
-            unreadCount = (data["unreadCount"] as? Long)?.toInt() ?: 0,
+            unreadCount = perUserUnread?.toInt() ?: (data["unreadCount"] as? Long)?.toInt() ?: 0,
             createdAt = data["createdAt"] as? Long ?: 0L,
             createdBy = data["createdBy"] as? String,
             admins = (data["admins"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),

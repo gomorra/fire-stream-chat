@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fire Stream Chat</string>
+    <string name="app_name">Fire Stream</string>
     <string name="login_title">Welcome to Fire Stream</string>
     <string name="login_subtitle">Enter your phone number to get started</string>
     <string name="phone_number_hint">Phone number</string>
@@ -26,4 +26,8 @@
     <string name="typing">typing…</string>
     <string name="no_chats_yet">No conversations yet</string>
     <string name="start_chatting">Start a new chat to begin messaging</string>
+    <string name="share_to">Share to…</string>
+    <string name="share_recipients_selected">%d chat(s) selected</string>
+    <string name="share_sending">Sending…</string>
+    <string name="share_no_chats">No chats yet</string>
 </resources>

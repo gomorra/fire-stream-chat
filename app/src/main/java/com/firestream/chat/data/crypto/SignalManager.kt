@@ -43,6 +43,9 @@ class SignalManager @Inject constructor(
 ) {
     private val initMutex = Mutex()
     private val deviceId = 1
+    private val preKeyId = 1
+    private val signedPreKeyId = 1
+    private val kyberPreKeyId = 1
 
     /**
      * Generates and publishes keys if this device has never been registered.
@@ -103,8 +106,14 @@ class SignalManager @Inject constructor(
             val bytes = Base64.decode(message.ciphertext, Base64.NO_WRAP)
 
             val plaintext = when (message.signalType) {
-                CiphertextMessage.PREKEY_TYPE ->
-                    cipher.decrypt(PreKeySignalMessage(bytes))
+                CiphertextMessage.PREKEY_TYPE -> {
+                    val result = cipher.decrypt(PreKeySignalMessage(bytes))
+                    // The Signal library consumed our one-time pre-key during decryption.
+                    // Replenish it so the next new contact can establish a fresh session.
+                    // Best-effort: a replenishment failure must not mask the successful decryption.
+                    runCatching { replenishPreKeyIfNeeded() }
+                    result
+                }
                 CiphertextMessage.WHISPER_TYPE ->
                     cipher.decrypt(SignalMessage(bytes))
                 else -> error("Unknown Signal message type: ${message.signalType}")
@@ -114,6 +123,32 @@ class SignalManager @Inject constructor(
 
     // ── Private ───────────────────────────────────────────────────────────────
 
+    /**
+     * Generates a fresh one-time pre-key and publishes the updated bundle to Firestore.
+     * Called after a [PreKeySignalMessage] is successfully decrypted to ensure the next
+     * new contact always finds a valid pre-key in our published bundle.
+     */
+    private suspend fun replenishPreKeyIfNeeded() {
+        if (store.containsPreKey(preKeyId)) return  // still available, nothing to do
+        val uid = authSource.currentUserId ?: return
+        val identityKeyPair = store.getIdentityKeyPair()
+        val newPreKeyPair = ECKeyPair.generate()
+        val newPreKeyRecord = PreKeyRecord(preKeyId, newPreKeyPair)
+        val signedPreKeyRecord = store.loadSignedPreKey(signedPreKeyId)
+        val kyberPreKeyRecord = store.loadKyberPreKey(kyberPreKeyId)
+        // Publish to Firestore first. If this throws, the local store is not updated, so
+        // containsPreKey() stays false and the next PREKEY decryption will retry.
+        keySource.publishKeys(
+            uid = uid,
+            identityKey = identityKeyPair.publicKey,
+            registrationId = store.getLocalRegistrationId(),
+            signedPreKey = signedPreKeyRecord,
+            preKey = newPreKeyRecord,
+            kyberPreKey = kyberPreKeyRecord
+        )
+        store.storePreKey(preKeyId, newPreKeyRecord)
+    }
+
     private suspend fun generateAndPublishKeys() {
         val uid = authSource.currentUserId
             ?: error("Cannot initialize Signal: user not authenticated")
@@ -121,8 +156,7 @@ class SignalManager @Inject constructor(
         val identityKeyPair = IdentityKeyPair.generate()
         val registrationId = KeyHelper.generateRegistrationId(false)
 
-        // Signed pre-key (ID = 1)
-        val signedPreKeyId = 1
+        // Signed pre-key
         val signedPreKeyPair = ECKeyPair.generate()
         val signedPreKeySignature = identityKeyPair.privateKey
             .calculateSignature(signedPreKeyPair.publicKey.serialize())
@@ -133,13 +167,11 @@ class SignalManager @Inject constructor(
             signedPreKeySignature
         )
 
-        // One-time pre-key (ID = 1; we publish one for now)
-        val preKeyId = 1
+        // One-time pre-key
         val preKeyPair = ECKeyPair.generate()
         val preKeyRecord = PreKeyRecord(preKeyId, preKeyPair)
 
-        // Kyber last-resort pre-key (ID = 1)
-        val kyberPreKeyId = 1
+        // Kyber last-resort pre-key
         val kyberKeyPair = KEMKeyPair.generate(KEMKeyType.KYBER_1024)
         val kyberSignature = identityKeyPair.privateKey
             .calculateSignature(kyberKeyPair.publicKey.serialize())

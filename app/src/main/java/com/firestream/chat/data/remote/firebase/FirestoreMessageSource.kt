@@ -78,7 +78,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaUrl: String? = null,
         isForwarded: Boolean = false,
         duration: Int? = null,
-        mentions: List<String> = emptyList()
+        mentions: List<String> = emptyList(),
+        plainContent: String = ""
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -105,7 +106,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
-            else -> "New message"
+            else -> plainContent.ifBlank { "Message" }
         }
         firestore.collection("chats").document(chatId).update(
             mapOf(

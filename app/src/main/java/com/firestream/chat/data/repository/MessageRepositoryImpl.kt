@@ -209,7 +209,8 @@ class MessageRepositoryImpl @Inject constructor(
                     type = MessageType.TEXT,
                     replyToId = replyToId,
                     timestamp = timestamp,
-                    mentions = mentions
+                    mentions = mentions,
+                    plainContent = content
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -383,7 +384,8 @@ class MessageRepositoryImpl @Inject constructor(
                     replyToId = null,
                     timestamp = timestamp,
                     mediaUrl = message.mediaUrl,
-                    isForwarded = true
+                    isForwarded = true,
+                    plainContent = message.content
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -479,7 +481,10 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun searchMessages(query: String): List<Message> {
         return try {
-            messageDao.searchMessages(query).map { it.toDomain() }
+            val regex = wordBoundaryRegex(query)
+            messageDao.searchMessages(query)
+                .filter { regex.containsMatchIn(it.content) }
+                .map { it.toDomain() }
         } catch (_: Exception) {
             emptyList()
         }
@@ -487,11 +492,17 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> {
         return try {
-            messageDao.searchMessagesInChat(chatId, query).map { it.toDomain() }
+            val regex = wordBoundaryRegex(query)
+            messageDao.searchMessagesInChat(chatId, query)
+                .filter { regex.containsMatchIn(it.content) }
+                .map { it.toDomain() }
         } catch (_: Exception) {
             emptyList()
         }
     }
+
+    private fun wordBoundaryRegex(query: String) =
+        Regex("\\b${Regex.escape(query)}\\b", RegexOption.IGNORE_CASE)
 
     override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {
         return try {
@@ -713,7 +724,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 signalType = encrypted.signalType,
                                 type = MessageType.TEXT,
                                 replyToId = null,
-                                timestamp = timestamp
+                                timestamp = timestamp,
+                                plainContent = content
                             )
                         } catch (_: Exception) {
                             // Best-effort delivery to each recipient

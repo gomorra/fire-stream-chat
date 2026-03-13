@@ -37,4 +37,6 @@ interface ChatRepository {
     suspend fun transferOwnership(chatId: String, newOwnerId: String): Result<Unit>
     // Phase 5.5: broadcast lists
     suspend fun createBroadcastList(name: String, recipientIds: List<String>): Result<Chat>
+    // Unread count
+    suspend fun resetUnreadCount(chatId: String): Result<Unit>
 }

@@ -84,9 +84,14 @@ data class ChatUiState(
     val participantNameMap: Map<String, String> = emptyMap(),
     // Phase 5.5: broadcast
     val isBroadcast: Boolean = false,
-    val broadcastRecipientIds: List<String> = emptyList()
+    val broadcastRecipientIds: List<String> = emptyList(),
+    // Recipient profile (individual chats only)
+    val recipientAvatarUrl: String? = null,
+    val isRecipientOnline: Boolean = false,
+    val chatAvatarUrl: String? = null
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
+    val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
 }
 
 @HiltViewModel
@@ -139,6 +144,7 @@ class ChatViewModel @Inject constructor(
         loadAvailableChats()
         observeReadReceiptsAllowed()
         loadChatInfo()
+        if (recipientId.isNotBlank()) observeRecipient()
     }
 
     private fun loadChatInfo() {
@@ -152,6 +158,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         isGroupChat = isGroup,
                         chatName = chat.name,
+                        chatAvatarUrl = chat.avatarUrl,
                         canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
                         isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
                         isBroadcast = isBroadcast,
@@ -175,9 +182,26 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    private fun observeRecipient() {
+        viewModelScope.launch {
+            userRepository.observeUser(recipientId)
+                .catch { /* non-fatal */ }
+                .collect { user ->
+                    _uiState.value = _uiState.value.copy(
+                        chatName = user.displayName.takeIf { it.isNotBlank() } ?: _uiState.value.chatName,
+                        recipientAvatarUrl = user.avatarUrl,
+                        isRecipientOnline = user.isOnline
+                    )
+                    // Reuse this single listener for read receipts instead of a duplicate observeUser call
+                    updateReadReceiptsAllowed(recipientEnabled = user.readReceiptsEnabled)
+                }
+        }
+    }
+
     /**
      * Observe both the local user's read receipts preference AND the recipient's
      * Firestore setting. Read receipts are only allowed when BOTH are enabled.
+     * The recipient's setting is handled by observeRecipient() to avoid a duplicate listener.
      */
     private fun observeReadReceiptsAllowed() {
         // Local user's setting
@@ -186,14 +210,8 @@ class ChatViewModel @Inject constructor(
                 updateReadReceiptsAllowed(localEnabled = localEnabled)
             }
         }
-        // Recipient's setting from Firestore
-        viewModelScope.launch {
-            userRepository.observeUser(recipientId)
-                .catch { /* ignore — defaults to true */ }
-                .collect { recipientUser ->
-                    updateReadReceiptsAllowed(recipientEnabled = recipientUser.readReceiptsEnabled)
-                }
-        }
+        // Note: recipient's readReceiptsEnabled is handled inside observeRecipient() to avoid
+        // opening a second Firestore listener on the same user document.
     }
 
     private var localReadReceipts: Boolean = true
@@ -210,8 +228,10 @@ class ChatViewModel @Inject constructor(
     }
 
     fun setScreenVisible(visible: Boolean) {
+        val wasVisible = screenVisible
         screenVisible = visible
-        if (visible) {
+        if (visible && !wasVisible) {
+            viewModelScope.launch { chatRepository.resetUnreadCount(chatId) }
             // When screen becomes visible, check for unread messages
             val messages = _uiState.value.messages
             if (messages.isNotEmpty()) {

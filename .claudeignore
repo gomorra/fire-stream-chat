@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+app/build/
+.gradle/
+
+# Logs
+*.log
+build_log*.txt
+
+# Node / Firebase Functions
+functions/node_modules/
+functions/package-lock.json
+
+# Gradle wrapper binary
+gradle/wrapper/gradle-wrapper.jar
+
+# Sensitive / generated (already gitignored, belt-and-suspenders)
+google-services.json
+*.jks
+*.keystore
+
+# Worktrees
+.claude/worktrees/
+
+# Generated app/build output files
+app/src/main/assets/

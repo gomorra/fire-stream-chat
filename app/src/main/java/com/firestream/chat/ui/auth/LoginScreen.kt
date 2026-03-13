@@ -64,8 +64,8 @@ fun LoginScreen(
         }
     }
 
-    // Show nothing while the auth check is in progress to prevent login screen flash
-    if (uiState.isCheckingAuth) return
+    // Show nothing while the auth check is in progress, or while already logged in (navigation pending)
+    if (uiState.isCheckingAuth || uiState.isLoggedIn) return
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {

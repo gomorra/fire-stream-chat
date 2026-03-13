@@ -1,6 +1,7 @@
 package com.firestream.chat
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -12,11 +13,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.share.SharedContentHolder
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.navigation.FireStreamNavGraph
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -25,12 +30,22 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var preferencesDataStore: PreferencesDataStore
 
+    @Inject
+    lateinit var userRepository: UserRepository
+
+    @Inject
+    lateinit var sharedContentHolder: SharedContentHolder
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
         val initialChatId = intent.getStringExtra("chatId")
         val initialSenderId = intent.getStringExtra("senderId")
+        val isShareIntent = intent?.action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)
+        if (isShareIntent) {
+            sharedContentHolder.pendingIntent = intent
+        }
         setContent {
             val appTheme by preferencesDataStore.appThemeFlow.collectAsState(initial = AppTheme.SYSTEM)
             val useDark = when (appTheme) {
@@ -41,10 +56,21 @@ class MainActivity : ComponentActivity() {
             FireStreamTheme(darkTheme = useDark) {
                 FireStreamNavGraph(
                     initialChatId = initialChatId,
-                    initialSenderId = initialSenderId
+                    initialSenderId = initialSenderId,
+                    isShareIntent = isShareIntent
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch { userRepository.setOnlineStatus(true) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        lifecycleScope.launch { userRepository.setOnlineStatus(false) }
     }
 
     private fun requestNotificationPermissionIfNeeded() {
