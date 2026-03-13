@@ -4,6 +4,64 @@ const { logger } = require("firebase-functions");
 
 admin.initializeApp();
 
+exports.sendCallPushNotification = onDocumentCreated(
+    "calls/{callId}",
+    async (event) => {
+        const callData = event.data.data();
+        const callId = event.params.callId;
+
+        if (callData.status !== "ringing") return null;
+
+        const callerId = callData.callerId;
+        const calleeId = callData.calleeId;
+
+        logger.info(`Incoming call ${callId} from ${callerId} to ${calleeId}`);
+
+        try {
+            const [callerSnap, calleeSnap] = await Promise.all([
+                admin.firestore().collection("users").doc(callerId).get(),
+                admin.firestore().collection("users").doc(calleeId).get()
+            ]);
+
+            if (!calleeSnap.exists) {
+                logger.error(`Callee ${calleeId} not found`);
+                return null;
+            }
+
+            const fcmToken = calleeSnap.data().fcmToken;
+            if (!fcmToken) {
+                logger.info(`Callee ${calleeId} has no FCM token`);
+                return null;
+            }
+
+            const callerData = callerSnap.exists ? callerSnap.data() : {};
+            const callerName = callerData.displayName || "Unknown";
+            const callerAvatarUrl = callerData.avatarUrl || "";
+
+            const payload = {
+                token: fcmToken,
+                data: {
+                    type: "incoming_call",
+                    callId: callId,
+                    callerId: callerId,
+                    callerName: callerName,
+                    callerAvatarUrl: callerAvatarUrl
+                },
+                android: {
+                    priority: "high"
+                }
+            };
+
+            const response = await admin.messaging().send(payload);
+            logger.info(`Call push sent to ${calleeId}:`, response);
+            return null;
+        } catch (error) {
+            logger.error("Error sending call push notification:", error);
+            return null;
+        }
+    }
+);
+
 exports.sendPushNotification = onDocumentCreated(
     "chats/{chatId}/messages/{messageId}",
     async (event) => {
