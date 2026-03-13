@@ -41,6 +41,7 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CALLEE_ID = "callee_id"
         const val EXTRA_CALLEE_NAME = "callee_name"
         const val EXTRA_CALLEE_AVATAR_URL = "callee_avatar_url"
+        const val EXTRA_CHAT_ID = "chat_id"
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
     }
@@ -109,13 +110,14 @@ class CallActivity : ComponentActivity() {
 
     private fun startOutgoingCall() {
         val calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
         val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
         val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
 
         activityScope.launch {
             callRepository.createCall(calleeId).onSuccess { callId ->
                 CallService.startOutgoing(
-                    this@CallActivity, callId, calleeId, calleeName, calleeAvatarUrl
+                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl
                 )
             }
         }

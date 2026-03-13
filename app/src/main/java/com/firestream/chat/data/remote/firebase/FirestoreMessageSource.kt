@@ -296,6 +296,38 @@ class FirestoreMessageSource @Inject constructor(
         docRef.update("pollData.options", updatedOptions).await()
     }
 
+    suspend fun sendCallMessage(
+        chatId: String,
+        senderId: String,
+        endReason: String,
+        durationSeconds: Int,
+        timestamp: Long
+    ): String {
+        val data = hashMapOf(
+            "senderId" to senderId,
+            "content" to endReason,
+            "type" to MessageType.CALL.name,
+            "status" to MessageStatus.SENT.name,
+            "timestamp" to timestamp,
+            "duration" to durationSeconds,
+            "reactions" to emptyMap<String, String>(),
+            "isForwarded" to false
+        )
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .add(data)
+            .await()
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to "📞 Voice call",
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId
+            )
+        ).await()
+        return docRef.id
+    }
+
     suspend fun closePoll(chatId: String, messageId: String) {
         firestore
             .collection("chats").document(chatId)

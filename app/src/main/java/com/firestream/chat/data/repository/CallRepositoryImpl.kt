@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirestoreCallSource
+import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
@@ -13,7 +14,8 @@ import javax.inject.Singleton
 @Singleton
 class CallRepositoryImpl @Inject constructor(
     private val callSource: FirestoreCallSource,
-    private val authSource: FirebaseAuthSource
+    private val authSource: FirebaseAuthSource,
+    private val messageSource: FirestoreMessageSource
 ) : CallRepository {
 
     override suspend fun createCall(calleeId: String): Result<String> {
@@ -99,6 +101,17 @@ class CallRepositoryImpl @Inject constructor(
             val data = callSource.getCallById(callId)
                 ?: return Result.failure(Exception("Call not found"))
             Result.success(data)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int): Result<Unit> {
+        return try {
+            val callerId = authSource.currentUserId
+                ?: return Result.failure(Exception("Not authenticated"))
+            messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, System.currentTimeMillis())
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

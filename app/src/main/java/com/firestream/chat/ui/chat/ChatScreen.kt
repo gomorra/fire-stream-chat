@@ -242,6 +242,7 @@ fun ChatScreen(
                                 putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
                                 putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
                                 putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
                             }
                             context.startActivity(callIntent)
                         }) {
@@ -454,7 +455,19 @@ fun ChatScreen(
                                                 onMessageInfoClick(message, chatParticipants)
                                             }
                                         } else null,
-                                        onImageClick = { url -> fullscreenImageUrl = url }
+                                        onImageClick = { url -> fullscreenImageUrl = url },
+                                        onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
+                                            {
+                                                val callIntent = Intent(context, CallActivity::class.java).apply {
+                                                    putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
+                                                    putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                                    putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
+                                                    putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                                    putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
+                                                }
+                                                context.startActivity(callIntent)
+                                            }
+                                        } else null
                                     )
                                 }
                             }

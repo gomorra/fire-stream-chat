@@ -51,6 +51,7 @@ class CallService : Service() {
         const val ACTION_TOGGLE_SPEAKER = "com.firestream.chat.call.TOGGLE_SPEAKER"
 
         const val EXTRA_CALL_ID = "call_id"
+        const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_REMOTE_USER_ID = "remote_user_id"
         const val EXTRA_REMOTE_NAME = "remote_name"
         const val EXTRA_REMOTE_AVATAR_URL = "remote_avatar_url"
@@ -61,6 +62,7 @@ class CallService : Service() {
         fun startOutgoing(
             context: Context,
             callId: String,
+            chatId: String,
             remoteUserId: String,
             remoteName: String,
             remoteAvatarUrl: String?
@@ -68,6 +70,7 @@ class CallService : Service() {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START_OUTGOING
                 putExtra(EXTRA_CALL_ID, callId)
+                putExtra(EXTRA_CHAT_ID, chatId)
                 putExtra(EXTRA_REMOTE_USER_ID, remoteUserId)
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_REMOTE_AVATAR_URL, remoteAvatarUrl)
@@ -111,10 +114,13 @@ class CallService : Service() {
     private var notificationManager: CallNotificationManager? = null
 
     private var currentCallId: String? = null
+    private var currentChatId: String? = null
     private var remoteUserId: String? = null
     private var remoteName: String? = null
     private var remoteAvatarUrl: String? = null
     private var isCaller: Boolean = false
+    private var callConnectedAt: Long? = null
+    private var callMessageWritten: Boolean = false
 
     private var ringTimeoutJob: Job? = null
     private var signalingJob: Job? = null
@@ -142,10 +148,11 @@ class CallService : Service() {
         when (intent?.action) {
             ACTION_START_OUTGOING -> {
                 val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopAndReturn()
+                val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return stopAndReturn()
                 val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopAndReturn()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
-                startOutgoingCall(callId, userId, name, avatar)
+                startOutgoingCall(callId, chatId, userId, name, avatar)
             }
             ACTION_START_INCOMING -> {
                 val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopAndReturn()
@@ -167,12 +174,14 @@ class CallService : Service() {
     // Outgoing Call Flow
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun startOutgoingCall(callId: String, userId: String, name: String, avatar: String?) {
+    private fun startOutgoingCall(callId: String, chatId: String, userId: String, name: String, avatar: String?) {
         currentCallId = callId
+        currentChatId = chatId
         remoteUserId = userId
         remoteName = name
         remoteAvatarUrl = avatar
         isCaller = true
+        callMessageWritten = false
 
         callStateHolder.updateState(
             CallState.OutgoingRinging(callId, userId, name, avatar)
@@ -347,11 +356,13 @@ class CallService : Service() {
                         }
                         "declined" -> {
                             if (isCaller) {
+                                writeCallMessageIfCaller(EndReason.DECLINED)
                                 callStateHolder.updateState(CallState.Ended(callId, EndReason.DECLINED))
                                 cleanup()
                             }
                         }
                         "ended" -> {
+                            if (isCaller) writeCallMessageIfCaller(EndReason.REMOTE_HANGUP)
                             callStateHolder.updateState(CallState.Ended(callId, EndReason.REMOTE_HANGUP))
                             cleanup()
                         }
@@ -439,6 +450,7 @@ class CallService : Service() {
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> {
                     ringTimeoutJob?.cancel()
+                    if (callConnectedAt == null) callConnectedAt = System.currentTimeMillis()
                     requestAudioFocus()
                     acquireProximityWakeLock()
                     callStateHolder.updateState(
@@ -483,6 +495,7 @@ class CallService : Service() {
         serviceScope.launch {
             callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
         }
+        writeCallMessageIfCaller(EndReason.HANGUP)
         callStateHolder.updateState(CallState.Ended(callId, EndReason.HANGUP))
         cleanup()
     }
@@ -507,6 +520,7 @@ class CallService : Service() {
             delay(RING_TIMEOUT_MS)
             val callId = currentCallId ?: return@launch
             callRepository.endCall(callId, EndReason.TIMEOUT.name.lowercase())
+            writeCallMessageIfCaller(EndReason.TIMEOUT)
             callStateHolder.updateState(CallState.Ended(callId, EndReason.TIMEOUT))
             cleanup()
         }
@@ -569,9 +583,23 @@ class CallService : Service() {
             serviceScope.launch {
                 callRepository.endCall(callId, reason.name.lowercase())
             }
+            writeCallMessageIfCaller(reason)
             callStateHolder.updateState(CallState.Ended(callId, reason))
         }
         cleanup()
+    }
+
+    private fun writeCallMessageIfCaller(reason: EndReason) {
+        if (!isCaller) return
+        val chatId = currentChatId ?: return
+        if (callMessageWritten) return
+        callMessageWritten = true
+        val durationSeconds = callConnectedAt?.let {
+            ((System.currentTimeMillis() - it) / 1000).toInt()
+        } ?: 0
+        serviceScope.launch {
+            callRepository.logCallMessage(chatId, reason.name.lowercase(), durationSeconds)
+        }
     }
 
     private fun cleanup() {
@@ -593,9 +621,12 @@ class CallService : Service() {
 
         processedIceCandidates.clear()
         currentCallId = null
+        currentChatId = null
         remoteUserId = null
         remoteName = null
         remoteAvatarUrl = null
+        callConnectedAt = null
+        callMessageWritten = false
 
         notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_INCOMING)
 

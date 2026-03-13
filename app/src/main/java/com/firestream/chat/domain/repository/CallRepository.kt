@@ -16,4 +16,5 @@ interface CallRepository {
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>
     suspend fun getCallById(callId: String): Result<CallSignalingData>
+    suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int): Result<Unit>
 }

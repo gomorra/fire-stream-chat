@@ -42,7 +42,8 @@ class ChatRepositoryImpl @Inject constructor(
             .whereArrayContains("participants", uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    close(error)
+                    // Don't close the flow on transient errors — just skip this emission.
+                    // Closing would propagate an exception that kills getChats() entirely.
                     return@addSnapshotListener
                 }
                 val chats = snapshot?.documents?.mapNotNull { doc ->
@@ -54,22 +55,29 @@ class ChatRepositoryImpl @Inject constructor(
     }
 
     override fun getChats(): Flow<List<Chat>> = channelFlow {
-        // Sync remote chats to Room, preserving local-only fields
+        // Sync remote chats to Room, preserving local-only fields.
+        // Errors here must NOT propagate to the channelFlow scope — that would cancel the
+        // Room collection and leave the UI with a permanently empty chat list.
         launch {
-            observeRemoteChats().collectLatest { chats ->
-                val existingMap = chatDao.getChatsByIds(chats.map { it.id }).associateBy { it.id }
-                val entities = chats.map { chat ->
-                    val existing = existingMap[chat.id]
-                    val entity = ChatEntity.fromDomain(chat)
-                    if (existing != null) {
-                        entity.copy(
-                            isPinned = existing.isPinned,
-                            isArchived = existing.isArchived,
-                            muteUntil = existing.muteUntil
-                        )
-                    } else entity
+            try {
+                observeRemoteChats().collectLatest { chats ->
+                    val existingMap = chatDao.getChatsByIds(chats.map { it.id }).associateBy { it.id }
+                    val entities = chats.map { chat ->
+                        val existing = existingMap[chat.id]
+                        val entity = ChatEntity.fromDomain(chat)
+                        if (existing != null) {
+                            entity.copy(
+                                isPinned = existing.isPinned,
+                                isArchived = existing.isArchived,
+                                muteUntil = existing.muteUntil
+                            )
+                        } else entity
+                    }
+                    chatDao.insertChats(entities)
                 }
-                chatDao.insertChats(entities)
+            } catch (_: Exception) {
+                // Sync failed (auth not ready, network error, etc.).
+                // Room data is still served via getAllChats() below.
             }
         }
         // Emit from Room (which has local fields)

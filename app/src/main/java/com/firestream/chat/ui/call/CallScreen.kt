@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import coil.compose.AsyncImage
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -69,19 +70,23 @@ internal fun CallScreen(
         when (val state = callState) {
             is CallState.IncomingRinging -> IncomingRingingContent(
                 callerName = state.callerName,
+                callerAvatarUrl = state.callerAvatarUrl,
                 onAnswer = viewModel::answer,
                 onDecline = viewModel::decline
             )
             is CallState.OutgoingRinging -> OutgoingRingingContent(
                 calleeName = state.calleeName,
+                calleeAvatarUrl = state.calleeAvatarUrl,
                 onCancel = viewModel::hangup
             )
             is CallState.Connecting -> ConnectingContent(
                 remoteName = state.remoteName,
+                remoteAvatarUrl = state.remoteAvatarUrl,
                 onHangup = viewModel::hangup
             )
             is CallState.Connected -> ConnectedContent(
                 remoteName = state.remoteName,
+                remoteAvatarUrl = state.remoteAvatarUrl,
                 startTime = state.startTime,
                 isMuted = uiControls.isMuted,
                 isSpeakerOn = uiControls.isSpeakerOn,
@@ -98,6 +103,7 @@ internal fun CallScreen(
 @Composable
 private fun IncomingRingingContent(
     callerName: String,
+    callerAvatarUrl: String?,
     onAnswer: () -> Unit,
     onDecline: () -> Unit
 ) {
@@ -115,7 +121,7 @@ private fun IncomingRingingContent(
         modifier = Modifier.padding(32.dp)
     ) {
         Box(modifier = Modifier.alpha(alpha)) {
-            CallUserAvatar(callerName)
+            CallUserAvatar(callerName, callerAvatarUrl)
         }
         Spacer(Modifier.height(24.dp))
         Text(callerName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -144,6 +150,7 @@ private fun IncomingRingingContent(
 @Composable
 private fun OutgoingRingingContent(
     calleeName: String,
+    calleeAvatarUrl: String?,
     onCancel: () -> Unit
 ) {
     Column(
@@ -151,7 +158,7 @@ private fun OutgoingRingingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        CallUserAvatar(calleeName)
+        CallUserAvatar(calleeName, calleeAvatarUrl)
         Spacer(Modifier.height(24.dp))
         Text(calleeName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -170,6 +177,7 @@ private fun OutgoingRingingContent(
 @Composable
 private fun ConnectingContent(
     remoteName: String,
+    remoteAvatarUrl: String?,
     onHangup: () -> Unit
 ) {
     Column(
@@ -177,6 +185,8 @@ private fun ConnectingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
+        CallUserAvatar(remoteName, remoteAvatarUrl)
+        Spacer(Modifier.height(24.dp))
         Text(remoteName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(16.dp))
         CircularProgressIndicator()
@@ -196,6 +206,7 @@ private fun ConnectingContent(
 @Composable
 private fun ConnectedContent(
     remoteName: String,
+    remoteAvatarUrl: String?,
     startTime: Long,
     isMuted: Boolean,
     isSpeakerOn: Boolean,
@@ -216,7 +227,7 @@ private fun ConnectedContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        CallUserAvatar(remoteName)
+        CallUserAvatar(remoteName, remoteAvatarUrl)
         Spacer(Modifier.height(24.dp))
         Text(remoteName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -264,7 +275,7 @@ private fun EndedContent() {
 }
 
 @Composable
-private fun CallUserAvatar(name: String) {
+private fun CallUserAvatar(name: String, avatarUrl: String?) {
     Box(
         modifier = Modifier
             .size(100.dp)
@@ -272,12 +283,20 @@ private fun CallUserAvatar(name: String) {
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-            fontSize = 40.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onPrimaryContainer
-        )
+        if (avatarUrl != null) {
+            AsyncImage(
+                model = avatarUrl,
+                contentDescription = name,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            Text(
+                text = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+                fontSize = 40.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+            )
+        }
     }
 }
 

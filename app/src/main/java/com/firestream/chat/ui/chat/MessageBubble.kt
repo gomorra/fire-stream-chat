@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -86,7 +89,8 @@ internal fun MessageBubble(
     onForwardClick: () -> Unit,
     onStarClick: () -> Unit = {},
     onInfoClick: (() -> Unit)?,
-    onImageClick: (String) -> Unit = {}
+    onImageClick: (String) -> Unit = {},
+    onCallClick: (() -> Unit)? = null
 ) {
     val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
@@ -147,7 +151,7 @@ internal fun MessageBubble(
                         )
                     )
                     .combinedClickable(
-                        onClick = {},
+                        onClick = { if (message.type == MessageType.CALL) onCallClick?.invoke() },
                         onLongClick = { showMenu = true }
                     )
                     .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -252,6 +256,56 @@ internal fun MessageBubble(
                                     color = textColor,
                                     style = MaterialTheme.typography.bodyMedium
                                 )
+                            }
+                        }
+                        MessageType.CALL -> {
+                            val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
+                            val isMissed = !isOwnMessage && endReason == "timeout"
+                            val isDeclined = !isOwnMessage && endReason == "declined"
+                            val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
+                            val callIcon = when {
+                                isMissed || isDeclined -> Icons.Default.CallMissed
+                                else -> Icons.Default.Call
+                            }
+                            val callLabel = when {
+                                isOwnMessage && endReason == "timeout" -> "No answer"
+                                isOwnMessage && endReason == "declined" -> "Declined"
+                                isOwnMessage -> "Outgoing call"
+                                isMissed -> "Missed call"
+                                isDeclined -> "Declined"
+                                else -> "Incoming call"
+                            }
+                            val durationSeconds = message.duration ?: 0
+                            val callDetail = when {
+                                durationSeconds > 0 -> {
+                                    val m = durationSeconds / 60
+                                    val s = durationSeconds % 60
+                                    if (m > 0) "${m}m ${s}s" else "${s}s"
+                                }
+                                else -> null
+                            }
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = callIcon,
+                                    contentDescription = null,
+                                    tint = callColor,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = callLabel,
+                                        color = callColor,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    if (callDetail != null) {
+                                        Text(
+                                            text = callDetail,
+                                            color = callColor.copy(alpha = 0.7f),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
                             }
                         }
                         else -> {
