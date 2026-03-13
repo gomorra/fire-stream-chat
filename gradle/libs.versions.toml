@@ -38,6 +38,9 @@ okhttp = "4.12.0"
 # QR Code
 zxing = "3.5.3"
 
+# WebRTC
+webrtc = "1.3.0"
+
 # Testing
 junit = "4.13.2"
 mockk = "1.13.13"
@@ -98,6 +101,9 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 
 # QR Code
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+# WebRTC
+stream-webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

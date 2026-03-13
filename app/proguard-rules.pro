@@ -8,3 +8,7 @@
 # Room
 -keep class * extends androidx.room.RoomDatabase
 -dontwarn androidx.room.paging.**
+
+# WebRTC
+-keep class org.webrtc.** { *; }
+-dontwarn org.webrtc.**

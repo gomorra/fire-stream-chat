@@ -118,6 +118,9 @@ dependencies {
     // QR Code
     implementation(libs.zxing.core)
 
+    // WebRTC
+    implementation(libs.stream.webrtc.android)
+
     // Core Library Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 
