@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import com.firestream.chat.BuildConfig
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -198,7 +199,7 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
             val remoteId: String
-            if (recipientId.isNotEmpty()) {
+            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
                 val encrypted = signalManager.encrypt(recipientId, content)
                 remoteId = messageSource.sendMessage(
@@ -287,7 +288,7 @@ class MessageRepositoryImpl @Inject constructor(
             val downloadUrl = storageSource.uploadMedia(chatId, tempId, uri, mimeType)
 
             val remoteId: String
-            if (recipientId.isNotEmpty()) {
+            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
                 val encrypted = signalManager.encrypt(recipientId, filename)
                 remoteId = messageSource.sendMessage(
@@ -372,7 +373,7 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
             val remoteId: String
-            if (recipientId.isNotEmpty()) {
+            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
                 val encrypted = signalManager.encrypt(recipientId, message.content)
                 remoteId = messageSource.sendMessage(
@@ -430,7 +431,7 @@ class MessageRepositoryImpl @Inject constructor(
             val downloadUrl = storageSource.uploadMedia(chatId, tempId, uri, "audio/aac")
 
             val remoteId: String
-            if (recipientId.isNotEmpty()) {
+            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
                 val encrypted = signalManager.encrypt(recipientId, "Voice message")
                 remoteId = messageSource.sendMessage(
@@ -714,19 +715,30 @@ class MessageRepositoryImpl @Inject constructor(
                             // Get or create the 1:1 chat with each recipient
                             val chatResult = chatRepository.get().getOrCreateChat(recipientId)
                             val individualChat = chatResult.getOrThrow()
-                            // Send as encrypted 1:1 message
-                            signalManager.ensureInitialized()
-                            val encrypted = signalManager.encrypt(recipientId, content)
-                            messageSource.sendMessage(
-                                chatId = individualChat.id,
-                                senderId = senderId,
-                                ciphertext = encrypted.ciphertext,
-                                signalType = encrypted.signalType,
-                                type = MessageType.TEXT,
-                                replyToId = null,
-                                timestamp = timestamp,
-                                plainContent = content
-                            )
+                            // Send as 1:1 message (encrypted in release, plain in debug)
+                            if (!BuildConfig.DEBUG) {
+                                signalManager.ensureInitialized()
+                                val encrypted = signalManager.encrypt(recipientId, content)
+                                messageSource.sendMessage(
+                                    chatId = individualChat.id,
+                                    senderId = senderId,
+                                    ciphertext = encrypted.ciphertext,
+                                    signalType = encrypted.signalType,
+                                    type = MessageType.TEXT,
+                                    replyToId = null,
+                                    timestamp = timestamp,
+                                    plainContent = content
+                                )
+                            } else {
+                                messageSource.sendPlainMessage(
+                                    chatId = individualChat.id,
+                                    senderId = senderId,
+                                    content = content,
+                                    type = MessageType.TEXT,
+                                    replyToId = null,
+                                    timestamp = timestamp
+                                )
+                            }
                         } catch (_: Exception) {
                             // Best-effort delivery to each recipient
                         } finally {

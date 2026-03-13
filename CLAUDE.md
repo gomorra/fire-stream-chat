@@ -112,7 +112,7 @@ com.firestream.chat/
 - **Single Activity** — `MainActivity` with Compose `NavHost` for all navigation.
 - **Local-first** — Room database with Firebase sync. `fallbackToDestructiveMigration()` is enabled.
 - **DataStore** — All preferences (theme, notifications, privacy). No SharedPreferences.
-- **Signal Protocol** — E2E encryption with `SignalManager` coordinating key exchange via `FirebaseKeySource`.
+- **Signal Protocol** — E2E encryption with `SignalManager` coordinating key exchange via `FirebaseKeySource`. **Encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `MessageRepositoryImpl`) — all messages are sent as plaintext via `sendPlainMessage` to avoid key-loss issues during development. Release builds use full Signal encryption.
 - **Deep linking** — `MainActivity` accepts `chatId`/`senderId` extras from FCM notifications.
 
 ## Key Conventions
