@@ -2,6 +2,7 @@ package com.firestream.chat.ui.chat
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -52,6 +53,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Reply
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -232,6 +234,24 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    if (!uiState.isGroupChat && !uiState.isBroadcast) {
+                        IconButton(onClick = {
+                            val callIntent = Intent().apply {
+                                setClassName(context.packageName, "com.firestream.chat.ui.call.CallActivity")
+                                putExtra("call_action", "outgoing")
+                                putExtra("callee_id", viewModel.recipientId)
+                                putExtra("callee_name", uiState.chatName ?: "")
+                                putExtra("callee_avatar_url", uiState.recipientAvatarUrl)
+                            }
+                            context.startActivity(callIntent)
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.Phone,
+                                contentDescription = "Voice call",
+                                tint = MaterialTheme.colorScheme.onPrimary
+                            )
+                        }
+                    }
                     IconButton(onClick = { viewModel.toggleSearch() }) {
                         Icon(
                             imageVector = Icons.Default.Search,
