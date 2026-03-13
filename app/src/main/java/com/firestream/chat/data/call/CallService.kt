@@ -240,6 +240,7 @@ class CallService : Service() {
         }
         startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification, serviceType)
 
+        observeCallDocument(callId)
         startRingTimeout()
     }
 
@@ -248,28 +249,27 @@ class CallService : Service() {
 
         ringTimeoutJob?.cancel()
 
-        // Cancel the incoming call notification
-        notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_INCOMING)
-
         callStateHolder.updateState(
             CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl)
         )
 
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
-        // Upgrade foreground type to MICROPHONE now that RECORD_AUDIO is granted
+        // Android 14+ prohibits changing from SHORT_SERVICE to another type directly;
+        // exit foreground first, then re-enter as MICROPHONE now that RECORD_AUDIO is granted.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            stopForeground(STOP_FOREGROUND_DETACH)
+        }
         startForeground(
             CallNotificationManager.NOTIFICATION_ID_ONGOING,
             notification,
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
 
-        serviceScope.launch {
-            callRepository.answerCall(callId)
-        }
-
         initWebRtc()
 
-        // Fetch the call document to get the offer, then set remote desc and create answer
+        // Fetch the call document to get the offer, then set remote desc and create answer.
+        // Status is updated to "answered" AFTER the answer SDP is written so the caller
+        // always sees both the status change and the SDP in the same snapshot.
         serviceScope.launch {
             callRepository.getCallById(callId).onSuccess { signalingData ->
                 val offer = signalingData.offer ?: run {
@@ -305,7 +305,10 @@ class CallService : Service() {
             override fun onCreateSuccess(sdp: SessionDescription) {
                 pc.setLocalDescription(SimpleSdpObserver(), sdp)
                 serviceScope.launch {
+                    // Write answer SDP first, then update status so the caller
+                    // always sees the SDP when it observes the "answered" status.
                     callRepository.sendAnswer(callId, SdpData(sdp.description, sdp.type.canonicalForm()))
+                    callRepository.answerCall(callId)
                 }
             }
 

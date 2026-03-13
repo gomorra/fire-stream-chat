@@ -86,7 +86,7 @@ exports.sendPushNotification = onDocumentCreated(
 
             // 2. Get sender's name for the notification
             const senderSnap = await admin.firestore().collection("users").doc(senderId).get();
-            const senderName = senderSnap.exists ? senderSnap.data().name : "New Message";
+            const senderName = senderSnap.exists ? senderSnap.data().displayName : "New Message";
 
             // 3. Identify recipients (all participants except the sender)
             const recipients = participants.filter(id => id !== senderId);
