@@ -3,9 +3,11 @@ package com.firestream.chat.data.call
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
@@ -177,7 +179,11 @@ class CallService : Service() {
         )
 
         val notification = notificationManager!!.buildOutgoingCallNotification(name)
-        startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification)
+        startForeground(
+            CallNotificationManager.NOTIFICATION_ID_ONGOING,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
 
         initWebRtc()
         createOfferAndSend(callId)
@@ -224,7 +230,11 @@ class CallService : Service() {
         )
 
         val notification = notificationManager!!.buildIncomingCallNotification(name)
-        startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification)
+        startForeground(
+            CallNotificationManager.NOTIFICATION_ID_ONGOING,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
 
         startRingTimeout()
     }
