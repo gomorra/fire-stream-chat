@@ -107,10 +107,11 @@ class CallNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val answerIntent = Intent(context, CallService::class.java).apply {
-            action = CallService.ACTION_ANSWER
+        // Route Answer through CallActivity so RECORD_AUDIO permission can be requested
+        val answerIntent = buildCallActivityIntent().apply {
+            putExtra("call_action", "answer")
         }
-        val answerPending = PendingIntent.getService(
+        val answerPending = PendingIntent.getActivity(
             context, 2, answerIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )

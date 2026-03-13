@@ -230,11 +230,14 @@ class CallService : Service() {
         )
 
         val notification = notificationManager!!.buildIncomingCallNotification(name)
-        startForeground(
-            CallNotificationManager.NOTIFICATION_ID_ONGOING,
-            notification,
+        // Use SHORT_SERVICE during ringing — MICROPHONE type requires RECORD_AUDIO
+        // which may not be granted yet (permission is requested when user answers)
+        val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+        } else {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-        )
+        }
+        startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification, serviceType)
 
         startRingTimeout()
     }
@@ -252,7 +255,12 @@ class CallService : Service() {
         )
 
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
-        notificationManager!!.updateNotification(notification, CallNotificationManager.NOTIFICATION_ID_ONGOING)
+        // Upgrade foreground type to MICROPHONE now that RECORD_AUDIO is granted
+        startForeground(
+            CallNotificationManager.NOTIFICATION_ID_ONGOING,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        )
 
         serviceScope.launch {
             callRepository.answerCall(callId)

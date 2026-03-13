@@ -1,12 +1,17 @@
 package com.firestream.chat.ui.call
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.core.content.ContextCompat
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.AppTheme
@@ -36,15 +41,32 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CALLEE_NAME = "callee_name"
         const val EXTRA_CALLEE_AVATAR_URL = "callee_avatar_url"
         const val ACTION_OUTGOING = "outgoing"
+        const val ACTION_ANSWER = "answer"
+    }
+
+    // Deferred action to run after permission is granted
+    private var pendingAction: (() -> Unit)? = null
+
+    private val requestAudioPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            pendingAction?.invoke()
+        } else {
+            Toast.makeText(this, "Microphone permission is required for calls", Toast.LENGTH_LONG).show()
+            if (callStateHolder.callState.value is CallState.Idle) {
+                finish()
+            }
+        }
+        pendingAction = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // If launched to start an outgoing call, initiate it
-        if (savedInstanceState == null && intent?.getStringExtra(EXTRA_ACTION) == ACTION_OUTGOING) {
-            startOutgoingCall()
+        if (savedInstanceState == null) {
+            handleIntent()
         }
 
         setContent {
@@ -60,6 +82,30 @@ class CallActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent()
+    }
+
+    private fun handleIntent() {
+        when (intent?.getStringExtra(EXTRA_ACTION)) {
+            ACTION_OUTGOING -> withAudioPermission { startOutgoingCall() }
+            ACTION_ANSWER -> withAudioPermission { answerCall() }
+        }
+    }
+
+    private fun withAudioPermission(action: () -> Unit) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
+            action()
+        } else {
+            pendingAction = action
+            requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
     private fun startOutgoingCall() {
         val calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return
         val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
@@ -72,5 +118,9 @@ class CallActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun answerCall() {
+        CallService.sendAction(this, CallService.ACTION_ANSWER)
     }
 }
