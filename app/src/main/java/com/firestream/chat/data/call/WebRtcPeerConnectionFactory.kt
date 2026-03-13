@@ -3,16 +3,11 @@ package com.firestream.chat.data.call
 import android.content.Context
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
-import org.webrtc.DefaultVideoDecoderFactory
-import org.webrtc.DefaultVideoEncoderFactory
-import org.webrtc.EglBase
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 
 class WebRtcPeerConnectionFactory(context: Context) {
-
-    private val eglBase = EglBase.create()
 
     private val factory: PeerConnectionFactory = run {
         PeerConnectionFactory.initialize(
@@ -20,10 +15,8 @@ class WebRtcPeerConnectionFactory(context: Context) {
                 .setEnableInternalTracer(false)
                 .createInitializationOptions()
         )
-        PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
-            .createPeerConnectionFactory()
+        // Audio-only: no video encoder/decoder factories needed
+        PeerConnectionFactory.builder().createPeerConnectionFactory()
     }
 
     private val iceServers = listOf(
@@ -51,6 +44,5 @@ class WebRtcPeerConnectionFactory(context: Context) {
 
     fun dispose() {
         factory.dispose()
-        eglBase.release()
     }
 }

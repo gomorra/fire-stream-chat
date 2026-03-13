@@ -114,20 +114,8 @@ private fun IncomingRingingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .alpha(alpha)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = callerName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                fontSize = 40.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
+        Box(modifier = Modifier.alpha(alpha)) {
+            CallUserAvatar(callerName)
         }
         Spacer(Modifier.height(24.dp))
         Text(callerName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -163,20 +151,7 @@ private fun OutgoingRingingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = calleeName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                fontSize = 40.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
+        CallUserAvatar(calleeName)
         Spacer(Modifier.height(24.dp))
         Text(calleeName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -241,20 +216,7 @@ private fun ConnectedContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(100.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = remoteName.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                fontSize = 40.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-            )
-        }
+        CallUserAvatar(remoteName)
         Spacer(Modifier.height(24.dp))
         Text(remoteName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -298,6 +260,24 @@ private fun EndedContent() {
         verticalArrangement = Arrangement.Center
     ) {
         Text("Call Ended", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun CallUserAvatar(name: String) {
+    Box(
+        modifier = Modifier
+            .size(100.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
+            fontSize = 40.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onPrimaryContainer
+        )
     }
 }
 

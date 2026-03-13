@@ -3,6 +3,7 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import com.firestream.chat.ui.call.CallActivity
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -236,12 +237,11 @@ fun ChatScreen(
                 actions = {
                     if (!uiState.isGroupChat && !uiState.isBroadcast) {
                         IconButton(onClick = {
-                            val callIntent = Intent().apply {
-                                setClassName(context.packageName, "com.firestream.chat.ui.call.CallActivity")
-                                putExtra("call_action", "outgoing")
-                                putExtra("callee_id", viewModel.recipientId)
-                                putExtra("callee_name", uiState.chatName ?: "")
-                                putExtra("callee_avatar_url", uiState.recipientAvatarUrl)
+                            val callIntent = Intent(context, CallActivity::class.java).apply {
+                                putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
+                                putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
+                                putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
                             }
                             context.startActivity(callIntent)
                         }) {

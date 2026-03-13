@@ -17,12 +17,14 @@ class CallNotificationManager(private val context: Context) {
         const val NOTIFICATION_ID_INCOMING = 9002
     }
 
+    private val notifManager = context.getSystemService(NotificationManager::class.java)
+
     init {
         createChannels()
     }
 
     private fun createChannels() {
-        val manager = context.getSystemService(NotificationManager::class.java)
+        val manager = notifManager
 
         manager.createNotificationChannel(
             NotificationChannel(
@@ -55,7 +57,7 @@ class CallNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val launchIntent = buildCallActivityIntent(context)
+        val launchIntent = buildCallActivityIntent()
         val launchPending = PendingIntent.getActivity(
             context, 0, launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -81,7 +83,7 @@ class CallNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val launchIntent = buildCallActivityIntent(context)
+        val launchIntent = buildCallActivityIntent()
         val launchPending = PendingIntent.getActivity(
             context, 0, launchIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -99,7 +101,7 @@ class CallNotificationManager(private val context: Context) {
     }
 
     fun buildIncomingCallNotification(callerName: String): Notification {
-        val fullScreenIntent = buildCallActivityIntent(context)
+        val fullScreenIntent = buildCallActivityIntent()
         val fullScreenPending = PendingIntent.getActivity(
             context, 1, fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -136,16 +138,14 @@ class CallNotificationManager(private val context: Context) {
     }
 
     fun updateNotification(notification: Notification, id: Int = NOTIFICATION_ID_ONGOING) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.notify(id, notification)
+        notifManager.notify(id, notification)
     }
 
     fun cancelNotification(id: Int) {
-        val manager = context.getSystemService(NotificationManager::class.java)
-        manager.cancel(id)
+        notifManager.cancel(id)
     }
 
-    private fun buildCallActivityIntent(context: Context): Intent {
+    private fun buildCallActivityIntent(): Intent {
         return Intent().apply {
             setClassName(context.packageName, "com.firestream.chat.ui.call.CallActivity")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP

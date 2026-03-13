@@ -10,7 +10,6 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.domain.model.CallState
-import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
@@ -226,9 +225,6 @@ class CallService : Service() {
 
         val notification = notificationManager!!.buildIncomingCallNotification(name)
         startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification)
-        notificationManager!!.updateNotification(
-            notification, CallNotificationManager.NOTIFICATION_ID_INCOMING
-        )
 
         startRingTimeout()
     }
@@ -463,7 +459,7 @@ class CallService : Service() {
     private fun hangup() {
         val callId = currentCallId ?: run { cleanup(); return }
         serviceScope.launch {
-            callRepository.endCall(callId, "caller_hangup")
+            callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
         }
         callStateHolder.updateState(CallState.Ended(callId, EndReason.HANGUP))
         cleanup()
@@ -488,9 +484,7 @@ class CallService : Service() {
         ringTimeoutJob = serviceScope.launch {
             delay(RING_TIMEOUT_MS)
             val callId = currentCallId ?: return@launch
-            serviceScope.launch {
-                callRepository.endCall(callId, "timeout")
-            }
+            callRepository.endCall(callId, EndReason.TIMEOUT.name.lowercase())
             callStateHolder.updateState(CallState.Ended(callId, EndReason.TIMEOUT))
             cleanup()
         }
