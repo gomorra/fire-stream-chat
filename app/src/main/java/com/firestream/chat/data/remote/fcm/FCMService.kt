@@ -9,7 +9,10 @@ import androidx.core.app.NotificationCompat.MessagingStyle
 import androidx.core.app.Person
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.call.CallService
+import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -29,6 +32,7 @@ class FCMService : FirebaseMessagingService() {
     @Inject lateinit var authRepository: AuthRepository
     @Inject lateinit var messageRepository: MessageRepository
     @Inject lateinit var preferencesDataStore: PreferencesDataStore
+    @Inject lateinit var callStateHolder: CallStateHolder
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -45,6 +49,13 @@ class FCMService : FirebaseMessagingService() {
         super.onMessageReceived(message)
 
         val data = message.data
+
+        // Handle incoming call push
+        if (data["type"] == "incoming_call") {
+            handleIncomingCall(data)
+            return
+        }
+
         val senderId = data["senderId"] ?: return
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
@@ -74,6 +85,19 @@ class FCMService : FirebaseMessagingService() {
 
             showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name)
         }
+    }
+
+    private fun handleIncomingCall(data: Map<String, String>) {
+        val callId = data["callId"] ?: return
+        val callerId = data["callerId"] ?: return
+        val callerName = data["callerName"] ?: "Unknown"
+        val callerAvatarUrl = data["callerAvatarUrl"]
+
+        // Don't start if already in a call
+        val currentState = callStateHolder.callState.value
+        if (currentState !is CallState.Idle && currentState !is CallState.Ended) return
+
+        CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
     }
 
     private fun showNotification(
