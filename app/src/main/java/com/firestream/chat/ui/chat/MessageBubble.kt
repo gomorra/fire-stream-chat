@@ -49,8 +49,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.util.MentionParser
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -249,14 +256,31 @@ internal fun MessageBubble(
                         }
                         else -> {
                             val highlightColor = MaterialTheme.colorScheme.primary
-                            val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor) {
-                                MentionParser.formatMentionText(
+                            val linkUrl = linkPreview?.url
+                            val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
+                                val base = MentionParser.formatMentionText(
                                     text = message.content,
                                     mentions = message.mentions,
                                     currentUserId = currentUserId,
                                     highlightColor = highlightColor,
                                     userIdToDisplayName = userIdToDisplayName
                                 )
+                                if (linkUrl != null) {
+                                    val idx = base.text.indexOf(linkUrl)
+                                    if (idx >= 0) buildAnnotatedString {
+                                        append(base.subSequence(0, idx))
+                                        withLink(LinkAnnotation.Url(
+                                            url = linkUrl,
+                                            styles = TextLinkStyles(SpanStyle(
+                                                fontSize = 12.sp,
+                                                color = textColor.copy(alpha = 0.85f),
+                                                textDecoration = TextDecoration.Underline
+                                            ))
+                                        )) { append(linkUrl) }
+                                        if (idx + linkUrl.length < base.length)
+                                            append(base.subSequence(idx + linkUrl.length, base.length))
+                                    } else base
+                                } else base
                             }
                             Text(
                                 text = displayText,
@@ -272,7 +296,11 @@ internal fun MessageBubble(
                             }
                             if (linkPreview != null) {
                                 Spacer(modifier = Modifier.height(6.dp))
-                                LinkPreviewCard(preview = linkPreview, textColor = textColor)
+                                LinkPreviewCard(
+                                    preview = linkPreview,
+                                    textColor = textColor,
+                                    onImageClick = onImageClick.takeIf { linkPreview.imageUrl != null }
+                                )
                             }
                         }
                     }

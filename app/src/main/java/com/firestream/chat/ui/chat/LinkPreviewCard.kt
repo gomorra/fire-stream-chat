@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -16,7 +17,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -25,7 +25,8 @@ import com.firestream.chat.data.remote.LinkPreview
 @Composable
 internal fun LinkPreviewCard(
     preview: LinkPreview,
-    textColor: Color
+    textColor: Color,
+    onImageClick: ((String) -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
@@ -46,6 +47,11 @@ internal fun LinkPreviewCard(
                         .fillMaxWidth()
                         .height(80.dp)
                         .clip(RoundedCornerShape(6.dp))
+                        .then(
+                            if (onImageClick != null)
+                                Modifier.clickable { onImageClick(preview.imageUrl) }
+                            else Modifier
+                        )
                 )
                 Spacer(modifier = Modifier.height(4.dp))
             }
@@ -67,13 +73,6 @@ internal fun LinkPreviewCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Text(
-                text = preview.url,
-                style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
-                color = textColor.copy(alpha = 0.6f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
         }
     }
 }

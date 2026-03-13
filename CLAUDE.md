@@ -56,11 +56,11 @@ Plans must include a recommendation table per step:
 
 ## Plan Execution Workflow
 
-**After each sub-feature (in order):**
+**After each sub-feature, ALWAYS run these steps in order without waiting to be asked:**
 1. `/simplify` — review changed code for quality
-2. `./gradlew test` — unit tests pass
-3. `./gradlew assembleDebug` — builds clean
-4. Git commit — checkpoint before next sub-feature
+2. `./gradlew test` — unit tests must pass
+3. `./gradlew assembleDebug` — build must be clean
+4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 
 **Parallel vs. sequential:** Run sub-features in parallel only when they touch different files. If two steps modify the same files, run them sequentially. When in doubt, sequential is safer.

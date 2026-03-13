@@ -9,13 +9,16 @@ import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.SharedContent
+import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,7 +35,8 @@ data class SharePickerUiState(
     val searchQuery: String = "",
     val isSending: Boolean = false,
     val error: String? = null,
-    val currentUserId: String = ""
+    val currentUserId: String = "",
+    val participantProfiles: Map<String, User> = emptyMap()
 )
 
 @HiltViewModel
@@ -42,6 +46,7 @@ class SharePickerViewModel @Inject constructor(
     private val sendMediaMessageUseCase: SendMediaMessageUseCase,
     private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
+    private val userRepository: UserRepository,
     private val sharedContentHolder: SharedContentHolder,
     private val shareContentResolver: ShareContentResolver
 ) : ViewModel() {
@@ -60,7 +65,24 @@ class SharePickerViewModel @Inject constructor(
         viewModelScope.launch {
             val chats = getChatsUseCase().first()
             _uiState.value = _uiState.value.copy(chats = chats, filteredChats = chats)
+            loadParticipantProfiles(chats)
         }
+    }
+
+    private suspend fun loadParticipantProfiles(chats: List<Chat>) {
+        val userId = _uiState.value.currentUserId
+        val participantIds = chats
+            .flatMap { it.participants }
+            .filter { it != userId }
+            .distinct()
+
+        val profiles = coroutineScope {
+            participantIds.map { id ->
+                async { userRepository.getUserById(id).getOrNull()?.let { id to it } }
+            }.awaitAll().filterNotNull().toMap()
+        }
+
+        _uiState.value = _uiState.value.copy(participantProfiles = profiles)
     }
 
     private fun resolveSharedContent() {
@@ -87,16 +109,26 @@ class SharePickerViewModel @Inject constructor(
     }
 
     fun onSearchQueryChange(query: String) {
-        val userId = _uiState.value.currentUserId
+        val state = _uiState.value
         val filtered = if (query.isBlank()) {
-            _uiState.value.chats
+            state.chats
         } else {
-            _uiState.value.chats.filter { chat ->
-                val name = chat.name ?: chat.participants.firstOrNull { it != userId } ?: ""
+            state.chats.filter { chat ->
+                val name = chatDisplayName(chat, state.currentUserId, state.participantProfiles)
                 name.contains(query, ignoreCase = true)
             }
         }
-        _uiState.value = _uiState.value.copy(searchQuery = query, filteredChats = filtered)
+        _uiState.value = state.copy(searchQuery = query, filteredChats = filtered)
+    }
+
+    private fun chatDisplayName(
+        chat: Chat,
+        currentUserId: String,
+        profiles: Map<String, User>
+    ): String {
+        if (chat.name != null) return chat.name
+        val recipientId = chat.participants.firstOrNull { it != currentUserId } ?: return "Chat"
+        return profiles[recipientId]?.displayName?.takeIf { it.isNotBlank() } ?: recipientId
     }
 
     fun send(onDone: (singleChatId: String?, recipientId: String?) -> Unit) {
