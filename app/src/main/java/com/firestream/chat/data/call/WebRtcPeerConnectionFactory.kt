@@ -13,6 +13,10 @@ class WebRtcPeerConnectionFactory(context: Context) {
     companion object {
         private val initialized = AtomicBoolean(false)
 
+        private const val TURN_HOST = "openrelay.metered.ca"
+        private const val TURN_USERNAME = "openrelayproject"
+        private const val TURN_PASSWORD = "openrelayproject"
+
         fun initializeOnce(context: Context) {
             if (initialized.compareAndSet(false, true)) {
                 PeerConnectionFactory.initialize(
@@ -22,33 +26,30 @@ class WebRtcPeerConnectionFactory(context: Context) {
                 )
             }
         }
+
+        private fun buildTurnServer(url: String): PeerConnection.IceServer =
+            PeerConnection.IceServer.builder(url)
+                .setUsername(TURN_USERNAME)
+                .setPassword(TURN_PASSWORD)
+                .createIceServer()
     }
 
     private val factory: PeerConnectionFactory
     private var audioSource: AudioSource? = null
 
-    init {
-        initializeOnce(context)
-        factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
-    }
-
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
         // TURN servers for NAT traversal (required for phone↔emulator and symmetric NAT)
-        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:80")
-            .setUsername("openrelayproject")
-            .setPassword("openrelayproject")
-            .createIceServer(),
-        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443")
-            .setUsername("openrelayproject")
-            .setPassword("openrelayproject")
-            .createIceServer(),
-        PeerConnection.IceServer.builder("turn:openrelay.metered.ca:443?transport=tcp")
-            .setUsername("openrelayproject")
-            .setPassword("openrelayproject")
-            .createIceServer(),
+        buildTurnServer("turn:$TURN_HOST:80"),
+        buildTurnServer("turn:$TURN_HOST:443"),
+        buildTurnServer("turn:$TURN_HOST:443?transport=tcp"),
     )
+
+    init {
+        initializeOnce(context)
+        factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+    }
 
     fun createPeerConnection(observer: PeerConnection.Observer): PeerConnection? {
         val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {

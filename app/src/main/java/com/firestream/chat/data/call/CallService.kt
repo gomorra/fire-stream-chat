@@ -230,8 +230,9 @@ class CallService : Service() {
         )
 
         val notification = notificationManager!!.buildIncomingCallNotification(name)
-        // Use SHORT_SERVICE during ringing — MICROPHONE type requires RECORD_AUDIO
-        // which may not be granted yet (permission is requested when user answers)
+        // API 34+ enforces RECORD_AUDIO at startForeground() for MICROPHONE type;
+        // use SHORT_SERVICE during ringing since the mic isn't needed yet.
+        // Pre-34 doesn't enforce this, and SHORT_SERVICE doesn't exist, so MICROPHONE is safe.
         val serviceType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
         } else {

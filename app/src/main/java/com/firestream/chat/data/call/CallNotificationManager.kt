@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
+import com.firestream.chat.ui.call.CallActivity
 
 class CallNotificationManager(private val context: Context) {
 
@@ -109,7 +110,7 @@ class CallNotificationManager(private val context: Context) {
 
         // Route Answer through CallActivity so RECORD_AUDIO permission can be requested
         val answerIntent = buildCallActivityIntent().apply {
-            putExtra("call_action", "answer")
+            putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_ANSWER)
         }
         val answerPending = PendingIntent.getActivity(
             context, 2, answerIntent,
