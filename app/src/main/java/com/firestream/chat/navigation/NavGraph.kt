@@ -13,6 +13,7 @@ import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
+import com.firestream.chat.ui.chat.SharedMediaScreen
 import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
 import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
@@ -42,6 +43,7 @@ object Routes {
     const val CREATE_BROADCAST = "create_broadcast"
     const val CREATE_GROUP = "create_group"
     const val SHARE_PICKER = "share_picker"
+    const val SHARED_MEDIA = "shared_media/{chatId}"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -55,6 +57,7 @@ object Routes {
     fun userProfile(userId: String) = "user_profile/$userId"
 
     fun groupSettings(chatId: String) = "group_settings/$chatId"
+    fun sharedMedia(chatId: String) = "shared_media/$chatId"
 }
 
 @Composable
@@ -183,7 +186,8 @@ fun FireStreamNavGraph(
                 onProfileClick = { userId ->
                     navController.navigate(Routes.userProfile(userId))
                 },
-                onGroupSettingsClick = { navController.navigate(Routes.groupSettings(chatId)) }
+                onGroupSettingsClick = { navController.navigate(Routes.groupSettings(chatId)) },
+                onSharedMediaClick = { navController.navigate(Routes.sharedMedia(chatId)) }
             )
         }
 
@@ -252,6 +256,14 @@ fun FireStreamNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onAddMemberClick = { navController.navigate(Routes.CONTACTS) }
             )
+        }
+
+        // Shared Media
+        composable(
+            route = Routes.SHARED_MEDIA,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) {
+            SharedMediaScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Phase 5: Create Group
