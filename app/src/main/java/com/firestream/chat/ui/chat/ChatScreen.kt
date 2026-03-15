@@ -733,15 +733,18 @@ fun ChatScreen(
                         maxLines = 4,
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         decorationBox = { innerTextField ->
-                            if (messageText.isEmpty()) {
-                                Text(
-                                    text = if (uiState.editingMessage != null) "Edit message..."
-                                           else stringResource(R.string.type_message),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                if (messageText.isEmpty()) {
+                                    Text(
+                                        text = if (uiState.editingMessage != null) "Edit message..."
+                                               else stringResource(R.string.type_message),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.align(Alignment.CenterStart)
+                                    )
+                                }
+                                innerTextField()
                             }
-                            innerTextField()
                         }
                     )
                     if (uiState.editingMessage == null) {
