@@ -26,7 +26,9 @@ data class ProfileUiState(
     val isBlockLoading: Boolean = false,
     val sharedMedia: List<Message> = emptyList(),
     val isUploading: Boolean = false,
-    val uploadError: String? = null
+    val uploadError: String? = null,
+    val isSavingProfile: Boolean = false,
+    val profileSaveError: String? = null
 )
 
 @HiltViewModel
@@ -102,6 +104,38 @@ class ProfileViewModel @Inject constructor(
                 .onSuccess { _uiState.value = _uiState.value.copy(isUploading = false) }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(isUploading = false, uploadError = e.message)
+                }
+        }
+    }
+
+    fun updateDisplayName(displayName: String) {
+        val trimmed = displayName.trim()
+        if (trimmed == _uiState.value.user?.displayName) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingProfile = true, profileSaveError = null)
+            userRepository.updateProfile(trimmed, null, null)
+                .onSuccess { _uiState.value = _uiState.value.copy(isSavingProfile = false) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isSavingProfile = false,
+                        profileSaveError = e.message ?: "Failed to save profile"
+                    )
+                }
+        }
+    }
+
+    fun updateStatusText(statusText: String) {
+        val trimmed = statusText.trim()
+        if (trimmed == _uiState.value.user?.statusText) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingProfile = true, profileSaveError = null)
+            userRepository.updateProfile(null, trimmed, null)
+                .onSuccess { _uiState.value = _uiState.value.copy(isSavingProfile = false) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        isSavingProfile = false,
+                        profileSaveError = e.message ?: "Failed to save profile"
+                    )
                 }
         }
     }

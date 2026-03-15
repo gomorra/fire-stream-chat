@@ -34,7 +34,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Circle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.AlertDialog
@@ -47,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -64,8 +68,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -92,6 +98,10 @@ fun ProfileScreen(
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
     var fullscreenAvatar by remember { mutableStateOf(false) }
     var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    var editingName by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
+    var editingAbout by remember { mutableStateOf(false) }
+    var aboutInput by remember { mutableStateOf("") }
 
     val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         uri?.let { viewModel.uploadAvatar(it) }
@@ -223,18 +233,49 @@ fun ProfileScreen(
 
                     Spacer(Modifier.height(12.dp))
 
-                    Text(
-                        text = user.displayName,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                    EditableProfileField(
+                        displayValue = user.displayName,
+                        label = "Name",
+                        isEditable = uiState.isCurrentUser,
+                        isSaving = uiState.isSavingProfile,
+                        isEditing = editingName,
+                        input = nameInput,
+                        onInputChange = { nameInput = it },
+                        onEditClick = { nameInput = user.displayName; editingName = true },
+                        onSave = { viewModel.updateDisplayName(nameInput); editingName = false },
+                        onCancel = { editingName = false },
+                        saveEnabled = nameInput.isNotBlank(),
+                        displayTextStyle = MaterialTheme.typography.headlineSmall,
+                        displayFontWeight = FontWeight.Bold,
+                        iconSize = 18.dp
                     )
 
-                    Text(
-                        text = user.statusText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                    EditableProfileField(
+                        displayValue = user.statusText,
+                        label = "About",
+                        isEditable = uiState.isCurrentUser,
+                        isSaving = uiState.isSavingProfile,
+                        isEditing = editingAbout,
+                        input = aboutInput,
+                        onInputChange = { aboutInput = it },
+                        onEditClick = { aboutInput = user.statusText; editingAbout = true },
+                        onSave = { viewModel.updateStatusText(aboutInput); editingAbout = false },
+                        onCancel = { editingAbout = false },
+                        displayTextStyle = MaterialTheme.typography.bodyMedium,
+                        displayColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        rowModifier = Modifier.padding(top = 4.dp, bottom = 8.dp),
+                        iconSize = 16.dp
                     )
+
+                    // Profile save error
+                    if (uiState.profileSaveError != null) {
+                        Text(
+                            text = uiState.profileSaveError!!,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
 
                     if (!user.isOnline && user.lastSeen > 0) {
                         val formatted = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
@@ -483,6 +524,68 @@ fun ProfileScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun EditableProfileField(
+    displayValue: String,
+    label: String,
+    isEditable: Boolean,
+    isSaving: Boolean,
+    isEditing: Boolean,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onEditClick: () -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+    saveEnabled: Boolean = true,
+    displayTextStyle: TextStyle = MaterialTheme.typography.bodyMedium,
+    displayFontWeight: FontWeight? = null,
+    displayColor: Color = Color.Unspecified,
+    rowModifier: Modifier = Modifier,
+    iconSize: Dp = 18.dp
+) {
+    if (isEditable && isEditing) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier.padding(horizontal = 16.dp)
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInputChange,
+                singleLine = true,
+                label = { Text(label) },
+                enabled = !isSaving,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onSave, enabled = saveEnabled && !isSaving) {
+                Icon(Icons.Default.Check, contentDescription = "Save $label")
+            }
+            IconButton(onClick = onCancel) {
+                Icon(Icons.Default.Close, contentDescription = "Cancel")
+            }
+        }
+    } else {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = rowModifier.then(modifier)) {
+            Text(
+                text = displayValue,
+                style = displayTextStyle,
+                fontWeight = displayFontWeight,
+                color = displayColor
+            )
+            if (isEditable) {
+                IconButton(onClick = onEditClick) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit $label",
+                        modifier = Modifier.size(iconSize),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
