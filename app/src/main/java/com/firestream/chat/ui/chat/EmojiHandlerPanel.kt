@@ -1,7 +1,10 @@
 package com.firestream.chat.ui.chat
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,9 +13,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -28,6 +34,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -38,17 +45,27 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private const val GRID_COLUMNS = 8
 private const val RECENTS_ICON = "⏱"
+private const val SIZE_MIN = 0.8f
+private const val SIZE_MAX = 2.5f
+private const val SIZE_DEFAULT = 1.0f
 
 enum class EmojiMode { TEXT_INPUT, REACTION }
 
@@ -63,7 +80,7 @@ private sealed class GridItem {
 }
 
 // ---------------------------------------------------------------------------
-// Category data (mirrors EmojiPicker.kt — old file deleted in Step 8)
+// Category data
 // ---------------------------------------------------------------------------
 
 private data class PanelCategory(val icon: String, val label: String, val emojis: List<String>)
@@ -149,6 +166,18 @@ private val STATIC_CATEGORY_GRID: List<GridItem> = buildList {
 }
 
 // ===========================================================================
+// Long-press size picker state
+// ===========================================================================
+
+private data class SizePickerState(
+    val gridItemIndex: Int,      // index in gridItems list
+    val emoji: String,
+    val columnIndex: Int,        // 0-7 within the row
+    val cellOffset: Offset,      // position of the pressed cell relative to grid
+    val sizeMultiplier: Float = SIZE_DEFAULT
+)
+
+// ===========================================================================
 // Main composable
 // ===========================================================================
 
@@ -169,7 +198,6 @@ internal fun EmojiHandlerPanel(
         if (isSearching) buildSearchResults(searchQuery) else buildCategoryGrid(recentEmojis)
     }
 
-    // Map (categoryIndex → gridItemIndex) for scroll-to-category and active-category tracking
     val categoryHeaderIndices = remember(gridItems) {
         gridItems.mapIndexedNotNull { idx, item ->
             (item as? GridItem.Header)?.let { it.categoryIndex to idx }
@@ -179,9 +207,6 @@ internal fun EmojiHandlerPanel(
     val gridState = rememberLazyGridState()
     val scope = rememberCoroutineScope()
 
-    // Re-keyed on categoryHeaderIndices so derivedStateOf captures the updated indices
-    // after grid changes (e.g. search toggle) — plain List is not Compose State, so without
-    // the key the lambda would silently capture the stale list from the previous composition.
     val activeCategoryIndex by remember(categoryHeaderIndices) {
         derivedStateOf {
             val firstVisible = gridState.firstVisibleItemIndex
@@ -189,20 +214,24 @@ internal fun EmojiHandlerPanel(
         }
     }
 
+    // Long-press size picker state — null means picker is hidden
+    var sizePicker by remember { mutableStateOf<SizePickerState?>(null) }
+
+    // Track cell positions so the size slider can anchor to the pressed cell
+    val cellPositions = remember { mutableMapOf<Int, Offset>() }
+
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surface)) {
-        // Quick reactions (REACTION mode only)
         if (mode == EmojiMode.REACTION) {
             QuickReactionsRow(
                 currentReaction = currentReaction,
                 onSelect = { emoji ->
-                    onEmojiSelected(emoji, 1f)
+                    onEmojiSelected(emoji, SIZE_DEFAULT)
                     onRecentUsed(emoji)
                 }
             )
             HorizontalDivider(thickness = 0.5.dp)
         }
 
-        // Top toolbar: search + backspace
         SearchToolbar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
@@ -211,49 +240,122 @@ internal fun EmojiHandlerPanel(
         )
         HorizontalDivider(thickness = 0.5.dp)
 
-        // Scrollable emoji grid (or "no results" placeholder)
         val hasEmojiResults = remember(gridItems) { gridItems.any { it is GridItem.Emoji } }
-        if (isSearching && !hasEmojiResults) {
-            Box(
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "No emoji found",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(GRID_COLUMNS),
-                state = gridState,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                items(
-                    count = gridItems.size,
-                    span = { index ->
-                        GridItemSpan(if (gridItems[index] is GridItem.Header) GRID_COLUMNS else 1)
-                    }
-                ) { index ->
-                    when (val item = gridItems[index]) {
-                        is GridItem.Header -> CategoryHeader(item.icon, item.title)
-                        is GridItem.Emoji -> EmojiCell(item.emoji) {
-                            onEmojiSelected(item.emoji, 1f)
-                            onRecentUsed(item.emoji)
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (isSearching && !hasEmojiResults) {
+                Box(modifier = Modifier.fillMaxWidth().align(Alignment.Center)) {
+                    Text(
+                        text = "No emoji found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(GRID_COLUMNS),
+                    state = gridState,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    userScrollEnabled = sizePicker == null  // lock scroll during size pick
+                ) {
+                    items(
+                        count = gridItems.size,
+                        span = { index ->
+                            GridItemSpan(if (gridItems[index] is GridItem.Header) GRID_COLUMNS else 1)
                         }
-                        is GridItem.EmptySlot -> EmptySlotCell()
+                    ) { index ->
+                        when (val item = gridItems[index]) {
+                            is GridItem.Header -> CategoryHeader(item.icon, item.title)
+                            is GridItem.Emoji -> {
+                                val sp = sizePicker
+                                // Siblings in the same row as the held cell fade out
+                                val heldRow = sp?.let { sp.gridItemIndex / GRID_COLUMNS }
+                                val thisRow = index / GRID_COLUMNS
+                                val isSiblingFaded = sp != null &&
+                                    thisRow == heldRow &&
+                                    index != sp.gridItemIndex
+                                val targetAlpha = if (isSiblingFaded) 0f else 1f
+                                val alpha by animateFloatAsState(
+                                    targetValue = targetAlpha,
+                                    animationSpec = tween(150),
+                                    label = "sibling_alpha"
+                                )
+                                val isHeld = sp?.gridItemIndex == index
+                                val displaySize = if (isHeld) {
+                                    (22 * sp!!.sizeMultiplier).sp
+                                } else {
+                                    22.sp
+                                }
+                                EmojiCell(
+                                    emoji = item.emoji,
+                                    fontSize = displaySize,
+                                    modifier = Modifier
+                                        .alpha(alpha)
+                                        .onGloballyPositioned { coords ->
+                                            cellPositions[index] = coords.positionInParent()
+                                        }
+                                        .pointerInput(item.emoji) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { _ ->
+                                                    val pos = cellPositions[index] ?: Offset.Zero
+                                                    val colIdx = index % GRID_COLUMNS
+                                                    sizePicker = SizePickerState(
+                                                        gridItemIndex = index,
+                                                        emoji = item.emoji,
+                                                        columnIndex = colIdx,
+                                                        cellOffset = pos
+                                                    )
+                                                },
+                                                onDrag = { _, dragAmount ->
+                                                    val sp2 = sizePicker ?: return@detectDragGesturesAfterLongPress
+                                                    // Drag up (negative y) → larger; drag down → smaller
+                                                    val delta = -dragAmount.y / 200f
+                                                    val newSize = (sp2.sizeMultiplier + delta)
+                                                        .coerceIn(SIZE_MIN, SIZE_MAX)
+                                                    // Skip write when already at bounds (avoids recomposition churn)
+                                                    if (newSize != sp2.sizeMultiplier) {
+                                                        sizePicker = sp2.copy(sizeMultiplier = newSize)
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    val sp2 = sizePicker ?: return@detectDragGesturesAfterLongPress
+                                                    onEmojiSelected(sp2.emoji, sp2.sizeMultiplier)
+                                                    onRecentUsed(sp2.emoji)
+                                                    sizePicker = null
+                                                },
+                                                onDragCancel = {
+                                                    sizePicker = null
+                                                }
+                                            )
+                                        },
+                                    onClick = {
+                                        onEmojiSelected(item.emoji, SIZE_DEFAULT)
+                                        onRecentUsed(item.emoji)
+                                    }
+                                )
+                            }
+                            is GridItem.EmptySlot -> EmptySlotCell()
+                        }
                     }
+                }
+
+                // Size picker overlay — anchored to the held cell
+                sizePicker?.let { sp ->
+                    SizePickerOverlay(
+                        emoji = sp.emoji,
+                        sizeMultiplier = sp.sizeMultiplier,
+                        anchorOffset = sp.cellOffset,
+                        showOnRight = sp.columnIndex < GRID_COLUMNS - 1
+                    )
                 }
             }
         }
 
         HorizontalDivider(thickness = 0.5.dp)
 
-        // Bottom category toolbar (hidden during search)
         if (!isSearching) {
             CategoryToolbar(
                 activeCategoryIndex = activeCategoryIndex,
@@ -263,6 +365,66 @@ internal fun EmojiHandlerPanel(
                     scope.launch { gridState.scrollToItem(target) }
                 }
             )
+        }
+    }
+}
+
+// ===========================================================================
+// Size picker overlay
+// ===========================================================================
+
+@Composable
+private fun SizePickerOverlay(
+    emoji: String,
+    sizeMultiplier: Float,
+    anchorOffset: Offset,
+    showOnRight: Boolean
+) {
+    val pct = ((sizeMultiplier - SIZE_MIN) / (SIZE_MAX - SIZE_MIN)).coerceIn(0f, 1f)
+    val displaySize = (22 * sizeMultiplier).sp
+
+    // Convert dp offsets to pixels using current density so the overlay positions
+    // correctly across all screen densities.
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val xOffset = with(density) {
+        if (showOnRight) (anchorOffset.x + 44.dp.toPx()).roundToInt()
+        else (anchorOffset.x - 72.dp.toPx()).roundToInt()
+    }
+    val yOffset = with(density) { (anchorOffset.y - 8.dp.toPx()).roundToInt() }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(xOffset, yOffset) }
+            .wrapContentSize()
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainer
+        ) {
+            Column(
+                modifier = Modifier.padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(text = emoji, fontSize = displaySize)
+                Text(
+                    text = "${(sizeMultiplier * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { pct },
+                    modifier = Modifier.width(48.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+                Text(
+                    text = "↑ drag ↓",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -313,7 +475,6 @@ private fun SearchToolbar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Search box
         Row(
             modifier = Modifier
                 .weight(1f)
@@ -358,7 +519,6 @@ private fun SearchToolbar(
             }
         }
 
-        // Backspace button (TEXT_INPUT mode only)
         if (mode == EmojiMode.TEXT_INPUT) {
             IconButton(
                 onClick = onBackspace,
@@ -390,15 +550,20 @@ private fun CategoryHeader(icon: String, title: String) {
 }
 
 @Composable
-private fun EmojiCell(emoji: String, onClick: () -> Unit) {
+private fun EmojiCell(
+    emoji: String,
+    fontSize: TextUnit = 22.sp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(4.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = emoji, fontSize = 22.sp)
+        Text(text = emoji, fontSize = fontSize)
     }
 }
 
@@ -479,15 +644,12 @@ private fun CategoryToolbar(
 // ===========================================================================
 
 private fun buildCategoryGrid(recentEmojis: List<String>): List<GridItem> = buildList {
-    // Recents section
     add(GridItem.Header(RECENTS_ICON, "Recents", categoryIndex = 0))
     recentEmojis.forEach { add(GridItem.Emoji(it)) }
-    // Pad to fill the row (at least one row of empty dots when empty)
     val recentCount = recentEmojis.size
     val nextFullRow = if (recentCount == 0) GRID_COLUMNS
         else ((recentCount + GRID_COLUMNS - 1) / GRID_COLUMNS) * GRID_COLUMNS
     repeat(nextFullRow - recentCount) { add(GridItem.EmptySlot) }
-    // Static category items (pre-built at file load)
     addAll(STATIC_CATEGORY_GRID)
 }
 

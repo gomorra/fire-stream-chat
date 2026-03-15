@@ -684,9 +684,15 @@ fun ChatScreen(
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut()
             ) {
-                MessageEmojiPicker(
-                    modifier = Modifier.height((screenHeightDp / 3).dp),
-                    onEmojiSelected = { emoji -> messageText += emoji }
+                EmojiHandlerPanel(
+                    mode = EmojiMode.TEXT_INPUT,
+                    recentEmojis = uiState.recentEmojis,
+                    onEmojiSelected = { emoji, _ -> messageText += emoji },
+                    onBackspace = {
+                        if (messageText.isNotEmpty()) messageText = messageText.dropLast(1)
+                    },
+                    onRecentUsed = { viewModel.addRecentEmoji(it) },
+                    modifier = Modifier.height((screenHeightDp / 3).dp)
                 )
             }
         }
@@ -771,12 +777,16 @@ fun ChatScreen(
         ModalBottomSheet(
             onDismissRequest = { reactionTargetMessage = null }
         ) {
-            EmojiPicker(
+            EmojiHandlerPanel(
+                mode = EmojiMode.REACTION,
                 currentReaction = targetMsg.reactions[uiState.currentUserId],
-                onEmojiSelected = { emoji ->
+                recentEmojis = uiState.recentEmojis,
+                onEmojiSelected = { emoji, _ ->
                     viewModel.toggleReaction(targetMsg.id, emoji)
                     reactionTargetMessage = null
-                }
+                },
+                onRecentUsed = { viewModel.addRecentEmoji(it) },
+                modifier = Modifier.height((screenHeightDp * 2 / 5).dp)
             )
         }
     }

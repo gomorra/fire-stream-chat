@@ -24,14 +24,24 @@ internal fun isEmojiOnly(text: String): Boolean =
     text.isNotBlank() && EMOJI_REGEX.replace(text, "").isBlank()
 
 /**
- * Returns a copy of [source] with [SpanStyle.fontSize] = [emojiSize] applied to every
- * emoji sequence, while all existing spans (mentions, links, etc.) are preserved.
+ * Returns a copy of [source] with [SpanStyle.fontSize] applied to every emoji sequence.
+ * The base size is [emojiSize]; per-character overrides from [sizeMultipliers] (charIndex →
+ * multiplier) are applied on top — the multiplier scales relative to the base body text size,
+ * not [emojiSize] itself, so a 2× multiplier always means 2× body text regardless of baseline.
+ *
+ * Existing spans (mentions, links, etc.) are preserved.
  */
-internal fun addEmojiSpans(source: AnnotatedString, emojiSize: TextUnit): AnnotatedString =
+internal fun addEmojiSpans(
+    source: AnnotatedString,
+    emojiSize: TextUnit,
+    sizeMultipliers: Map<Int, Float> = emptyMap()
+): AnnotatedString =
     buildAnnotatedString {
         append(source)
         EMOJI_REGEX.findAll(source.text).forEach { result ->
-            addStyle(SpanStyle(fontSize = emojiSize), result.range.first, result.range.last + 1)
+            val multiplier = sizeMultipliers[result.range.first]
+            val fontSize = if (multiplier != null) emojiSize * multiplier else emojiSize
+            addStyle(SpanStyle(fontSize = fontSize), result.range.first, result.range.last + 1)
         }
     }
 

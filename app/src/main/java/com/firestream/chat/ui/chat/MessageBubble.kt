@@ -353,8 +353,8 @@ internal fun MessageBubble(
                                 } else base
                             }
                             val emojiInlineSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE
-                            val displayTextWithEmojis = remember(displayText, emojiInlineSize) {
-                                addEmojiSpans(displayText, emojiInlineSize)
+                            val displayTextWithEmojis = remember(displayText, emojiInlineSize, message.emojiSizes) {
+                                addEmojiSpans(displayText, emojiInlineSize, message.emojiSizes)
                             }
                             Text(
                                 text = displayTextWithEmojis,
