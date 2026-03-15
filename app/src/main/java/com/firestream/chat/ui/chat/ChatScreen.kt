@@ -24,6 +24,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -713,8 +714,6 @@ fun ChatScreen(
                             .padding(
                                 start = 16.dp,
                                 end = if (uiState.editingMessage == null) 48.dp else 16.dp,
-                                top = 10.dp,
-                                bottom = 10.dp
                             ),
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
                             color = MaterialTheme.colorScheme.onSurface,
@@ -733,14 +732,18 @@ fun ChatScreen(
                         maxLines = 4,
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         decorationBox = { innerTextField ->
-                            Box(modifier = Modifier.fillMaxWidth()) {
+                            Box(
+                                contentAlignment = Alignment.CenterStart,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = 48.dp)
+                            ) {
                                 if (messageText.isEmpty()) {
                                     Text(
                                         text = if (uiState.editingMessage != null) "Edit message..."
                                                else stringResource(R.string.type_message),
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.align(Alignment.CenterStart)
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                                 innerTextField()
