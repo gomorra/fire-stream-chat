@@ -96,7 +96,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -642,11 +641,17 @@ fun ChatScreen(
                     )
                 }
 
+                val clearInput = {
+                    messageText = ""
+                    inputCursor = TextRange(0)
+                    pendingEmojiSizes = emptyMap()
+                    showEmojiSheet = false
+                }
                 val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
                 val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
-                    addEmojiSpans(buildAnnotatedString { append(messageText) }, emojiInputSize, pendingEmojiSizes)
+                    addEmojiSpans(messageText, emojiInputSize, pendingEmojiSizes)
                 }
-                val inputValue = remember(inputAnnotated, inputCursor, messageText) {
+                val inputValue = remember(inputAnnotated, inputCursor) {
                     TextFieldValue(
                         annotatedString = inputAnnotated,
                         selection = TextRange(
@@ -687,10 +692,7 @@ fun ChatScreen(
                         keyboardActions = KeyboardActions(
                             onSend = {
                                 handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                                messageText = ""
-                                inputCursor = TextRange(0)
-                                pendingEmojiSizes = emptyMap()
-                                showEmojiSheet = false
+                                clearInput()
                             }
                         ),
                         maxLines = 4,
@@ -725,10 +727,7 @@ fun ChatScreen(
                 IconButton(
                     onClick = {
                         handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                        messageText = ""
-                        inputCursor = TextRange(0)
-                        pendingEmojiSizes = emptyMap()
-                        showEmojiSheet = false
+                        clearInput()
                     },
                     enabled = messageText.isNotBlank() && !uiState.isSending
                 ) {

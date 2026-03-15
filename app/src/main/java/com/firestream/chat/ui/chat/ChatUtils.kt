@@ -32,6 +32,12 @@ internal fun isEmojiOnly(text: String): Boolean =
  * Existing spans (mentions, links, etc.) are preserved.
  */
 internal fun addEmojiSpans(
+    source: String,
+    emojiSize: TextUnit,
+    sizeMultipliers: Map<Int, Float> = emptyMap()
+): AnnotatedString = addEmojiSpans(AnnotatedString(source), emojiSize, sizeMultipliers)
+
+internal fun addEmojiSpans(
     source: AnnotatedString,
     emojiSize: TextUnit,
     sizeMultipliers: Map<Int, Float> = emptyMap()

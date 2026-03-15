@@ -319,9 +319,8 @@ internal fun MessageBubble(
                             if (isEmojiOnlyMsg) {
                                 val baseSize = MaterialTheme.typography.bodyMedium.fontSize
                                 val emojiOnlySize = baseSize * EMOJI_ONLY_SCALE
-                                val displayText = buildAnnotatedString { append(message.content) }
                                 val sized = remember(message.content, emojiOnlySize, message.emojiSizes) {
-                                    addEmojiSpans(displayText, emojiOnlySize, message.emojiSizes)
+                                    addEmojiSpans(message.content, emojiOnlySize, message.emojiSizes)
                                 }
                                 Text(
                                     text = sized,
