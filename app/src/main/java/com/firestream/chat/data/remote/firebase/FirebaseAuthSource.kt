@@ -49,7 +49,7 @@ class FirebaseAuthSource @Inject constructor(
             "phoneNumber" to phoneNumber,
             "displayName" to displayName,
             "avatarUrl" to avatarUrl,
-            "statusText" to "Hey there! I'm using Fire Stream",
+            "statusText" to "Hey there! I'm using FireStream",
             "lastSeen" to System.currentTimeMillis(),
             "isOnline" to true,
             "createdAt" to System.currentTimeMillis()

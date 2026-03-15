@@ -6,6 +6,7 @@ import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
+import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.flow.Flow
@@ -18,7 +19,8 @@ class UserRepositoryImpl @Inject constructor(
     private val userDao: UserDao,
     private val userSource: FirestoreUserSource,
     private val authSource: FirebaseAuthSource,
-    private val storageSource: FirebaseStorageSource
+    private val storageSource: FirebaseStorageSource,
+    private val presenceSource: RealtimePresenceSource
 ) : UserRepository {
 
     override fun observeUser(userId: String): Flow<User> {
@@ -71,6 +73,10 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun setOnlineStatus(isOnline: Boolean): Result<Unit> {
         return try {
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            // RTDB handles the abrupt-disconnect case via onDisconnect() — runs server-side
+            // even if the device powers off before onStop() can fire a Firestore write.
+            // The Firestore write below is kept for immediate consistency on normal transitions.
+            if (isOnline) presenceSource.connect(uid) else presenceSource.disconnect(uid)
             userSource.setOnlineStatus(uid, isOnline)
             Result.success(Unit)
         } catch (e: Exception) {

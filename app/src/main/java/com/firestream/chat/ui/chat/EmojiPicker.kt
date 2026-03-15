@@ -86,8 +86,79 @@ private val EMOJI_CATEGORIES = listOf(
         "🖲️","💾","💿","📀","📼","📷","📸","📹","🎥","📽️",
         "🎬","📺","📻","🎙️","🎚️","🎛️","🧭","⏱️","⏲️","⏰",
         "🔔","🔕","📢","📣","🔉","🔊","📯","🔇","🔈","🎵"
+    )),
+    EmojiCategory("🔞", "Special", listOf(
+        "🖕","💀","☠️","👿","😈","🤬","😡","😤","🤮","🤢",
+        "💩","👻","👹","👺","🤡","🎃","⚰️","🪦","🩸","🦴",
+        "😼","😾","😰","😨","😱","🥶","🥵","🤯","😳","🫣",
+        "😶‍🌫️","🥴","😵‍💫","🫠","😏","💋","🫦","🍑","🍆","😒",
+        "🙄","🤥","🤫","🍺","🍻","🥃","🍷","🥂","🍾","🚬",
+        "🎲","🃏","♠️","♥️","♦️","♣️","🎰","🔞","⚠️","💥",
+        "💣","🔥","⚡","☢️","☣️","💊","💉","🗡️"
     ))
 )
+
+@Composable
+internal fun MessageEmojiPicker(
+    modifier: Modifier = Modifier,
+    onEmojiSelected: (String) -> Unit
+) {
+    var selectedCategory by remember { mutableIntStateOf(0) }
+    Column(modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        LazyRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            itemsIndexed(EMOJI_CATEGORIES) { index, category ->
+                Box(
+                    modifier = Modifier
+                        .size(43.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (index == selectedCategory) MaterialTheme.colorScheme.primaryContainer
+                            else Color.Transparent
+                        )
+                        .clickable { selectedCategory = index },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = category.icon,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = MaterialTheme.typography.titleMedium.fontSize * 1.2f
+                        )
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        HorizontalDivider()
+        Spacer(modifier = Modifier.height(4.dp))
+        val emojis = EMOJI_CATEGORIES[selectedCategory].emojis
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(8),
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            items(emojis.size) { index ->
+                Box(
+                    modifier = Modifier
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable { onEmojiSelected(emojis[index]) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = emojis[index],
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = MaterialTheme.typography.titleLarge.fontSize * 1.2f
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
 
 @Composable
 internal fun EmojiPicker(
@@ -114,7 +185,7 @@ internal fun EmojiPicker(
                 val isSelected = currentReaction == emoji
                 Box(
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(58.dp)
                         .clip(CircleShape)
                         .background(
                             if (isSelected) MaterialTheme.colorScheme.primaryContainer
@@ -123,7 +194,12 @@ internal fun EmojiPicker(
                         .clickable { onEmojiSelected(emoji) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = emoji, style = MaterialTheme.typography.headlineMedium)
+                    Text(
+                        text = emoji,
+                        style = MaterialTheme.typography.headlineMedium.copy(
+                            fontSize = MaterialTheme.typography.headlineMedium.fontSize * 1.2f
+                        )
+                    )
                 }
             }
         }
@@ -139,7 +215,7 @@ internal fun EmojiPicker(
             itemsIndexed(EMOJI_CATEGORIES) { index, category ->
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(43.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(
                             if (index == selectedCategory) MaterialTheme.colorScheme.primaryContainer
@@ -148,7 +224,12 @@ internal fun EmojiPicker(
                         .clickable { selectedCategory = index },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = category.icon, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = category.icon,
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = MaterialTheme.typography.titleMedium.fontSize * 1.2f
+                        )
+                    )
                 }
             }
         }
@@ -172,7 +253,12 @@ internal fun EmojiPicker(
                         .clickable { onEmojiSelected(emojis[index]) },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(text = emojis[index], style = MaterialTheme.typography.titleLarge)
+                    Text(
+                        text = emojis[index],
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontSize = MaterialTheme.typography.titleLarge.fontSize * 1.2f
+                        )
+                    )
                 }
             }
         }

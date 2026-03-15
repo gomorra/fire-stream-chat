@@ -4,6 +4,7 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ContactRepository
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
 import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
@@ -17,6 +18,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -46,6 +48,7 @@ class ChatListViewModelTest {
     private lateinit var authRepository: AuthRepository
     private lateinit var messageRepository: MessageRepository
     private lateinit var contactRepository: ContactRepository
+    private lateinit var userRepository: UserRepository
     private lateinit var viewModel: ChatListViewModel
 
     private val chat1 = Chat(
@@ -73,6 +76,7 @@ class ChatListViewModelTest {
         authRepository = mockk()
         messageRepository = mockk()
         contactRepository = mockk()
+        userRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
         every { getChatsUseCase() } returns flowOf(listOf(chat1, chat2))
@@ -80,6 +84,7 @@ class ChatListViewModelTest {
         coEvery { pinChatUseCase(any(), any()) } returns Result.success(Unit)
         coEvery { syncContactsUseCase() } returns Result.success(emptyList())
         every { contactRepository.getContacts() } returns flowOf(emptyList())
+        every { userRepository.observeUser(any()) } returns emptyFlow()
 
         viewModel = ChatListViewModel(
             getChatsUseCase = getChatsUseCase,
@@ -91,7 +96,8 @@ class ChatListViewModelTest {
             syncContactsUseCase = syncContactsUseCase,
             authRepository = authRepository,
             messageRepository = messageRepository,
-            contactRepository = contactRepository
+            contactRepository = contactRepository,
+            userRepository = userRepository
         )
     }
 
@@ -145,7 +151,8 @@ class ChatListViewModelTest {
             syncContactsUseCase = syncContactsUseCase,
             authRepository = authRepository,
             messageRepository = messageRepository,
-            contactRepository = contactRepository
+            contactRepository = contactRepository,
+            userRepository = userRepository
         )
         advanceUntilIdle()
 

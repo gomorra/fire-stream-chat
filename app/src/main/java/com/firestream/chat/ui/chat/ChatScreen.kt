@@ -47,6 +47,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Group
@@ -85,7 +86,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -122,8 +126,13 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showCreatePollSheet by remember { mutableStateOf(false) }
+    var showEmojiSheet by remember { mutableStateOf(false) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+
+    BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -604,14 +613,15 @@ fun ChatScreen(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                if (uiState.editingMessage == null) {
-                    IconButton(onClick = { showAttachmentSheet = true }) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Attach",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                IconButton(onClick = {
+                    keyboardController?.hide()
+                    showEmojiSheet = !showEmojiSheet
+                }) {
+                    Icon(
+                        imageVector = Icons.Outlined.EmojiEmotions,
+                        contentDescription = "Emoji",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
 
                 OutlinedTextField(
@@ -620,18 +630,30 @@ fun ChatScreen(
                         messageText = it
                         if (uiState.editingMessage == null) viewModel.onTypingWithMentions(it)
                     },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) showEmojiSheet = false },
                     placeholder = {
                         Text(
                             if (uiState.editingMessage != null) "Edit message..."
                             else stringResource(R.string.type_message)
                         )
                     },
+                    trailingIcon = if (uiState.editingMessage == null) {
+                        {
+                            IconButton(onClick = { showAttachmentSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Attach",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    } else null,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = {
                             handleSend(viewModel, uiState, messageText)
                             messageText = ""
+                            showEmojiSheet = false
                         }
                     ),
                     maxLines = 4,
@@ -643,6 +665,7 @@ fun ChatScreen(
                     onClick = {
                         handleSend(viewModel, uiState, messageText)
                         messageText = ""
+                        showEmojiSheet = false
                     },
                     enabled = messageText.isNotBlank() && !uiState.isSending
                 ) {
@@ -653,6 +676,18 @@ fun ChatScreen(
                         else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     )
                 }
+            }
+
+            // Inline emoji panel — pushes chat list up like the keyboard
+            AnimatedVisibility(
+                visible = showEmojiSheet,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut()
+            ) {
+                MessageEmojiPicker(
+                    modifier = Modifier.height((screenHeightDp / 3).dp),
+                    onEmojiSelected = { emoji -> messageText += emoji }
+                )
             }
         }
     }

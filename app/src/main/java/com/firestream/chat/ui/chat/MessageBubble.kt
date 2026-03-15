@@ -60,10 +60,12 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.util.MentionParser
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
@@ -71,6 +73,10 @@ import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.ui.theme.ReadReceiptBlue
 import kotlin.math.roundToInt
+
+// Emoji size factors: emoji are always this multiple of the surrounding text size.
+private const val EMOJI_INLINE_SCALE = 1.3f  // inline emoji: 30% larger than the text
+private const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger than the text
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -309,6 +315,16 @@ internal fun MessageBubble(
                             }
                         }
                         else -> {
+                            val isEmojiOnlyMsg = remember(message.content) { isEmojiOnly(message.content) }
+                            if (isEmojiOnlyMsg) {
+                                val baseSize = MaterialTheme.typography.bodyMedium.fontSize
+                                Text(
+                                    text = message.content,
+                                    fontSize = baseSize * EMOJI_ONLY_SCALE,
+                                    lineHeight = baseSize * EMOJI_ONLY_SCALE * 1.2f,
+                                    color = textColor
+                                )
+                            } else {
                             val highlightColor = MaterialTheme.colorScheme.primary
                             val linkUrl = linkPreview?.url
                             val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
@@ -336,11 +352,16 @@ internal fun MessageBubble(
                                     } else base
                                 } else base
                             }
+                            val emojiInlineSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE
+                            val displayTextWithEmojis = remember(displayText, emojiInlineSize) {
+                                addEmojiSpans(displayText, emojiInlineSize)
+                            }
                             Text(
-                                text = displayText,
+                                text = displayTextWithEmojis,
                                 color = textColor,
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            } // end non-emoji-only branch
                             if (message.editedAt != null) {
                                 Text(
                                     text = "(edited)",
@@ -454,10 +475,12 @@ internal fun MessageBubble(
                         label = {
                             Text(
                                 text = if (count > 1) "$emoji $count" else emoji,
-                                style = MaterialTheme.typography.labelSmall
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = MaterialTheme.typography.labelSmall.fontSize * 1.2f
+                                )
                             )
                         },
-                        modifier = Modifier.height(28.dp),
+                        modifier = Modifier.height(34.dp),
                         border = BorderStroke(
                             width = 1.dp,
                             color = if (myReaction) MaterialTheme.colorScheme.primary

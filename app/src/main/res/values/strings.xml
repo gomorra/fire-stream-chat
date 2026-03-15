@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Fire Stream</string>
-    <string name="login_title">Welcome to Fire Stream</string>
+    <string name="app_name">FireStream</string>
+    <string name="login_title">Welcome to FireStream</string>
     <string name="login_subtitle">Enter your phone number to get started</string>
     <string name="phone_number_hint">Phone number</string>
     <string name="country_code_hint">+1</string>

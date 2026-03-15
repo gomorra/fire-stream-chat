@@ -1,9 +1,39 @@
 package com.firestream.chat.ui.chat
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.unit.TextUnit
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+
+// Matches emoji characters on JVM. Supplementary-plane emoji (U+1Fxxx) must use
+// \x{HHHH} syntax because Java's regex engine matches code points, not surrogate pairs.
+private val EMOJI_REGEX = Regex(
+    "[\\x{1F000}-\\x{1FFFF}]"      + // Supplementary-plane emoji (faces, flags, objects, etc.)
+    "|[\\u2600-\\u27BF]"            + // Misc symbols (☀ ★ ✉ etc.)
+    "|[\\u2300-\\u23FF]"            + // Misc technical (⏰ ⌚ ✂ etc.)
+    "|[\\u2B00-\\u2BFF]"            + // Misc arrows/symbols (⬛ ⬜ ⬅ etc.)
+    "|\\u200D|\\uFE0F|\\u20E3"       // ZWJ, variation-selector-16, combining keycap
+)
+
+/** Returns true when [text] contains only emoji characters and whitespace. */
+internal fun isEmojiOnly(text: String): Boolean =
+    text.isNotBlank() && EMOJI_REGEX.replace(text, "").isBlank()
+
+/**
+ * Returns a copy of [source] with [SpanStyle.fontSize] = [emojiSize] applied to every
+ * emoji sequence, while all existing spans (mentions, links, etc.) are preserved.
+ */
+internal fun addEmojiSpans(source: AnnotatedString, emojiSize: TextUnit): AnnotatedString =
+    buildAnnotatedString {
+        append(source)
+        EMOJI_REGEX.findAll(source.text).forEach { result ->
+            addStyle(SpanStyle(fontSize = emojiSize), result.range.first, result.range.last + 1)
+        }
+    }
 
 internal fun formatTimestamp(timestamp: Long): String {
     val sdf = SimpleDateFormat("HH:mm", Locale.getDefault())

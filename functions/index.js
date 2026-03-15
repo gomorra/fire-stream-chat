@@ -1,8 +1,28 @@
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onValueWritten } = require("firebase-functions/v2/database");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions");
 
 admin.initializeApp();
+
+// Mirrors RTDB presence changes to Firestore.
+// This is the fallback for abrupt disconnects (power off, crash) where the Android
+// onStop() lifecycle method never fires. Firebase RTDB runs onDisconnect() server-side
+// in those cases, writing to RTDB — this function propagates that to Firestore.
+exports.syncPresenceToFirestore = onValueWritten(
+    { ref: "/presence/{userId}" },
+    async (event) => {
+        const userId = event.params.userId;
+        const presence = event.data.after.val();
+        if (!presence) return null;
+
+        await admin.firestore().collection("users").doc(userId).update({
+            isOnline: presence.isOnline === true,
+            lastSeen: presence.lastSeen || Date.now()
+        });
+        return null;
+    }
+);
 
 exports.sendCallPushNotification = onDocumentCreated(
     "calls/{callId}",
