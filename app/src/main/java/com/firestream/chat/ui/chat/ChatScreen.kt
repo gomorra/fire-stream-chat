@@ -121,6 +121,9 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
+    // Tracks char-index → size multiplier for emojis inserted via the picker.
+    // Indices are based on messageText.length at insertion time and cleared on send/cancel.
+    var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -513,6 +516,7 @@ fun ChatScreen(
                     IconButton(onClick = {
                         viewModel.cancelEdit()
                         messageText = ""
+                        pendingEmojiSizes = emptyMap()
                     }) {
                         Icon(
                             imageVector = Icons.Default.Close,
@@ -651,8 +655,9 @@ fun ChatScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = {
-                            handleSend(viewModel, uiState, messageText)
+                            handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
                             messageText = ""
+                            pendingEmojiSizes = emptyMap()
                             showEmojiSheet = false
                         }
                     ),
@@ -663,8 +668,9 @@ fun ChatScreen(
 
                 IconButton(
                     onClick = {
-                        handleSend(viewModel, uiState, messageText)
+                        handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
                         messageText = ""
+                        pendingEmojiSizes = emptyMap()
                         showEmojiSheet = false
                     },
                     enabled = messageText.isNotBlank() && !uiState.isSending
@@ -687,9 +693,19 @@ fun ChatScreen(
                 EmojiHandlerPanel(
                     mode = EmojiMode.TEXT_INPUT,
                     recentEmojis = uiState.recentEmojis,
-                    onEmojiSelected = { emoji, _ -> messageText += emoji },
+                    onEmojiSelected = { emoji, size ->
+                        val insertIdx = messageText.length
+                        messageText += emoji
+                        if (size != 1.0f) {
+                            pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
+                        }
+                    },
                     onBackspace = {
-                        if (messageText.isNotEmpty()) messageText = messageText.dropLast(1)
+                        if (messageText.isNotEmpty()) {
+                            val removedIdx = messageText.length - 1
+                            messageText = messageText.dropLast(1)
+                            pendingEmojiSizes = pendingEmojiSizes - removedIdx
+                        }
                     },
                     onRecentUsed = { viewModel.addRecentEmoji(it) },
                     modifier = Modifier.height((screenHeightDp / 3).dp)
@@ -834,11 +850,11 @@ private fun DateSeparator(label: String) {
     }
 }
 
-private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: String) {
+private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: String, emojiSizes: Map<Int, Float> = emptyMap()) {
     if (uiState.editingMessage != null) {
         viewModel.confirmEdit(text)
     } else {
-        viewModel.sendMessage(text)
+        viewModel.sendMessage(text, emojiSizes)
         viewModel.onTyping("")
     }
 }

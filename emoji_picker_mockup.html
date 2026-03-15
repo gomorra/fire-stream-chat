@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EmojiHandlerPanel — Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #1a1a2e; color: #eee; padding: 24px; display: flex; gap: 32px; flex-wrap: wrap; }
+  h1 { color: #a78bfa; font-size: 18px; margin-bottom: 4px; }
+  h2 { color: #7c3aed; font-size: 13px; font-weight: normal; margin-bottom: 16px; }
+  .scene { display: flex; flex-direction: column; gap: 16px; }
+  .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; }
+
+  /* Phone frame */
+  .phone { width: 360px; background: #121212; border-radius: 36px; border: 2px solid #333; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.6); }
+  .phone-status { height: 28px; background: #1e1e1e; display: flex; align-items: center; justify-content: flex-end; padding: 0 16px; font-size: 11px; color: #666; }
+
+  /* Chat area */
+  .chat-area { background: #0d1117; min-height: 180px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .bubble { padding: 8px 12px; border-radius: 16px; font-size: 13px; max-width: 70%; }
+  .bubble.received { background: #1e2d3d; color: #cdd9e5; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .bubble.sent { background: #1f6feb; color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bubble-time { font-size: 10px; opacity: 0.6; margin-top: 2px; text-align: right; }
+
+  /* Input row */
+  .input-row { background: #161b22; padding: 8px 10px; display: flex; align-items: center; gap: 6px; border-top: 1px solid #30363d; }
+  .input-field { flex: 1; background: #21262d; border: 1px solid #30363d; border-radius: 20px; padding: 8px 36px 8px 12px; font-size: 13px; color: #cdd9e5; position: relative; }
+  .input-field .plus-inside { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: #6e7681; font-size: 16px; }
+  .icon-btn { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; background: transparent; border: none; font-size: 18px; color: #6e7681; }
+  .icon-btn.active { color: #58a6ff; }
+  .send-btn { width: 36px; height: 36px; border-radius: 50%; background: #238636; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+
+  /* Emoji Panel */
+  .emoji-panel { background: #161b22; border-top: 1px solid #30363d; }
+
+  /* Top toolbar */
+  .emoji-toolbar-top { display: flex; align-items: center; padding: 8px 10px; gap: 8px; border-bottom: 1px solid #30363d; }
+  .search-box { flex: 1; background: #21262d; border: 1px solid #30363d; border-radius: 16px; padding: 5px 10px; font-size: 12px; color: #8b949e; display: flex; align-items: center; gap: 6px; }
+  .search-icon { font-size: 13px; }
+  .delete-btn { width: 32px; height: 32px; background: #21262d; border: 1px solid #30363d; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; color: #8b949e; cursor: pointer; }
+
+  /* Scrollable content */
+  .emoji-scroll-area { height: 200px; overflow-y: auto; padding: 0 10px; }
+  .emoji-scroll-area::-webkit-scrollbar { width: 3px; }
+  .emoji-scroll-area::-webkit-scrollbar-track { background: transparent; }
+  .emoji-scroll-area::-webkit-scrollbar-thumb { background: #30363d; border-radius: 2px; }
+  .category-section { padding: 8px 0 4px; }
+  .category-title { font-size: 10px; color: #6e7681; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 600; }
+  .emoji-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+  .emoji-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 20px; border-radius: 6px; cursor: pointer; transition: background 0.1s; }
+  .emoji-cell:hover { background: #21262d; }
+  .emoji-cell.empty { opacity: 0.15; font-size: 12px; color: #6e7681; }
+
+  /* Bottom toolbar */
+  .emoji-toolbar-bottom { display: flex; align-items: center; justify-content: space-around; padding: 6px 8px; border-top: 1px solid #30363d; }
+  .cat-btn { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: 16px; border-radius: 6px; cursor: pointer; opacity: 0.5; transition: opacity 0.1s, background 0.1s; }
+  .cat-btn:hover, .cat-btn.active { opacity: 1; background: #21262d; }
+  .cat-btn.active { opacity: 1; }
+
+  /* SVG icons approximations using unicode */
+  .material-icon { font-family: 'Material Icons', sans-serif; font-size: 16px; }
+
+  /* ---- LONG PRESS SCENE ---- */
+  .longpress-container { position: relative; }
+  .emoji-grid-lp { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; }
+  .emoji-cell-lp { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-size: 20px; border-radius: 6px; }
+  .emoji-cell-lp.held { background: #1f6feb33; border: 1px solid #1f6feb; position: relative; font-size: 26px; z-index: 2; }
+  .emoji-cell-lp.dim { opacity: 0.3; filter: blur(0.5px); }
+  .size-slider { position: absolute; right: -28px; top: 0; bottom: 0; width: 24px; background: #21262d; border: 1px solid #30363d; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 4px 0; z-index: 10; }
+  .size-slider-track { flex: 1; width: 3px; background: #30363d; border-radius: 2px; position: relative; margin: 4px 0; }
+  .size-slider-thumb { width: 14px; height: 14px; background: #1f6feb; border-radius: 50%; position: absolute; left: 50%; transform: translateX(-50%); top: 30%; border: 2px solid #58a6ff; }
+  .size-arrow { font-size: 9px; color: #8b949e; line-height: 1; }
+  .size-label { font-size: 8px; color: #58a6ff; margin-top: 2px; }
+
+  /* ---- REACTION SCENE ---- */
+  .reaction-sheet { background: #161b22; border-radius: 16px 16px 0 0; border: 1px solid #30363d; border-bottom: none; }
+  .reaction-title { font-size: 12px; color: #8b949e; text-align: center; padding: 10px; border-bottom: 1px solid #30363d; }
+  .quick-reactions { display: flex; justify-content: space-evenly; padding: 10px 8px; border-bottom: 1px solid #30363d; }
+  .quick-cell { width: 42px; height: 42px; display: flex; align-items: center; justify-content: center; font-size: 26px; border-radius: 50%; cursor: pointer; }
+  .quick-cell.selected { background: #1f6feb33; border: 1px solid #1f6feb; }
+
+  /* Annotations */
+  .annotation { font-size: 11px; color: #f0883e; background: #1a1100; border: 1px solid #f0883e44; border-radius: 4px; padding: 4px 8px; margin-top: 6px; }
+  .arrow { color: #f0883e; }
+
+  /* Layout zones legend */
+  .zone-label { font-size: 10px; padding: 2px 6px; border-radius: 3px; display: inline-block; margin-bottom: 4px; }
+  .zone-top { background: #1a2a1a; color: #3fb950; border: 1px solid #238636; }
+  .zone-mid { background: #1a1a2a; color: #79c0ff; border: 1px solid #1f6feb; }
+  .zone-bot { background: #2a1a1a; color: #ff7b72; border: 1px solid #da3633; }
+
+  .divider { width: 1px; background: #30363d; margin: 0 8px; }
+  .row { display: flex; gap: 24px; align-items: flex-start; }
+  .col { display: flex; flex-direction: column; gap: 8px; }
+</style>
+</head>
+<body>
+
+<div class="col">
+  <h1>EmojiHandlerPanel — Design Mockup</h1>
+  <h2>FireStream Chat · for discussion</h2>
+
+  <div class="row">
+
+    <!-- SCENE 1: Normal state -->
+    <div class="scene">
+      <div class="label">1 · Normal State (Text Input mode)</div>
+      <div class="phone">
+        <div class="phone-status">9:41</div>
+
+        <!-- Chat bubbles -->
+        <div class="chat-area">
+          <div class="bubble received">Hey, coming tonight? 👀<div class="bubble-time">19:42</div></div>
+          <div class="bubble sent">Yeah, be there at 8<div class="bubble-time">19:43</div></div>
+          <div class="bubble received">🎉🎉<div class="bubble-time">19:43</div></div>
+        </div>
+
+        <!-- Input row -->
+        <div class="input-row">
+          <button class="icon-btn active">🙂</button><!-- emoji btn (EmojiEmotions icon) -->
+          <div class="input-field" style="position:relative;">
+            Type a message…
+            <span class="plus-inside">＋</span>
+          </div>
+          <div class="send-btn">➤</div>
+        </div>
+
+        <!-- EMOJI PANEL -->
+        <div class="emoji-panel">
+
+          <!-- Zone label -->
+          <div style="display:flex; gap:6px; padding:4px 10px 0;">
+            <span class="zone-label zone-top">Top toolbar</span>
+            <span class="zone-label zone-mid">Scroll area</span>
+            <span class="zone-label zone-bot">Bottom toolbar</span>
+          </div>
+
+          <!-- Top toolbar -->
+          <div class="emoji-toolbar-top">
+            <div class="search-box">
+              <span class="search-icon">🔍</span>
+              <span>Search emoji…</span>
+            </div>
+            <div class="delete-btn">⌫</div>
+          </div>
+
+          <!-- Scrollable area -->
+          <div class="emoji-scroll-area">
+            <div class="category-section">
+              <div class="category-title">⏱ Recents</div>
+              <div class="emoji-grid">
+                <div class="emoji-cell">❤️</div>
+                <div class="emoji-cell">😂</div>
+                <div class="emoji-cell">👍</div>
+                <div class="emoji-cell">🔥</div>
+                <div class="emoji-cell">😭</div>
+                <div class="emoji-cell empty">·</div>
+                <div class="emoji-cell empty">·</div>
+                <div class="emoji-cell empty">·</div>
+              </div>
+            </div>
+            <div class="category-section">
+              <div class="category-title">😀 Smileys</div>
+              <div class="emoji-grid">
+                <div class="emoji-cell">😀</div><div class="emoji-cell">😃</div><div class="emoji-cell">😄</div><div class="emoji-cell">😁</div>
+                <div class="emoji-cell">😆</div><div class="emoji-cell">😅</div><div class="emoji-cell">🤣</div><div class="emoji-cell">😂</div>
+                <div class="emoji-cell">🙂</div><div class="emoji-cell">🙃</div><div class="emoji-cell">😉</div><div class="emoji-cell">😊</div>
+                <div class="emoji-cell">😇</div><div class="emoji-cell">🥰</div><div class="emoji-cell">😍</div><div class="emoji-cell">🤩</div>
+              </div>
+            </div>
+            <div class="category-section">
+              <div class="category-title">👋 People</div>
+              <div class="emoji-grid">
+                <div class="emoji-cell">👋</div><div class="emoji-cell">🤚</div><div class="emoji-cell">🖐️</div><div class="emoji-cell">✋</div>
+                <div class="emoji-cell">🖖</div><div class="emoji-cell">👌</div><div class="emoji-cell">🤌</div><div class="emoji-cell">🤏</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom toolbar -->
+          <div class="emoji-toolbar-bottom">
+            <div class="cat-btn active" title="Recents">⏱</div>
+            <div class="cat-btn" title="Smileys">😊</div>
+            <div class="cat-btn" title="People">🙋</div>
+            <div class="cat-btn" title="Animals">🐾</div>
+            <div class="cat-btn" title="Food">🍽️</div>
+            <div class="cat-btn" title="Activities">⚽</div>
+            <div class="cat-btn" title="Symbols">♥</div>
+            <div class="cat-btn" title="Travel">🚗</div>
+            <div class="cat-btn" title="Objects">💡</div>
+            <div class="cat-btn" title="Special">🔞</div>
+          </div>
+
+        </div><!-- /emoji-panel -->
+      </div><!-- /phone -->
+      <div class="annotation">↑ Panel pushes chat UP (no overlay). Height = screen ÷ 3.</div>
+    </div>
+
+    <!-- SCENE 2: Long-press size picker -->
+    <div class="scene">
+      <div class="label">2 · Long-Press Size Picker</div>
+      <div class="phone">
+        <div class="phone-status">9:41</div>
+        <div class="chat-area" style="min-height:120px;">
+          <div class="bubble received">Pick a big one 😄<div class="bubble-time">19:44</div></div>
+        </div>
+        <div class="input-row">
+          <button class="icon-btn active">🙂</button>
+          <div class="input-field" style="position:relative;">Let's go <span style="font-size:18px;">🔥</span>
+            <span class="plus-inside">＋</span>
+          </div>
+          <div class="send-btn">➤</div>
+        </div>
+        <div class="emoji-panel">
+          <div class="emoji-toolbar-top">
+            <div class="search-box"><span class="search-icon">🔍</span><span>Search emoji…</span></div>
+            <div class="delete-btn">⌫</div>
+          </div>
+          <div class="emoji-scroll-area" style="height:200px; overflow:hidden;">
+            <div class="category-section">
+              <div class="category-title">😀 Smileys</div>
+              <!-- Emoji grid with long-press state -->
+              <div style="position:relative; display:inline-block; width:100%;">
+                <div class="emoji-grid-lp">
+                  <div class="emoji-cell-lp dim">😀</div>
+                  <div class="emoji-cell-lp dim">😃</div>
+                  <div class="emoji-cell-lp dim">😄</div>
+                  <div class="emoji-cell-lp dim">😁</div>
+                  <div class="emoji-cell-lp dim">😆</div>
+                  <div class="emoji-cell-lp dim">😅</div>
+                  <div class="emoji-cell-lp held" style="position:relative;">🤣
+                    <!-- Size slider on the right (col 7 of 8 → right side ok) -->
+                    <div class="size-slider">
+                      <span class="size-arrow">▲</span>
+                      <div class="size-slider-track">
+                        <div class="size-slider-thumb"></div>
+                      </div>
+                      <span class="size-arrow">▼</span>
+                    </div>
+                  </div>
+                  <div class="emoji-cell-lp dim">😂</div>
+                </div>
+                <div style="font-size:9px;color:#58a6ff;margin-top:4px;padding-left:2px;">
+                  ← scroll locked · drag slider ↑ larger / ↓ smaller · release = insert
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="emoji-toolbar-bottom">
+            <div class="cat-btn">⏱</div><div class="cat-btn active">😊</div><div class="cat-btn">🙋</div>
+            <div class="cat-btn">🐾</div><div class="cat-btn">🍽️</div><div class="cat-btn">⚽</div>
+            <div class="cat-btn">♥</div><div class="cat-btn">🚗</div><div class="cat-btn">💡</div><div class="cat-btn">🔞</div>
+          </div>
+        </div>
+      </div>
+      <div class="annotation">↑ Slider right of emoji (or left if last column). Drag up = larger. Release = place.</div>
+    </div>
+
+    <!-- SCENE 3: Search active -->
+    <div class="scene">
+      <div class="label">3 · Search Active</div>
+      <div class="phone">
+        <div class="phone-status">9:41</div>
+        <div class="chat-area" style="min-height:100px;">
+          <div class="bubble sent">search "fire"<div class="bubble-time">19:45</div></div>
+        </div>
+        <div class="input-row">
+          <button class="icon-btn active">🙂</button>
+          <div class="input-field" style="position:relative;">Type a message…<span class="plus-inside">＋</span></div>
+          <div class="send-btn">➤</div>
+        </div>
+        <div class="emoji-panel">
+          <div class="emoji-toolbar-top">
+            <div class="search-box" style="background:#21262d; border-color:#1f6feb;">
+              <span class="search-icon">🔍</span>
+              <span style="color:#cdd9e5;">fire</span>
+              <span style="margin-left:auto; font-size:11px; color:#8b949e;">✕</span>
+            </div>
+            <div class="delete-btn">⌫</div>
+          </div>
+          <div class="emoji-scroll-area">
+            <div class="category-section">
+              <div class="category-title">Search results · "fire"</div>
+              <div class="emoji-grid">
+                <div class="emoji-cell">🔥</div>
+                <div class="emoji-cell">🚒</div>
+                <div class="emoji-cell">🧯</div>
+                <div class="emoji-cell">👨‍🚒</div>
+                <div class="emoji-cell">🌋</div>
+                <div class="emoji-cell">🎆</div>
+                <div class="emoji-cell">🪔</div>
+                <div class="emoji-cell">🕯️</div>
+              </div>
+            </div>
+          </div>
+          <div class="emoji-toolbar-bottom">
+            <div class="cat-btn">⏱</div><div class="cat-btn">😊</div><div class="cat-btn">🙋</div>
+            <div class="cat-btn">🐾</div><div class="cat-btn">🍽️</div><div class="cat-btn">⚽</div>
+            <div class="cat-btn">♥</div><div class="cat-btn">🚗</div><div class="cat-btn">💡</div><div class="cat-btn">🔞</div>
+          </div>
+        </div>
+      </div>
+      <div class="annotation">↑ Keyword lookup table bundled in-app. No network needed.</div>
+    </div>
+
+    <!-- SCENE 4: Reaction mode -->
+    <div class="scene">
+      <div class="label">4 · Reaction Mode (same panel)</div>
+      <div class="phone">
+        <div class="phone-status">9:41</div>
+        <div class="chat-area" style="min-height:120px; position:relative;">
+          <div class="bubble received" style="border: 1.5px solid #1f6feb;">
+            Hey, coming tonight? 👀
+            <div style="font-size:18px; margin-top:4px;">❤️ <span style="font-size:11px; color:#8b949e;">you</span></div>
+            <div class="bubble-time">19:42</div>
+          </div>
+          <div style="font-size:10px; color:#8b949e; margin-top:-4px; margin-left:4px;">long-press → "React"</div>
+        </div>
+        <!-- no input row in this view - the panel is a bottom sheet -->
+        <div class="reaction-sheet">
+          <div class="reaction-title">React to message</div>
+          <!-- Quick reactions row (6 most used) -->
+          <div class="quick-reactions">
+            <div class="quick-cell selected">❤️</div>
+            <div class="quick-cell">😂</div>
+            <div class="quick-cell">👍</div>
+            <div class="quick-cell">😮</div>
+            <div class="quick-cell">😢</div>
+            <div class="quick-cell">🙏</div>
+          </div>
+          <!-- Same panel, REACTION mode -->
+          <div class="emoji-toolbar-top" style="padding:6px 10px;">
+            <div class="search-box"><span class="search-icon">🔍</span><span>Search emoji…</span></div>
+            <div class="delete-btn" title="Remove reaction">✕</div>
+          </div>
+          <div class="emoji-scroll-area" style="height:130px;">
+            <div class="category-section">
+              <div class="category-title">⏱ Recents</div>
+              <div class="emoji-grid">
+                <div class="emoji-cell">❤️</div><div class="emoji-cell">😂</div><div class="emoji-cell">👍</div>
+                <div class="emoji-cell">🔥</div><div class="emoji-cell">😭</div>
+              </div>
+            </div>
+          </div>
+          <div class="emoji-toolbar-bottom">
+            <div class="cat-btn active">⏱</div><div class="cat-btn">😊</div><div class="cat-btn">🙋</div>
+            <div class="cat-btn">🐾</div><div class="cat-btn">🍽️</div><div class="cat-btn">⚽</div>
+            <div class="cat-btn">♥</div><div class="cat-btn">🚗</div><div class="cat-btn">💡</div><div class="cat-btn">🔞</div>
+          </div>
+        </div>
+      </div>
+      <div class="annotation">↑ In reaction mode: ✕ removes current reaction. Quick-reactions row on top. Selecting closes sheet.</div>
+    </div>
+
+  </div><!-- /row -->
+
+  <!-- Open questions section -->
+  <div style="margin-top: 24px; max-width: 900px;">
+    <h2 style="font-size:14px; color:#f0883e; margin-bottom:10px;">⚠ Open Questions (need your answers)</h2>
+    <table style="border-collapse:collapse; width:100%; font-size:12px;">
+      <tr style="background:#1e2d3d;">
+        <th style="padding:8px; text-align:left; border:1px solid #30363d; color:#79c0ff;">#</th>
+        <th style="padding:8px; text-align:left; border:1px solid #30363d; color:#79c0ff;">Question</th>
+        <th style="padding:8px; text-align:left; border:1px solid #30363d; color:#79c0ff;">Option A</th>
+        <th style="padding:8px; text-align:left; border:1px solid #30363d; color:#79c0ff;">Option B</th>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #30363d;">Q1</td>
+        <td style="padding:8px; border:1px solid #30363d;">Emoji size after long-press — what does "placing" mean?</td>
+        <td style="padding:8px; border:1px solid #30363d; color:#3fb950;">Visual only in picker (easier to pick), always standard size in message</td>
+        <td style="padding:8px; border:1px solid #30363d; color:#f0883e;">Size stored as message metadata, emoji rendered bigger/smaller in bubble (schema change required)</td>
+      </tr>
+      <tr style="background:#0d1117;">
+        <td style="padding:8px; border:1px solid #30363d;">Q2</td>
+        <td style="padding:8px; border:1px solid #30363d;">Delete ⌫ button behavior</td>
+        <td style="padding:8px; border:1px solid #30363d; color:#3fb950;">Text mode: backspace last char. Reaction mode: remove reaction.</td>
+        <td style="padding:8px; border:1px solid #30363d;">Something else?</td>
+      </tr>
+      <tr>
+        <td style="padding:8px; border:1px solid #30363d;">Q3</td>
+        <td style="padding:8px; border:1px solid #30363d;">Recents persistence</td>
+        <td style="padding:8px; border:1px solid #30363d; color:#3fb950;">DataStore (survives restart)</td>
+        <td style="padding:8px; border:1px solid #30363d;">In-session only (ViewModel)</td>
+      </tr>
+      <tr style="background:#0d1117;">
+        <td style="padding:8px; border:1px solid #30363d;">Q4</td>
+        <td style="padding:8px; border:1px solid #30363d;">Search available in…</td>
+        <td style="padding:8px; border:1px solid #30363d; color:#3fb950;">Both modes (text + reaction)</td>
+        <td style="padding:8px; border:1px solid #30363d;">Text input only</td>
+      </tr>
+    </table>
+  </div>
+
+</div><!-- /col -->
+</body>
+</html>

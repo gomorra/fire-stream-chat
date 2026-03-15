@@ -353,7 +353,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    fun sendMessage(content: String) {
+    fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) {
         if (content.isBlank()) return
         typingDebounceJob?.cancel()
         val state = _uiState.value
@@ -367,7 +367,7 @@ class ChatViewModel @Inject constructor(
             } else {
                 val replyToId = state.replyToMessage?.id
                 val mentions = if (state.isGroupChat) parseMentionsUseCase(content, displayNameToUserId) else emptyList()
-                sendMessageUseCase(chatId, content, recipientId, replyToId, mentions)
+                sendMessageUseCase(chatId, content, recipientId, replyToId, mentions, emojiSizes)
                     .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
                     .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
             }

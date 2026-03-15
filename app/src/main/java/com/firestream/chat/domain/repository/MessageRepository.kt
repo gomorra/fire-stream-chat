@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 
 interface MessageRepository {
     fun getMessages(chatId: String): Flow<List<Message>>
-    suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null, mentions: List<String> = emptyList()): Result<Message>
+    suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null, mentions: List<String> = emptyList(), emojiSizes: Map<Int, Float> = emptyMap()): Result<Message>
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit>
     suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit>

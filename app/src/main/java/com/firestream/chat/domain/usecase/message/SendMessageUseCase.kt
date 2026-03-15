@@ -12,8 +12,9 @@ class SendMessageUseCase @Inject constructor(
         content: String,
         recipientId: String,
         replyToId: String? = null,
-        mentions: List<String> = emptyList()
+        mentions: List<String> = emptyList(),
+        emojiSizes: Map<Int, Float> = emptyMap()
     ): Result<Message> {
-        return messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions)
+        return messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
     }
 }

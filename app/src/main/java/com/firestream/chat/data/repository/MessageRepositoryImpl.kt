@@ -180,7 +180,8 @@ class MessageRepositoryImpl @Inject constructor(
         content: String,
         recipientId: String,
         replyToId: String?,
-        mentions: List<String>
+        mentions: List<String>,
+        emojiSizes: Map<Int, Float>
     ): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
@@ -196,7 +197,8 @@ class MessageRepositoryImpl @Inject constructor(
                 status = MessageStatus.SENDING,
                 timestamp = timestamp,
                 replyToId = replyToId,
-                mentions = mentions
+                mentions = mentions,
+                emojiSizes = emojiSizes
             )
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
@@ -213,7 +215,8 @@ class MessageRepositoryImpl @Inject constructor(
                     replyToId = replyToId,
                     timestamp = timestamp,
                     mentions = mentions,
-                    plainContent = content
+                    plainContent = content,
+                    emojiSizes = emojiSizes
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -223,7 +226,8 @@ class MessageRepositoryImpl @Inject constructor(
                     type = MessageType.TEXT,
                     replyToId = replyToId,
                     timestamp = timestamp,
-                    mentions = mentions
+                    mentions = mentions,
+                    emojiSizes = emojiSizes
                 )
             }
 
