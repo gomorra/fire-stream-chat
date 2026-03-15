@@ -37,7 +37,9 @@ data class GroupSettingsUiState(
     val inviteLinkGenerated: Boolean = false,
     val leftGroup: Boolean = false,
     val isUploading: Boolean = false,
-    val uploadError: String? = null
+    val uploadError: String? = null,
+    val isSavingName: Boolean = false,
+    val isSavingDescription: Boolean = false
 )
 
 data class MemberInfo(
@@ -153,15 +155,35 @@ class GroupSettingsViewModel @Inject constructor(
         }
     }
 
+    fun updateGroupName(name: String) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingName = true)
+            chatRepository.updateGroup(chatId, name = name, avatarUrl = null)
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(
+                        isSavingName = false,
+                        chat = _uiState.value.chat?.copy(name = name)
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(isSavingName = false, error = e.message)
+                }
+        }
+    }
+
     fun updateDescription(description: String) {
         viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSavingDescription = true)
             updateGroupDescriptionUseCase(chatId, description)
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(
+                        isSavingDescription = false,
                         chat = _uiState.value.chat?.copy(description = description)
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(isSavingDescription = false, error = e.message)
+                }
         }
     }
 

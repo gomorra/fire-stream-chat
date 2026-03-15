@@ -54,6 +54,15 @@ android {
         disable.add("NonNullableMutableLiveData")
     }
 
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64") // arm64-v8a: real devices; x86_64: emulator
+            isUniversalApk = false
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

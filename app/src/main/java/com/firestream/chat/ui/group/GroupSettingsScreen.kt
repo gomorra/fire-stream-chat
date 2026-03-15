@@ -85,6 +85,7 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import java.io.File
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -104,8 +105,11 @@ fun GroupSettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
-    var showDescriptionDialog by remember { mutableStateOf(false) }
     var showQrDialog by remember { mutableStateOf(false) }
+    var editingName by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
+    var editingDescription by remember { mutableStateOf(false) }
+    var descriptionInput by remember { mutableStateOf("") }
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf<String?>(null) }
     var fullscreenGroupAvatar by remember { mutableStateOf(false) }
@@ -247,10 +251,20 @@ fun GroupSettingsScreen(
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = chat.name ?: "Group",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                    EditableGroupField(
+                        displayValue = chat.name ?: "Group",
+                        label = "Group name",
+                        isEditable = isAdmin,
+                        isSaving = uiState.isSavingName,
+                        isEditing = editingName,
+                        input = nameInput,
+                        onInputChange = { nameInput = it },
+                        onEditClick = { nameInput = chat.name ?: ""; editingName = true },
+                        onSave = { viewModel.updateGroupName(nameInput); editingName = false },
+                        onCancel = { editingName = false },
+                        saveEnabled = nameInput.isNotBlank(),
+                        displayTextStyle = MaterialTheme.typography.headlineSmall,
+                        displayFontWeight = FontWeight.Bold
                     )
                     Text(
                         text = "${chat.participants.size} members",
@@ -271,29 +285,21 @@ fun GroupSettingsScreen(
             // Description section
             item {
                 SectionHeader("Description")
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(enabled = isAdmin) { showDescriptionDialog = true }
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = chat.description ?: if (isAdmin) "Add group description" else "No description",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (chat.description != null) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (isAdmin) {
-                        Icon(
-                            Icons.Default.Edit,
-                            contentDescription = "Edit description",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
+                EditableGroupField(
+                    displayValue = chat.description ?: if (isAdmin) "Add group description" else "No description",
+                    label = "Description",
+                    isEditable = isAdmin,
+                    isSaving = uiState.isSavingDescription,
+                    isEditing = editingDescription,
+                    input = descriptionInput,
+                    onInputChange = { descriptionInput = it },
+                    onEditClick = { descriptionInput = chat.description ?: ""; editingDescription = true },
+                    onSave = { viewModel.updateDescription(descriptionInput); editingDescription = false },
+                    onCancel = { editingDescription = false },
+                    displayColor = if (chat.description != null) Color.Unspecified
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                    rowModifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
                 HorizontalDivider()
             }
 
@@ -463,33 +469,6 @@ fun GroupSettingsScreen(
         }
     }
 
-    // Description edit dialog
-    if (showDescriptionDialog) {
-        var descText by remember { mutableStateOf(uiState.chat?.description ?: "") }
-        AlertDialog(
-            onDismissRequest = { showDescriptionDialog = false },
-            title = { Text("Group Description") },
-            text = {
-                OutlinedTextField(
-                    value = descText,
-                    onValueChange = { descText = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text("Enter group description") },
-                    maxLines = 5
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.updateDescription(descText)
-                    showDescriptionDialog = false
-                }) { Text("Save") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDescriptionDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
     // QR code dialog
     if (showQrDialog && uiState.chat?.inviteLink != null) {
         val inviteUrl = "https://firestream.chat/join/${uiState.chat!!.inviteLink}"
@@ -605,6 +584,71 @@ fun GroupSettingsScreen(
                 TextButton(onClick = { showPhotoSourceDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+private fun EditableGroupField(
+    displayValue: String,
+    label: String,
+    isEditable: Boolean,
+    isSaving: Boolean,
+    isEditing: Boolean,
+    input: String,
+    onInputChange: (String) -> Unit,
+    onEditClick: () -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+    saveEnabled: Boolean = true,
+    displayTextStyle: TextStyle = MaterialTheme.typography.bodyLarge,
+    displayFontWeight: FontWeight? = null,
+    displayColor: Color = Color.Unspecified,
+    rowModifier: Modifier = Modifier
+) {
+    if (isEditable && isEditing) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier.padding(horizontal = 16.dp)
+        ) {
+            OutlinedTextField(
+                value = input,
+                onValueChange = onInputChange,
+                singleLine = true,
+                label = { Text(label) },
+                enabled = !isSaving,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = onSave, enabled = saveEnabled && !isSaving) {
+                Icon(Icons.Default.Check, contentDescription = "Save $label")
+            }
+            IconButton(onClick = onCancel) {
+                Icon(Icons.Default.Close, contentDescription = "Cancel")
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = rowModifier.then(modifier)
+        ) {
+            Text(
+                text = displayValue,
+                style = displayTextStyle,
+                fontWeight = displayFontWeight,
+                color = displayColor,
+                modifier = Modifier.weight(1f)
+            )
+            if (isEditable) {
+                IconButton(onClick = onEditClick) {
+                    Icon(
+                        Icons.Default.Edit,
+                        contentDescription = "Edit $label",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
     }
 }
 
