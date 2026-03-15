@@ -45,6 +45,9 @@ class PreferencesDataStore @Inject constructor(
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
 
+    // Emoji recents
+    private val recentEmojisKey = stringPreferencesKey("recent_emojis")
+
     // --- Theme ---
 
     val appThemeFlow: Flow<AppTheme> = context.dataStore.data.map { prefs ->
@@ -138,5 +141,22 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setAutoDownload(option: AutoDownloadOption) {
         context.dataStore.edit { prefs -> prefs[autoDownloadKey] = option.name }
+    }
+
+    // --- Emoji recents ---
+
+    val recentEmojisFlow: Flow<List<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[recentEmojisKey] ?: return@map emptyList()
+        raw.split(",").filter { it.isNotEmpty() }
+    }
+
+    suspend fun addRecentEmoji(emoji: String) {
+        context.dataStore.edit { prefs ->
+            val current = (prefs[recentEmojisKey] ?: "")
+                .split(",").filter { it.isNotEmpty() }.toMutableList()
+            current.remove(emoji)
+            current.add(0, emoji)
+            prefs[recentEmojisKey] = current.take(40).joinToString(",")
+        }
     }
 }

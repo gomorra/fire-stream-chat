@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -85,6 +86,8 @@ data class ChatUiState(
     // Phase 5.5: broadcast
     val isBroadcast: Boolean = false,
     val broadcastRecipientIds: List<String> = emptyList(),
+    // Emoji recents (from DataStore)
+    val recentEmojis: List<String> = emptyList(),
     // Recipient profile (individual chats only)
     val recipientAvatarUrl: String? = null,
     val isRecipientOnline: Boolean = false,
@@ -144,6 +147,7 @@ class ChatViewModel @Inject constructor(
         loadAvailableChats()
         observeReadReceiptsAllowed()
         loadChatInfo()
+        observeRecentEmojis()
         if (recipientId.isNotBlank()) observeRecipient()
     }
 
@@ -561,6 +565,23 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    // Emoji recents
+    private fun observeRecentEmojis() {
+        viewModelScope.launch {
+            preferencesDataStore.recentEmojisFlow
+                .distinctUntilChanged()
+                .collect { recents ->
+                    _uiState.value = _uiState.value.copy(recentEmojis = recents)
+                }
+        }
+    }
+
+    fun addRecentEmoji(emoji: String) {
+        viewModelScope.launch {
+            preferencesDataStore.addRecentEmoji(emoji)
+        }
     }
 
     override fun onCleared() {
