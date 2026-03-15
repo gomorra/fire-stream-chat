@@ -119,6 +119,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+// Max emoji size multiplier shown in the input field — keeps tall emoji from overflowing maxLines.
+private const val INPUT_EMOJI_SIZE_CAP = 2.0f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -675,7 +678,8 @@ fun ChatScreen(
                 }
                 val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
                 val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
-                    addEmojiSpans(messageText, emojiInputSize, pendingEmojiSizes)
+                    val cappedSizes = pendingEmojiSizes.mapValues { (_, v) -> v.coerceAtMost(INPUT_EMOJI_SIZE_CAP) }
+                    addEmojiSpans(messageText, emojiInputSize, cappedSizes)
                 }
                 val inputValue = remember(inputAnnotated, inputCursor) {
                     TextFieldValue(
@@ -690,10 +694,7 @@ fun ChatScreen(
                     modifier = Modifier
                         .weight(1f)
                         .onFocusChanged { if (it.isFocused) showEmojiSheet = false }
-                        // No clip: the Row's non-weighted IconButtons (48dp) constrain the Box's
-                        // max-height via Row's cross-axis measurement, so clip would cut tall emoji.
-                        // border() draws rounded corners independently — no background means no
-                        // visible bleed at corners for normal-sized text.
+                        // No clip: large emoji must overflow the Row's cross-axis height constraint.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
                     BasicTextField(
@@ -702,6 +703,7 @@ fun ChatScreen(
                             inputCursor = newValue.selection
                             val newText = newValue.text
                             if (newText != messageText) {
+                                pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
                                 messageText = newText
                                 if (uiState.editingMessage == null) viewModel.onTypingWithMentions(newText)
                             }
@@ -947,6 +949,33 @@ private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: Str
     } else {
         viewModel.sendMessage(text, emojiSizes)
         viewModel.onTyping("")
+    }
+}
+
+/**
+ * Adjusts emoji size index map when the text changes via keyboard input.
+ * Shifts indices after an insertion, drops entries in a deleted range and shifts the rest down.
+ */
+private fun adjustEmojiIndices(
+    oldText: String,
+    newText: String,
+    sizes: Map<Int, Float>
+): Map<Int, Float> {
+    if (sizes.isEmpty()) return sizes
+    val delta = newText.length - oldText.length
+    if (delta == 0) return sizes
+    // Find the first position where the strings diverge — that's the edit point.
+    val editPos = oldText.zip(newText).indexOfFirst { (a, b) -> a != b }.takeIf { it >= 0 }
+        ?: minOf(oldText.length, newText.length)
+    return if (delta > 0) {
+        // Insertion: shift all indices >= editPos forward by delta.
+        sizes.mapKeys { (idx, _) -> if (idx >= editPos) idx + delta else idx }
+    } else {
+        // Deletion: drop entries in [editPos, editPos - delta) and shift the rest down.
+        val deleteEnd = editPos - delta
+        sizes.entries
+            .filter { (idx, _) -> idx < editPos || idx >= deleteEnd }
+            .associate { (idx, v) -> (if (idx >= deleteEnd) idx + delta else idx) to v }
     }
 }
 
