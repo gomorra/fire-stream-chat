@@ -22,8 +22,8 @@ class FirestoreUserSource @Inject constructor(
                     close(error)
                     return@addSnapshotListener
                 }
-                snapshot?.data?.let { data ->
-                    trySend(mapToUser(data))
+                snapshot?.takeIf { it.exists() }?.let { doc ->
+                    trySend(mapToUser(doc.data ?: return@let, doc.id))
                 }
             }
         awaitClose { listener.remove() }
@@ -31,7 +31,7 @@ class FirestoreUserSource @Inject constructor(
 
     suspend fun getUserById(userId: String): User? {
         val doc = firestore.collection("users").document(userId).get().await()
-        return if (doc.exists()) doc.data?.let { mapToUser(it) } else null
+        return if (doc.exists()) doc.data?.let { mapToUser(it, doc.id) } else null
     }
 
     suspend fun updateProfile(userId: String, updates: Map<String, Any?>) {
@@ -72,9 +72,9 @@ class FirestoreUserSource @Inject constructor(
         return doc.exists()
     }
 
-    private fun mapToUser(data: Map<String, Any?>): User {
+    private fun mapToUser(data: Map<String, Any?>, documentId: String = ""): User {
         return User(
-            uid = data["uid"] as? String ?: "",
+            uid = (data["uid"] as? String)?.takeIf { it.isNotBlank() } ?: documentId,
             phoneNumber = data["phoneNumber"] as? String ?: "",
             displayName = data["displayName"] as? String ?: "",
             avatarUrl = data["avatarUrl"] as? String,

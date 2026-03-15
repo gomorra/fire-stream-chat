@@ -140,17 +140,17 @@ class ChatListViewModel @Inject constructor(
                     }
                     .catch { }
                     .collect { user ->
-                        val updated = _uiState.value.contacts[user.uid]
+                        val updated = _uiState.value.contacts[recipientId]
                             ?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
                             ?: Contact(
-                                uid = user.uid,
+                                uid = recipientId,
                                 phoneNumber = user.phoneNumber,
                                 displayName = user.displayName,
                                 avatarUrl = user.avatarUrl,
                                 isRegistered = true
                             )
                         _uiState.value = _uiState.value.copy(
-                            contacts = _uiState.value.contacts + (user.uid to updated)
+                            contacts = _uiState.value.contacts + (recipientId to updated)
                         )
                     }
             }

@@ -157,7 +157,11 @@ class ChatViewModel @Inject constructor(
                     val broadcastRecipientIds = if (isBroadcast) chat.participants.filter { it != uid } else emptyList()
                     _uiState.value = _uiState.value.copy(
                         isGroupChat = isGroup,
-                        chatName = chat.name,
+                        // Only overwrite chatName from the chat document for named chats
+                        // (groups/broadcasts). For individual chats chat.name is null and
+                        // overwriting here would race with observeRecipient() which sets the
+                        // recipient's displayName as chatName from a faster snapshot listener.
+                        chatName = if (isGroup || isBroadcast) chat.name else _uiState.value.chatName,
                         chatAvatarUrl = chat.avatarUrl,
                         canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
                         isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
