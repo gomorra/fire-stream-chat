@@ -19,6 +19,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -91,8 +93,13 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -124,6 +131,7 @@ fun ChatScreen(
     // Tracks char-index → size multiplier for emojis inserted via the picker.
     // Indices are based on messageText.length at insertion time and cleared on send/cancel.
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
+    var inputCursor by remember { mutableStateOf(TextRange(0)) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -162,7 +170,10 @@ fun ChatScreen(
 
     LaunchedEffect(uiState.editingMessage) {
         val editing = uiState.editingMessage
-        if (editing != null) messageText = editing.content
+        if (editing != null) {
+            messageText = editing.content
+            inputCursor = TextRange(editing.content.length)
+        }
     }
 
     LaunchedEffect(uiState.messages.size) {
@@ -516,6 +527,7 @@ fun ChatScreen(
                     IconButton(onClick = {
                         viewModel.cancelEdit()
                         messageText = ""
+                        inputCursor = TextRange(0)
                         pendingEmojiSizes = emptyMap()
                     }) {
                         Icon(
@@ -604,7 +616,9 @@ fun ChatScreen(
                         ListItem(
                             headlineContent = { Text(user.displayName) },
                             modifier = Modifier.clickable {
-                                messageText = viewModel.selectMention(user, messageText)
+                                val selected = viewModel.selectMention(user, messageText)
+                                messageText = selected
+                                inputCursor = TextRange(selected.length)
                             }
                         )
                         HorizontalDivider()
@@ -628,48 +642,91 @@ fun ChatScreen(
                     )
                 }
 
-                OutlinedTextField(
-                    value = messageText,
-                    onValueChange = {
-                        messageText = it
-                        if (uiState.editingMessage == null) viewModel.onTypingWithMentions(it)
-                    },
-                    modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) showEmojiSheet = false },
-                    placeholder = {
-                        Text(
-                            if (uiState.editingMessage != null) "Edit message..."
-                            else stringResource(R.string.type_message)
+                val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
+                val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
+                    addEmojiSpans(buildAnnotatedString { append(messageText) }, emojiInputSize, pendingEmojiSizes)
+                }
+                val inputValue = remember(inputAnnotated, inputCursor, messageText) {
+                    TextFieldValue(
+                        annotatedString = inputAnnotated,
+                        selection = TextRange(
+                            inputCursor.start.coerceIn(0, messageText.length),
+                            inputCursor.end.coerceIn(0, messageText.length)
                         )
-                    },
-                    trailingIcon = if (uiState.editingMessage == null) {
-                        {
-                            IconButton(onClick = { showAttachmentSheet = true }) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "Attach",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onFocusChanged { if (it.isFocused) showEmojiSheet = false }
+                        .clip(RoundedCornerShape(24.dp))
+                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
+                ) {
+                    BasicTextField(
+                        value = inputValue,
+                        onValueChange = { newValue ->
+                            inputCursor = newValue.selection
+                            val newText = newValue.text
+                            if (newText != messageText) {
+                                messageText = newText
+                                if (uiState.editingMessage == null) viewModel.onTypingWithMentions(newText)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(
+                                start = 16.dp,
+                                end = if (uiState.editingMessage == null) 48.dp else 16.dp,
+                                top = 10.dp,
+                                bottom = 10.dp
+                            ),
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
+                                messageText = ""
+                                inputCursor = TextRange(0)
+                                pendingEmojiSizes = emptyMap()
+                                showEmojiSheet = false
+                            }
+                        ),
+                        maxLines = 4,
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        decorationBox = { innerTextField ->
+                            if (messageText.isEmpty()) {
+                                Text(
+                                    text = if (uiState.editingMessage != null) "Edit message..."
+                                           else stringResource(R.string.type_message),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            innerTextField()
                         }
-                    } else null,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = {
-                            handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                            messageText = ""
-                            pendingEmojiSizes = emptyMap()
-                            showEmojiSheet = false
+                    )
+                    if (uiState.editingMessage == null) {
+                        IconButton(
+                            onClick = { showAttachmentSheet = true },
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "Attach",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    ),
-                    maxLines = 4,
-                    shape = RoundedCornerShape(24.dp)
-                )
+                    }
+                }
                 Spacer(modifier = Modifier.width(8.dp))
 
                 IconButton(
                     onClick = {
                         handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
                         messageText = ""
+                        inputCursor = TextRange(0)
                         pendingEmojiSizes = emptyMap()
                         showEmojiSheet = false
                     },
@@ -696,6 +753,7 @@ fun ChatScreen(
                     onEmojiSelected = { emoji, size ->
                         val insertIdx = messageText.length
                         messageText += emoji
+                        inputCursor = TextRange(messageText.length)
                         if (size != 1.0f) {
                             pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
                         }
@@ -704,6 +762,7 @@ fun ChatScreen(
                         if (messageText.isNotEmpty()) {
                             val removedIdx = messageText.length - 1
                             messageText = messageText.dropLast(1)
+                            inputCursor = TextRange(messageText.length)
                             pendingEmojiSizes = pendingEmojiSizes - removedIdx
                         }
                     },

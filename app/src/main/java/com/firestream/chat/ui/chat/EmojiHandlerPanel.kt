@@ -64,7 +64,7 @@ import kotlin.math.roundToInt
 private const val GRID_COLUMNS = 8
 private const val RECENTS_ICON = "⏱"
 private const val SIZE_MIN = 0.8f
-private const val SIZE_MAX = 2.5f
+private const val SIZE_MAX = 5.0f
 private const val SIZE_DEFAULT = 1.0f
 
 enum class EmojiMode { TEXT_INPUT, REACTION }
