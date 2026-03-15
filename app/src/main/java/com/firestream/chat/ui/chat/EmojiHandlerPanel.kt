@@ -283,15 +283,9 @@ internal fun EmojiHandlerPanel(
                                     animationSpec = tween(150),
                                     label = "sibling_alpha"
                                 )
-                                val isHeld = sp?.gridItemIndex == index
-                                val displaySize = if (isHeld) {
-                                    (22 * sp!!.sizeMultiplier).sp
-                                } else {
-                                    22.sp
-                                }
                                 EmojiCell(
                                     emoji = item.emoji,
-                                    fontSize = displaySize,
+                                    fontSize = 22.sp,
                                     modifier = Modifier
                                         .alpha(alpha)
                                         .onGloballyPositioned { coords ->
@@ -387,10 +381,10 @@ private fun SizePickerOverlay(
     // correctly across all screen densities.
     val density = androidx.compose.ui.platform.LocalDensity.current
     val xOffset = with(density) {
-        if (showOnRight) (anchorOffset.x + 44.dp.toPx()).roundToInt()
-        else (anchorOffset.x - 72.dp.toPx()).roundToInt()
+        if (showOnRight) (anchorOffset.x + 56.dp.toPx()).roundToInt()
+        else (anchorOffset.x - 120.dp.toPx()).roundToInt()
     }
-    val yOffset = with(density) { (anchorOffset.y - 8.dp.toPx()).roundToInt() }
+    val yOffset = with(density) { (anchorOffset.y - 100.dp.toPx()).roundToInt() }
 
     Box(
         modifier = Modifier
