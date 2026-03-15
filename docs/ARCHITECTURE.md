@@ -1,6 +1,6 @@
 # FireStream Chat Spec and Architecture
 
-This document provides a detailed specification and architectural overview of the **FireStream Chat** application, a real-time messaging Android application built with modern Android development practices, end-to-end encryption, and a robust feature set resembling modern chat apps (e.g., WhatsApp, Signal).
+This document provides a detailed specification and architectural overview of the **FireStream** application, a real-time messaging Android application built with modern Android development practices, end-to-end encryption, and a robust feature set resembling modern chat apps (e.g., WhatsApp, Signal).
 
 ## 1. Specification / Features
 
@@ -74,10 +74,9 @@ This document provides a detailed specification and architectural overview of th
 - **Preferences**: Jetpack DataStore (Preferences DataStore)
 - **Backend Infrastructure**: Firebase Services
   - **Firestore**: Real-time NoSQL database for syncing encrypted payloads, user statuses, typing indicators, and call signaling.
-  - **Realtime Database**: Used exclusively for presence tracking. Its `onDisconnect()` mechanism runs server-side and marks users offline even on abrupt disconnects (power off, crash). A Cloud Function mirrors RTDB presence changes to Firestore so the rest of the app sees consistent online/last-seen state.
   - **Firebase Authentication**: Phone authentication mechanism.
   - **Cloud Storage**: Hosting user avatars, images, and voice recordings.
-  - **Cloud Functions**: Server-side triggers — push notifications on new messages (`sendPushNotification`), incoming calls (`sendCallPushNotification`), and RTDB-to-Firestore presence sync (`syncPresenceToFirestore`). Runtime: Node.js 20.
+  - **Cloud Functions**: Server-side triggers — push notifications on new messages (`sendPushNotification`) and incoming calls (`sendCallPushNotification`). Runtime: Node.js 20.
   - **Firebase Cloud Messaging (FCM)**: Reliable push notifications for background delivery wake-ups and incoming call alerts.
 - **Cryptography**: `libsignal-android` for industry-standard Signal Protocol end-to-end encryption (including post-quantum Kyber pre-keys).
 - **Real-Time Communication**: `stream-webrtc-android` for WebRTC-based voice calls.
@@ -115,7 +114,6 @@ graph TD
 
         subgraph Remote_Source [Remote Data Sources]
             firestore(Firebase Firestore)
-            rtdb(Firebase Realtime DB - Presence)
             storage(Firebase Storage)
             auth(Firebase Auth)
             fcm(Firebase Cloud Messaging)
@@ -587,23 +585,23 @@ graph TD
 
 ### Navigation Routes
 
-| Route | Arguments | Description |
-|-------|-----------|-------------|
-| `LOGIN` | — | Phone number entry |
-| `OTP` | verificationId, phoneNumber | OTP verification |
-| `PROFILE_SETUP` | — | Initial profile creation |
-| `CHAT_LIST` | — | Main screen |
-| `CHAT` | chatId, recipientId | Chat conversation |
-| `CONTACTS` | — | Contact list for new chat |
-| `MESSAGE_INFO` | messageId, chatId | Delivery/read timestamps |
-| `SETTINGS` | — | App settings |
-| `USER_PROFILE` | userId | User profile view |
-| `STARRED_MESSAGES` | — | Bookmarked messages |
-| `ARCHIVED_CHATS` | — | Archived conversations |
-| `GROUP_SETTINGS` | chatId | Group admin screen |
-| `CREATE_GROUP` | — | Group creation |
-| `CREATE_BROADCAST` | — | Broadcast list creation |
-| `SHARE_PICKER` | — | External share target |
+| Route              | Arguments                   | Description               |
+| ------------------ | --------------------------- | ------------------------- |
+| `LOGIN`            | —                           | Phone number entry        |
+| `OTP`              | verificationId, phoneNumber | OTP verification          |
+| `PROFILE_SETUP`    | —                           | Initial profile creation  |
+| `CHAT_LIST`        | —                           | Main screen               |
+| `CHAT`             | chatId, recipientId         | Chat conversation         |
+| `CONTACTS`         | —                           | Contact list for new chat |
+| `MESSAGE_INFO`     | messageId, chatId           | Delivery/read timestamps  |
+| `SETTINGS`         | —                           | App settings              |
+| `USER_PROFILE`     | userId                      | User profile view         |
+| `STARRED_MESSAGES` | —                           | Bookmarked messages       |
+| `ARCHIVED_CHATS`   | —                           | Archived conversations    |
+| `GROUP_SETTINGS`   | chatId                      | Group admin screen        |
+| `CREATE_GROUP`     | —                           | Group creation            |
+| `CREATE_BROADCAST` | —                           | Broadcast list creation   |
+| `SHARE_PICKER`     | —                           | External share target     |
 
 ---
 
@@ -630,8 +628,7 @@ com.firestream.chat/
 │   │   ├── fcm/FCMService.kt
 │   │   ├── firebase/            # FirebaseAuthSource, FirestoreCallSource,
 │   │   │                        # FirestoreMessageSource, FirestoreUserSource,
-│   │   │                        # FirebaseKeySource, FirebaseStorageSource,
-│   │   │                        # RealtimePresenceSource
+│   │   │                        # FirebaseKeySource, FirebaseStorageSource
 │   │   └── LinkPreviewSource.kt
 │   ├── repository/              # AuthRepositoryImpl, ChatRepositoryImpl,
 │   │                            # ContactRepositoryImpl, MessageRepositoryImpl,
@@ -685,9 +682,10 @@ com.firestream.chat/
 
 ## 12. Firebase Cloud Functions
 
-Three functions in `functions/index.js` (Node.js 20 runtime):
+Two functions in `functions/index.js` (Node.js 20 runtime):
 
 ### `sendPushNotification`
+
 - **Trigger**: Firestore document creation at `chats/{chatId}/messages/{messageId}`
 - Gets all chat participants, filters out the sender
 - Sends concurrent FCM data messages to all recipients
@@ -695,12 +693,8 @@ Three functions in `functions/index.js` (Node.js 20 runtime):
 - **FCM Payload**: `chatId`, `senderId`, `senderName`, `messageId`, `chatType`, `chatName`, `mentions` (comma-separated user IDs)
 
 ### `sendCallPushNotification`
+
 - **Trigger**: Firestore document creation at `calls/{callId}` where `status == "ringing"`
 - Fetches caller and callee user documents
 - Sends a high-priority FCM data message to the callee
 - **FCM Payload**: `type: "call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`
-
-### `syncPresenceToFirestore`
-- **Trigger**: Firebase Realtime Database write at `presence/{userId}`
-- Mirrors `isOnline` and `lastSeen` from RTDB into the Firestore `users/{userId}` document
-- Handles the abrupt-disconnect case: when a device powers off, the RTDB `onDisconnect()` handler fires server-side (setting `isOnline: false`) and this function propagates it to Firestore so the UI reflects the correct presence state
