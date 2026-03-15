@@ -36,7 +36,8 @@ data class MessageEntity(
     val deliveredTo: Map<String, Long> = emptyMap(),
     val pollData: String? = null,
     val mentions: List<String> = emptyList(),
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    val emojiSizes: Map<Int, Float> = emptyMap()
 ) {
     fun toDomain() = Message(
         id = id,
@@ -58,7 +59,8 @@ data class MessageEntity(
         deliveredTo = deliveredTo,
         pollData = pollData?.let { parsePollJson(it) },
         mentions = mentions,
-        deletedAt = deletedAt
+        deletedAt = deletedAt,
+        emojiSizes = emojiSizes
     )
 
     companion object {
@@ -82,7 +84,8 @@ data class MessageEntity(
             deliveredTo = message.deliveredTo,
             pollData = message.pollData?.let { pollToJson(it) },
             mentions = message.mentions,
-            deletedAt = message.deletedAt
+            deletedAt = message.deletedAt,
+            emojiSizes = message.emojiSizes
         )
 
         private fun pollToJson(poll: Poll): String {

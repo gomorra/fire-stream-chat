@@ -99,7 +99,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 deliveredTo = raw.deliveredTo,
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
                                 mentions = raw.mentions,
-                                deletedAt = raw.deletedAt
+                                deletedAt = raw.deletedAt,
+                                emojiSizes = raw.emojiSizes
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -158,7 +159,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 deliveredTo = raw.deliveredTo,
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
                                 mentions = raw.mentions,
-                                deletedAt = raw.deletedAt
+                                deletedAt = raw.deletedAt,
+                                emojiSizes = raw.emojiSizes
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                         }

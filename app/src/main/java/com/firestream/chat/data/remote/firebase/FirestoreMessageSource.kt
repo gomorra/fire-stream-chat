@@ -40,7 +40,8 @@ data class RawFirestoreMessage(
     val deliveredTo: Map<String, Long> = emptyMap(),
     val pollData: Map<String, Any?>? = null,
     val mentions: List<String> = emptyList(),
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    val emojiSizes: Map<Int, Float> = emptyMap()
 )
 
 private const val POLL_CONTENT = "📊 Poll"
@@ -79,7 +80,8 @@ class FirestoreMessageSource @Inject constructor(
         isForwarded: Boolean = false,
         duration: Int? = null,
         mentions: List<String> = emptyList(),
-        plainContent: String = ""
+        plainContent: String = "",
+        emojiSizes: Map<Int, Float> = emptyMap()
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -93,7 +95,8 @@ class FirestoreMessageSource @Inject constructor(
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to isForwarded,
             "duration" to duration,
-            "mentions" to mentions
+            "mentions" to mentions,
+            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -129,7 +132,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaUrl: String? = null,
         isForwarded: Boolean = false,
         duration: Int? = null,
-        mentions: List<String> = emptyList()
+        mentions: List<String> = emptyList(),
+        emojiSizes: Map<Int, Float> = emptyMap()
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -142,7 +146,8 @@ class FirestoreMessageSource @Inject constructor(
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to isForwarded,
             "duration" to duration,
-            "mentions" to mentions
+            "mentions" to mentions,
+            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -376,8 +381,20 @@ class FirestoreMessageSource @Inject constructor(
             deliveredTo = parseLongMap(data["deliveredTo"]),
             pollData = data["pollData"] as? Map<String, Any?>,
             mentions = (data["mentions"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
-            deletedAt = data["deletedAt"] as? Long
+            deletedAt = data["deletedAt"] as? Long,
+            emojiSizes = parseIntFloatMap(data["emojiSizes"])
         )
+    }
+
+    private fun parseIntFloatMap(raw: Any?): Map<Int, Float> {
+        return (raw as? Map<*, *>)
+            ?.entries
+            ?.mapNotNull { (k, v) ->
+                val key = (k as? String)?.toIntOrNull() ?: (k as? Number)?.toInt() ?: return@mapNotNull null
+                val value = (v as? Number)?.toFloat() ?: return@mapNotNull null
+                key to value
+            }
+            ?.toMap() ?: emptyMap()
     }
 
     private fun parseLongMap(raw: Any?): Map<String, Long> {

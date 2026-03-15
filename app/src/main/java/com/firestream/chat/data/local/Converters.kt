@@ -60,6 +60,23 @@ class Converters {
     }
 
     @TypeConverter
+    fun fromIntFloatMap(map: Map<Int, Float>): String {
+        val obj = JSONObject()
+        map.forEach { (k, v) -> obj.put(k.toString(), v.toDouble()) }
+        return obj.toString()
+    }
+
+    @TypeConverter
+    fun toIntFloatMap(json: String): Map<Int, Float> {
+        return try {
+            val obj = JSONObject(json)
+            buildMap { obj.keys().forEach { key -> put(key.toInt(), obj.getDouble(key).toFloat()) } }
+        } catch (_: Exception) {
+            emptyMap()
+        }
+    }
+
+    @TypeConverter
     fun fromGroupPermissions(permissions: GroupPermissions): String {
         val obj = JSONObject()
         obj.put("sendMessages", permissions.sendMessages.name)

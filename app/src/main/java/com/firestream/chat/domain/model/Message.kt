@@ -27,5 +27,7 @@ data class Message(
     val pollData: Poll? = null,
     // Phase 5.4: mentions — userIds; "everyone" for @everyone
     val mentions: List<String> = emptyList(),
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    // Emoji size overrides — maps character index in content → size multiplier (0.8–2.5)
+    val emojiSizes: Map<Int, Float> = emptyMap()
 )
