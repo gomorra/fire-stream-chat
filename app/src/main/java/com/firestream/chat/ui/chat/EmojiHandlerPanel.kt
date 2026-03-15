@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
@@ -377,19 +378,20 @@ private fun SizePickerOverlay(
     val pct = ((sizeMultiplier - SIZE_MIN) / (SIZE_MAX - SIZE_MIN)).coerceIn(0f, 1f)
     val displaySize = (22 * sizeMultiplier).sp
 
-    // Convert dp offsets to pixels using current density so the overlay positions
-    // correctly across all screen densities.
     val density = androidx.compose.ui.platform.LocalDensity.current
     val xOffset = with(density) {
         if (showOnRight) (anchorOffset.x + 56.dp.toPx()).roundToInt()
         else (anchorOffset.x - 120.dp.toPx()).roundToInt()
     }
-    val yOffset = with(density) { (anchorOffset.y - 100.dp.toPx()).roundToInt() }
+    // Anchor the bottom of the panel at the cell's top so it grows upward as emoji size increases
+    val bottomAnchor = with(density) { anchorOffset.y.roundToInt() }
+    var panelHeight by remember { mutableStateOf(0) }
 
     Box(
         modifier = Modifier
-            .offset { IntOffset(xOffset, yOffset) }
+            .offset { IntOffset(xOffset, bottomAnchor - panelHeight) }
             .wrapContentSize()
+            .onSizeChanged { panelHeight = it.height }
     ) {
         Surface(
             shape = RoundedCornerShape(12.dp),
@@ -401,9 +403,9 @@ private fun SizePickerOverlay(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                Text(text = emoji, fontSize = displaySize)
+                // Label at top so it is never clipped as the emoji grows larger
                 Text(
-                    text = "${(sizeMultiplier * 100).roundToInt()}%",
+                    text = "↑ drag ↓",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -411,13 +413,15 @@ private fun SizePickerOverlay(
                     progress = { pct },
                     modifier = Modifier.width(48.dp),
                     color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    drawStopIndicator = {}  // hide the stop-indicator dot at the right end
                 )
                 Text(
-                    text = "↑ drag ↓",
+                    text = "${(sizeMultiplier * 100).roundToInt()}%",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Text(text = emoji, fontSize = displaySize)
             }
         }
     }
