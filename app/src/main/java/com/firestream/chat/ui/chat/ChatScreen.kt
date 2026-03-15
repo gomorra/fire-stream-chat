@@ -96,7 +96,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontStyle
@@ -691,7 +690,10 @@ fun ChatScreen(
                     modifier = Modifier
                         .weight(1f)
                         .onFocusChanged { if (it.isFocused) showEmojiSheet = false }
-                        .clip(RoundedCornerShape(24.dp))
+                        // No clip: the Row's non-weighted IconButtons (48dp) constrain the Box's
+                        // max-height via Row's cross-axis measurement, so clip would cut tall emoji.
+                        // border() draws rounded corners independently — no background means no
+                        // visible bleed at corners for normal-sized text.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
                     BasicTextField(
