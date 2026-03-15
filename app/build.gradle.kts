@@ -58,7 +58,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86_64") // arm64-v8a: real devices; x86_64: emulator
+            include("arm64-v8a") // real devices only; drop x86_64 emulator ABI for release
             isUniversalApk = false
         }
     }
