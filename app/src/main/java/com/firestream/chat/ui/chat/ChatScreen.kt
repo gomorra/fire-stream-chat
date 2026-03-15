@@ -103,6 +103,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -712,7 +713,11 @@ fun ChatScreen(
                                 bottom = 10.dp
                             ),
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            // Unspecified lets each line expand to its content's natural metrics,
+                            // so a large emoji (e.g. 500%) grows the line — and the Box — instead
+                            // of overflowing the fixed 20.sp bodyMedium lineHeight and being clipped.
+                            lineHeight = TextUnit.Unspecified
                         ),
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                         keyboardActions = KeyboardActions(
