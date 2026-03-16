@@ -800,8 +800,12 @@ fun ChatScreen(
                     },
                     onBackspace = {
                         if (messageText.isNotEmpty()) {
-                            val removedIdx = messageText.length - 1
-                            messageText = messageText.dropLast(1)
+                            val iter = java.text.BreakIterator.getCharacterInstance()
+                            iter.setText(messageText)
+                            iter.last()
+                            val boundary = iter.previous()
+                            val removedIdx = boundary
+                            messageText = messageText.substring(0, boundary)
                             inputCursor = TextRange(messageText.length)
                             pendingEmojiSizes = pendingEmojiSizes - removedIdx
                         }
