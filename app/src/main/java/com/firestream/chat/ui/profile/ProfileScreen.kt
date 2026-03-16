@@ -45,7 +45,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -127,9 +126,10 @@ fun ProfileScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
         }
@@ -298,7 +298,7 @@ fun ProfileScreen(
                     }
 
                     Spacer(Modifier.height(24.dp))
-                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
 
                     // Phone number row
                     Row(
@@ -326,7 +326,7 @@ fun ProfileScreen(
                         }
                     }
 
-                    HorizontalDivider()
+                    Spacer(Modifier.height(8.dp))
 
                     // Block/Unblock button (only for other users)
                     if (!uiState.isCurrentUser) {
@@ -373,7 +373,7 @@ fun ProfileScreen(
                         }
 
                         Spacer(Modifier.height(16.dp))
-                        HorizontalDivider()
+                        Spacer(Modifier.height(8.dp))
                     }
 
                     // Shared Media section

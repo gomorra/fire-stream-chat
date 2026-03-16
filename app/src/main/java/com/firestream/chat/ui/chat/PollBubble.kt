@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.theme.LocalFireStreamColors
 import com.firestream.chat.domain.model.PollOption
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,10 +38,11 @@ fun PollBubble(
     onClose: () -> Unit
 ) {
     val poll = message.pollData ?: return
-    val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
+    val fireStreamColors = LocalFireStreamColors.current
+    val bubbleColor = if (isOwnMessage) fireStreamColors.sentBubble
+    else fireStreamColors.receivedBubble
     val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    else MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     val totalVotes = remember(poll) { poll.options.sumOf { it.voterIds.size } }
@@ -151,7 +153,7 @@ fun PollBubble(
                     Text(
                         text = SimpleDateFormat("HH:mm", Locale.getDefault())
                             .format(Date(message.timestamp)),
-                        color = textColor.copy(alpha = 0.7f),
+                        color = textColor.copy(alpha = 0.5f),
                         style = MaterialTheme.typography.labelSmall
                     )
                 }
@@ -236,7 +238,7 @@ private fun PollOptionRow(
                 Text(
                     text = "$percentage%",
                     style = MaterialTheme.typography.labelSmall,
-                    color = textColor.copy(alpha = 0.7f)
+                    color = textColor.copy(alpha = 0.5f)
                 )
             }
         }

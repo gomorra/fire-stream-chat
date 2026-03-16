@@ -13,8 +13,11 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -73,6 +76,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -249,12 +253,12 @@ fun ChatScreen(
                                 uiState.isRecipientOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                                 )
                                 uiState.isBroadcast && uiState.broadcastRecipientCount > 0 -> Text(
                                     text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                                 )
                             }
                         }
@@ -280,7 +284,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.Phone,
                                 contentDescription = "Voice call",
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -288,7 +292,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Search messages",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Box {
@@ -296,7 +300,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "More options",
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         DropdownMenu(
@@ -314,9 +318,10 @@ fun ChatScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
         }
@@ -656,128 +661,122 @@ fun ChatScreen(
             }
 
             // Input row
-            if (uiState.canSendMessages) Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = {
-                    keyboardController?.hide()
-                    showEmojiSheet = !showEmojiSheet
-                }) {
-                    Icon(
-                        imageVector = Icons.Outlined.EmojiEmotions,
-                        contentDescription = "Emoji",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                val clearInput = {
-                    messageText = ""
-                    inputCursor = TextRange(0)
-                    pendingEmojiSizes = emptyMap()
-                    showEmojiSheet = false
-                }
-                val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
-                val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
-                    val cappedSizes = pendingEmojiSizes.mapValues { (_, v) -> v.coerceAtMost(INPUT_EMOJI_SIZE_CAP) }
-                    addEmojiSpans(messageText, emojiInputSize, cappedSizes)
-                }
-                val inputValue = remember(inputAnnotated, inputCursor) {
-                    TextFieldValue(
-                        annotatedString = inputAnnotated,
-                        selection = TextRange(
-                            inputCursor.start.coerceIn(0, messageText.length),
-                            inputCursor.end.coerceIn(0, messageText.length)
-                        )
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .onFocusChanged { if (it.isFocused) showEmojiSheet = false }
-                        // No clip: large emoji must overflow the Row's cross-axis height constraint.
-                        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
-                ) {
-                    BasicTextField(
-                        value = inputValue,
-                        onValueChange = { newValue ->
-                            inputCursor = newValue.selection
-                            val newText = newValue.text
-                            if (newText != messageText) {
-                                pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
-                                messageText = newText
-                                if (uiState.editingMessage == null) viewModel.onTypingWithMentions(newText)
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(
-                                start = 16.dp,
-                                end = if (uiState.editingMessage == null) 48.dp else 16.dp,
-                            ),
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            // Unspecified lets each line expand to its content's natural metrics,
-                            // so a large emoji (e.g. 500%) grows the line — and the Box — instead
-                            // of overflowing the fixed 20.sp bodyMedium lineHeight and being clipped.
-                            lineHeight = TextUnit.Unspecified
-                        ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                                clearInput()
-                            }
-                        ),
-                        maxLines = 4,
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        decorationBox = { innerTextField ->
-                            Box(
-                                contentAlignment = Alignment.CenterStart,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .defaultMinSize(minHeight = 48.dp)
-                            ) {
-                                if (messageText.isEmpty()) {
-                                    Text(
-                                        text = if (uiState.editingMessage != null) "Edit message..."
-                                               else stringResource(R.string.type_message),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-                    if (uiState.editingMessage == null) {
-                        IconButton(
-                            onClick = { showAttachmentSheet = true },
-                            modifier = Modifier.align(Alignment.CenterEnd)
-                        ) {
+            if (uiState.canSendMessages) {
+                HorizontalDivider(
+                    thickness = 0.5.dp,
+                    color = MaterialTheme.colorScheme.outline
+                )
+                Surface(tonalElevation = 1.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = {
+                            keyboardController?.hide()
+                            showEmojiSheet = !showEmojiSheet
+                        }) {
                             Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Attach",
+                                imageVector = Icons.Outlined.EmojiEmotions,
+                                contentDescription = "Emoji",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    }
-                }
-                Spacer(modifier = Modifier.width(8.dp))
 
-                IconButton(
-                    onClick = {
-                        handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                        clearInput()
-                    },
-                    enabled = messageText.isNotBlank() && !uiState.isSending
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send),
-                        tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    )
+                        val clearInput = {
+                            messageText = ""
+                            inputCursor = TextRange(0)
+                            pendingEmojiSizes = emptyMap()
+                            showEmojiSheet = false
+                        }
+                        val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
+                        val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
+                            val cappedSizes = pendingEmojiSizes.mapValues { (_, v) -> v.coerceAtMost(INPUT_EMOJI_SIZE_CAP) }
+                            addEmojiSpans(messageText, emojiInputSize, cappedSizes)
+                        }
+                        val inputValue = remember(inputAnnotated, inputCursor) {
+                            TextFieldValue(
+                                annotatedString = inputAnnotated,
+                                selection = TextRange(
+                                    inputCursor.start.coerceIn(0, messageText.length),
+                                    inputCursor.end.coerceIn(0, messageText.length)
+                                )
+                            )
+                        }
+                        BasicTextField(
+                            value = inputValue,
+                            onValueChange = { newValue ->
+                                inputCursor = newValue.selection
+                                val newText = newValue.text
+                                if (newText != messageText) {
+                                    pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
+                                    messageText = newText
+                                    if (uiState.editingMessage == null) viewModel.onTypingWithMentions(newText)
+                                }
+                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .onFocusChanged { if (it.isFocused) showEmojiSheet = false },
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface,
+                                lineHeight = TextUnit.Unspecified
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                            keyboardActions = KeyboardActions(
+                                onSend = {
+                                    handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
+                                    clearInput()
+                                }
+                            ),
+                            maxLines = 4,
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            decorationBox = { innerTextField ->
+                                Box(
+                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .defaultMinSize(minHeight = 48.dp)
+                                ) {
+                                    if (messageText.isEmpty()) {
+                                        Text(
+                                            text = if (uiState.editingMessage != null) "Edit message..."
+                                                   else stringResource(R.string.type_message),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    innerTextField()
+                                }
+                            }
+                        )
+                        if (uiState.editingMessage == null) {
+                            IconButton(onClick = { showAttachmentSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = "Attach",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        AnimatedVisibility(
+                            visible = messageText.isNotBlank(),
+                            enter = scaleIn(animationSpec = tween(150)),
+                            exit = scaleOut(animationSpec = tween(150))
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
+                                    clearInput()
+                                },
+                                enabled = !uiState.isSending
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = stringResource(R.string.send),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

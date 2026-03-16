@@ -3,6 +3,7 @@ package com.firestream.chat.ui.chat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -50,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.LinkAnnotation
@@ -71,6 +73,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.theme.LocalFireStreamColors
 import com.firestream.chat.ui.theme.ReadReceiptBlue
 import kotlin.math.roundToInt
 
@@ -98,10 +101,11 @@ internal fun MessageBubble(
     onImageClick: (String) -> Unit = {},
     onCallClick: (() -> Unit)? = null
 ) {
-    val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
+    val fireStreamColors = LocalFireStreamColors.current
+    val bubbleColor = if (isOwnMessage) fireStreamColors.sentBubble
+    else fireStreamColors.receivedBubble
     val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    else MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     var showMenu by remember { mutableStateOf(false) }
@@ -144,17 +148,23 @@ internal fun MessageBubble(
         }
 
         Box {
+            val bubbleShape = RoundedCornerShape(
+                topStart = 16.dp,
+                topEnd = 16.dp,
+                bottomStart = if (isOwnMessage) 16.dp else 4.dp,
+                bottomEnd = if (isOwnMessage) 4.dp else 16.dp
+            )
             Box(
                 modifier = Modifier
                     .widthIn(max = 280.dp)
                     .background(
                         color = bubbleColor,
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                        )
+                        shape = bubbleShape
+                    )
+                    .border(
+                        width = if (!isOwnMessage) 0.5.dp else 0.dp,
+                        color = if (!isOwnMessage) fireStreamColors.receivedBubbleBorder else Color.Transparent,
+                        shape = bubbleShape
                     )
                     .combinedClickable(
                         onClick = { if (message.type == MessageType.CALL) onCallClick?.invoke() },
@@ -307,7 +317,7 @@ internal fun MessageBubble(
                                     if (callDetail != null) {
                                         Text(
                                             text = callDetail,
-                                            color = callColor.copy(alpha = 0.7f),
+                                            color = callColor.copy(alpha = 0.5f),
                                             style = MaterialTheme.typography.labelSmall
                                         )
                                     }
@@ -387,7 +397,7 @@ internal fun MessageBubble(
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = formatTimestamp(message.timestamp),
-                            color = textColor.copy(alpha = 0.7f),
+                            color = textColor.copy(alpha = 0.5f),
                             style = MaterialTheme.typography.labelSmall
                         )
                         if (isOwnMessage) {
@@ -415,7 +425,7 @@ internal fun MessageBubble(
                                 tint = when (displayStatus) {
                                     MessageStatus.READ -> ReadReceiptBlue
                                     MessageStatus.FAILED -> MaterialTheme.colorScheme.error
-                                    else -> textColor.copy(alpha = 0.7f)
+                                    else -> textColor.copy(alpha = 0.5f)
                                 },
                                 modifier = Modifier.size(16.dp)
                             )

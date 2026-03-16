@@ -52,7 +52,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -151,9 +150,10 @@ fun GroupSettingsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
         },
@@ -300,7 +300,7 @@ fun GroupSettingsScreen(
                                    else MaterialTheme.colorScheme.onSurfaceVariant,
                     rowModifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
-                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
             }
 
             // Invite link section (admin only)
@@ -368,7 +368,7 @@ fun GroupSettingsScreen(
                             )
                         }
                     }
-                    HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
 
                 // Require approval toggle
@@ -395,7 +395,7 @@ fun GroupSettingsScreen(
                             onCheckedChange = { viewModel.setRequireApproval(it) }
                         )
                     }
-                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
             }
 
@@ -409,7 +409,7 @@ fun GroupSettingsScreen(
                         onReject = { viewModel.rejectMember(member.userId) }
                     )
                 }
-                item { HorizontalDivider() }
+                item { Spacer(modifier = Modifier.height(8.dp)) }
             }
 
             // Members list
@@ -444,7 +444,7 @@ fun GroupSettingsScreen(
 
             // Leave group
             item {
-                HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

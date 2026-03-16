@@ -30,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -230,7 +229,7 @@ internal fun EmojiHandlerPanel(
                     onRecentUsed(emoji)
                 }
             )
-            HorizontalDivider(thickness = 0.5.dp)
+            Spacer(modifier = Modifier.height(2.dp))
         }
 
         SearchToolbar(
@@ -239,7 +238,7 @@ internal fun EmojiHandlerPanel(
             mode = mode,
             onBackspace = onBackspace
         )
-        HorizontalDivider(thickness = 0.5.dp)
+        Spacer(modifier = Modifier.height(2.dp))
 
         val hasEmojiResults = remember(gridItems) { gridItems.any { it is GridItem.Emoji } }
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -349,7 +348,7 @@ internal fun EmojiHandlerPanel(
             }
         }
 
-        HorizontalDivider(thickness = 0.5.dp)
+        Spacer(modifier = Modifier.height(2.dp))
 
         if (!isSearching) {
             CategoryToolbar(

@@ -47,7 +47,7 @@ class MainActivity : ComponentActivity() {
             sharedContentHolder.pendingIntent = intent
         }
         setContent {
-            val appTheme by preferencesDataStore.appThemeFlow.collectAsState(initial = AppTheme.SYSTEM)
+            val appTheme by preferencesDataStore.appThemeFlow.collectAsState(initial = AppTheme.DARK)
             val useDark = when (appTheme) {
                 AppTheme.LIGHT -> false
                 AppTheme.DARK -> true

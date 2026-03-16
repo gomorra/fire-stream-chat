@@ -34,7 +34,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -117,9 +116,10 @@ fun SharePickerScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
         },
@@ -160,7 +160,7 @@ fun SharePickerScreen(
                 onImageClick = { url -> fullscreenImageUrl = url }
             )
 
-            HorizontalDivider()
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Search bar
             OutlinedTextField(
@@ -195,7 +195,10 @@ fun SharePickerScreen(
                 }
 
                 else -> {
-                    LazyColumn(modifier = Modifier.heightIn(max = 260.dp)) {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
                         items(uiState.filteredChats, key = { it.id }) { chat ->
                             ShareChatRow(
                                 chat = chat,
@@ -204,7 +207,6 @@ fun SharePickerScreen(
                                 isSelected = chat.id in uiState.selectedChatIds,
                                 onClick = { viewModel.toggleChatSelection(chat.id) }
                             )
-                            HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
                         }
                     }
                 }

@@ -51,8 +51,8 @@ class PreferencesDataStore @Inject constructor(
     // --- Theme ---
 
     val appThemeFlow: Flow<AppTheme> = context.dataStore.data.map { prefs ->
-        runCatching { AppTheme.valueOf(prefs[themeKey] ?: AppTheme.SYSTEM.name) }
-            .getOrDefault(AppTheme.SYSTEM)
+        runCatching { AppTheme.valueOf(prefs[themeKey] ?: AppTheme.DARK.name) }
+            .getOrDefault(AppTheme.DARK)
     }
 
     suspend fun setAppTheme(theme: AppTheme) {

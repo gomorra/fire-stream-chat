@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,12 +41,12 @@ import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -96,9 +97,10 @@ fun SettingsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             )
         }
@@ -111,53 +113,65 @@ fun SettingsScreen(
         ) {
             // Account section
             uiState.currentUser?.let { user ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onProfileClick(user.uid) }
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Surface(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer
                 ) {
-                    AsyncImage(
-                        model = user.avatarUrl,
-                        contentDescription = "Avatar",
+                    Row(
                         modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                    )
-                    Spacer(Modifier.width(16.dp))
-                    Column {
-                        Text(
-                            text = user.displayName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold
+                            .fillMaxWidth()
+                            .clickable { onProfileClick(user.uid) }
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AsyncImage(
+                            model = user.avatarUrl,
+                            contentDescription = "Avatar",
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(CircleShape)
                         )
-                        Text(
-                            text = user.statusText,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Spacer(Modifier.width(16.dp))
+                        Column {
+                            Text(
+                                text = user.displayName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = user.statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
-                HorizontalDivider()
             }
 
             Spacer(Modifier.height(8.dp))
             SectionHeader("Chats")
 
-            SettingsItem(
-                icon = Icons.Default.Bookmark,
-                title = "Starred Messages",
-                subtitle = "Messages you've starred for quick reference",
-                onClick = onStarredMessagesClick
-            )
-
-            SettingsItem(
-                icon = Icons.Default.Archive,
-                title = "Archived Chats",
-                subtitle = "Chats you've archived",
-                onClick = onArchivedChatsClick
-            )
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column {
+                    SettingsItem(
+                        icon = Icons.Default.Bookmark,
+                        title = "Starred Messages",
+                        subtitle = "Messages you've starred for quick reference",
+                        onClick = onStarredMessagesClick
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Archive,
+                        title = "Archived Chats",
+                        subtitle = "Chats you've archived",
+                        onClick = onArchivedChatsClick
+                    )
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
             SectionHeader("Appearance")
@@ -172,161 +186,194 @@ fun SettingsScreen(
                 AppTheme.LIGHT -> Icons.Default.LightMode
                 AppTheme.DARK -> Icons.Default.DarkMode
             }
-            SettingsItem(
-                icon = themeIcon,
-                title = "Theme",
-                subtitle = themeLabel,
-                onClick = { showThemePicker = true }
-            )
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                SettingsItem(
+                    icon = themeIcon,
+                    title = "Theme",
+                    subtitle = themeLabel,
+                    onClick = { showThemePicker = true }
+                )
+            }
 
             // Privacy section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Privacy")
 
-            SettingsToggleItem(
-                icon = Icons.Default.RemoveRedEye,
-                title = "Read Receipts",
-                subtitle = "Show when you've read messages",
-                checked = uiState.readReceipts,
-                onCheckedChange = { viewModel.setReadReceipts(it) }
-            )
-
-            SettingsToggleItem(
-                icon = Icons.Default.Visibility,
-                title = "Last Seen",
-                subtitle = "Show your last seen status to others",
-                checked = uiState.lastSeenVisible,
-                onCheckedChange = { viewModel.setLastSeenVisible(it) }
-            )
-
-            SettingsToggleItem(
-                icon = Icons.Default.ScreenLockPortrait,
-                title = "Screen Security",
-                subtitle = "Prevent screenshots in the app",
-                checked = uiState.screenSecurity,
-                onCheckedChange = { viewModel.setScreenSecurity(it) }
-            )
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column {
+                    SettingsToggleItem(
+                        icon = Icons.Default.RemoveRedEye,
+                        title = "Read Receipts",
+                        subtitle = "Show when you've read messages",
+                        checked = uiState.readReceipts,
+                        onCheckedChange = { viewModel.setReadReceipts(it) }
+                    )
+                    SettingsToggleItem(
+                        icon = Icons.Default.Visibility,
+                        title = "Last Seen",
+                        subtitle = "Show your last seen status to others",
+                        checked = uiState.lastSeenVisible,
+                        onCheckedChange = { viewModel.setLastSeenVisible(it) }
+                    )
+                    SettingsToggleItem(
+                        icon = Icons.Default.ScreenLockPortrait,
+                        title = "Screen Security",
+                        subtitle = "Prevent screenshots in the app",
+                        checked = uiState.screenSecurity,
+                        onCheckedChange = { viewModel.setScreenSecurity(it) }
+                    )
+                }
+            }
 
             // Notifications section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Notifications")
 
-            SettingsToggleItem(
-                icon = Icons.Default.Notifications,
-                title = "Message Notifications",
-                subtitle = "Receive notifications for new messages",
-                checked = uiState.messageNotifications,
-                onCheckedChange = { viewModel.setMessageNotifications(it) }
-            )
-
-            SettingsToggleItem(
-                icon = Icons.Default.NotificationsActive,
-                title = "Group Notifications",
-                subtitle = "Receive notifications for group messages",
-                checked = uiState.groupNotifications,
-                onCheckedChange = { viewModel.setGroupNotifications(it) }
-            )
-
-            SettingsToggleItem(
-                icon = Icons.Default.AlternateEmail,
-                title = "Mention-only Notifications",
-                subtitle = "Only notify for group messages that mention you",
-                checked = uiState.mentionOnlyNotifications,
-                onCheckedChange = { viewModel.setMentionOnlyNotifications(it) }
-            )
-
-            val soundLabel = when (uiState.notificationSound) {
-                NotificationSound.DEFAULT -> "Default"
-                NotificationSound.SILENT -> "Silent"
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column {
+                    SettingsToggleItem(
+                        icon = Icons.Default.Notifications,
+                        title = "Message Notifications",
+                        subtitle = "Receive notifications for new messages",
+                        checked = uiState.messageNotifications,
+                        onCheckedChange = { viewModel.setMessageNotifications(it) }
+                    )
+                    SettingsToggleItem(
+                        icon = Icons.Default.NotificationsActive,
+                        title = "Group Notifications",
+                        subtitle = "Receive notifications for group messages",
+                        checked = uiState.groupNotifications,
+                        onCheckedChange = { viewModel.setGroupNotifications(it) }
+                    )
+                    SettingsToggleItem(
+                        icon = Icons.Default.AlternateEmail,
+                        title = "Mention-only Notifications",
+                        subtitle = "Only notify for group messages that mention you",
+                        checked = uiState.mentionOnlyNotifications,
+                        onCheckedChange = { viewModel.setMentionOnlyNotifications(it) }
+                    )
+                    val soundLabel = when (uiState.notificationSound) {
+                        NotificationSound.DEFAULT -> "Default"
+                        NotificationSound.SILENT -> "Silent"
+                    }
+                    SettingsItem(
+                        icon = Icons.Default.MusicNote,
+                        title = "Notification Sound",
+                        subtitle = soundLabel,
+                        onClick = { showSoundPicker = true }
+                    )
+                    SettingsToggleItem(
+                        icon = Icons.Default.Vibration,
+                        title = "Vibration",
+                        subtitle = "Vibrate on new notifications",
+                        checked = uiState.vibration,
+                        onCheckedChange = { viewModel.setVibration(it) }
+                    )
+                }
             }
-            SettingsItem(
-                icon = Icons.Default.MusicNote,
-                title = "Notification Sound",
-                subtitle = soundLabel,
-                onClick = { showSoundPicker = true }
-            )
-
-            SettingsToggleItem(
-                icon = Icons.Default.Vibration,
-                title = "Vibration",
-                subtitle = "Vibrate on new notifications",
-                checked = uiState.vibration,
-                onCheckedChange = { viewModel.setVibration(it) }
-            )
 
             // Storage section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Storage")
 
-            SettingsItem(
-                icon = Icons.Default.Storage,
-                title = "Storage Used",
-                subtitle = formatCacheSize(uiState.cacheSize),
-                onClick = { }
-            )
-
-            SettingsItem(
-                icon = Icons.Default.Delete,
-                title = "Clear Cache",
-                subtitle = "Free up space by clearing cached media",
-                onClick = { showClearCacheDialog = true }
-            )
-
-            val autoDownloadLabel = when (uiState.autoDownload) {
-                AutoDownloadOption.WIFI_ONLY -> "WiFi only"
-                AutoDownloadOption.ALWAYS -> "Always"
-                AutoDownloadOption.NEVER -> "Never"
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column {
+                    SettingsItem(
+                        icon = Icons.Default.Storage,
+                        title = "Storage Used",
+                        subtitle = formatCacheSize(uiState.cacheSize),
+                        onClick = { }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Delete,
+                        title = "Clear Cache",
+                        subtitle = "Free up space by clearing cached media",
+                        onClick = { showClearCacheDialog = true }
+                    )
+                    val autoDownloadLabel = when (uiState.autoDownload) {
+                        AutoDownloadOption.WIFI_ONLY -> "WiFi only"
+                        AutoDownloadOption.ALWAYS -> "Always"
+                        AutoDownloadOption.NEVER -> "Never"
+                    }
+                    SettingsItem(
+                        icon = Icons.Default.Download,
+                        title = "Auto-download Media",
+                        subtitle = autoDownloadLabel,
+                        onClick = { showAutoDownloadPicker = true }
+                    )
+                }
             }
-            SettingsItem(
-                icon = Icons.Default.Download,
-                title = "Auto-download Media",
-                subtitle = autoDownloadLabel,
-                onClick = { showAutoDownloadPicker = true }
-            )
 
             // Help section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Help")
 
-            SettingsItem(
-                icon = Icons.Default.Info,
-                title = "App Version",
-                subtitle = "1.0.0",
-                onClick = { }
-            )
-
-            SettingsItem(
-                icon = Icons.Default.Description,
-                title = "Terms of Service",
-                subtitle = "Read our terms of service",
-                onClick = { /* Placeholder */ }
-            )
-
-            SettingsItem(
-                icon = Icons.Default.Security,
-                title = "Privacy Policy",
-                subtitle = "Read our privacy policy",
-                onClick = { /* Placeholder */ }
-            )
-
-            SettingsItem(
-                icon = Icons.Default.Email,
-                title = "Contact Support",
-                subtitle = "Get help from our support team",
-                onClick = { /* Placeholder */ }
-            )
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                Column {
+                    SettingsItem(
+                        icon = Icons.Default.Info,
+                        title = "App Version",
+                        subtitle = "1.0.0",
+                        onClick = { }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Description,
+                        title = "Terms of Service",
+                        subtitle = "Read our terms of service",
+                        onClick = { /* Placeholder */ }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Security,
+                        title = "Privacy Policy",
+                        subtitle = "Read our privacy policy",
+                        onClick = { /* Placeholder */ }
+                    )
+                    SettingsItem(
+                        icon = Icons.Default.Email,
+                        title = "Contact Support",
+                        subtitle = "Get help from our support team",
+                        onClick = { /* Placeholder */ }
+                    )
+                }
+            }
 
             // Account section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Account")
 
-            SettingsItem(
-                icon = Icons.AutoMirrored.Filled.ExitToApp,
-                title = "Sign Out",
-                subtitle = "Sign out of your account",
-                onClick = { showSignOutDialog = true },
-                tintError = true
-            )
+            Surface(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainer
+            ) {
+                SettingsItem(
+                    icon = Icons.AutoMirrored.Filled.ExitToApp,
+                    title = "Sign Out",
+                    subtitle = "Sign out of your account",
+                    onClick = { showSignOutDialog = true },
+                    tintError = true
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
         }
@@ -414,8 +461,8 @@ private fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp)
     )
 }
 
