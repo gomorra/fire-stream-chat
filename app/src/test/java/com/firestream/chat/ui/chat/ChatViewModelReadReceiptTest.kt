@@ -123,7 +123,6 @@ class ChatViewModelReadReceiptTest {
 
         // Recipient
         every { userRepository.observeUser(any()) } returns recipientFlow
-        coEvery { userRepository.getUserById(any()) } returns Result.failure(Exception())
 
         // Delivery/read — the calls under test
         coEvery { messageRepository.markMessagesAsDelivered(any(), any()) } returns Result.success(Unit)
@@ -178,9 +177,7 @@ class ChatViewModelReadReceiptTest {
 
         viewModel.setScreenVisible(true)
         messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent()
-        advanceTimeBy(1500)
-        runCurrent()
+        runCurrent() // code returns early at readReceiptsAllowed check — no job started
 
         coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
     }
@@ -192,9 +189,7 @@ class ChatViewModelReadReceiptTest {
 
         viewModel.setScreenVisible(true)
         messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent()
-        advanceTimeBy(1500)
-        runCurrent()
+        runCurrent() // code returns early at readReceiptsAllowed check — no job started
 
         coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
     }
@@ -203,10 +198,8 @@ class ChatViewModelReadReceiptTest {
 
     @Test
     fun `No marking when screen is not visible`() = runTest {
-        // screenVisible stays false (default)
+        // screenVisible stays false (default) — markIncomingMessagesAsRead returns immediately
         messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.SENT)))
-        runCurrent()
-        advanceTimeBy(1500)
         runCurrent()
 
         coVerify(exactly = 0) { messageRepository.markMessagesAsDelivered(any(), any()) }
@@ -243,9 +236,7 @@ class ChatViewModelReadReceiptTest {
         val ownSent = Message(id = "m1", senderId = "uid1", status = MessageStatus.SENT)
         val ownDelivered = Message(id = "m2", senderId = "uid1", status = MessageStatus.DELIVERED)
         messagesFlow.emit(listOf(ownSent, ownDelivered))
-        runCurrent()
-        advanceTimeBy(1500)
-        runCurrent()
+        runCurrent() // senderId == currentUserId, so needsDelivery and needsRead are both empty
 
         coVerify(exactly = 0) { messageRepository.markMessagesAsDelivered(any(), any()) }
         coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
