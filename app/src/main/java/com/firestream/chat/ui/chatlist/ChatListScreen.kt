@@ -3,12 +3,16 @@ package com.firestream.chat.ui.chatlist
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -49,6 +53,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -95,10 +102,16 @@ fun ChatListScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FireIcon(modifier = Modifier.size(26.dp))
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
                 },
                 windowInsets = WindowInsets(0),
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -432,3 +445,55 @@ private fun MuteDialog(
 private fun Chat.recipientId(currentUserId: String): String =
     if (type == ChatType.INDIVIDUAL) participants.firstOrNull { it != currentUserId } ?: ""
     else ""
+
+@Composable
+private fun FireIcon(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        // Outer flame — deep orange base fading to amber/yellow at tip
+        val outerGradient = Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFFFFEB3B), // yellow tip
+                Color(0xFFFF9800), // amber mid
+                Color(0xFFE64A19), // deep orange base
+            ),
+            startY = 0f,
+            endY = h
+        )
+
+        val outerFlame = Path().apply {
+            moveTo(w * 0.50f, h * 0.00f)                                         // tip
+            cubicTo(w * 0.82f, h * 0.14f, w * 0.96f, h * 0.40f, w * 0.88f, h * 0.62f) // right upper
+            cubicTo(w * 0.80f, h * 0.78f, w * 0.90f, h * 0.88f, w * 0.74f, h * 0.93f) // right lower
+            cubicTo(w * 0.62f, h * 0.97f, w * 0.57f, h * 1.00f, w * 0.50f, h * 1.00f) // base right
+            cubicTo(w * 0.43f, h * 1.00f, w * 0.38f, h * 0.97f, w * 0.26f, h * 0.93f) // base left
+            cubicTo(w * 0.10f, h * 0.88f, w * 0.20f, h * 0.78f, w * 0.12f, h * 0.62f) // left lower
+            cubicTo(w * 0.04f, h * 0.40f, w * 0.18f, h * 0.14f, w * 0.50f, h * 0.00f) // left upper → tip
+            close()
+        }
+        drawPath(outerFlame, brush = outerGradient)
+
+        // Inner highlight — white-hot core fading out toward the middle
+        val innerGradient = Brush.verticalGradient(
+            colors = listOf(
+                Color(0xCCFFFFFF), // near-white hot core
+                Color(0x88FFEB3B), // warm yellow
+                Color(0x00FF9800), // transparent fade-out
+            ),
+            startY = h * 0.08f,
+            endY = h * 0.60f
+        )
+
+        val innerFlame = Path().apply {
+            moveTo(w * 0.50f, h * 0.08f)
+            cubicTo(w * 0.66f, h * 0.18f, w * 0.72f, h * 0.38f, w * 0.64f, h * 0.54f)
+            cubicTo(w * 0.59f, h * 0.63f, w * 0.54f, h * 0.67f, w * 0.50f, h * 0.68f)
+            cubicTo(w * 0.46f, h * 0.67f, w * 0.41f, h * 0.63f, w * 0.36f, h * 0.54f)
+            cubicTo(w * 0.28f, h * 0.38f, w * 0.34f, h * 0.18f, w * 0.50f, h * 0.08f)
+            close()
+        }
+        drawPath(innerFlame, brush = innerGradient)
+    }
+}
