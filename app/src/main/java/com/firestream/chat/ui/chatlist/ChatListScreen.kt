@@ -244,6 +244,7 @@ fun ChatListScreen(
                                     chat = chat,
                                     currentUserId = uiState.currentUserId,
                                     contacts = uiState.contacts,
+                                    onlineUserIds = uiState.onlineUserIds,
                                     onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
                                     onDelete = { viewModel.requestDeleteChat(chat.id) },
                                     onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -263,6 +264,7 @@ fun ChatListScreen(
                                 chat = chat,
                                 currentUserId = uiState.currentUserId,
                                 contacts = uiState.contacts,
+                                onlineUserIds = uiState.onlineUserIds,
                                 onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
                                 onDelete = { viewModel.requestDeleteChat(chat.id) },
                                 onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -308,6 +310,7 @@ private fun ChatItem(
     chat: Chat,
     currentUserId: String,
     contacts: Map<String, Contact> = emptyMap(),
+    onlineUserIds: Set<String> = emptySet(),
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onPin: () -> Unit,
@@ -325,6 +328,8 @@ private fun ChatItem(
             chat = chat,
             currentUserId = currentUserId,
             contacts = contacts,
+            isRecipientOnline = chat.type == ChatType.INDIVIDUAL &&
+                chat.participants.firstOrNull { it != currentUserId }?.let { it in onlineUserIds } == true,
             onClick = onClick,
             onLongClick = { showMenu = true }
         )

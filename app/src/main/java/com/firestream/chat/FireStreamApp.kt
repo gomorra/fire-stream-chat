@@ -1,16 +1,24 @@
 package com.firestream.chat
 
 import android.app.Application
+import androidx.lifecycle.ProcessLifecycleOwner
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import javax.inject.Inject
 
 @HiltAndroidApp
 class FireStreamApp : Application() {
 
+    @Inject
+    lateinit var appLifecycleObserver: AppLifecycleObserver
+
     override fun onCreate() {
         super.onCreate()
+        // Register process-level lifecycle observer for online/offline presence.
+        // Must happen after super.onCreate() so Hilt completes injection.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
     }
 
@@ -23,4 +31,3 @@ class FireStreamApp : Application() {
         }
     }
 }
-

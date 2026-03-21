@@ -42,7 +42,9 @@ data class ChatListUiState(
     val showArchived: Boolean = false,
     // Phase 2: mute dialog
     val pendingMuteChatId: String? = null,
-    val contacts: Map<String, Contact> = emptyMap()
+    val contacts: Map<String, Contact> = emptyMap(),
+    // Presence: set of recipient user IDs currently online
+    val onlineUserIds: Set<String> = emptySet()
 )
 
 @HiltViewModel
@@ -128,7 +130,13 @@ class ChatListViewModel @Inject constructor(
 
         // Cancel observers for recipients no longer in chat list
         val toRemove = recipientObservers.keys - recipientIds
-        toRemove.forEach { recipientObservers.remove(it)?.cancel() }
+        toRemove.forEach { id ->
+            recipientObservers.remove(id)?.cancel()
+            // Remove from online set when we stop observing
+            _uiState.value = _uiState.value.copy(
+                onlineUserIds = _uiState.value.onlineUserIds - id
+            )
+        }
 
         // Start observers for new recipients
         val newIds = recipientIds - recipientObservers.keys
@@ -136,11 +144,13 @@ class ChatListViewModel @Inject constructor(
             recipientObservers[recipientId] = viewModelScope.launch {
                 userRepository.observeUser(recipientId)
                     .distinctUntilChanged { old, new ->
-                        old.avatarUrl == new.avatarUrl && old.displayName == new.displayName
+                        old.avatarUrl == new.avatarUrl &&
+                            old.displayName == new.displayName &&
+                            old.isOnline == new.isOnline
                     }
                     .catch { }
                     .collect { user ->
-                        val updated = _uiState.value.contacts[recipientId]
+                        val updatedContact = _uiState.value.contacts[recipientId]
                             ?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
                             ?: Contact(
                                 uid = recipientId,
@@ -149,8 +159,14 @@ class ChatListViewModel @Inject constructor(
                                 avatarUrl = user.avatarUrl,
                                 isRegistered = true
                             )
+                        val updatedOnline = if (user.isOnline) {
+                            _uiState.value.onlineUserIds + recipientId
+                        } else {
+                            _uiState.value.onlineUserIds - recipientId
+                        }
                         _uiState.value = _uiState.value.copy(
-                            contacts = _uiState.value.contacts + (recipientId to updated)
+                            contacts = _uiState.value.contacts + (recipientId to updatedContact),
+                            onlineUserIds = updatedOnline
                         )
                     }
             }

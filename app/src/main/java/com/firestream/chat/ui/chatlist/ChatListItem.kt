@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chatlist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,6 +42,7 @@ fun ChatListItem(
     chat: Chat,
     currentUserId: String,
     contacts: Map<String, Contact> = emptyMap(),
+    isRecipientOnline: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier
@@ -59,17 +62,29 @@ fun ChatListItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        UserAvatar(
-            avatarUrl = avatarUrl,
-            contentDescription = displayName,
-            icon = when (chat.type) {
-                ChatType.BROADCAST -> Icons.Default.Campaign
-                ChatType.GROUP -> Icons.Default.Group
-                else -> Icons.Default.Person
-            },
-            size = 52.dp,
-            modifier = Modifier.size(52.dp)
-        )
+        // Avatar with optional online dot overlay
+        Box(contentAlignment = Alignment.BottomEnd) {
+            UserAvatar(
+                avatarUrl = avatarUrl,
+                contentDescription = displayName,
+                icon = when (chat.type) {
+                    ChatType.BROADCAST -> Icons.Default.Campaign
+                    ChatType.GROUP -> Icons.Default.Group
+                    else -> Icons.Default.Person
+                },
+                size = 52.dp,
+                modifier = Modifier.size(52.dp)
+            )
+            if (isRecipientOnline) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color(0xFF4CAF50), // green
+                    modifier = Modifier
+                        .size(14.dp)
+                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                ) {}
+            }
+        }
 
         Spacer(modifier = Modifier.width(12.dp))
 
