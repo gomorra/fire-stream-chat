@@ -24,6 +24,7 @@ internal fun MainScreen(
     onNewGroupClick: () -> Unit,
     onNewBroadcastClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onMessageClick: (chatId: String, recipientId: String) -> Unit,
 ) {
     // Only CHATS and CALLS are swipeable; LISTS is not yet implemented.
     val pagerState = rememberPagerState(pageCount = { 2 })
@@ -53,7 +54,7 @@ internal fun MainScreen(
                     onNewBroadcastClick = onNewBroadcastClick,
                     onSettingsClick = onSettingsClick,
                 )
-                MainTab.CALLS -> CallsScreen()
+                MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
                 MainTab.LISTS -> Unit
             }
         }

@@ -158,6 +158,11 @@ fun FireStreamNavGraph(
                 onNewGroupClick = { navController.navigate(Routes.CREATE_GROUP) },
                 onNewBroadcastClick = { navController.navigate(Routes.CREATE_BROADCAST) },
                 onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                onMessageClick = { chatId, recipientId ->
+                    navController.navigate(Routes.chat(chatId, recipientId)) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
