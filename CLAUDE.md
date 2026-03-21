@@ -43,6 +43,12 @@ When creating implementation plans, include a model/effort recommendation per st
 | Straightforward feature work, well-scoped changes | Sonnet | Medium |
 | Simple bug fixes, typos, single-file changes | Sonnet | Low |
 
+**Defaults:**
+- **Planning** — always Opus, High effort (unless the plan is trivial/single-step)
+- **Implementation** — Sonnet, Medium effort (override per the table above when warranted)
+
+**Per-step model selection:** For each implementation step, automatically apply the model/effort from the table above based on the step's characteristics. The defaults (Sonnet/Medium) are the fallback only when no table row clearly applies. If the table suggests a different model/effort than the default, apply it automatically — but if the choice is ambiguous, ask the user before deviating.
+
 **Decision factors:**
 - **Opus** when: defining architecture others build on, complex permission/security logic, multiple interacting systems
 - **Sonnet** when: following patterns already in the codebase, isolated features, UI components
@@ -55,6 +61,11 @@ Plans must include a recommendation table per step:
 |------|-------|--------|-----------|
 
 ## Plan Execution Workflow
+
+**At the start of each implementation step, display:**
+> **Step X — Model: [Opus|Sonnet] / Effort: [High|Medium|Low]**
+
+This must appear before any code changes are made for that step.
 
 **After each sub-feature, ALWAYS run these steps in order without waiting to be asked:**
 1. `/simplify` — review changed code for quality
