@@ -22,6 +22,7 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
+import com.firestream.chat.ui.calls.CallsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 
@@ -38,6 +39,8 @@ object Routes {
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
     const val ARCHIVED_CHATS = "archived_chats"
+    // Bottom nav tabs
+    const val CALLS = "calls"
     // Phase 5 routes
     const val GROUP_SETTINGS = "group_settings/{chatId}"
     const val CREATE_BROADCAST = "create_broadcast"
@@ -163,6 +166,25 @@ fun FireStreamNavGraph(
                 },
                 onSettingsClick = {
                     navController.navigate(Routes.SETTINGS)
+                },
+                onCallsTabClick = {
+                    navController.navigate(Routes.CALLS) {
+                        launchSingleTop = true
+                        restoreState = true
+                        popUpTo(Routes.CHAT_LIST) { saveState = true }
+                    }
+                }
+            )
+        }
+
+        composable(Routes.CALLS) {
+            CallsScreen(
+                onChatsTabClick = {
+                    navController.navigate(Routes.CHAT_LIST) {
+                        launchSingleTop = true
+                        restoreState = true
+                        popUpTo(Routes.CALLS) { saveState = true }
+                    }
                 }
             )
         }

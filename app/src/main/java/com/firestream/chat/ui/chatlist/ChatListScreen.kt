@@ -60,6 +60,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.ui.main.BottomNavBar
+import com.firestream.chat.ui.main.MainTab
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
@@ -75,6 +77,7 @@ fun ChatListScreen(
     onNewGroupClick: () -> Unit = {},
     onNewBroadcastClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
+    onCallsTabClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -147,7 +150,14 @@ fun ChatListScreen(
                 )
             }
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        bottomBar = {
+            BottomNavBar(
+                selectedTab = MainTab.CHATS,
+                onChatsClick = {},
+                onCallsClick = onCallsTabClick
+            )
+        }
     ) { padding ->
         Column(
             modifier = Modifier
@@ -327,13 +337,18 @@ private fun SwipeableChatItem(
                 SwipeToDismissBoxValue.EndToStart -> { onArchive(); false }
                 else -> false
             }
-        }
+        },
+        positionalThreshold = { totalDistance -> totalDistance / 3f }
     )
 
     SwipeToDismissBox(
         state = dismissState,
         backgroundContent = {
+            // Read state inside this slot so Compose tracks it as a dependency here
+            val isActivated = dismissState.targetValue != SwipeToDismissBoxValue.Settled
             val direction = dismissState.dismissDirection
+            val activeTint = MaterialTheme.colorScheme.primary
+            val idleTint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
             Row(
                 modifier = Modifier
                     .fillMaxSize()
@@ -344,7 +359,7 @@ private fun SwipeableChatItem(
                     Icon(
                         imageVector = Icons.Default.PushPin,
                         contentDescription = if (chat.isPinned) "Unpin" else "Pin",
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = if (isActivated) activeTint else idleTint
                     )
                 }
                 Spacer(Modifier.weight(1f))
@@ -352,7 +367,7 @@ private fun SwipeableChatItem(
                     Icon(
                         imageVector = Icons.Default.Archive,
                         contentDescription = if (chat.isArchived) "Unarchive" else "Archive",
-                        tint = MaterialTheme.colorScheme.secondary
+                        tint = if (isActivated) activeTint else idleTint
                     )
                 }
             }
