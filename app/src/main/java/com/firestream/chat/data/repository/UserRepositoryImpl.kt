@@ -74,10 +74,9 @@ class UserRepositoryImpl @Inject constructor(
         return try {
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
             // RTDB handles the abrupt-disconnect case via onDisconnect() — runs server-side
-            // even if the device powers off before onStop() can fire a Firestore write.
-            // The Firestore write below is kept for immediate consistency on normal transitions.
-            if (isOnline) presenceSource.connect(uid) else presenceSource.disconnect(uid)
-            userSource.setOnlineStatus(uid, isOnline)
+            // even if the device powers off before onStop() can fire. The Cloud Function
+            // syncPresenceToFirestore is the sole writer to Firestore (avoids race with direct writes).
+            if (isOnline) presenceSource.startPresence(uid) else presenceSource.goOffline(uid)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

@@ -14,6 +14,8 @@ import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.share.SharedContentHolder
@@ -70,7 +72,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        lifecycleScope.launch { userRepository.setOnlineStatus(false) }
+        lifecycleScope.launch { withContext(NonCancellable) { userRepository.setOnlineStatus(false) } }
     }
 
     private fun requestNotificationPermissionIfNeeded() {

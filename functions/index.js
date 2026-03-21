@@ -16,9 +16,19 @@ exports.syncPresenceToFirestore = onValueWritten(
         const presence = event.data.after.val();
         if (!presence) return null;
 
-        await admin.firestore().collection("users").doc(userId).update({
-            isOnline: presence.isOnline === true,
-            lastSeen: presence.lastSeen || Date.now()
+        const isOnline = presence.isOnline === true;
+        const lastSeen = presence.lastSeen || Date.now();
+
+        // Use a transaction to prevent a stale write (e.g. reordered invocations on
+        // multi-device or rapid connect/disconnect) from overwriting a newer value.
+        const userRef = admin.firestore().collection("users").doc(userId);
+        await admin.firestore().runTransaction(async (tx) => {
+            const snap = await tx.get(userRef);
+            const existing = snap.exists ? (snap.data().lastSeen || 0) : 0;
+            // Only write if this event is newer than what Firestore already has
+            if (lastSeen >= existing) {
+                tx.update(userRef, { isOnline, lastSeen });
+            }
         });
         return null;
     }
