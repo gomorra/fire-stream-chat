@@ -36,6 +36,13 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var sharedContentHolder: SharedContentHolder
 
+    override fun onResume() {
+        super.onResume()
+        // Redundant with AppLifecycleObserver.onStart(), but guarantees online status is set
+        // even if ProcessLifecycleOwner fires before auth state is restored (e.g. cold start).
+        lifecycleScope.launch { userRepository.setOnlineStatus(true) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
