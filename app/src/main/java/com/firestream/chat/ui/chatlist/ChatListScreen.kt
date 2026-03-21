@@ -3,10 +3,9 @@ package com.firestream.chat.ui.chatlist
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.WindowInsets
@@ -38,13 +37,10 @@ import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -54,6 +50,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -159,10 +157,25 @@ fun ChatListScreen(
             )
         }
     ) { padding ->
+        val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
+        var swipeAccumulator by remember { mutableStateOf(0f) }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .pointerInput(onCallsTabClick) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = { swipeAccumulator = 0f },
+                        onDragCancel = { swipeAccumulator = 0f }
+                    ) { _, dragAmount ->
+                        swipeAccumulator += dragAmount
+                        if (swipeAccumulator < -swipeThresholdPx) {
+                            swipeAccumulator = 0f
+                            onCallsTabClick()
+                        }
+                    }
+                }
         ) {
             // Search bar
             SearchBar(
@@ -253,7 +266,7 @@ fun ChatListScreen(
                                 ChatSectionHeader("Pinned")
                             }
                             items(pinnedChats, key = { "pin_${it.id}" }) { chat ->
-                                SwipeableChatItem(
+                                ChatItem(
                                     chat = chat,
                                     currentUserId = uiState.currentUserId,
                                     contacts = uiState.contacts,
@@ -272,7 +285,7 @@ fun ChatListScreen(
                             }
                         }
                         items(regularChats, key = { it.id }) { chat ->
-                            SwipeableChatItem(
+                            ChatItem(
                                 chat = chat,
                                 currentUserId = uiState.currentUserId,
                                 contacts = uiState.contacts,
@@ -316,9 +329,8 @@ fun ChatListScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SwipeableChatItem(
+private fun ChatItem(
     chat: Chat,
     currentUserId: String,
     contacts: Map<String, Contact> = emptyMap(),
@@ -329,84 +341,40 @@ private fun SwipeableChatItem(
     onMute: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val isMuted = chat.muteUntil == Long.MAX_VALUE ||
+        (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
 
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            when (value) {
-                SwipeToDismissBoxValue.StartToEnd -> { onPin(); false }
-                SwipeToDismissBoxValue.EndToStart -> { onArchive(); false }
-                else -> false
-            }
-        },
-        positionalThreshold = { totalDistance -> totalDistance / 3f }
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        backgroundContent = {
-            // Read state inside this slot so Compose tracks it as a dependency here
-            val isActivated = dismissState.targetValue != SwipeToDismissBoxValue.Settled
-            val direction = dismissState.dismissDirection
-            val activeTint = MaterialTheme.colorScheme.primary
-            val idleTint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (direction == SwipeToDismissBoxValue.StartToEnd) {
-                    Icon(
-                        imageVector = Icons.Default.PushPin,
-                        contentDescription = if (chat.isPinned) "Unpin" else "Pin",
-                        tint = if (isActivated) activeTint else idleTint
-                    )
-                }
-                Spacer(Modifier.weight(1f))
-                if (direction == SwipeToDismissBoxValue.EndToStart) {
-                    Icon(
-                        imageVector = Icons.Default.Archive,
-                        contentDescription = if (chat.isArchived) "Unarchive" else "Archive",
-                        tint = if (isActivated) activeTint else idleTint
-                    )
-                }
-            }
-        }
-    ) {
-        Box {
-            ChatListItem(
-                chat = chat,
-                currentUserId = currentUserId,
-                contacts = contacts,
-                onClick = onClick,
-                onLongClick = { showMenu = true }
+    Box {
+        ChatListItem(
+            chat = chat,
+            currentUserId = currentUserId,
+            contacts = contacts,
+            onClick = onClick,
+            onLongClick = { showMenu = true }
+        )
+        DropdownMenu(
+            expanded = showMenu,
+            onDismissRequest = { showMenu = false }
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (chat.isPinned) "Unpin" else "Pin") },
+                leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                onClick = { showMenu = false; onPin() }
             )
-            val isMuted = chat.muteUntil == Long.MAX_VALUE ||
-                (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false }
-            ) {
-                DropdownMenuItem(
-                    text = { Text(if (chat.isPinned) "Unpin" else "Pin") },
-                    leadingIcon = { Icon(Icons.Default.PushPin, null) },
-                    onClick = { showMenu = false; onPin() }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (chat.isArchived) "Unarchive" else "Archive") },
-                    leadingIcon = { Icon(Icons.Default.Archive, null) },
-                    onClick = { showMenu = false; onArchive() }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (isMuted) "Unmute" else "Mute") },
-                    leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
-                    onClick = { showMenu = false; onMute() }
-                )
-                DropdownMenuItem(
-                    text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                    onClick = { showMenu = false; onDelete() }
-                )
-            }
+            DropdownMenuItem(
+                text = { Text(if (chat.isArchived) "Unarchive" else "Archive") },
+                leadingIcon = { Icon(Icons.Default.Archive, null) },
+                onClick = { showMenu = false; onArchive() }
+            )
+            DropdownMenuItem(
+                text = { Text(if (isMuted) "Unmute" else "Mute") },
+                leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
+                onClick = { showMenu = false; onMute() }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                onClick = { showMenu = false; onDelete() }
+            )
         }
     }
 }
