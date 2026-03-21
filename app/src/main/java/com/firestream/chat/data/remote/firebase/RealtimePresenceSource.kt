@@ -8,6 +8,8 @@ import com.google.firebase.database.ValueEventListener
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,11 +60,11 @@ class RealtimePresenceSource @Inject constructor(
                 val connected = snapshot.getValue(Boolean::class.java) ?: false
                 if (!connected) return
 
-                // Re-register onDisconnect on every reconnect, then go online
+                // Re-register onDisconnect on every reconnect, then go online.
+                // onDisconnect() is best-effort; write online status unconditionally
+                // so a rules rejection doesn't silently prevent the user going online.
                 presenceRef.onDisconnect().setValue(offlineData)
-                    .addOnSuccessListener {
-                        presenceRef.setValue(onlineData)
-                    }
+                presenceRef.setValue(onlineData)
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -90,21 +92,24 @@ class RealtimePresenceSource @Inject constructor(
      * Observes the live online status of [userId] directly from RTDB.
      * Does not depend on the Cloud Function sync — changes are visible instantly.
      */
-    fun observeOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
-        val presenceRef = database.getReference("presence/$userId")
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val isOnline = snapshot.child("isOnline").getValue(Boolean::class.java) ?: false
-                trySend(isOnline)
-            }
+    fun observeOnlineStatus(userId: String): Flow<Boolean> = merge(
+        flowOf(false), // guarantees combine() has an initial value even if RTDB is slow
+        callbackFlow {
+            val presenceRef = database.getReference("presence/$userId")
+            val listener = object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val isOnline = snapshot.child("isOnline").getValue(Boolean::class.java) ?: false
+                    trySend(isOnline)
+                }
 
-            override fun onCancelled(error: DatabaseError) {
-                trySend(false)
+                override fun onCancelled(error: DatabaseError) {
+                    trySend(false)
+                }
             }
+            presenceRef.addValueEventListener(listener)
+            awaitClose { presenceRef.removeEventListener(listener) }
         }
-        presenceRef.addValueEventListener(listener)
-        awaitClose { presenceRef.removeEventListener(listener) }
-    }
+    )
 
     /**
      * Removes the `.info/connected` listener. Called on logout.
