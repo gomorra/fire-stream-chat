@@ -21,14 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.firestream.chat.ui.main.BottomNavBar
-import com.firestream.chat.ui.main.MainTab
-import com.firestream.chat.ui.main.swipeToNavigate
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CallsScreen(
-    onChatsTabClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Scaffold(
@@ -47,19 +42,11 @@ fun CallsScreen(
                 )
             )
         },
-        bottomBar = {
-            BottomNavBar(
-                selectedTab = MainTab.CALLS,
-                onChatsClick = onChatsTabClick,
-                onCallsClick = {}
-            )
-        }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .swipeToNavigate(swipeRight = true, onSwipe = onChatsTabClick),
+                .padding(padding),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {

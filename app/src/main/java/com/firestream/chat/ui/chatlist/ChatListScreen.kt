@@ -47,17 +47,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
-import com.firestream.chat.ui.main.BottomNavBar
-import com.firestream.chat.ui.main.MainTab
-import com.firestream.chat.ui.main.swipeToNavigate
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
@@ -73,7 +75,6 @@ fun ChatListScreen(
     onNewGroupClick: () -> Unit = {},
     onNewBroadcastClick: () -> Unit = {},
     onSettingsClick: () -> Unit,
-    onCallsTabClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -98,10 +99,19 @@ fun ChatListScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_flame),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
@@ -147,19 +157,11 @@ fun ChatListScreen(
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        bottomBar = {
-            BottomNavBar(
-                selectedTab = MainTab.CHATS,
-                onChatsClick = {},
-                onCallsClick = onCallsTabClick
-            )
-        }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .swipeToNavigate(swipeRight = false, onSwipe = onCallsTabClick)
         ) {
             // Search bar
             SearchBar(
