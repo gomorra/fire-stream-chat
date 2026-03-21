@@ -72,4 +72,8 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE senderId = :userId AND mediaUrl IS NOT NULL ORDER BY timestamp DESC LIMIT 100")
     fun getSharedMediaForUser(userId: String): Flow<List<MessageEntity>>
+
+    // Call log
+    @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")
+    fun getCallMessages(): Flow<List<MessageEntity>>
 }

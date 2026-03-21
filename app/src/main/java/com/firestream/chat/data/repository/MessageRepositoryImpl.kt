@@ -760,6 +760,9 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    override fun getCallLog(): Flow<List<Message>> =
+        messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
+
     private fun buildPollFirestoreMap(poll: Poll): Map<String, Any?> {
         return mapOf(
             "question" to poll.question,

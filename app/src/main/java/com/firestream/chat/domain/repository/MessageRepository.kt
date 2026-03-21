@@ -37,4 +37,6 @@ interface MessageRepository {
     suspend fun closePoll(chatId: String, messageId: String): Result<Unit>
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
+    // Call log
+    fun getCallLog(): Flow<List<Message>>
 }
