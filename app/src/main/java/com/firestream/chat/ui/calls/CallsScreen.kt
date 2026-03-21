@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,8 +48,6 @@ import com.firestream.chat.domain.model.CallLogEntry
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.ui.call.CallActivity
 import com.firestream.chat.ui.components.UserAvatar
-import com.firestream.chat.ui.main.BottomNavBar
-import com.firestream.chat.ui.main.MainTab
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -57,7 +56,6 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CallsScreen(
-    onChatsTabClick: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CallsViewModel = hiltViewModel()
 ) {
@@ -66,6 +64,7 @@ fun CallsScreen(
 
     Scaffold(
         modifier = modifier,
+        contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
                 title = {
@@ -74,17 +73,11 @@ fun CallsScreen(
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
+                windowInsets = WindowInsets(0),
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary
                 )
-            )
-        },
-        bottomBar = {
-            BottomNavBar(
-                selectedTab = MainTab.CALLS,
-                onChatsClick = onChatsTabClick,
-                onCallsClick = {}
             )
         }
     ) { padding ->

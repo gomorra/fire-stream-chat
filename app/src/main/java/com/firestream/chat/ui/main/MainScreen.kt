@@ -53,9 +53,7 @@ internal fun MainScreen(
                     onNewBroadcastClick = onNewBroadcastClick,
                     onSettingsClick = onSettingsClick,
                 )
-                MainTab.CALLS -> CallsScreen(
-                    onChatsTabClick = { scope.launch { pagerState.animateScrollToPage(MainTab.CHATS.ordinal) } }
-                )
+                MainTab.CALLS -> CallsScreen()
                 MainTab.LISTS -> Unit
             }
         }
