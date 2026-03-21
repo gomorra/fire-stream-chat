@@ -28,7 +28,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
-enum class MainTab { CHATS, CALLS, LISTS }
+internal enum class MainTab { CHATS, CALLS, LISTS }
 
 @Composable
 internal fun BottomNavBar(

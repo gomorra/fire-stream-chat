@@ -3,7 +3,6 @@ package com.firestream.chat.ui.chatlist
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,8 +49,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -60,6 +57,7 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.ui.main.BottomNavBar
 import com.firestream.chat.ui.main.MainTab
+import com.firestream.chat.ui.main.swipeToNavigate
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
@@ -157,25 +155,11 @@ fun ChatListScreen(
             )
         }
     ) { padding ->
-        val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
-        var swipeAccumulator by remember { mutableStateOf(0f) }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .pointerInput(onCallsTabClick) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = { swipeAccumulator = 0f },
-                        onDragCancel = { swipeAccumulator = 0f }
-                    ) { _, dragAmount ->
-                        swipeAccumulator += dragAmount
-                        if (swipeAccumulator < -swipeThresholdPx) {
-                            swipeAccumulator = 0f
-                            onCallsTabClick()
-                        }
-                    }
-                }
+                .swipeToNavigate(swipeRight = false, onSwipe = onCallsTabClick)
         ) {
             // Search bar
             SearchBar(
@@ -341,8 +325,10 @@ private fun ChatItem(
     onMute: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
-    val isMuted = chat.muteUntil == Long.MAX_VALUE ||
-        (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
+    val isMuted = remember(chat.muteUntil) {
+        chat.muteUntil == Long.MAX_VALUE ||
+            (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
+    }
 
     Box {
         ChatListItem(
