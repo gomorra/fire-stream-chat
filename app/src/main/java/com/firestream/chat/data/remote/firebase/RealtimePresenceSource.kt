@@ -5,6 +5,9 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ServerValue
 import com.google.firebase.database.ValueEventListener
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -81,6 +84,26 @@ class RealtimePresenceSource @Inject constructor(
         presenceRef.setValue(
             mapOf("isOnline" to false, "lastSeen" to ServerValue.TIMESTAMP)
         ).await()
+    }
+
+    /**
+     * Observes the live online status of [userId] directly from RTDB.
+     * Does not depend on the Cloud Function sync — changes are visible instantly.
+     */
+    fun observeOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
+        val presenceRef = database.getReference("presence/$userId")
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val isOnline = snapshot.child("isOnline").getValue(Boolean::class.java) ?: false
+                trySend(isOnline)
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                trySend(false)
+            }
+        }
+        presenceRef.addValueEventListener(listener)
+        awaitClose { presenceRef.removeEventListener(listener) }
     }
 
     /**

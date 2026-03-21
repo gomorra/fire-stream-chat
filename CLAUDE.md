@@ -112,7 +112,19 @@ com.firestream.chat/
 │   ├── repository/      # Interfaces (Auth, Chat, Contact, Message, User)
 │   └── usecase/         # Organized by feature (auth, chat, contact, message)
 ├── navigation/          # NavGraph.kt with Routes object
-├── ui/                  # Feature packages (auth, chat, chatlist, contacts, profile, settings, starred)
+├── ui/                  # Feature packages, organized by screen
+│   ├── auth/            # LoginScreen, OtpScreen, ProfileSetupScreen
+│   ├── calls/           # CallsScreen, CallsViewModel (call log + WebRTC entry points)
+│   ├── chat/            # ChatScreen, ChatViewModel, MessageBubble, VoiceMessagePlayer, etc.
+│   ├── chatlist/        # ChatListScreen, ChatListViewModel, ArchivedChatsScreen
+│   ├── contacts/        # ContactsScreen
+│   ├── group/           # GroupSettingsScreen, CreateGroupScreen, GroupSettingsViewModel
+│   ├── broadcast/       # CreateBroadcastScreen, CreateBroadcastViewModel
+│   ├── main/            # MainScreen (HorizontalPager host), BottomNavBar, TabSwipeModifier
+│   ├── profile/         # ProfileScreen
+│   ├── settings/        # SettingsScreen, SettingsViewModel
+│   ├── share/           # SharePickerScreen
+│   ├── starred/         # StarredMessagesScreen
 │   └── theme/           # Color, Shape, Theme, Type
 ├── FireStreamApp.kt     # @HiltAndroidApp
 └── MainActivity.kt      # Single activity entry point
@@ -121,9 +133,11 @@ com.firestream.chat/
 ### Key Architectural Decisions
 
 - **Single Activity** — `MainActivity` with Compose `NavHost` for all navigation.
+- **Bottom navigation** — `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with Chats and Calls tabs. `BottomNavBar` lives in `MainScreen`'s Scaffold; individual tab screens (`ChatListScreen`, `CallsScreen`) do **not** own the nav bar or swipe gesture.
 - **Local-first** — Room database with Firebase sync. `fallbackToDestructiveMigration()` is enabled.
 - **DataStore** — All preferences (theme, notifications, privacy). No SharedPreferences.
 - **Signal Protocol** — E2E encryption with `SignalManager` coordinating key exchange via `FirebaseKeySource`. **Encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `MessageRepositoryImpl`) — all messages are sent as plaintext via `sendPlainMessage` to avoid key-loss issues during development. Release builds use full Signal encryption.
+- **Presence** — Online status uses Firebase Realtime Database (`RealtimePresenceSource`). `startPresence()` uses the `.info/connected` pattern to re-register `onDisconnect()` on every reconnect. `observeOnlineStatus()` lets `UserRepositoryImpl.observeUser()` combine RTDB presence directly into the user stream — no Cloud Function dependency for the live indicator. The Cloud Function `syncPresenceToFirestore` still mirrors RTDB to Firestore for abrupt-disconnect cases.
 - **Deep linking** — `MainActivity` accepts `chatId`/`senderId` extras from FCM notifications.
 
 ## Key Conventions
@@ -150,14 +164,18 @@ Do **not** construct route strings manually.
 
 ## Firebase Cloud Functions
 
-Single function in `functions/index.js`: `sendPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` creation, sends FCM push to the recipient. Runtime: Node.js 20.
+Three functions in `functions/index.js`. Runtime: Node.js 20.
+
+- `sendPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` creation; sends FCM push to all recipients and increments per-user unread counts.
+- `sendCallPushNotification` — triggers on `calls/{callId}` creation with `status == "ringing"`; sends high-priority FCM to the callee.
+- `syncPresenceToFirestore` — triggers on RTDB `/presence/{userId}` writes; mirrors `isOnline`/`lastSeen` to Firestore with a `lastSeen` transaction guard to reject reordered invocations.
 
 ## Testing
 
 - **Unit tests**: `app/src/test/` — JUnit 4 + MockK + `kotlinx-coroutines-test`
 - **UI tests**: Espresso + Compose UI Test (no instrumentation tests written yet)
 - Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions.
-- Existing test coverage: use case tests (Archive, Mute, Pin, Search, Star) and ViewModel tests (ChatList, Settings).
+- Existing test coverage: use case tests (Archive, Mute, Pin, Search, Star, Group, Broadcast, Call log), ViewModel tests (ChatList, Settings, GroupSettings, CreateBroadcast, Calls), repository tests (Presence, Delivery/receipts).
 
 ## Sensitive Files
 

@@ -15,14 +15,13 @@ import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
 import com.firestream.chat.ui.chat.SharedMediaScreen
 import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
-import com.firestream.chat.ui.chatlist.ChatListScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.profile.ProfileScreen
 import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
-import com.firestream.chat.ui.calls.CallsScreen
+import com.firestream.chat.ui.main.MainScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 
@@ -39,8 +38,8 @@ object Routes {
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
     const val ARCHIVED_CHATS = "archived_chats"
-    // Bottom nav tabs
-    const val CALLS = "calls"
+    // Bottom nav tabs (no longer a separate nav route — handled by MainScreen tab state)
+    // const val CALLS = "calls"
     // Phase 5 routes
     const val GROUP_SETTINGS = "group_settings/{chatId}"
     const val CREATE_BROADCAST = "create_broadcast"
@@ -149,43 +148,16 @@ fun FireStreamNavGraph(
                     }
                 }
             }
-            ChatListScreen(
+            MainScreen(
                 onChatClick = { chatId, recipientId ->
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
                     }
                 },
-                onNewChatClick = {
-                    navController.navigate(Routes.CONTACTS)
-                },
-                onNewGroupClick = {
-                    navController.navigate(Routes.CREATE_GROUP)
-                },
-                onNewBroadcastClick = {
-                    navController.navigate(Routes.CREATE_BROADCAST)
-                },
-                onSettingsClick = {
-                    navController.navigate(Routes.SETTINGS)
-                },
-                onCallsTabClick = {
-                    navController.navigate(Routes.CALLS) {
-                        launchSingleTop = true
-                        restoreState = true
-                        popUpTo(Routes.CHAT_LIST) { saveState = true }
-                    }
-                }
-            )
-        }
-
-        composable(Routes.CALLS) {
-            CallsScreen(
-                onChatsTabClick = {
-                    navController.navigate(Routes.CHAT_LIST) {
-                        launchSingleTop = true
-                        restoreState = true
-                        popUpTo(Routes.CALLS) { saveState = true }
-                    }
-                }
+                onNewChatClick = { navController.navigate(Routes.CONTACTS) },
+                onNewGroupClick = { navController.navigate(Routes.CREATE_GROUP) },
+                onNewBroadcastClick = { navController.navigate(Routes.CREATE_BROADCAST) },
+                onSettingsClick = { navController.navigate(Routes.SETTINGS) },
             )
         }
 

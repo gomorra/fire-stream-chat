@@ -10,6 +10,7 @@ import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -24,7 +25,12 @@ class UserRepositoryImpl @Inject constructor(
 ) : UserRepository {
 
     override fun observeUser(userId: String): Flow<User> {
-        return userSource.observeUser(userId).onEach { user ->
+        return combine(
+            userSource.observeUser(userId),
+            presenceSource.observeOnlineStatus(userId)
+        ) { user, isOnline ->
+            user.copy(isOnline = isOnline)
+        }.onEach { user ->
             userDao.insertUser(UserEntity.fromDomain(user))
         }
     }
