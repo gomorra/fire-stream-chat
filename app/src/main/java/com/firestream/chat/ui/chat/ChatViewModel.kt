@@ -13,6 +13,7 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
@@ -34,7 +35,13 @@ import com.firestream.chat.domain.usecase.message.SendPollUseCase
 import com.firestream.chat.domain.usecase.message.VotePollUseCase
 import com.firestream.chat.domain.usecase.message.ClosePollUseCase
 import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
+import com.firestream.chat.domain.usecase.message.PinMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendListMessageUseCase
+import com.firestream.chat.domain.usecase.list.CreateListUseCase
+import com.firestream.chat.domain.usecase.list.ObserveListUseCase
+import com.firestream.chat.domain.model.ListData
+import com.firestream.chat.domain.model.ListType
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
@@ -91,7 +98,11 @@ data class ChatUiState(
     // Recipient profile (individual chats only)
     val recipientAvatarUrl: String? = null,
     val isRecipientOnline: Boolean = false,
-    val chatAvatarUrl: String? = null
+    val chatAvatarUrl: String? = null,
+    // Lists feature
+    val listDataCache: Map<String, ListData?> = emptyMap(),
+    // Pinned messages
+    val pinnedMessages: List<Message> = emptyList()
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
@@ -115,6 +126,10 @@ class ChatViewModel @Inject constructor(
     private val closePollUseCase: ClosePollUseCase,
     private val parseMentionsUseCase: ParseMentionsUseCase,
     private val sendBroadcastMessageUseCase: SendBroadcastMessageUseCase,
+    private val pinMessageUseCase: PinMessageUseCase,
+    private val sendListMessageUseCase: SendListMessageUseCase,
+    private val createListUseCase: CreateListUseCase,
+    private val observeListUseCase: ObserveListUseCase,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
     private val getChatsUseCase: GetChatsUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
@@ -263,12 +278,15 @@ class ChatViewModel @Inject constructor(
                 .collectLatest { messages ->
                     _uiState.value = _uiState.value.copy(
                         messages = messages,
-                        isLoading = false
+                        isLoading = false,
+                        pinnedMessages = messages.filter { it.isPinned }
                     )
                     // Mark incoming messages as read
                     markIncomingMessagesAsRead(messages)
                     // Fetch link previews for text messages with URLs
                     fetchLinkPreviewsFor(messages)
+                    // Observe list data for LIST messages
+                    observeListMessages(messages)
                 }
         }
     }
@@ -560,6 +578,49 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             closePollUseCase(chatId, messageId)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    // Message pinning
+    fun togglePin(messageId: String, pinned: Boolean) {
+        viewModelScope.launch {
+            pinMessageUseCase(chatId, messageId, pinned)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    // Lists
+    private val observedListIds = mutableSetOf<String>()
+
+    private fun observeListMessages(messages: List<Message>) {
+        val listIds = messages
+            .filter { it.type == MessageType.LIST && it.listId != null }
+            .mapNotNull { it.listId }
+            .distinct()
+            .take(10) // Cap concurrent listeners
+
+        listIds.forEach { listId ->
+            if (listId !in observedListIds) {
+                observedListIds.add(listId)
+                viewModelScope.launch {
+                    observeListUseCase(listId)
+                        .catch { /* non-fatal */ }
+                        .collect { listData ->
+                            _uiState.value = _uiState.value.copy(
+                                listDataCache = _uiState.value.listDataCache + (listId to listData)
+                            )
+                        }
+                }
+            }
+        }
+    }
+
+    fun createAndSendList(title: String, type: ListType) {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isSending = true)
+            createListUseCase(title, type, chatId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+            _uiState.value = _uiState.value.copy(isSending = false)
         }
     }
 

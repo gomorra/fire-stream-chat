@@ -15,7 +15,8 @@ enum class MessageType {
     VOICE,
     DOCUMENT,
     POLL,
-    CALL
+    CALL,
+    LIST
 }
 
 enum class ChatType {

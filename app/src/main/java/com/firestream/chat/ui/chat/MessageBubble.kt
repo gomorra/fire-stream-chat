@@ -94,6 +94,7 @@ internal fun MessageBubble(
     onReactionClick: () -> Unit,
     onForwardClick: () -> Unit,
     onStarClick: () -> Unit = {},
+    onPinClick: () -> Unit = {},
     onInfoClick: (() -> Unit)?,
     onImageClick: (String) -> Unit = {},
     onCallClick: (() -> Unit)? = null
@@ -451,6 +452,10 @@ internal fun MessageBubble(
                 DropdownMenuItem(
                     text = { Text(if (message.isStarred) "Unstar" else "Star") },
                     onClick = { showMenu = false; onStarClick() }
+                )
+                DropdownMenuItem(
+                    text = { Text(if (message.isPinned) "Unpin" else "Pin") },
+                    onClick = { showMenu = false; onPinClick() }
                 )
                 onEditClick?.let {
                     DropdownMenuItem(

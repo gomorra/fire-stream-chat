@@ -37,6 +37,10 @@ interface MessageRepository {
     suspend fun closePoll(chatId: String, messageId: String): Result<Unit>
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
+    // Lists
+    suspend fun sendListMessage(chatId: String, listId: String, listTitle: String): Result<Message>
+    // Generic message pinning
+    suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean): Result<Unit>
     // Call log
     fun getCallLog(): Flow<List<Message>>
 }

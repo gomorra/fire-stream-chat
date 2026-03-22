@@ -29,5 +29,9 @@ data class Message(
     val mentions: List<String> = emptyList(),
     val deletedAt: Long? = null,
     // Emoji size overrides — maps character index in content → size multiplier (0.8–2.5)
-    val emojiSizes: Map<Int, Float> = emptyMap()
+    val emojiSizes: Map<Int, Float> = emptyMap(),
+    // Lists feature
+    val listId: String? = null,
+    // Generic message pinning
+    val isPinned: Boolean = false
 )

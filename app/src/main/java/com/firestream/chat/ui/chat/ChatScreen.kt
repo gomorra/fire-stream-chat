@@ -47,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -131,6 +132,8 @@ fun ChatScreen(
     onProfileClick: (userId: String) -> Unit = {},
     onGroupSettingsClick: () -> Unit = {},
     onSharedMediaClick: () -> Unit = {},
+    onSharedListsClick: () -> Unit = {},
+    onListClick: (listId: String) -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -144,6 +147,7 @@ fun ChatScreen(
     val scope = rememberCoroutineScope()
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showCreatePollSheet by remember { mutableStateOf(false) }
+    var showCreateListSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
@@ -310,6 +314,13 @@ fun ChatScreen(
                                     onSharedMediaClick()
                                 }
                             )
+                            DropdownMenuItem(
+                                text = { Text("Shared Lists") },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    onSharedListsClick()
+                                }
+                            )
                         }
                     }
                 },
@@ -327,6 +338,51 @@ fun ChatScreen(
                 .padding(padding)
                 .imePadding()
         ) {
+            // Pinned message banner
+            if (uiState.pinnedMessages.isNotEmpty()) {
+                val pinned = uiState.pinnedMessages.last()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.secondaryContainer)
+                        .clickable {
+                            val index = uiState.messages.indexOfFirst { it.id == pinned.id }
+                            if (index >= 0) {
+                                scope.launch { listState.animateScrollToItem(index) }
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Lock,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = pinned.content.take(80),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { viewModel.togglePin(pinned.id, false) },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Unpin",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
+
             // In-chat search bar
             AnimatedVisibility(
                 visible = uiState.isSearchActive,
@@ -480,6 +536,15 @@ fun ChatScreen(
                                         onVote = { optionIds -> viewModel.votePoll(message.id, optionIds) },
                                         onClose = { viewModel.closePoll(message.id) }
                                     )
+                                } else if (message.type == MessageType.LIST) {
+                                    ListBubble(
+                                        message = message,
+                                        listData = uiState.listDataCache[message.listId],
+                                        isOwnMessage = isOwn,
+                                        onClick = {
+                                            message.listId?.let { onListClick(it) }
+                                        }
+                                    )
                                 } else {
                                     MessageBubble(
                                         message = message,
@@ -499,6 +564,9 @@ fun ChatScreen(
                                         onReactionClick = { reactionTargetMessage = message },
                                         onForwardClick = { forwardTargetMessage = message },
                                         onStarClick = { viewModel.toggleStar(message) },
+                                        onPinClick = {
+                                            viewModel.togglePin(message.id, !message.isPinned)
+                                        },
                                         onInfoClick = if (isOwn) {
                                             {
                                                 val chatParticipants = uiState.availableChats
@@ -876,6 +944,16 @@ fun ChatScreen(
                         }
                     }
                 )
+                AttachmentOption(
+                    icon = Icons.AutoMirrored.Filled.List,
+                    label = "Create List",
+                    onClick = {
+                        scope.launch { sheetState.hide() }.invokeOnCompletion {
+                            showAttachmentSheet = false
+                            showCreateListSheet = true
+                        }
+                    }
+                )
             }
         }
     }
@@ -887,6 +965,17 @@ fun ChatScreen(
             onCreatePoll = { question, options, isMultipleChoice, isAnonymous ->
                 viewModel.sendPoll(question, options, isMultipleChoice, isAnonymous)
                 showCreatePollSheet = false
+            }
+        )
+    }
+
+    // Create List bottom sheet
+    if (showCreateListSheet) {
+        CreateListSheet(
+            onDismiss = { showCreateListSheet = false },
+            onCreateList = { title, type, _ ->
+                viewModel.createAndSendList(title, type)
+                showCreateListSheet = false
             }
         )
     }

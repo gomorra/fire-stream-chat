@@ -21,6 +21,8 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
+import com.firestream.chat.ui.lists.ListDetailScreen
+import com.firestream.chat.ui.lists.SharedListsScreen
 import com.firestream.chat.ui.main.MainScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
@@ -46,6 +48,8 @@ object Routes {
     const val CREATE_GROUP = "create_group"
     const val SHARE_PICKER = "share_picker"
     const val SHARED_MEDIA = "shared_media/{chatId}"
+    const val LIST_DETAIL = "list_detail/{listId}"
+    const val SHARED_LISTS = "shared_lists/{chatId}"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
@@ -60,6 +64,8 @@ object Routes {
 
     fun groupSettings(chatId: String) = "group_settings/$chatId"
     fun sharedMedia(chatId: String) = "shared_media/$chatId"
+    fun listDetail(listId: String) = "list_detail/$listId"
+    fun sharedLists(chatId: String) = "shared_lists/$chatId"
 }
 
 @Composable
@@ -163,6 +169,11 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
+                onListClick = { listId ->
+                    navController.navigate(Routes.listDetail(listId)) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 
@@ -186,7 +197,13 @@ fun FireStreamNavGraph(
                     navController.navigate(Routes.userProfile(userId))
                 },
                 onGroupSettingsClick = { navController.navigate(Routes.groupSettings(chatId)) },
-                onSharedMediaClick = { navController.navigate(Routes.sharedMedia(chatId)) }
+                onSharedMediaClick = { navController.navigate(Routes.sharedMedia(chatId)) },
+                onSharedListsClick = { navController.navigate(Routes.sharedLists(chatId)) },
+                onListClick = { listId ->
+                    navController.navigate(Routes.listDetail(listId)) {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
 
@@ -316,6 +333,36 @@ fun FireStreamNavGraph(
                     }
                 },
                 onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        // List Detail
+        composable(
+            route = Routes.LIST_DETAIL,
+            arguments = listOf(navArgument("listId") { type = NavType.StringType })
+        ) {
+            ListDetailScreen(
+                onBackClick = { navController.popBackStack() },
+                onShareToChat = { chatId, recipientId ->
+                    navController.navigate(Routes.chat(chatId, recipientId)) {
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        // Shared Lists
+        composable(
+            route = Routes.SHARED_LISTS,
+            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
+        ) {
+            SharedListsScreen(
+                onBackClick = { navController.popBackStack() },
+                onListClick = { listId ->
+                    navController.navigate(Routes.listDetail(listId)) {
+                        launchSingleTop = true
+                    }
+                }
             )
         }
     }

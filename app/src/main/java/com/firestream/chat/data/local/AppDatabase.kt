@@ -5,11 +5,13 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
+import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.dao.SignalDao
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.ContactEntity
+import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.SignalIdentityEntity
 import com.firestream.chat.data.local.entity.SignalKyberPreKeyEntity
@@ -32,9 +34,10 @@ import com.firestream.chat.data.local.entity.UserEntity
         SignalSessionEntity::class,
         SignalKyberPreKeyEntity::class,
         SignalSenderKeyEntity::class,
-        SignalTrustedIdentityEntity::class
+        SignalTrustedIdentityEntity::class,
+        ListEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -44,4 +47,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun contactDao(): ContactDao
     abstract fun signalDao(): SignalDao
+    abstract fun listDao(): ListDao
 }

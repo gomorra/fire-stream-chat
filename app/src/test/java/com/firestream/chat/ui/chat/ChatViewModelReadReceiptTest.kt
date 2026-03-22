@@ -79,6 +79,10 @@ class ChatViewModelReadReceiptTest {
     private val closePollUseCase = mockk<ClosePollUseCase>()
     private val parseMentionsUseCase = mockk<ParseMentionsUseCase>()
     private val sendBroadcastMessageUseCase = mockk<SendBroadcastMessageUseCase>()
+    private val pinMessageUseCase = mockk<com.firestream.chat.domain.usecase.message.PinMessageUseCase>()
+    private val sendListMessageUseCase = mockk<com.firestream.chat.domain.usecase.message.SendListMessageUseCase>()
+    private val createListUseCase = mockk<com.firestream.chat.domain.usecase.list.CreateListUseCase>()
+    private val observeListUseCase = mockk<com.firestream.chat.domain.usecase.list.ObserveListUseCase>()
     private val checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>()
     private val getChatsUseCase = mockk<GetChatsUseCase>()
     private val searchMessagesUseCase = mockk<SearchMessagesUseCase>()
@@ -261,6 +265,10 @@ class ChatViewModelReadReceiptTest {
         closePollUseCase = closePollUseCase,
         parseMentionsUseCase = parseMentionsUseCase,
         sendBroadcastMessageUseCase = sendBroadcastMessageUseCase,
+        pinMessageUseCase = pinMessageUseCase,
+        sendListMessageUseCase = sendListMessageUseCase,
+        createListUseCase = createListUseCase,
+        observeListUseCase = observeListUseCase,
         checkGroupPermissionUseCase = checkGroupPermissionUseCase,
         getChatsUseCase = getChatsUseCase,
         searchMessagesUseCase = searchMessagesUseCase,

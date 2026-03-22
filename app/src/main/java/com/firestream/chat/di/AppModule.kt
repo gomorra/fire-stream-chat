@@ -4,12 +4,14 @@ import com.firestream.chat.data.repository.AuthRepositoryImpl
 import com.firestream.chat.data.repository.CallRepositoryImpl
 import com.firestream.chat.data.repository.ChatRepositoryImpl
 import com.firestream.chat.data.repository.ContactRepositoryImpl
+import com.firestream.chat.data.repository.ListRepositoryImpl
 import com.firestream.chat.data.repository.MessageRepositoryImpl
 import com.firestream.chat.data.repository.UserRepositoryImpl
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -51,6 +53,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindCallRepository(impl: CallRepositoryImpl): CallRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindListRepository(impl: ListRepositoryImpl): ListRepository
 }
 
 @Module

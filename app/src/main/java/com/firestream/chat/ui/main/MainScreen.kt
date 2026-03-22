@@ -10,6 +10,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import com.firestream.chat.ui.calls.CallsScreen
 import com.firestream.chat.ui.chatlist.ChatListScreen
+import com.firestream.chat.ui.lists.ListsScreen
 import kotlinx.coroutines.launch
 
 /**
@@ -25,9 +26,9 @@ internal fun MainScreen(
     onNewBroadcastClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onMessageClick: (chatId: String, recipientId: String) -> Unit,
+    onListClick: (listId: String) -> Unit = {},
 ) {
-    // Only CHATS and CALLS are swipeable; LISTS is not yet implemented.
-    val pagerState = rememberPagerState(pageCount = { 2 })
+    val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
     Scaffold(
@@ -35,7 +36,8 @@ internal fun MainScreen(
             BottomNavBar(
                 selectedTab = MainTab.entries[pagerState.currentPage],
                 onChatsClick = { scope.launch { pagerState.animateScrollToPage(MainTab.CHATS.ordinal) } },
-                onCallsClick = { scope.launch { pagerState.animateScrollToPage(MainTab.CALLS.ordinal) } }
+                onCallsClick = { scope.launch { pagerState.animateScrollToPage(MainTab.CALLS.ordinal) } },
+                onListsClick = { scope.launch { pagerState.animateScrollToPage(MainTab.LISTS.ordinal) } }
             )
         }
     ) { padding ->
@@ -55,7 +57,7 @@ internal fun MainScreen(
                     onSettingsClick = onSettingsClick,
                 )
                 MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
-                MainTab.LISTS -> Unit
+                MainTab.LISTS -> ListsScreen(onListClick = onListClick)
             }
         }
     }

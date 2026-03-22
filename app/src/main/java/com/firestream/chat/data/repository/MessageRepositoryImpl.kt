@@ -100,7 +100,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
                                 mentions = raw.mentions,
                                 deletedAt = raw.deletedAt,
-                                emojiSizes = raw.emojiSizes
+                                emojiSizes = raw.emojiSizes,
+                                listId = raw.listId,
+                                isPinned = raw.isPinned
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -160,7 +162,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 pollData = raw.pollData?.let { parsePollFromFirestore(it) },
                                 mentions = raw.mentions,
                                 deletedAt = raw.deletedAt,
-                                emojiSizes = raw.emojiSizes
+                                emojiSizes = raw.emojiSizes,
+                                listId = raw.listId,
+                                isPinned = raw.isPinned
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                         }
@@ -755,6 +759,60 @@ class MessageRepositoryImpl @Inject constructor(
             }
 
             Result.success(broadcastMessage)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun sendListMessage(
+        chatId: String,
+        listId: String,
+        listTitle: String
+    ): Result<Message> {
+        return try {
+            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val timestamp = System.currentTimeMillis()
+
+            val remoteId = messageSource.sendListMessage(
+                chatId = chatId,
+                senderId = senderId,
+                listId = listId,
+                listTitle = listTitle,
+                timestamp = timestamp
+            )
+
+            val message = Message(
+                id = remoteId,
+                chatId = chatId,
+                senderId = senderId,
+                content = "\uD83D\uDCCB List: $listTitle",
+                type = MessageType.LIST,
+                status = MessageStatus.SENT,
+                timestamp = timestamp,
+                listId = listId
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(message))
+
+            Result.success(message)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun pinMessage(
+        chatId: String,
+        messageId: String,
+        pinned: Boolean
+    ): Result<Unit> {
+        return try {
+            messageSource.pinMessage(chatId, messageId, pinned)
+            // Update local cache
+            val entity = messageDao.getMessageById(messageId)
+            if (entity != null) {
+                val updated = entity.toDomain().copy(isPinned = pinned)
+                messageDao.insertMessage(MessageEntity.fromDomain(updated))
+            }
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }

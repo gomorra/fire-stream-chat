@@ -41,10 +41,13 @@ data class RawFirestoreMessage(
     val pollData: Map<String, Any?>? = null,
     val mentions: List<String> = emptyList(),
     val deletedAt: Long? = null,
-    val emojiSizes: Map<Int, Float> = emptyMap()
+    val emojiSizes: Map<Int, Float> = emptyMap(),
+    val listId: String? = null,
+    val isPinned: Boolean = false
 )
 
 private const val POLL_CONTENT = "📊 Poll"
+private const val LIST_CONTENT = "📋 List"
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
@@ -109,6 +112,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
+            MessageType.LIST -> LIST_CONTENT
             else -> plainContent.ifBlank { "Message" }
         }
         firestore.collection("chats").document(chatId).update(
@@ -160,6 +164,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
+            MessageType.LIST -> LIST_CONTENT
             else -> content
         }
         firestore.collection("chats").document(chatId).update(
@@ -333,6 +338,49 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
+    suspend fun sendListMessage(
+        chatId: String,
+        senderId: String,
+        listId: String,
+        listTitle: String,
+        timestamp: Long
+    ): String {
+        val content = "$LIST_CONTENT: $listTitle"
+        val data = hashMapOf(
+            "senderId" to senderId,
+            "content" to content,
+            "type" to MessageType.LIST.name,
+            "status" to MessageStatus.SENT.name,
+            "timestamp" to timestamp,
+            "reactions" to emptyMap<String, String>(),
+            "isForwarded" to false,
+            "listId" to listId
+        )
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .add(data)
+            .await()
+
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to content,
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId
+            )
+        ).await()
+
+        return docRef.id
+    }
+
+    suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update("isPinned", pinned)
+            .await()
+    }
+
     suspend fun closePoll(chatId: String, messageId: String) {
         firestore
             .collection("chats").document(chatId)
@@ -382,7 +430,9 @@ class FirestoreMessageSource @Inject constructor(
             pollData = data["pollData"] as? Map<String, Any?>,
             mentions = (data["mentions"] as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
             deletedAt = data["deletedAt"] as? Long,
-            emojiSizes = parseIntFloatMap(data["emojiSizes"])
+            emojiSizes = parseIntFloatMap(data["emojiSizes"]),
+            listId = data["listId"] as? String,
+            isPinned = data["isPinned"] as? Boolean ?: false
         )
     }
 

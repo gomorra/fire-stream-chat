@@ -35,6 +35,7 @@ internal fun BottomNavBar(
     selectedTab: MainTab,
     onChatsClick: () -> Unit,
     onCallsClick: () -> Unit,
+    onListsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     NavigationBar(
@@ -59,13 +60,12 @@ internal fun BottomNavBar(
             enabled = true
         )
         NavItem(
-            selected = false,
-            onClick = {},
+            selected = selectedTab == MainTab.LISTS,
+            onClick = onListsClick,
             selectedIcon = Icons.AutoMirrored.Filled.List,
             unselectedIcon = Icons.AutoMirrored.Outlined.List,
             label = "Lists",
-            enabled = false,
-            showComingSoon = true
+            enabled = true
         )
     }
 }

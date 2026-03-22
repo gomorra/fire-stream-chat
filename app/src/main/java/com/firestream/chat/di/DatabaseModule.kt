@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
+import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.dao.SignalDao
 import com.firestream.chat.data.local.dao.UserDao
@@ -43,4 +44,7 @@ object DatabaseModule {
 
     @Provides
     fun provideSignalDao(db: AppDatabase): SignalDao = db.signalDao()
+
+    @Provides
+    fun provideListDao(db: AppDatabase): ListDao = db.listDao()
 }
