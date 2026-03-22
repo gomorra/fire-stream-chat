@@ -44,7 +44,8 @@ data class ChatListUiState(
     val pendingMuteChatId: String? = null,
     val contacts: Map<String, Contact> = emptyMap(),
     // Presence: set of recipient user IDs currently online
-    val onlineUserIds: Set<String> = emptySet()
+    val onlineUserIds: Set<String> = emptySet(),
+    val isSearchBarVisible: Boolean = false
 )
 
 @HiltViewModel
@@ -259,6 +260,12 @@ class ChatListViewModel @Inject constructor(
             val results = searchMessagesUseCase(query)
             _uiState.value = _uiState.value.copy(searchResults = results)
         }
+    }
+
+    fun toggleSearchBar() {
+        val newVisible = !_uiState.value.isSearchBarVisible
+        _uiState.value = _uiState.value.copy(isSearchBarVisible = newVisible)
+        if (!newVisible) clearSearch()
     }
 
     fun clearSearch() {

@@ -42,6 +42,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -49,6 +54,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -107,6 +114,9 @@ fun ChatListScreen(
                     actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 actions = {
+                    IconButton(onClick = { viewModel.toggleSearchBar() }) {
+                        Icon(Icons.Default.Search, contentDescription = "Search")
+                    }
                     var showMenu by remember { mutableStateOf(false) }
                     IconButton(onClick = { showMenu = true }) {
                         Icon(Icons.Default.Campaign, contentDescription = "More")
@@ -152,54 +162,69 @@ fun ChatListScreen(
                 .padding(padding)
         ) {
             // Search bar
-            SearchBar(
-                inputField = {
-                    SearchBarDefaults.InputField(
-                        query = uiState.searchQuery,
-                        onQueryChange = viewModel::onSearchQueryChange,
-                        onSearch = {},
-                        expanded = uiState.isSearchActive,
-                        onExpandedChange = { if (!it) viewModel.clearSearch() },
-                        placeholder = { Text("Search messages…") },
-                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                        trailingIcon = {
-                            if (uiState.searchQuery.isNotEmpty()) {
-                                IconButton(onClick = viewModel::clearSearch) {
-                                    Icon(Icons.Default.Close, contentDescription = "Clear")
-                                }
-                            }
-                        }
-                    )
-                },
-                expanded = uiState.isSearchActive,
-                onExpandedChange = { if (!it) viewModel.clearSearch() },
-                windowInsets = WindowInsets(0.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+            val searchFocusRequester = remember { FocusRequester() }
+
+            LaunchedEffect(uiState.isSearchBarVisible) {
+                if (uiState.isSearchBarVisible) {
+                    searchFocusRequester.requestFocus()
+                }
+            }
+
+            AnimatedVisibility(
+                visible = uiState.isSearchBarVisible,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                if (uiState.searchResults.isEmpty() && uiState.searchQuery.isNotEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "No messages found",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                } else {
-                    LazyColumn {
-                        items(uiState.searchResults, key = { it.id }) { message ->
-                            SearchResultItem(
-                                message = message,
-                                onClick = {
-                                    viewModel.clearSearch()
-                                    onChatClick(message.chatId, "")
+                SearchBar(
+                    inputField = {
+                        SearchBarDefaults.InputField(
+                            query = uiState.searchQuery,
+                            onQueryChange = viewModel::onSearchQueryChange,
+                            onSearch = {},
+                            expanded = uiState.isSearchActive,
+                            onExpandedChange = { if (!it) viewModel.clearSearch() },
+                            placeholder = { Text("Search messages…") },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                            trailingIcon = {
+                                if (uiState.searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = viewModel::clearSearch) {
+                                        Icon(Icons.Default.Close, contentDescription = "Clear")
+                                    }
                                 }
+                            },
+                            modifier = Modifier.focusRequester(searchFocusRequester)
+                        )
+                    },
+                    expanded = uiState.isSearchActive,
+                    onExpandedChange = { if (!it) viewModel.clearSearch() },
+                    windowInsets = WindowInsets(0.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                ) {
+                    if (uiState.searchResults.isEmpty() && uiState.searchQuery.isNotEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "No messages found",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
+                    } else {
+                        LazyColumn {
+                            items(uiState.searchResults, key = { it.id }) { message ->
+                                SearchResultItem(
+                                    message = message,
+                                    onClick = {
+                                        viewModel.clearSearch()
+                                        onChatClick(message.chatId, "")
+                                    }
+                                )
+                            }
                         }
                     }
                 }

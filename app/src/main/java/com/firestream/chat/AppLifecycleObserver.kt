@@ -1,5 +1,6 @@
 package com.firestream.chat
 
+import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import com.firestream.chat.domain.repository.UserRepository
@@ -35,13 +36,24 @@ class AppLifecycleObserver @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onStart(owner: LifecycleOwner) {
-        // App entered foreground — mark the current user as online.
-        scope.launch { userRepository.setOnlineStatus(true) }
+        Log.d(TAG, "onStart — setting online")
+        scope.launch {
+            val result = userRepository.setOnlineStatus(true)
+            Log.d(TAG, "setOnlineStatus(true) result: $result")
+        }
     }
 
     override fun onStop(owner: LifecycleOwner) {
-        // App went to background — mark offline. Use NonCancellable so the write
-        // is not killed if the scope is also shutting down (e.g. process death race).
-        scope.launch { withContext(NonCancellable) { userRepository.setOnlineStatus(false) } }
+        Log.d(TAG, "onStop — setting offline")
+        scope.launch {
+            withContext(NonCancellable) {
+                val result = userRepository.setOnlineStatus(false)
+                Log.d(TAG, "setOnlineStatus(false) result: $result")
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "Presence"
     }
 }

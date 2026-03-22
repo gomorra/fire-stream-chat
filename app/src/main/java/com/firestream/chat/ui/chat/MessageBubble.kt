@@ -311,6 +311,11 @@ internal fun MessageBubble(
                                             style = MaterialTheme.typography.labelSmall
                                         )
                                     }
+                                    Text(
+                                        text = formatTimestamp(message.timestamp),
+                                        color = callColor.copy(alpha = 0.6f),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
                                 }
                             }
                         }
@@ -385,11 +390,13 @@ internal fun MessageBubble(
                     }
 
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = formatTimestamp(message.timestamp),
-                            color = textColor.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.labelSmall
-                        )
+                        if (message.type != MessageType.CALL) {
+                            Text(
+                                text = formatTimestamp(message.timestamp),
+                                color = textColor.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
                         if (isOwnMessage) {
                             Spacer(modifier = Modifier.width(4.dp))
                             val displayStatus = if (!readReceiptsAllowed && message.status == MessageStatus.READ) {
