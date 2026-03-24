@@ -48,7 +48,7 @@ object Routes {
     const val CREATE_GROUP = "create_group"
     const val SHARE_PICKER = "share_picker"
     const val SHARED_MEDIA = "shared_media/{chatId}"
-    const val LIST_DETAIL = "list_detail/{listId}"
+    const val LIST_DETAIL = "list_detail/{listId}?autoFocus={autoFocus}"
     const val SHARED_LISTS = "shared_lists/{chatId}"
 
     fun otp(verificationId: String, phoneNumber: String) =
@@ -64,7 +64,7 @@ object Routes {
 
     fun groupSettings(chatId: String) = "group_settings/$chatId"
     fun sharedMedia(chatId: String) = "shared_media/$chatId"
-    fun listDetail(listId: String) = "list_detail/$listId"
+    fun listDetail(listId: String, autoFocus: Boolean = false) = "list_detail/$listId?autoFocus=$autoFocus"
     fun sharedLists(chatId: String) = "shared_lists/$chatId"
 }
 
@@ -171,6 +171,11 @@ fun FireStreamNavGraph(
                 },
                 onListClick = { listId ->
                     navController.navigate(Routes.listDetail(listId)) {
+                        launchSingleTop = true
+                    }
+                },
+                onListCreated = { listId ->
+                    navController.navigate(Routes.listDetail(listId, autoFocus = true)) {
                         launchSingleTop = true
                     }
                 },
@@ -339,9 +344,14 @@ fun FireStreamNavGraph(
         // List Detail
         composable(
             route = Routes.LIST_DETAIL,
-            arguments = listOf(navArgument("listId") { type = NavType.StringType })
-        ) {
+            arguments = listOf(
+                navArgument("listId") { type = NavType.StringType },
+                navArgument("autoFocus") { type = NavType.BoolType; defaultValue = false }
+            )
+        ) { backStackEntry ->
+            val autoFocus = backStackEntry.arguments?.getBoolean("autoFocus") ?: false
             ListDetailScreen(
+                autoFocus = autoFocus,
                 onBackClick = { navController.popBackStack() },
                 onShareToChat = { chatId, recipientId ->
                     navController.navigate(Routes.chat(chatId, recipientId)) {

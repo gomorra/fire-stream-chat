@@ -52,6 +52,7 @@ import java.util.Locale
 @Composable
 internal fun ListsScreen(
     onListClick: (listId: String) -> Unit,
+    onListCreated: (listId: String) -> Unit = {},
     viewModel: ListsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -127,7 +128,7 @@ internal fun ListsScreen(
             onDismiss = { showCreateSheet = false },
             onCreateList = { title, type, _ ->
                 viewModel.createList(title, type) { listId ->
-                    onListClick(listId)
+                    onListCreated(listId)
                 }
                 showCreateSheet = false
             }

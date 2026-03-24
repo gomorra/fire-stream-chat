@@ -1,8 +1,6 @@
 package com.firestream.chat.ui.lists
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -46,6 +45,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +58,7 @@ import com.firestream.chat.domain.model.ListType
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ListDetailScreen(
+    autoFocus: Boolean = false,
     onBackClick: () -> Unit,
     onShareToChat: (chatId: String, recipientId: String) -> Unit = { _, _ -> },
     viewModel: ListDetailViewModel = hiltViewModel()
@@ -63,9 +66,19 @@ fun ListDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showOverflowMenu by remember { mutableStateOf(false) }
     var newItemText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(uiState.isDeleted) {
         if (uiState.isDeleted) onBackClick()
+    }
+
+    LaunchedEffect(autoFocus, uiState.listData) {
+        if (autoFocus && uiState.listData != null) {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
     }
 
     Scaffold(
@@ -102,7 +115,7 @@ fun ListDetailScreen(
                             },
                             onClick = {
                                 showOverflowMenu = false
-                                viewModel.deleteList { onBackClick() }
+                                viewModel.deleteList()
                             }
                         )
                     }
@@ -139,17 +152,20 @@ fun ListDetailScreen(
             }
             else -> {
                 val listData = uiState.listData!!
+                val items = listData.items
+                LaunchedEffect(items.size) {
+                    if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1)
+                }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
                 ) {
                     LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .animateContentSize()
+                        state = listState,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        items(listData.items, key = { it.id }) { item ->
+                        items(items, key = { it.id }) { item ->
                             ListItemRow(
                                 item = item,
                                 listType = listData.type,
@@ -159,7 +175,7 @@ fun ListDetailScreen(
                             HorizontalDivider()
                         }
 
-                        if (listData.items.isEmpty()) {
+                        if (items.isEmpty()) {
                             item {
                                 Box(
                                     modifier = Modifier
@@ -189,7 +205,7 @@ fun ListDetailScreen(
                             value = newItemText,
                             onValueChange = { newItemText = it },
                             placeholder = { Text("Add item...") },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
                             singleLine = true
                         )
                         Spacer(modifier = Modifier.width(8.dp))

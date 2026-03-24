@@ -131,18 +131,17 @@ class ListDetailViewModelTest {
     }
 
     @Test
-    fun `deleteList calls use case and invokes callback`() = runTest {
+    fun `deleteList calls use case and sets isDeleted`() = runTest {
         every { observeListUseCase("list1") } returns flowOf(ListData(id = "list1"))
         coEvery { deleteListUseCase("list1") } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
 
-        var deleted = false
-        viewModel.deleteList { deleted = true }
+        viewModel.deleteList()
         runCurrent()
 
-        assert(deleted)
+        assert(viewModel.uiState.value.isDeleted)
         coVerify(exactly = 1) { deleteListUseCase("list1") }
     }
 }

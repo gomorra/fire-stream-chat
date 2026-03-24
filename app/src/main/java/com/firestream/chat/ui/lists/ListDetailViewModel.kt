@@ -121,10 +121,10 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
-    fun deleteList(onDeleted: () -> Unit) {
+    fun deleteList() {
         viewModelScope.launch {
             deleteListUseCase(listId)
-                .onSuccess { onDeleted() }
+                .onSuccess { _uiState.value = _uiState.value.copy(isDeleted = true) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }

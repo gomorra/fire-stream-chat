@@ -1,37 +1,27 @@
 package com.firestream.chat.ui.chat
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.ListType
@@ -45,7 +35,6 @@ internal fun CreateListSheet(
     var title by remember { mutableStateOf("") }
     var selectedType by remember { mutableStateOf(ListType.CHECKLIST) }
     var typeExpanded by remember { mutableStateOf(false) }
-    val items = remember { mutableStateListOf<String>() }
 
     val canCreate = title.isNotBlank()
 
@@ -103,52 +92,10 @@ internal fun CreateListSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
-
-            if (items.isNotEmpty()) {
-                Text(
-                    text = "Initial items",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                items.forEachIndexed { index, item ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        OutlinedTextField(
-                            value = item,
-                            onValueChange = { items[index] = it },
-                            label = { Text("Item ${index + 1}") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        IconButton(onClick = { items.removeAt(index) }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Remove item",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(4.dp))
-                }
-            }
-
-            TextButton(onClick = { items.add("") }) {
-                Icon(Icons.Default.Add, contentDescription = null)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add item")
-            }
-
             Spacer(modifier = Modifier.height(16.dp))
 
             Button(
-                onClick = {
-                    val validItems = items.filter { it.isNotBlank() }
-                    onCreateList(title, selectedType, validItems)
-                },
+                onClick = { onCreateList(title, selectedType, emptyList()) },
                 modifier = Modifier.fillMaxWidth(),
                 enabled = canCreate
             ) {
