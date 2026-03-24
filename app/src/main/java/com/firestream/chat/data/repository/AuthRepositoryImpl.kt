@@ -11,6 +11,10 @@ import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.auth.PhoneAuthCredential
 import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.messaging.FirebaseMessaging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -93,15 +97,17 @@ class AuthRepositoryImpl @Inject constructor(
     override suspend fun getCurrentUser(): Result<User?> {
         return try {
             val uid = currentUserId ?: return Result.success(null)
-            
-            // Proactively sync FCM token on every app start/user fetch
-            try {
-                Log.d("AuthRepository", "Syncing FCM token for user: $uid")
-                val token = firebaseMessaging.token.await()
-                authSource.updateFcmToken(uid, token)
-                Log.d("AuthRepository", "FCM token synced successfully")
-            } catch (e: Exception) {
-                Log.e("AuthRepository", "FCM token sync failed", e)
+
+            // Sync FCM token in the background — must not block the auth check.
+            // After Doze/power-saving, firebaseMessaging.token can hang for 10–30 s.
+            CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+                try {
+                    val token = firebaseMessaging.token.await()
+                    authSource.updateFcmToken(uid, token)
+                    Log.d("AuthRepository", "FCM token synced successfully")
+                } catch (e: Exception) {
+                    Log.e("AuthRepository", "FCM token sync failed", e)
+                }
             }
 
             val cached = userDao.getUserById(uid)

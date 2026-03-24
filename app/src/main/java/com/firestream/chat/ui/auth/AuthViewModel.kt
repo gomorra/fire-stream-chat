@@ -11,10 +11,12 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthOptions
 import com.google.firebase.auth.PhoneAuthProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
@@ -46,12 +48,16 @@ class AuthViewModel @Inject constructor(
     private fun checkLoginStatus() {
         viewModelScope.launch {
             if (getCurrentUserUseCase.isLoggedIn) {
-                val result = getCurrentUserUseCase()
-                result.onSuccess { user ->
-                    if (user != null && user.displayName.isNotEmpty()) {
-                        _uiState.value = _uiState.value.copy(isLoggedIn = true, isCheckingAuth = false, user = user)
-                        return@launch
+                try {
+                    val result = withTimeout(5_000) { getCurrentUserUseCase() }
+                    result.onSuccess { user ->
+                        if (user != null && user.displayName.isNotEmpty()) {
+                            _uiState.value = _uiState.value.copy(isLoggedIn = true, isCheckingAuth = false, user = user)
+                            return@launch
+                        }
                     }
+                } catch (_: TimeoutCancellationException) {
+                    // Network unavailable after idle/Doze — fall through to show login screen
                 }
             }
             _uiState.value = _uiState.value.copy(isCheckingAuth = false)
