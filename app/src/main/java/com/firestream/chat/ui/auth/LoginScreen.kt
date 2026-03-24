@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -64,8 +65,13 @@ fun LoginScreen(
         }
     }
 
-    // Show nothing while the auth check is in progress, or while already logged in (navigation pending)
-    if (uiState.isCheckingAuth || uiState.isLoggedIn) return
+    // Show a spinner while the auth check is in progress or navigation is pending — avoids a blank white screen
+    if (uiState.isCheckingAuth || uiState.isLoggedIn) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
