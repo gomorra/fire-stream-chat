@@ -75,6 +75,7 @@ data class ChatUiState(
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),
     // Forward picker
     val availableChats: List<Chat> = emptyList(),
+    val chatParticipants: Map<String, User> = emptyMap(),
     // In-chat search
     val searchQuery: String = "",
     val searchResults: List<Message> = emptyList(),
@@ -512,7 +513,15 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val chats = getChatsUseCase().first()
-                _uiState.value = _uiState.value.copy(availableChats = chats)
+                val uid = _uiState.value.currentUserId
+                val participants = chats
+                    .mapNotNull { chat -> chat.participants.firstOrNull { it != uid } }
+                    .distinct()
+                    .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
+                    .awaitAll()
+                    .filterNotNull()
+                    .toMap()
+                _uiState.value = _uiState.value.copy(availableChats = chats, chatParticipants = participants)
             } catch (_: Exception) {
                 // Non-critical — forward picker will show empty
             }

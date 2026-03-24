@@ -30,6 +30,7 @@ import javax.inject.Inject
 data class ListsUiState(
     val lists: List<ListData> = emptyList(),
     val chats: List<Chat> = emptyList(),
+    val chatParticipants: Map<String, User> = emptyMap(),
     val currentUserId: String = "",
     val selectedListHistory: List<ListHistoryEntry> = emptyList(),
     val participantAvatars: Map<String, List<User>> = emptyMap(),
@@ -93,7 +94,15 @@ class ListsViewModel @Inject constructor(
             chatRepository.getChats()
                 .catch { }
                 .collect { chats ->
-                    _uiState.value = _uiState.value.copy(chats = chats)
+                    val uid = _uiState.value.currentUserId
+                    val participants = chats
+                        .mapNotNull { chat -> chat.participants.firstOrNull { it != uid } }
+                        .distinct()
+                        .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
+                        .awaitAll()
+                        .filterNotNull()
+                        .toMap()
+                    _uiState.value = _uiState.value.copy(chats = chats, chatParticipants = participants)
                 }
         }
     }

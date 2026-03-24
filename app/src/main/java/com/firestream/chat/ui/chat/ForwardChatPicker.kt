@@ -1,18 +1,16 @@
 package com.firestream.chat.ui.chat
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -20,17 +18,19 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.User
+import com.firestream.chat.ui.components.UserAvatar
 
 @Composable
 internal fun ForwardChatPicker(
     chats: List<Chat>,
     currentUserId: String,
     onDismiss: () -> Unit,
-    onForward: (chatId: String, recipientId: String) -> Unit
+    onForward: (chatId: String, recipientId: String) -> Unit,
+    users: Map<String, User> = emptyMap()
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -44,10 +44,12 @@ internal fun ForwardChatPicker(
             } else {
                 LazyColumn {
                     items(chats, key = { it.id }) { chat ->
-                        val displayName = chat.name
-                            ?: chat.participants.firstOrNull { it != currentUserId }
-                            ?: "Chat"
                         val recipientId = chat.participants.firstOrNull { it != currentUserId } ?: ""
+                        val resolvedUser = users[recipientId]
+                        val displayName = chat.name
+                            ?: resolvedUser?.displayName
+                            ?: "Chat"
+                        val avatarUrl = chat.avatarUrl ?: resolvedUser?.avatarUrl
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -55,19 +57,12 @@ internal fun ForwardChatPicker(
                                 .padding(vertical = 12.dp, horizontal = 8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = displayName.take(1).uppercase(),
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
+                            UserAvatar(
+                                avatarUrl = avatarUrl,
+                                contentDescription = displayName,
+                                icon = Icons.Default.Person,
+                                size = 40.dp
+                            )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(

@@ -180,7 +180,8 @@ internal fun ListsScreen(
             onForward = { chatId, _ ->
                 viewModel.shareListToChat(shareListId, chatId)
                 showSharePicker = false
-            }
+            },
+            users = uiState.chatParticipants
         )
     }
 }

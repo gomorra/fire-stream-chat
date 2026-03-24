@@ -1008,7 +1008,8 @@ fun ChatScreen(
             onForward = { chatId, recipientId ->
                 viewModel.forwardMessage(targetMsg, chatId, recipientId)
                 forwardTargetMessage = null
-            }
+            },
+            users = uiState.chatParticipants
         )
     }
 

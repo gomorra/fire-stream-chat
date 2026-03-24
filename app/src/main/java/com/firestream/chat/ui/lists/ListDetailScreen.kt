@@ -381,7 +381,8 @@ fun ListDetailScreen(
             onForward = { chatId, _ ->
                 viewModel.shareToChat(chatId)
                 showSharePicker = false
-            }
+            },
+            users = uiState.chatParticipants
         )
     }
 }
