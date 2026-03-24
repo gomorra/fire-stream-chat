@@ -194,7 +194,7 @@ fun ChatScreen(
         }
     }
 
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
         uri?.let { viewModel.sendMediaMessage(it, "image/jpeg") }
