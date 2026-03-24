@@ -12,6 +12,7 @@ import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.usecase.list.AddListItemUseCase
 import com.firestream.chat.domain.usecase.list.DeleteListUseCase
 import com.firestream.chat.domain.usecase.list.ObserveListUseCase
+import com.firestream.chat.domain.usecase.list.ReorderListItemsUseCase
 import com.firestream.chat.domain.usecase.list.RemoveListItemUseCase
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
@@ -48,6 +49,7 @@ class ListDetailViewModel @Inject constructor(
     private val removeListItemUseCase: RemoveListItemUseCase,
     private val toggleListItemUseCase: ToggleListItemUseCase,
     private val updateListItemUseCase: UpdateListItemUseCase,
+    private val reorderListItemsUseCase: ReorderListItemsUseCase,
     private val updateListTitleUseCase: UpdateListTitleUseCase,
     private val updateListTypeUseCase: UpdateListTypeUseCase,
     private val shareListToChatUseCase: ShareListToChatUseCase,
@@ -159,6 +161,19 @@ class ListDetailViewModel @Inject constructor(
     fun updateItem(itemId: String, text: String, quantity: String? = null, unit: String? = null) {
         viewModelScope.launch {
             updateListItemUseCase(listId, itemId, text, quantity, unit)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun reorderItems(fromIndex: Int, toIndex: Int) {
+        val items = _uiState.value.listData?.items ?: return
+        if (fromIndex == toIndex || fromIndex !in items.indices || toIndex !in items.indices) return
+        val reordered = items.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+        viewModelScope.launch {
+            reorderListItemsUseCase(listId, reordered)
+                .onSuccess { accumulateAndDebounce(ListDiff(reordered = true)) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }

@@ -1,6 +1,8 @@
 package com.firestream.chat.ui.lists
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Checkbox
@@ -45,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,7 +57,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -61,6 +68,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
@@ -80,6 +88,8 @@ fun ListDetailScreen(
     var newItemText by remember { mutableStateOf("") }
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
+    var draggedItemKey by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
     val listState = rememberLazyListState()
     val addItemFocusRequester = remember { FocusRequester() }
     val titleFocusRequester = remember { FocusRequester() }
@@ -235,14 +245,50 @@ fun ListDetailScreen(
                         modifier = Modifier.weight(1f)
                     ) {
                         items(items, key = { it.id }) { item ->
-                            ListItemRow(
-                                item = item,
-                                listType = listData.type,
-                                onToggle = { viewModel.toggleItem(item.id) },
-                                onRemove = { viewModel.removeItem(item.id) },
-                                onEdit = { newText -> viewModel.updateItem(item.id, newText) }
-                            )
-                            HorizontalDivider()
+                            val isDragging = item.id == draggedItemKey
+                            Column(
+                                modifier = Modifier
+                                    .zIndex(if (isDragging) 1f else 0f)
+                                    .graphicsLayer {
+                                        translationY = if (isDragging) dragOffset else 0f
+                                        shadowElevation = if (isDragging) 8f else 0f
+                                    }
+                                    .then(
+                                        if (isDragging) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                        else Modifier
+                                    )
+                                    .animateItem()
+                            ) {
+                                ListItemRow(
+                                    item = item,
+                                    listType = listData.type,
+                                    onToggle = { viewModel.toggleItem(item.id) },
+                                    onRemove = { viewModel.removeItem(item.id) },
+                                    onEdit = { newText -> viewModel.updateItem(item.id, newText) },
+                                    onDragStart = {
+                                        draggedItemKey = item.id
+                                        dragOffset = 0f
+                                    },
+                                    onDrag = { delta -> dragOffset += delta },
+                                    onDragEnd = {
+                                        val fromIndex = items.indexOfFirst { it.id == draggedItemKey }
+                                        if (fromIndex >= 0) {
+                                            val visible = listState.layoutInfo.visibleItemsInfo
+                                            val avgHeight = if (visible.isNotEmpty())
+                                                visible.map { it.size }.average().toFloat()
+                                            else 60f
+                                            val slots = (dragOffset / avgHeight).roundToInt()
+                                            val toIndex = (fromIndex + slots).coerceIn(0, items.size - 1)
+                                            if (fromIndex != toIndex) {
+                                                viewModel.reorderItems(fromIndex, toIndex)
+                                            }
+                                        }
+                                        draggedItemKey = null
+                                        dragOffset = 0f
+                                    }
+                                )
+                                HorizontalDivider()
+                            }
                         }
 
                         if (items.isEmpty()) {
@@ -322,7 +368,10 @@ private fun ListItemRow(
     listType: ListType,
     onToggle: () -> Unit,
     onRemove: () -> Unit,
-    onEdit: (String) -> Unit
+    onEdit: (String) -> Unit,
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: () -> Unit = {}
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var editValue by remember(item.id) {
@@ -429,5 +478,24 @@ private fun ListItemRow(
                 )
             }
         }
+
+        Icon(
+            Icons.Default.DragHandle,
+            contentDescription = "Drag to reorder",
+            modifier = Modifier
+                .size(24.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragStart = { onDragStart() },
+                        onDragEnd = { onDragEnd() },
+                        onDragCancel = { onDragEnd() },
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            onDrag(dragAmount)
+                        }
+                    )
+                },
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+        )
     }
 }
