@@ -8,6 +8,7 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -102,6 +103,7 @@ class MessageRepositoryImpl @Inject constructor(
                                 deletedAt = raw.deletedAt,
                                 emojiSizes = raw.emojiSizes,
                                 listId = raw.listId,
+                                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
@@ -164,6 +166,7 @@ class MessageRepositoryImpl @Inject constructor(
                                 deletedAt = raw.deletedAt,
                                 emojiSizes = raw.emojiSizes,
                                 listId = raw.listId,
+                                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
@@ -767,7 +770,8 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendListMessage(
         chatId: String,
         listId: String,
-        listTitle: String
+        listTitle: String,
+        listDiff: ListDiff?
     ): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
@@ -778,7 +782,8 @@ class MessageRepositoryImpl @Inject constructor(
                 senderId = senderId,
                 listId = listId,
                 listTitle = listTitle,
-                timestamp = timestamp
+                timestamp = timestamp,
+                listDiff = listDiff?.toMap()
             )
 
             val message = Message(
@@ -789,7 +794,8 @@ class MessageRepositoryImpl @Inject constructor(
                 type = MessageType.LIST,
                 status = MessageStatus.SENT,
                 timestamp = timestamp,
-                listId = listId
+                listId = listId,
+                listDiff = listDiff
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
 

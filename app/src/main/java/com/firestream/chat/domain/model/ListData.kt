@@ -24,5 +24,6 @@ data class ListData(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     val participants: List<String> = emptyList(),
-    val items: List<ListItem> = emptyList()
+    val items: List<ListItem> = emptyList(),
+    val sharedChatIds: List<String> = emptyList()
 )

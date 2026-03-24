@@ -15,10 +15,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -31,13 +34,13 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -49,13 +52,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.ui.chat.ForwardChatPicker
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,9 +76,13 @@ fun ListDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showOverflowMenu by remember { mutableStateOf(false) }
+    var showSharePicker by remember { mutableStateOf(false) }
     var newItemText by remember { mutableStateOf("") }
+    var isEditingTitle by remember { mutableStateOf(false) }
+    var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
     val listState = rememberLazyListState()
-    val focusRequester = remember { FocusRequester() }
+    val addItemFocusRequester = remember { FocusRequester() }
+    val titleFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -79,9 +92,25 @@ fun ListDetailScreen(
 
     LaunchedEffect(autoFocus, uiState.listData) {
         if (autoFocus && uiState.listData != null) {
-            focusRequester.requestFocus()
+            addItemFocusRequester.requestFocus()
             keyboardController?.show()
         }
+    }
+
+    // Auto-focus title field when entering edit mode
+    LaunchedEffect(isEditingTitle) {
+        if (isEditingTitle) {
+            titleFocusRequester.requestFocus()
+        }
+    }
+
+    fun submitTitleEdit() {
+        val newTitle = titleEditValue.text.trim()
+        if (newTitle.isNotBlank() && newTitle != uiState.listData?.title) {
+            viewModel.updateTitle(newTitle)
+        }
+        isEditingTitle = false
+        keyboardController?.hide()
     }
 
     Scaffold(
@@ -90,14 +119,38 @@ fun ListDetailScreen(
             TopAppBar(
                 scrollBehavior = scrollBehavior,
                 title = {
-                    Text(
-                        text = uiState.listData?.title ?: "List",
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    if (isEditingTitle) {
+                        BasicTextField(
+                            value = titleEditValue,
+                            onValueChange = { titleEditValue = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(titleFocusRequester),
+                            singleLine = true,
+                            textStyle = MaterialTheme.typography.titleLarge.copy(
+                                color = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.onPrimary),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                            keyboardActions = KeyboardActions(onDone = { submitTitleEdit() })
+                        )
+                    } else {
+                        Text(
+                            text = uiState.listData?.title ?: "List",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable {
+                                val title = uiState.listData?.title ?: return@clickable
+                                titleEditValue = TextFieldValue(title, TextRange(title.length))
+                                isEditingTitle = true
+                            }
+                        )
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = {
+                        if (isEditingTitle) submitTitleEdit() else onBackClick()
+                    }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
@@ -109,6 +162,16 @@ fun ListDetailScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
+                        DropdownMenuItem(
+                            text = { Text("Share to chat") },
+                            leadingIcon = {
+                                Icon(Icons.Default.Share, contentDescription = null)
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                showSharePicker = true
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Delete list") },
                             leadingIcon = {
@@ -176,7 +239,8 @@ fun ListDetailScreen(
                                 item = item,
                                 listType = listData.type,
                                 onToggle = { viewModel.toggleItem(item.id) },
-                                onRemove = { viewModel.removeItem(item.id) }
+                                onRemove = { viewModel.removeItem(item.id) },
+                                onEdit = { newText -> viewModel.updateItem(item.id, newText) }
                             )
                             HorizontalDivider()
                         }
@@ -211,7 +275,7 @@ fun ListDetailScreen(
                             value = newItemText,
                             onValueChange = { newItemText = it },
                             placeholder = { Text("Add item...") },
-                            modifier = Modifier.weight(1f).focusRequester(focusRequester),
+                            modifier = Modifier.weight(1f).focusRequester(addItemFocusRequester),
                             singleLine = true
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -238,6 +302,18 @@ fun ListDetailScreen(
             }
         }
     }
+
+    if (showSharePicker) {
+        ForwardChatPicker(
+            chats = uiState.chats,
+            currentUserId = uiState.currentUserId,
+            onDismiss = { showSharePicker = false },
+            onForward = { chatId, _ ->
+                viewModel.shareToChat(chatId)
+                showSharePicker = false
+            }
+        )
+    }
 }
 
 @Composable
@@ -245,15 +321,36 @@ private fun ListItemRow(
     item: ListItem,
     listType: ListType,
     onToggle: () -> Unit,
-    onRemove: () -> Unit
+    onRemove: () -> Unit,
+    onEdit: (String) -> Unit
 ) {
+    var isEditing by remember { mutableStateOf(false) }
+    var editValue by remember(item.id) {
+        mutableStateOf(TextFieldValue(item.text, TextRange(item.text.length)))
+    }
+    val editFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(isEditing) {
+        if (isEditing) editFocusRequester.requestFocus()
+    }
+
+    fun submitEdit() {
+        val newText = editValue.text.trim()
+        if (newText.isNotBlank() && newText != item.text) {
+            onEdit(newText)
+        }
+        isEditing = false
+        keyboardController?.hide()
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onToggle)
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        // Checkbox/bullet — always toggles
         when (listType) {
             ListType.CHECKLIST, ListType.SHOPPING -> {
                 Checkbox(
@@ -265,37 +362,72 @@ private fun ListItemRow(
                 Text(
                     text = "\u2022",
                     style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.padding(start = 12.dp, end = 12.dp)
+                    modifier = Modifier
+                        .padding(start = 12.dp, end = 12.dp)
+                        .clickable(onClick = onToggle)
                 )
             }
         }
 
+        // Text area — tap to edit
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = item.text,
-                style = MaterialTheme.typography.bodyLarge,
-                textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None,
-                color = if (item.isChecked)
-                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                else
-                    MaterialTheme.colorScheme.onSurface
-            )
-            if (listType == ListType.SHOPPING && (item.quantity != null || item.unit != null)) {
-                Text(
-                    text = listOfNotNull(item.quantity, item.unit).joinToString(" "),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+            if (isEditing) {
+                BasicTextField(
+                    value = editValue,
+                    onValueChange = { editValue = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(editFocusRequester),
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = LocalContentColor.current
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitEdit() })
                 )
+            } else {
+                Text(
+                    text = item.text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    textDecoration = if (item.isChecked) TextDecoration.LineThrough else TextDecoration.None,
+                    color = if (item.isChecked)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                    else
+                        MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.clickable {
+                        editValue = TextFieldValue(item.text, TextRange(item.text.length))
+                        isEditing = true
+                    }
+                )
+                if (listType == ListType.SHOPPING && (item.quantity != null || item.unit != null)) {
+                    Text(
+                        text = listOfNotNull(item.quantity, item.unit).joinToString(" "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
 
-        IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
-            Icon(
-                Icons.Default.Close,
-                contentDescription = "Remove",
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-            )
+        if (isEditing) {
+            IconButton(onClick = { submitEdit() }, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "Done",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        } else {
+            IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                )
+            }
         }
     }
 }

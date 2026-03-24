@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.lists
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,11 +45,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.ui.chat.CreateListSheet
+import com.firestream.chat.ui.chat.ForwardChatPicker
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun ListsScreen(
     onListClick: (listId: String) -> Unit,
@@ -57,6 +59,9 @@ internal fun ListsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateSheet by remember { mutableStateOf(false) }
+    var selectedListForAction by remember { mutableStateOf<ListData?>(null) }
+    var showSharePicker by remember { mutableStateOf(false) }
+    var shareListId by remember { mutableStateOf("") }
 
     Scaffold(
         topBar = {
@@ -113,7 +118,11 @@ internal fun ListsScreen(
                         items(uiState.lists, key = { it.id }) { listData ->
                             ListRow(
                                 listData = listData,
-                                onClick = { onListClick(listData.id) }
+                                onClick = { onListClick(listData.id) },
+                                onLongClick = {
+                                    selectedListForAction = listData
+                                    viewModel.loadHistory(listData.id)
+                                }
                             )
                             HorizontalDivider()
                         }
@@ -134,17 +143,61 @@ internal fun ListsScreen(
             }
         )
     }
+
+    selectedListForAction?.let { listData ->
+        ListContextSheet(
+            listData = listData,
+            history = uiState.selectedListHistory,
+            onDismiss = {
+                selectedListForAction = null
+                viewModel.clearSelectedList()
+            },
+            onShare = {
+                shareListId = listData.id
+                showSharePicker = true
+                selectedListForAction = null
+                viewModel.clearSelectedList()
+            },
+            onDelete = {
+                viewModel.deleteList(listData.id)
+                selectedListForAction = null
+                viewModel.clearSelectedList()
+            },
+            onRename = { newTitle ->
+                viewModel.renameList(listData.id, newTitle)
+                selectedListForAction = null
+                viewModel.clearSelectedList()
+            }
+        )
+    }
+
+    if (showSharePicker) {
+        ForwardChatPicker(
+            chats = uiState.chats,
+            currentUserId = uiState.currentUserId,
+            onDismiss = { showSharePicker = false },
+            onForward = { chatId, _ ->
+                viewModel.shareListToChat(shareListId, chatId)
+                showSharePicker = false
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ListRow(
     listData: ListData,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

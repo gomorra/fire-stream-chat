@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.Converters
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Poll
 import com.firestream.chat.domain.model.PollOption
 import org.json.JSONArray
@@ -39,6 +40,7 @@ data class MessageEntity(
     val deletedAt: Long? = null,
     val emojiSizes: Map<Int, Float> = emptyMap(),
     val listId: String? = null,
+    val listDiff: String? = null,
     val isPinned: Boolean = false
 ) {
     fun toDomain() = Message(
@@ -64,6 +66,7 @@ data class MessageEntity(
         deletedAt = deletedAt,
         emojiSizes = emojiSizes,
         listId = listId,
+        listDiff = listDiff?.let { parseListDiffJson(it) },
         isPinned = isPinned
     )
 
@@ -91,6 +94,7 @@ data class MessageEntity(
             deletedAt = message.deletedAt,
             emojiSizes = message.emojiSizes,
             listId = message.listId,
+            listDiff = message.listDiff?.let { listDiffToJson(it) },
             isPinned = message.isPinned
         )
 
@@ -111,6 +115,38 @@ data class MessageEntity(
                 })
             }
             return obj.toString()
+        }
+
+        private fun listDiffToJson(diff: ListDiff): String {
+            return JSONObject().apply {
+                put("added", JSONArray(diff.added))
+                put("removed", JSONArray(diff.removed))
+                put("checked", JSONArray(diff.checked))
+                put("unchecked", JSONArray(diff.unchecked))
+                if (diff.titleChanged != null) put("titleChanged", diff.titleChanged)
+                if (diff.reordered) put("reordered", true)
+            }.toString()
+        }
+
+        private fun parseListDiffJson(json: String): ListDiff? {
+            return try {
+                val obj = JSONObject(json)
+                ListDiff(
+                    added = jsonArrayToStringList(obj.optJSONArray("added")),
+                    removed = jsonArrayToStringList(obj.optJSONArray("removed")),
+                    checked = jsonArrayToStringList(obj.optJSONArray("checked")),
+                    unchecked = jsonArrayToStringList(obj.optJSONArray("unchecked")),
+                    titleChanged = obj.optString("titleChanged", null).takeIf { it != "null" },
+                    reordered = obj.optBoolean("reordered", false)
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        private fun jsonArrayToStringList(arr: JSONArray?): List<String> {
+            if (arr == null) return emptyList()
+            return List(arr.length()) { i -> arr.getString(i) }
         }
 
         private fun parsePollJson(json: String): Poll? {

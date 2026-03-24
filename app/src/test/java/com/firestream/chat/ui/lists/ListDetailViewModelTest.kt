@@ -12,7 +12,10 @@ import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
+import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
+import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -44,10 +47,15 @@ class ListDetailViewModelTest {
     private val updateListTypeUseCase = mockk<UpdateListTypeUseCase>()
     private val shareListToChatUseCase = mockk<ShareListToChatUseCase>()
     private val deleteListUseCase = mockk<DeleteListUseCase>()
+    private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>(relaxed = true)
+    private val chatRepository = mockk<ChatRepository>()
+    private val authSource = mockk<FirebaseAuthSource>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { authSource.currentUserId } returns "user1"
+        every { chatRepository.getChats() } returns flowOf(emptyList())
     }
 
     @After
@@ -66,7 +74,10 @@ class ListDetailViewModelTest {
             updateListTitleUseCase = updateListTitleUseCase,
             updateListTypeUseCase = updateListTypeUseCase,
             shareListToChatUseCase = shareListToChatUseCase,
-            deleteListUseCase = deleteListUseCase
+            deleteListUseCase = deleteListUseCase,
+            sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase,
+            chatRepository = chatRepository,
+            authSource = authSource
         )
     }
 

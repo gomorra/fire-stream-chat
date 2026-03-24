@@ -17,7 +17,8 @@ data class ListEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val participants: String, // JSON array of userIds
-    val items: String // JSON array of ListItem
+    val items: String, // JSON array of ListItem
+    val sharedChatIds: String = "[]" // JSON array of chatIds
 ) {
     fun toDomain() = ListData(
         id = id,
@@ -27,7 +28,8 @@ data class ListEntity(
         createdAt = createdAt,
         updatedAt = updatedAt,
         participants = parseStringList(participants),
-        items = parseItemsJson(items)
+        items = parseItemsJson(items),
+        sharedChatIds = parseStringList(sharedChatIds)
     )
 
     companion object {
@@ -39,7 +41,8 @@ data class ListEntity(
             createdAt = list.createdAt,
             updatedAt = list.updatedAt,
             participants = JSONArray(list.participants).toString(),
-            items = itemsToJson(list.items)
+            items = itemsToJson(list.items),
+            sharedChatIds = JSONArray(list.sharedChatIds).toString()
         )
 
         fun itemsToJson(items: List<ListItem>): String {

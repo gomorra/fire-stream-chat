@@ -32,6 +32,7 @@ data class Message(
     val emojiSizes: Map<Int, Float> = emptyMap(),
     // Lists feature
     val listId: String? = null,
+    val listDiff: ListDiff? = null,
     // Generic message pinning
     val isPinned: Boolean = false
 )

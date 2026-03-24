@@ -43,6 +43,7 @@ data class RawFirestoreMessage(
     val deletedAt: Long? = null,
     val emojiSizes: Map<Int, Float> = emptyMap(),
     val listId: String? = null,
+    val listDiff: Map<String, Any?>? = null,
     val isPinned: Boolean = false
 )
 
@@ -343,7 +344,8 @@ class FirestoreMessageSource @Inject constructor(
         senderId: String,
         listId: String,
         listTitle: String,
-        timestamp: Long
+        timestamp: Long,
+        listDiff: Map<String, Any?>? = null
     ): String {
         val content = "$LIST_CONTENT: $listTitle"
         val data = hashMapOf(
@@ -356,6 +358,7 @@ class FirestoreMessageSource @Inject constructor(
             "isForwarded" to false,
             "listId" to listId
         )
+        if (listDiff != null) data["listDiff"] = listDiff
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -432,6 +435,7 @@ class FirestoreMessageSource @Inject constructor(
             deletedAt = data["deletedAt"] as? Long,
             emojiSizes = parseIntFloatMap(data["emojiSizes"]),
             listId = data["listId"] as? String,
+            listDiff = data["listDiff"] as? Map<String, Any?>,
             isPinned = data["isPinned"] as? Boolean ?: false
         )
     }

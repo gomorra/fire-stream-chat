@@ -1,9 +1,15 @@
 package com.firestream.chat.ui.lists
 
+import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.usecase.list.CreateListUseCase
+import com.firestream.chat.domain.usecase.list.DeleteListUseCase
+import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
 import com.firestream.chat.domain.usecase.list.ObserveMyListsUseCase
+import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
+import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -27,16 +33,35 @@ class ListsViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
     private val observeMyListsUseCase = mockk<ObserveMyListsUseCase>()
     private val createListUseCase = mockk<CreateListUseCase>()
+    private val shareListToChatUseCase = mockk<ShareListToChatUseCase>()
+    private val deleteListUseCase = mockk<DeleteListUseCase>()
+    private val updateListTitleUseCase = mockk<UpdateListTitleUseCase>()
+    private val observeListHistoryUseCase = mockk<ObserveListHistoryUseCase>()
+    private val chatRepository = mockk<ChatRepository>()
+    private val authSource = mockk<FirebaseAuthSource>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        every { authSource.currentUserId } returns "user1"
+        every { chatRepository.getChats() } returns flowOf(emptyList())
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
     }
+
+    private fun createViewModel(): ListsViewModel = ListsViewModel(
+        observeMyListsUseCase = observeMyListsUseCase,
+        createListUseCase = createListUseCase,
+        shareListToChatUseCase = shareListToChatUseCase,
+        deleteListUseCase = deleteListUseCase,
+        updateListTitleUseCase = updateListTitleUseCase,
+        observeListHistoryUseCase = observeListHistoryUseCase,
+        chatRepository = chatRepository,
+        authSource = authSource
+    )
 
     @Test
     fun `observes lists on init`() = runTest {
@@ -46,7 +71,7 @@ class ListsViewModelTest {
         )
         every { observeMyListsUseCase() } returns flowOf(lists)
 
-        val viewModel = ListsViewModel(observeMyListsUseCase, createListUseCase)
+        val viewModel = createViewModel()
         runCurrent()
 
         val state = viewModel.uiState.value
@@ -61,7 +86,7 @@ class ListsViewModelTest {
         val created = ListData(id = "new1", title = "New List", type = ListType.GENERIC)
         coEvery { createListUseCase("New List", ListType.GENERIC, null) } returns Result.success(created)
 
-        val viewModel = ListsViewModel(observeMyListsUseCase, createListUseCase)
+        val viewModel = createViewModel()
         runCurrent()
 
         var callbackId = ""
@@ -76,7 +101,7 @@ class ListsViewModelTest {
         every { observeMyListsUseCase() } returns flowOf(emptyList())
         coEvery { createListUseCase(any(), any(), any()) } returns Result.failure(Exception("Oops"))
 
-        val viewModel = ListsViewModel(observeMyListsUseCase, createListUseCase)
+        val viewModel = createViewModel()
         runCurrent()
 
         viewModel.createList("Fail", ListType.CHECKLIST) {}

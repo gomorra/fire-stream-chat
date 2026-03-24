@@ -36,4 +36,7 @@ interface ListDao {
 
     @Query("UPDATE lists SET type = :type, updatedAt = :updatedAt WHERE id = :listId")
     suspend fun updateType(listId: String, type: String, updatedAt: Long)
+
+    @Query("UPDATE lists SET sharedChatIds = :sharedChatIdsJson, updatedAt = :updatedAt WHERE id = :listId")
+    suspend fun updateSharedChatIds(listId: String, sharedChatIdsJson: String, updatedAt: Long)
 }

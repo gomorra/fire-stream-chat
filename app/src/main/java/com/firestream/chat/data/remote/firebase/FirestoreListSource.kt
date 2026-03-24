@@ -57,7 +57,8 @@ class FirestoreListSource @Inject constructor(
             "createdAt" to list.createdAt,
             "updatedAt" to list.updatedAt,
             "participants" to list.participants,
-            "items" to list.items.map { itemToMap(it) }
+            "items" to list.items.map { itemToMap(it) },
+            "sharedChatIds" to list.sharedChatIds
         )
         val docRef = listsCollection.add(data).await()
         return docRef.id
@@ -109,6 +110,12 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
+    suspend fun updateSharedChatIds(listId: String, chatId: String) {
+        listsCollection.document(listId).update(
+            "sharedChatIds", FieldValue.arrayUnion(chatId)
+        ).await()
+    }
+
     suspend fun updateListType(listId: String, type: ListType) {
         listsCollection.document(listId).update(
             mapOf(
@@ -141,7 +148,9 @@ class FirestoreListSource @Inject constructor(
             updatedAt = data["updatedAt"] as? Long ?: 0L,
             participants = (data["participants"] as? List<*>)
                 ?.filterIsInstance<String>() ?: emptyList(),
-            items = rawItems.map { mapToListItem(it) }
+            items = rawItems.map { mapToListItem(it) },
+            sharedChatIds = (data["sharedChatIds"] as? List<*>)
+                ?.filterIsInstance<String>() ?: emptyList()
         )
     }
 

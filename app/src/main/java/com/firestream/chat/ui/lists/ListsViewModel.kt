@@ -2,11 +2,20 @@ package com.firestream.chat.ui.lists
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ListData
+import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.usecase.list.CreateListUseCase
+import com.firestream.chat.domain.usecase.list.DeleteListUseCase
+import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
 import com.firestream.chat.domain.usecase.list.ObserveMyListsUseCase
+import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
+import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,6 +25,9 @@ import javax.inject.Inject
 
 data class ListsUiState(
     val lists: List<ListData> = emptyList(),
+    val chats: List<Chat> = emptyList(),
+    val currentUserId: String = "",
+    val selectedListHistory: List<ListHistoryEntry> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -23,14 +35,23 @@ data class ListsUiState(
 @HiltViewModel
 class ListsViewModel @Inject constructor(
     private val observeMyListsUseCase: ObserveMyListsUseCase,
-    private val createListUseCase: CreateListUseCase
+    private val createListUseCase: CreateListUseCase,
+    private val shareListToChatUseCase: ShareListToChatUseCase,
+    private val deleteListUseCase: DeleteListUseCase,
+    private val updateListTitleUseCase: UpdateListTitleUseCase,
+    private val observeListHistoryUseCase: ObserveListHistoryUseCase,
+    private val chatRepository: ChatRepository,
+    private val authSource: FirebaseAuthSource
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ListsUiState())
+    private var historyJob: Job? = null
     val uiState: StateFlow<ListsUiState> = _uiState.asStateFlow()
 
     init {
+        _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
         observeLists()
+        observeChats()
     }
 
     private fun observeLists() {
@@ -45,12 +66,60 @@ class ListsViewModel @Inject constructor(
         }
     }
 
+    private fun observeChats() {
+        viewModelScope.launch {
+            chatRepository.getChats()
+                .catch { }
+                .collect { chats ->
+                    _uiState.value = _uiState.value.copy(chats = chats)
+                }
+        }
+    }
+
     fun createList(title: String, type: ListType, onCreated: (String) -> Unit) {
         viewModelScope.launch {
             createListUseCase(title, type)
                 .onSuccess { listData -> onCreated(listData.id) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
+    }
+
+    fun shareListToChat(listId: String, chatId: String) {
+        viewModelScope.launch {
+            shareListToChatUseCase(listId, chatId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun deleteList(listId: String) {
+        viewModelScope.launch {
+            deleteListUseCase(listId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun renameList(listId: String, title: String) {
+        viewModelScope.launch {
+            updateListTitleUseCase(listId, title)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun loadHistory(listId: String) {
+        historyJob?.cancel()
+        historyJob = viewModelScope.launch {
+            observeListHistoryUseCase(listId)
+                .catch { }
+                .collect { history ->
+                    _uiState.value = _uiState.value.copy(selectedListHistory = history)
+                }
+        }
+    }
+
+    fun clearSelectedList() {
+        historyJob?.cancel()
+        historyJob = null
+        _uiState.value = _uiState.value.copy(selectedListHistory = emptyList())
     }
 
     fun clearError() {

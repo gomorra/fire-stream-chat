@@ -1,11 +1,15 @@
 package com.firestream.chat.data.repository
 
+import android.util.Log
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
 import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.domain.model.HistoryAction
 import com.firestream.chat.domain.model.ListData
+import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
@@ -13,6 +17,9 @@ import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.UserRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -27,10 +34,33 @@ class ListRepositoryImpl @Inject constructor(
     private val listDao: ListDao,
     private val messageDao: MessageDao,
     private val listSource: FirestoreListSource,
+    private val historySource: FirestoreListHistorySource,
     private val authSource: FirebaseAuthSource,
     private val chatRepository: dagger.Lazy<ChatRepository>,
-    private val messageRepository: dagger.Lazy<MessageRepository>
+    private val messageRepository: dagger.Lazy<MessageRepository>,
+    private val userRepository: dagger.Lazy<UserRepository>
 ) : ListRepository {
+
+    private val historyScope = CoroutineScope(SupervisorJob())
+
+    private fun recordHistory(listId: String, action: HistoryAction, itemId: String? = null, itemText: String? = null) {
+        val userId = authSource.currentUserId ?: return
+        historyScope.launch {
+            try {
+                val user = userRepository.get().getUserById(userId).getOrNull()
+                val entry = ListHistoryEntry(
+                    action = action,
+                    itemId = itemId,
+                    itemText = itemText,
+                    userId = userId,
+                    userName = user?.displayName ?: "Unknown"
+                )
+                historySource.addEntry(listId, entry)
+            } catch (e: Exception) {
+                Log.w("ListRepo", "Failed to record history", e)
+            }
+        }
+    }
 
     override fun observeList(listId: String): Flow<ListData?> = channelFlow {
         launch {
@@ -80,9 +110,12 @@ class ListRepositoryImpl @Inject constructor(
             val created = listData.copy(id = remoteId)
             listDao.insert(ListEntity.fromDomain(created))
 
-            // If created from a chat, auto-send a list message
+            recordHistory(remoteId, HistoryAction.CREATED)
+
+            // If created from a chat, auto-send a list message and track sharedChatId
             if (chatId != null) {
                 messageRepository.get().sendListMessage(chatId, remoteId, title)
+                listSource.updateSharedChatIds(remoteId, chatId)
             }
 
             Result.success(created)
@@ -102,6 +135,7 @@ class ListRepositoryImpl @Inject constructor(
                 addedBy = userId
             )
             listSource.addItem(listId, item)
+            recordHistory(listId, HistoryAction.ITEM_ADDED, itemId = item.id, itemText = text)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -114,6 +148,7 @@ class ListRepositoryImpl @Inject constructor(
             val list = entity.toDomain()
             val item = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
             listSource.removeItem(listId, item)
+            recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -124,10 +159,15 @@ class ListRepositoryImpl @Inject constructor(
         return try {
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
+            val targetItem = list.items.find { it.id == itemId }
             val updatedItems = list.items.map { item ->
                 if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
             }
             listSource.updateListItems(listId, updatedItems)
+            if (targetItem != null) {
+                val action = if (targetItem.isChecked) HistoryAction.ITEM_UNCHECKED else HistoryAction.ITEM_CHECKED
+                recordHistory(listId, action, itemId = itemId, itemText = targetItem.text)
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -148,6 +188,7 @@ class ListRepositoryImpl @Inject constructor(
                 if (item.id == itemId) item.copy(text = text, quantity = quantity, unit = unit) else item
             }
             listSource.updateListItems(listId, updatedItems)
+            recordHistory(listId, HistoryAction.ITEM_MODIFIED, itemId = itemId, itemText = text)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -157,6 +198,7 @@ class ListRepositoryImpl @Inject constructor(
     override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> {
         return try {
             listSource.updateListItems(listId, items)
+            recordHistory(listId, HistoryAction.REORDERED)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -166,6 +208,7 @@ class ListRepositoryImpl @Inject constructor(
     override suspend fun updateListTitle(listId: String, title: String): Result<Unit> {
         return try {
             listSource.updateListTitle(listId, title)
+            recordHistory(listId, HistoryAction.TITLE_CHANGED, itemText = title)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -202,6 +245,9 @@ class ListRepositoryImpl @Inject constructor(
                 listSource.addParticipant(listId, participantId)
             }
 
+            // Track this chat as a shared destination
+            updateSharedChatIds(listId, chatId)
+
             messageRepository.get().sendListMessage(chatId, listId, list.title)
         } catch (e: Exception) {
             Result.failure(e)
@@ -220,5 +266,37 @@ class ListRepositoryImpl @Inject constructor(
                 val lists = listIds.mapNotNull { listDao.getById(it)?.toDomain() }
                 send(lists)
             }
+    }
+
+    override fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> =
+        historySource.observeHistory(listId)
+
+    override suspend fun addHistoryEntry(listId: String, entry: ListHistoryEntry): Result<Unit> {
+        return try {
+            historySource.addEntry(listId, entry)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateSharedChatIds(listId: String, chatId: String): Result<Unit> {
+        return try {
+            listSource.updateSharedChatIds(listId, chatId)
+            val now = System.currentTimeMillis()
+            val entity = listDao.getById(listId)
+            if (entity != null) {
+                val list = entity.toDomain()
+                val updatedIds = (list.sharedChatIds + chatId).distinct()
+                listDao.updateSharedChatIds(
+                    listId,
+                    org.json.JSONArray(updatedIds).toString(),
+                    now
+                )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

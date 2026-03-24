@@ -1,6 +1,7 @@
 package com.firestream.chat.domain.repository
 
 import android.net.Uri
+import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import kotlinx.coroutines.flow.Flow
 
@@ -38,7 +39,7 @@ interface MessageRepository {
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
     // Lists
-    suspend fun sendListMessage(chatId: String, listId: String, listTitle: String): Result<Message>
+    suspend fun sendListMessage(chatId: String, listId: String, listTitle: String, listDiff: ListDiff? = null): Result<Message>
     // Generic message pinning
     suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean): Result<Unit>
     // Call log
