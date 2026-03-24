@@ -4,6 +4,7 @@ import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.list.CreateListUseCase
 import com.firestream.chat.domain.usecase.list.DeleteListUseCase
 import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
@@ -39,6 +40,7 @@ class ListsViewModelTest {
     private val observeListHistoryUseCase = mockk<ObserveListHistoryUseCase>()
     private val chatRepository = mockk<ChatRepository>()
     private val authSource = mockk<FirebaseAuthSource>()
+    private val userRepository = mockk<UserRepository>()
 
     @Before
     fun setUp() {
@@ -60,7 +62,8 @@ class ListsViewModelTest {
         updateListTitleUseCase = updateListTitleUseCase,
         observeListHistoryUseCase = observeListHistoryUseCase,
         chatRepository = chatRepository,
-        authSource = authSource
+        authSource = authSource,
+        userRepository = userRepository
     )
 
     @Test

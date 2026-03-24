@@ -118,6 +118,7 @@ internal fun ListsScreen(
                         items(uiState.lists, key = { it.id }) { listData ->
                             ListRow(
                                 listData = listData,
+                                participants = uiState.participantAvatars[listData.id] ?: emptyList(),
                                 onClick = { onListClick(listData.id) },
                                 onLongClick = {
                                     selectedListForAction = listData
@@ -188,6 +189,7 @@ internal fun ListsScreen(
 @Composable
 private fun ListRow(
     listData: ListData,
+    participants: List<com.firestream.chat.domain.model.User>,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -236,6 +238,13 @@ private fun ListRow(
             )
         }
 
+        val overflow = (listData.participants.size - 1 - participants.size).coerceAtLeast(0)
+        if (participants.isNotEmpty() || overflow > 0) {
+            Spacer(modifier = Modifier.width(8.dp))
+            AvatarStack(users = participants, overflow = overflow)
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = SimpleDateFormat("MMM d", Locale.getDefault())
                 .format(Date(listData.updatedAt)),

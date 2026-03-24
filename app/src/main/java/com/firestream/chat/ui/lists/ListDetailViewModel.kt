@@ -39,7 +39,11 @@ data class ListDetailUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val isDeleted: Boolean = false
-)
+) {
+    val displayItems get() = listData?.items
+        ?.let { items -> items.filter { !it.isChecked } + items.filter { it.isChecked } }
+        ?: emptyList()
+}
 
 @HiltViewModel
 class ListDetailViewModel @Inject constructor(

@@ -41,6 +41,10 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -51,6 +55,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -72,6 +77,7 @@ import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
+import kotlinx.coroutines.launch
 import com.firestream.chat.ui.chat.ForwardChatPicker
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -90,6 +96,9 @@ fun ListDetailScreen(
     var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
     var draggedItemKey by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableFloatStateOf(0f) }
+    var pendingRemoval by remember { mutableStateOf<ListItem?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val addItemFocusRequester = remember { FocusRequester() }
     val titleFocusRequester = remember { FocusRequester() }
@@ -125,6 +134,7 @@ fun ListDetailScreen(
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 scrollBehavior = scrollBehavior,
@@ -230,9 +240,9 @@ fun ListDetailScreen(
             }
             else -> {
                 val listData = uiState.listData!!
-                val items = listData.items
-                LaunchedEffect(items.size) {
-                    if (items.isNotEmpty()) listState.animateScrollToItem(items.size - 1)
+                val displayItems = uiState.displayItems.filter { it.id != pendingRemoval?.id }
+                LaunchedEffect(displayItems.size) {
+                    if (displayItems.isNotEmpty()) listState.animateScrollToItem(displayItems.size - 1)
                 }
                 Column(
                     modifier = Modifier
@@ -244,7 +254,7 @@ fun ListDetailScreen(
                         state = listState,
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(items, key = { it.id }) { item ->
+                        items(displayItems, key = { it.id }) { item ->
                             val isDragging = item.id == draggedItemKey
                             Column(
                                 modifier = Modifier
@@ -263,7 +273,22 @@ fun ListDetailScreen(
                                     item = item,
                                     listType = listData.type,
                                     onToggle = { viewModel.toggleItem(item.id) },
-                                    onRemove = { viewModel.removeItem(item.id) },
+                                    onRemove = {
+                                        pendingRemoval = item
+                                        coroutineScope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "\"${item.text}\" removed",
+                                                actionLabel = "Undo",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                pendingRemoval = null
+                                            } else {
+                                                pendingRemoval?.let { viewModel.removeItem(it.id) }
+                                                pendingRemoval = null
+                                            }
+                                        }
+                                    },
                                     onEdit = { newText -> viewModel.updateItem(item.id, newText) },
                                     onDragStart = {
                                         draggedItemKey = item.id
@@ -271,14 +296,14 @@ fun ListDetailScreen(
                                     },
                                     onDrag = { delta -> dragOffset += delta },
                                     onDragEnd = {
-                                        val fromIndex = items.indexOfFirst { it.id == draggedItemKey }
+                                        val fromIndex = displayItems.indexOfFirst { it.id == draggedItemKey }
                                         if (fromIndex >= 0) {
                                             val visible = listState.layoutInfo.visibleItemsInfo
                                             val avgHeight = if (visible.isNotEmpty())
                                                 visible.map { it.size }.average().toFloat()
                                             else 60f
                                             val slots = (dragOffset / avgHeight).roundToInt()
-                                            val toIndex = (fromIndex + slots).coerceIn(0, items.size - 1)
+                                            val toIndex = (fromIndex + slots).coerceIn(0, displayItems.size - 1)
                                             if (fromIndex != toIndex) {
                                                 viewModel.reorderItems(fromIndex, toIndex)
                                             }
@@ -291,7 +316,7 @@ fun ListDetailScreen(
                             }
                         }
 
-                        if (items.isEmpty()) {
+                        if (displayItems.isEmpty()) {
                             item {
                                 Box(
                                     modifier = Modifier

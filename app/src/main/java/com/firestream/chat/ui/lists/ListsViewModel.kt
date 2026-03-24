@@ -7,7 +7,9 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.list.CreateListUseCase
 import com.firestream.chat.domain.usecase.list.DeleteListUseCase
 import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
@@ -28,6 +30,7 @@ data class ListsUiState(
     val chats: List<Chat> = emptyList(),
     val currentUserId: String = "",
     val selectedListHistory: List<ListHistoryEntry> = emptyList(),
+    val participantAvatars: Map<String, List<User>> = emptyMap(),
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -41,7 +44,8 @@ class ListsViewModel @Inject constructor(
     private val updateListTitleUseCase: UpdateListTitleUseCase,
     private val observeListHistoryUseCase: ObserveListHistoryUseCase,
     private val chatRepository: ChatRepository,
-    private val authSource: FirebaseAuthSource
+    private val authSource: FirebaseAuthSource,
+    private val userRepository: UserRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ListsUiState())
@@ -62,7 +66,20 @@ class ListsViewModel @Inject constructor(
                 }
                 .collect { lists ->
                     _uiState.value = _uiState.value.copy(lists = lists, isLoading = false)
+                    resolveParticipants(lists)
                 }
+        }
+    }
+
+    private fun resolveParticipants(lists: List<ListData>) {
+        val currentUserId = _uiState.value.currentUserId
+        viewModelScope.launch {
+            val avatarMap = lists.associate { list ->
+                val otherIds = list.participants.filter { it != currentUserId }.take(3)
+                val users = otherIds.mapNotNull { id -> userRepository.getUserById(id).getOrNull() }
+                list.id to users
+            }
+            _uiState.value = _uiState.value.copy(participantAvatars = avatarMap)
         }
     }
 
