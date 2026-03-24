@@ -1,5 +1,11 @@
 package com.firestream.chat.ui.chat
 
+import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.repository.UserRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -94,6 +100,19 @@ internal fun formatDateSeparator(timestamp: Long): String {
         else ->
             SimpleDateFormat("MMM d · yyyy", Locale.getDefault()).format(msgCal.time)
     }
+}
+
+/** Resolves the "other participant" User object for each chat, keyed by userId. */
+internal suspend fun List<Chat>.resolveChatParticipants(
+    currentUserId: String,
+    userRepository: UserRepository
+): Map<String, User> = coroutineScope {
+    mapNotNull { chat -> chat.participants.firstOrNull { it != currentUserId } }
+        .distinct()
+        .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
+        .awaitAll()
+        .filterNotNull()
+        .toMap()
 }
 
 internal fun formatDuration(seconds: Int): String {

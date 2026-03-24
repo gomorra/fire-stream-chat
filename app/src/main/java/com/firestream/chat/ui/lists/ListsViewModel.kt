@@ -17,6 +17,7 @@ import com.firestream.chat.domain.usecase.list.ObserveMyListsUseCase
 import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.firestream.chat.ui.chat.resolveChatParticipants
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -95,13 +96,12 @@ class ListsViewModel @Inject constructor(
                 .catch { }
                 .collect { chats ->
                     val uid = _uiState.value.currentUserId
-                    val participants = chats
-                        .mapNotNull { chat -> chat.participants.firstOrNull { it != uid } }
-                        .distinct()
-                        .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
-                        .awaitAll()
-                        .filterNotNull()
-                        .toMap()
+                    val newIds = chats.mapNotNull { it.participants.firstOrNull { id -> id != uid } }.toSet()
+                    val participants = if (newIds == _uiState.value.chatParticipants.keys) {
+                        _uiState.value.chatParticipants
+                    } else {
+                        chats.resolveChatParticipants(uid, userRepository)
+                    }
                     _uiState.value = _uiState.value.copy(chats = chats, chatParticipants = participants)
                 }
         }

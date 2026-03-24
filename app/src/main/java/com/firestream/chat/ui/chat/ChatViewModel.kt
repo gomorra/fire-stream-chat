@@ -513,14 +513,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val chats = getChatsUseCase().first()
-                val uid = _uiState.value.currentUserId
-                val participants = chats
-                    .mapNotNull { chat -> chat.participants.firstOrNull { it != uid } }
-                    .distinct()
-                    .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
-                    .awaitAll()
-                    .filterNotNull()
-                    .toMap()
+                val participants = chats.resolveChatParticipants(_uiState.value.currentUserId, userRepository)
                 _uiState.value = _uiState.value.copy(availableChats = chats, chatParticipants = participants)
             } catch (_: Exception) {
                 // Non-critical — forward picker will show empty

@@ -7,6 +7,7 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.ui.chat.resolveChatParticipants
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
@@ -23,8 +24,6 @@ import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -89,13 +88,12 @@ class ListDetailViewModel @Inject constructor(
                 .catch { }
                 .collect { chats ->
                     val uid = _uiState.value.currentUserId
-                    val participants = chats
-                        .mapNotNull { chat -> chat.participants.firstOrNull { it != uid } }
-                        .distinct()
-                        .map { id -> async { userRepository.getUserById(id).getOrNull()?.let { id to it } } }
-                        .awaitAll()
-                        .filterNotNull()
-                        .toMap()
+                    val newIds = chats.mapNotNull { it.participants.firstOrNull { id -> id != uid } }.toSet()
+                    val participants = if (newIds == _uiState.value.chatParticipants.keys) {
+                        _uiState.value.chatParticipants
+                    } else {
+                        chats.resolveChatParticipants(uid, userRepository)
+                    }
                     _uiState.value = _uiState.value.copy(chats = chats, chatParticipants = participants)
                 }
         }
