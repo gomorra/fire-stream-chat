@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -61,7 +62,8 @@ internal fun ForwardChatPicker(
                                 avatarUrl = avatarUrl,
                                 contentDescription = displayName,
                                 icon = Icons.Default.Person,
-                                size = 40.dp
+                                size = 40.dp,
+                                modifier = Modifier.size(40.dp)
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
