@@ -241,7 +241,7 @@ fun ListDetailScreen(
             else -> {
                 val listData = uiState.listData!!
                 val displayItems = uiState.displayItems.filter { it.id != pendingRemoval?.id }
-                LaunchedEffect(displayItems.size) {
+                LaunchedEffect(listData.items.size) {
                     if (displayItems.isNotEmpty()) listState.animateScrollToItem(displayItems.size - 1)
                 }
                 Column(
@@ -334,7 +334,6 @@ fun ListDetailScreen(
                         }
                     }
 
-                    // Add item row
                     HorizontalDivider()
                     Row(
                         modifier = Modifier

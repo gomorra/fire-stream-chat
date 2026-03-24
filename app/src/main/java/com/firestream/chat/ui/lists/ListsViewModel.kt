@@ -18,6 +18,8 @@ import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -76,7 +78,10 @@ class ListsViewModel @Inject constructor(
         viewModelScope.launch {
             val avatarMap = lists.associate { list ->
                 val otherIds = list.participants.filter { it != currentUserId }.take(3)
-                val users = otherIds.mapNotNull { id -> userRepository.getUserById(id).getOrNull() }
+                val users = otherIds
+                    .map { id -> async { userRepository.getUserById(id).getOrNull() } }
+                    .awaitAll()
+                    .filterNotNull()
                 list.id to users
             }
             _uiState.value = _uiState.value.copy(participantAvatars = avatarMap)

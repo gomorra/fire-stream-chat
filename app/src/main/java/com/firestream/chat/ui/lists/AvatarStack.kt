@@ -13,7 +13,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.ui.components.UserAvatar
@@ -25,7 +24,7 @@ private val AVATAR_STEP = 12.dp // AVATAR_SIZE - overlap(8dp)
 internal fun AvatarStack(users: List<User>, overflow: Int, modifier: Modifier = Modifier) {
     if (users.isEmpty() && overflow == 0) return
     val slotCount = users.size + if (overflow > 0) 1 else 0
-    val totalWidth: Dp = AVATAR_SIZE + AVATAR_STEP * (slotCount - 1).coerceAtLeast(0)
+    val totalWidth = AVATAR_SIZE + AVATAR_STEP * (slotCount - 1).coerceAtLeast(0)
     Box(modifier = modifier.width(totalWidth)) {
         users.forEachIndexed { index, user ->
             UserAvatar(
