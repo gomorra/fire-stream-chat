@@ -147,6 +147,7 @@ fun ChatScreen(
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     var inputCursor by remember { mutableStateOf(TextRange(0)) }
     val listState = rememberLazyListState()
+    var initialScrollDone by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var showAttachmentSheet by remember { mutableStateOf(false) }
@@ -166,6 +167,29 @@ fun ChatScreen(
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
+
+    // Save scroll position when leaving so it can be restored on re-entry
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.saveScrollPosition(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset
+            )
+        }
+    }
+
+    // Restore saved scroll position once messages are first available
+    LaunchedEffect(uiState.messages.isNotEmpty()) {
+        if (uiState.messages.isNotEmpty() && !initialScrollDone) {
+            initialScrollDone = true
+            val savedIndex = viewModel.savedScrollIndex
+            if (savedIndex in 0 until uiState.messages.size) {
+                listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
+            } else {
+                listState.scrollToItem(uiState.messages.size - 1)
+            }
+        }
+    }
 
     // Track screen visibility for read receipts — only mark READ when chat is in foreground
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -193,7 +217,9 @@ fun ChatScreen(
     }
 
     // Auto-scroll only when near the bottom (within ~1 screen of the end)
+    // Skip until the initial scroll restore has run to avoid racing with it.
     LaunchedEffect(uiState.messages.size) {
+        if (!initialScrollDone) return@LaunchedEffect
         if (uiState.messages.isNotEmpty()) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val visibleCount = listState.layoutInfo.visibleItemsInfo.size

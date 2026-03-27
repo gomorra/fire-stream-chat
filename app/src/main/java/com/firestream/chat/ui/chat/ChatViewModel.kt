@@ -111,7 +111,7 @@ data class ChatUiState(
 
 @HiltViewModel
 class ChatViewModel @Inject constructor(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val getMessagesUseCase: GetMessagesUseCase,
     private val sendMessageUseCase: SendMessageUseCase,
     private val deleteMessageUseCase: DeleteMessageUseCase,
@@ -145,6 +145,14 @@ class ChatViewModel @Inject constructor(
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
     val recipientId: String = checkNotNull(savedStateHandle["recipientId"])
+
+    val savedScrollIndex: Int get() = savedStateHandle["scrollIndex"] ?: -1
+    val savedScrollOffset: Int get() = savedStateHandle["scrollOffset"] ?: 0
+
+    fun saveScrollPosition(index: Int, offset: Int) {
+        savedStateHandle["scrollIndex"] = index
+        savedStateHandle["scrollOffset"] = offset
+    }
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
