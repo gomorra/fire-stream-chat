@@ -26,6 +26,9 @@ import com.firestream.chat.ui.lists.SharedListsScreen
 import com.firestream.chat.ui.main.MainScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
+import com.firestream.chat.data.local.PreferencesDataStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 object Routes {
     const val LOGIN = "login"
@@ -72,7 +75,8 @@ object Routes {
 fun FireStreamNavGraph(
     initialChatId: String? = null,
     initialSenderId: String? = null,
-    isShareIntent: Boolean = false
+    isShareIntent: Boolean = false,
+    preferencesDataStore: PreferencesDataStore? = null
 ) {
     val navController = rememberNavController()
     val messageInfoHolder = androidx.compose.runtime.remember {
@@ -82,9 +86,25 @@ fun FireStreamNavGraph(
         androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     }
 
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
+
     val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
     val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
     val pendingShare = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(isShareIntent) }
+
+    // Restore last open chat when no deep link or share intent is pending
+    val restoredLastChat = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (!restoredLastChat.value && initialChatId == null && !isShareIntent && preferencesDataStore != null) {
+            restoredLastChat.value = true
+            val lastChatId = preferencesDataStore.lastChatIdFlow.first()
+            val lastRecipientId = preferencesDataStore.lastRecipientIdFlow.first()
+            if (lastChatId != null && lastRecipientId != null) {
+                pendingChatId.value = lastChatId
+                pendingSenderId.value = lastRecipientId
+            }
+        }
+    }
 
     NavHost(
         navController = navController,
@@ -154,8 +174,13 @@ fun FireStreamNavGraph(
                     }
                 }
             }
+            // Clear last open chat when returning to chat list
+            LaunchedEffect(Unit) {
+                preferencesDataStore?.clearLastOpenChat()
+            }
             MainScreen(
                 onChatClick = { chatId, recipientId ->
+                    coroutineScope.launch { preferencesDataStore?.setLastOpenChat(chatId, recipientId) }
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
                     }
@@ -165,6 +190,7 @@ fun FireStreamNavGraph(
                 onNewBroadcastClick = { navController.navigate(Routes.CREATE_BROADCAST) },
                 onSettingsClick = { navController.navigate(Routes.SETTINGS) },
                 onMessageClick = { chatId, recipientId ->
+                    coroutineScope.launch { preferencesDataStore?.setLastOpenChat(chatId, recipientId) }
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
                     }

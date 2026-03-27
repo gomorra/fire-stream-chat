@@ -277,8 +277,8 @@ class CallService : Service() {
         initWebRtc()
 
         // Fetch the call document to get the offer, then set remote desc and create answer.
-        // Status is updated to "answered" AFTER the answer SDP is written so the caller
-        // always sees both the status change and the SDP in the same snapshot.
+        // IMPORTANT: We must wait for setRemoteDescription to complete before creating the
+        // answer or observing ICE candidates — WebRTC requires it.
         serviceScope.launch {
             callRepository.getCallById(callId).onSuccess { signalingData ->
                 val offer = signalingData.offer ?: run {
@@ -291,10 +291,18 @@ class CallService : Service() {
                     SessionDescription.Type.fromCanonicalForm(offer.type),
                     offer.sdp
                 )
-                peerConnection?.setRemoteDescription(SimpleSdpObserver(), remoteDesc)
+                val pc = peerConnection ?: return@onSuccess
+                pc.setRemoteDescription(object : SimpleSdpObserver() {
+                    override fun onSetSuccess() {
+                        createAnswerAndSend(callId)
+                        observeIceCandidates(callId, "callerCandidates")
+                    }
 
-                createAnswerAndSend(callId)
-                observeIceCandidates(callId, "callerCandidates")
+                    override fun onSetFailure(error: String?) {
+                        Log.e(TAG, "Failed to set remote description (callee): $error")
+                        endCallWithReason(EndReason.ERROR)
+                    }
+                }, remoteDesc)
             }.onFailure { e ->
                 Log.e(TAG, "Failed to get call document", e)
                 endCallWithReason(EndReason.ERROR)
@@ -314,10 +322,9 @@ class CallService : Service() {
             override fun onCreateSuccess(sdp: SessionDescription) {
                 pc.setLocalDescription(SimpleSdpObserver(), sdp)
                 serviceScope.launch {
-                    // Write answer SDP first, then update status so the caller
+                    // Write answer SDP + status="answered" atomically so the caller
                     // always sees the SDP when it observes the "answered" status.
-                    callRepository.sendAnswer(callId, SdpData(sdp.description, sdp.type.canonicalForm()))
-                    callRepository.answerCall(callId)
+                    callRepository.sendAnswerAndAccept(callId, SdpData(sdp.description, sdp.type.canonicalForm()))
                 }
             }
 
@@ -382,18 +389,28 @@ class CallService : Service() {
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
         notificationManager!!.updateNotification(notification, CallNotificationManager.NOTIFICATION_ID_ONGOING)
 
-        // Set remote description from answer
+        // Set remote description from answer — must complete before adding ICE candidates
         val answer = data.answer
-        if (answer != null) {
-            val remoteDesc = SessionDescription(
-                SessionDescription.Type.fromCanonicalForm(answer.type),
-                answer.sdp
-            )
-            peerConnection?.setRemoteDescription(SimpleSdpObserver(), remoteDesc)
+        if (answer == null) {
+            Log.e(TAG, "Call answered but no answer SDP found — waiting for next snapshot")
+            return
         }
 
-        // Start observing callee's ICE candidates
-        observeIceCandidates(callId, "calleeCandidates")
+        val remoteDesc = SessionDescription(
+            SessionDescription.Type.fromCanonicalForm(answer.type),
+            answer.sdp
+        )
+        peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
+            override fun onSetSuccess() {
+                // Only start observing ICE candidates after remote description is set
+                observeIceCandidates(callId, "calleeCandidates")
+            }
+
+            override fun onSetFailure(error: String?) {
+                Log.e(TAG, "Failed to set remote description (caller): $error")
+                endCallWithReason(EndReason.ERROR)
+            }
+        }, remoteDesc)
     }
 
     private fun observeIceCandidates(callId: String, subcollection: String) {

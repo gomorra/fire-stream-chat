@@ -16,6 +16,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -54,6 +56,7 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
@@ -74,6 +77,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -188,9 +192,15 @@ fun ChatScreen(
         }
     }
 
+    // Auto-scroll only when near the bottom (within ~1 screen of the end)
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+            val nearBottom = (uiState.messages.size - 1 - lastVisible) <= visibleCount
+            if (nearBottom) {
+                listState.animateScrollToItem(uiState.messages.size - 1)
+            }
         }
     }
 
@@ -507,9 +517,17 @@ fun ChatScreen(
                         }
                     }
                     else -> {
+                        // Scroll-to-bottom: show FAB when more than 2 screens from bottom
+                        val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        val totalItems = uiState.messages.size
+                        val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+                        val showScrollToBottom = totalItems > 0 &&
+                            (totalItems - 1 - lastVisibleIndex) > visibleCount * 2
+
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.weight(1f).fillMaxWidth().padding(horizontal = 8.dp),
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
                             itemsIndexed(uiState.messages, key = { _, msg -> msg.id }) { index, message ->
@@ -592,6 +610,32 @@ fun ChatScreen(
                                 }
                             }
                         }
+
+                        // Scroll-to-bottom FAB
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = showScrollToBottom,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .padding(end = 12.dp, bottom = 12.dp),
+                            enter = fadeIn() + scaleIn(),
+                            exit = fadeOut() + scaleOut()
+                        ) {
+                            SmallFloatingActionButton(
+                                onClick = {
+                                    scope.launch {
+                                        listState.animateScrollToItem(uiState.messages.size - 1)
+                                    }
+                                },
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Scroll to bottom"
+                                )
+                            }
+                        }
+                        } // Box
                     }
                 }
             }

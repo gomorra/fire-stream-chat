@@ -48,6 +48,10 @@ class PreferencesDataStore @Inject constructor(
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
 
+    // Last open chat (restore on launch)
+    private val lastChatIdKey = stringPreferencesKey("last_chat_id")
+    private val lastRecipientIdKey = stringPreferencesKey("last_recipient_id")
+
     // --- Theme ---
 
     val appThemeFlow: Flow<AppTheme> = context.dataStore.data.map { prefs ->
@@ -148,6 +152,30 @@ class PreferencesDataStore @Inject constructor(
     val recentEmojisFlow: Flow<List<String>> = context.dataStore.data.map { prefs ->
         val raw = prefs[recentEmojisKey] ?: return@map emptyList()
         raw.split(",").filter { it.isNotEmpty() }
+    }
+
+    // --- Last open chat ---
+
+    val lastChatIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[lastChatIdKey]
+    }
+
+    val lastRecipientIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[lastRecipientIdKey]
+    }
+
+    suspend fun setLastOpenChat(chatId: String, recipientId: String) {
+        context.dataStore.edit { prefs ->
+            prefs[lastChatIdKey] = chatId
+            prefs[lastRecipientIdKey] = recipientId
+        }
+    }
+
+    suspend fun clearLastOpenChat() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(lastChatIdKey)
+            prefs.remove(lastRecipientIdKey)
+        }
     }
 
     suspend fun addRecentEmoji(emoji: String) {

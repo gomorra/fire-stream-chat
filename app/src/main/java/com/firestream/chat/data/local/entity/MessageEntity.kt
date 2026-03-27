@@ -125,6 +125,7 @@ data class MessageEntity(
                 put("unchecked", JSONArray(diff.unchecked))
                 if (diff.titleChanged != null) put("titleChanged", diff.titleChanged)
                 if (diff.reordered) put("reordered", true)
+                if (diff.deleted) put("deleted", true)
             }.toString()
         }
 
@@ -137,7 +138,8 @@ data class MessageEntity(
                     checked = jsonArrayToStringList(obj.optJSONArray("checked")),
                     unchecked = jsonArrayToStringList(obj.optJSONArray("unchecked")),
                     titleChanged = obj.optString("titleChanged", null).takeIf { it != "null" },
-                    reordered = obj.optBoolean("reordered", false)
+                    reordered = obj.optBoolean("reordered", false),
+                    deleted = obj.optBoolean("deleted", false)
                 )
             } catch (_: Exception) {
                 null

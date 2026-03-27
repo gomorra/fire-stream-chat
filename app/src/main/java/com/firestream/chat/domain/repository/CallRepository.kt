@@ -12,6 +12,7 @@ interface CallRepository {
     suspend fun endCall(callId: String, reason: String): Result<Unit>
     suspend fun sendOffer(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendAnswer(callId: String, sdp: SdpData): Result<Unit>
+    suspend fun sendAnswerAndAccept(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendIceCandidate(callId: String, isCaller: Boolean, candidate: IceCandidateData): Result<Unit>
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>

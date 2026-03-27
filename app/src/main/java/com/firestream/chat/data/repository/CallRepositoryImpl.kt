@@ -74,6 +74,15 @@ class CallRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun sendAnswerAndAccept(callId: String, sdp: SdpData): Result<Unit> {
+        return try {
+            callSource.setAnswerAndAccept(callId, sdp)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun sendIceCandidate(
         callId: String,
         isCaller: Boolean,

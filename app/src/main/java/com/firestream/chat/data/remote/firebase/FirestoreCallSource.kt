@@ -57,6 +57,16 @@ class FirestoreCallSource @Inject constructor(
         ).await()
     }
 
+    /** Write answer SDP and status="answered" atomically so the caller always sees both. */
+    suspend fun setAnswerAndAccept(callId: String, sdp: SdpData) {
+        callsCollection.document(callId).update(
+            mapOf(
+                "answer" to hashMapOf("sdp" to sdp.sdp, "type" to sdp.type),
+                "status" to "answered"
+            )
+        ).await()
+    }
+
     suspend fun addIceCandidate(callId: String, subcollection: String, candidate: IceCandidateData) {
         val data = hashMapOf(
             "sdpMid" to candidate.sdpMid,

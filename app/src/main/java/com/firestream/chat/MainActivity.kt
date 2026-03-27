@@ -64,7 +64,8 @@ class MainActivity : ComponentActivity() {
                 FireStreamNavGraph(
                     initialChatId = initialChatId,
                     initialSenderId = initialSenderId,
-                    isShareIntent = isShareIntent
+                    isShareIntent = isShareIntent,
+                    preferencesDataStore = preferencesDataStore
                 )
             }
         }
