@@ -29,4 +29,5 @@ interface ListRepository {
     suspend fun updateSharedChatIds(listId: String, chatId: String): Result<Unit>
     suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit>
     suspend fun removeParticipant(listId: String, userId: String): Result<Unit>
+    suspend fun removeParticipants(listId: String, userIds: List<String>): Result<Unit>
 }

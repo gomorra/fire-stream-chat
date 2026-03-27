@@ -189,8 +189,7 @@ fun ListDetailScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
-                        val isOwner = uiState.listData?.createdBy == uiState.currentUserId
-                        if (isOwner) {
+                        if (uiState.isOwner) {
                             DropdownMenuItem(
                                 text = { Text("Manage sharing") },
                                 leadingIcon = {
@@ -214,7 +213,7 @@ fun ListDetailScreen(
                                 }
                             )
                         }
-                        if (isOwner) {
+                        if (uiState.isOwner) {
                             DropdownMenuItem(
                                 text = { Text("Delete list") },
                                 leadingIcon = {
@@ -275,21 +274,21 @@ fun ListDetailScreen(
                     }
                 }
 
-                LaunchedEffect(uiState.displayItems) {
+                LaunchedEffect(reorderableLazyListState.isAnyItemDragging, uiState.displayItems) {
                     if (!reorderableLazyListState.isAnyItemDragging) {
-                        localItems = uiState.displayItems
-                    }
-                }
-
-                LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
-                    if (!reorderableLazyListState.isAnyItemDragging) {
-                        val id = draggedItemId ?: return@LaunchedEffect
-                        draggedItemId = null
-                        val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
-                        val finalTo = localItems.indexOfFirst { it.id == id }
-                        localItems = uiState.displayItems
-                        if (originalFrom >= 0 && finalTo >= 0 && originalFrom != finalTo) {
-                            viewModel.reorderItems(originalFrom, finalTo)
+                        val id = draggedItemId
+                        if (id != null) {
+                            // Drag ended: commit order if changed
+                            draggedItemId = null
+                            val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
+                            val finalTo = localItems.indexOfFirst { it.id == id }
+                            localItems = uiState.displayItems
+                            if (originalFrom >= 0 && finalTo >= 0 && originalFrom != finalTo) {
+                                viewModel.reorderItems(originalFrom, finalTo)
+                            }
+                        } else if (localItems != uiState.displayItems) {
+                            // Server update: sync local state
+                            localItems = uiState.displayItems
                         }
                     }
                 }

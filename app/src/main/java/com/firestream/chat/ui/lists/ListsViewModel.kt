@@ -49,7 +49,9 @@ data class ListsUiState(
     val sortOption: ListSortOption = ListSortOption.MODIFIED,
     val isLoading: Boolean = true,
     val error: String? = null
-)
+) {
+    fun isOwner(list: ListData) = list.createdBy == currentUserId
+}
 
 @HiltViewModel
 class ListsViewModel @Inject constructor(

@@ -183,7 +183,7 @@ internal fun ListsScreen(
     selectedListForAction?.let { listData ->
         ListContextSheet(
             listData = listData,
-            isOwner = listData.createdBy == uiState.currentUserId,
+            isOwner = uiState.isOwner(listData),
             history = uiState.selectedListHistory,
             onDismiss = {
                 selectedListForAction = null

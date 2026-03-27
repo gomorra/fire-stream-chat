@@ -48,6 +48,7 @@ data class ListDetailUiState(
     val error: String? = null,
     val isDeleted: Boolean = false
 ) {
+    val isOwner get() = listData?.createdBy == currentUserId
     val displayItems get() = listData?.items
         ?.let { items -> items.filter { !it.isChecked } + items.filter { it.isChecked } }
         ?: emptyList()
@@ -242,9 +243,8 @@ class ListDetailViewModel @Inject constructor(
                 .onSuccess {
                     val chat = _uiState.value.chats.find { it.id == chatId }
                     val owner = _uiState.value.listData?.createdBy ?: return@onSuccess
-                    chat?.participants?.filter { it != owner }?.forEach { userId ->
-                        listRepository.removeParticipant(listId, userId)
-                    }
+                    val toRemove = chat?.participants?.filter { it != owner } ?: return@onSuccess
+                    if (toRemove.isNotEmpty()) listRepository.removeParticipants(listId, toRemove)
                 }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
