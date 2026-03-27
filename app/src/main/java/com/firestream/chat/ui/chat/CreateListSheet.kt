@@ -131,15 +131,3 @@ internal fun CreateListSheet(
     }
 }
 
-private fun ListType.displayName(): String = when (this) {
-    ListType.CHECKLIST -> "Checklist"
-    ListType.SHOPPING -> "Shopping List"
-    ListType.GENERIC -> "Generic List"
-}
-
-private fun GenericListStyle.displayName(): String = when (this) {
-    GenericListStyle.BULLET -> "• Bullet"
-    GenericListStyle.NUMBER -> "1. Number"
-    GenericListStyle.DASH -> "– Dash"
-    GenericListStyle.NONE -> "None"
-}

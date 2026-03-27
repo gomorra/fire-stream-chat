@@ -3,10 +3,25 @@ package com.firestream.chat.domain.model
 enum class ListType {
     CHECKLIST,
     SHOPPING,
-    GENERIC
+    GENERIC;
+
+    fun displayName(): String = when (this) {
+        CHECKLIST -> "Checklist"
+        SHOPPING -> "Shopping List"
+        GENERIC -> "Generic List"
+    }
 }
 
-enum class GenericListStyle { BULLET, NUMBER, DASH, NONE }
+enum class GenericListStyle {
+    BULLET, NUMBER, DASH, NONE;
+
+    fun displayName(): String = when (this) {
+        BULLET -> "• Bullet"
+        NUMBER -> "1. Number"
+        DASH -> "– Dash"
+        NONE -> "None"
+    }
+}
 
 data class ListItem(
     val id: String = "",

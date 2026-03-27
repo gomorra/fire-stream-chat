@@ -83,6 +83,7 @@ class ListsViewModel @Inject constructor(
         preferencesDataStore.listSortOptionFlow
             .onEach { raw ->
                 val option = runCatching { ListSortOption.valueOf(raw) }.getOrDefault(ListSortOption.MODIFIED)
+                if (option == _uiState.value.sortOption) return@onEach
                 _uiState.value = _uiState.value.copy(
                     sortOption = option,
                     lists = sortedLists(rawLists, option)

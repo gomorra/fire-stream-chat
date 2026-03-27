@@ -257,7 +257,7 @@ fun ListDetailScreen(
             }
             else -> {
                 val listData = uiState.listData!!
-                var localItems by remember(uiState.displayItems) { mutableStateOf(uiState.displayItems) }
+                var localItems by remember { mutableStateOf(uiState.displayItems) }
                 var draggedItemId by remember { mutableStateOf<String?>(null) }
                 val displayItems = localItems.filter { it.id != pendingRemoval?.id }
 
@@ -268,8 +268,15 @@ fun ListDetailScreen(
                     }
                 }
 
+                LaunchedEffect(uiState.displayItems) {
+                    if (!reorderableLazyListState.isAnyItemDragging) {
+                        localItems = uiState.displayItems
+                    }
+                }
+
                 LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
                     if (!reorderableLazyListState.isAnyItemDragging) {
+                        localItems = uiState.displayItems
                         val id = draggedItemId ?: return@LaunchedEffect
                         draggedItemId = null
                         val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
@@ -468,13 +475,6 @@ fun ListDetailScreen(
             confirmButton = {}
         )
     }
-}
-
-private fun GenericListStyle.displayName(): String = when (this) {
-    GenericListStyle.BULLET -> "• Bullet"
-    GenericListStyle.NUMBER -> "1. Number"
-    GenericListStyle.DASH -> "– Dash"
-    GenericListStyle.NONE -> "None"
 }
 
 @Composable
