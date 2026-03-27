@@ -2,6 +2,7 @@ package com.firestream.chat.data.local.entity
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
@@ -18,7 +19,8 @@ data class ListEntity(
     val updatedAt: Long,
     val participants: String, // JSON array of userIds
     val items: String, // JSON array of ListItem
-    val sharedChatIds: String = "[]" // JSON array of chatIds
+    val sharedChatIds: String = "[]", // JSON array of chatIds
+    val genericStyle: String = GenericListStyle.BULLET.name
 ) {
     fun toDomain() = ListData(
         id = id,
@@ -29,7 +31,8 @@ data class ListEntity(
         updatedAt = updatedAt,
         participants = parseStringList(participants),
         items = parseItemsJson(items),
-        sharedChatIds = parseStringList(sharedChatIds)
+        sharedChatIds = parseStringList(sharedChatIds),
+        genericStyle = runCatching { GenericListStyle.valueOf(genericStyle) }.getOrDefault(GenericListStyle.BULLET)
     )
 
     companion object {
@@ -42,7 +45,8 @@ data class ListEntity(
             updatedAt = list.updatedAt,
             participants = JSONArray(list.participants).toString(),
             items = itemsToJson(list.items),
-            sharedChatIds = JSONArray(list.sharedChatIds).toString()
+            sharedChatIds = JSONArray(list.sharedChatIds).toString(),
+            genericStyle = list.genericStyle.name
         )
 
         fun itemsToJson(items: List<ListItem>): String {

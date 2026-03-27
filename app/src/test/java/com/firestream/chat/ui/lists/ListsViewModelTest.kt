@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.lists
 
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
@@ -16,6 +17,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
@@ -41,12 +43,14 @@ class ListsViewModelTest {
     private val chatRepository = mockk<ChatRepository>()
     private val authSource = mockk<FirebaseAuthSource>()
     private val userRepository = mockk<UserRepository>()
+    private val preferencesDataStore = mockk<PreferencesDataStore>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
         every { authSource.currentUserId } returns "user1"
         every { chatRepository.getChats() } returns flowOf(emptyList())
+        every { preferencesDataStore.listSortOptionFlow } returns MutableStateFlow("MODIFIED")
     }
 
     @After
@@ -63,7 +67,8 @@ class ListsViewModelTest {
         observeListHistoryUseCase = observeListHistoryUseCase,
         chatRepository = chatRepository,
         authSource = authSource,
-        userRepository = userRepository
+        userRepository = userRepository,
+        preferencesDataStore = preferencesDataStore
     )
 
     @Test

@@ -2,8 +2,10 @@ package com.firestream.chat.ui.lists
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
@@ -25,8 +27,17 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+enum class ListSortOption(val displayName: String) {
+    TYPE("By type"),
+    CREATED("Date created"),
+    MODIFIED("Last modified"),
+    CREATOR("By creator")
+}
 
 data class ListsUiState(
     val lists: List<ListData> = emptyList(),
@@ -35,6 +46,7 @@ data class ListsUiState(
     val currentUserId: String = "",
     val selectedListHistory: List<ListHistoryEntry> = emptyList(),
     val participantAvatars: Map<String, List<User>> = emptyMap(),
+    val sortOption: ListSortOption = ListSortOption.MODIFIED,
     val isLoading: Boolean = true,
     val error: String? = null
 )
@@ -49,17 +61,47 @@ class ListsViewModel @Inject constructor(
     private val observeListHistoryUseCase: ObserveListHistoryUseCase,
     private val chatRepository: ChatRepository,
     private val authSource: FirebaseAuthSource,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val preferencesDataStore: PreferencesDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ListsUiState())
     private var historyJob: Job? = null
     val uiState: StateFlow<ListsUiState> = _uiState.asStateFlow()
 
+    // Raw unsorted lists — kept separately so sort changes re-apply immediately
+    private var rawLists: List<ListData> = emptyList()
+
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
+        observeSortOption()
         observeLists()
         observeChats()
+    }
+
+    private fun observeSortOption() {
+        preferencesDataStore.listSortOptionFlow
+            .onEach { raw ->
+                val option = runCatching { ListSortOption.valueOf(raw) }.getOrDefault(ListSortOption.MODIFIED)
+                _uiState.value = _uiState.value.copy(
+                    sortOption = option,
+                    lists = sortedLists(rawLists, option)
+                )
+            }
+            .launchIn(viewModelScope)
+    }
+
+    private fun sortedLists(lists: List<ListData>, option: ListSortOption): List<ListData> = when (option) {
+        ListSortOption.TYPE -> lists.sortedWith(compareBy({ it.type.ordinal }, { it.title }))
+        ListSortOption.CREATED -> lists.sortedByDescending { it.createdAt }
+        ListSortOption.MODIFIED -> lists.sortedByDescending { it.updatedAt }
+        ListSortOption.CREATOR -> lists.sortedWith(compareBy({ it.createdBy }, { it.title }))
+    }
+
+    fun setSortOption(option: ListSortOption) {
+        viewModelScope.launch {
+            preferencesDataStore.setListSortOption(option.name)
+        }
     }
 
     private fun observeLists() {
@@ -69,7 +111,11 @@ class ListsViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
                 .collect { lists ->
-                    _uiState.value = _uiState.value.copy(lists = lists, isLoading = false)
+                    rawLists = lists
+                    _uiState.value = _uiState.value.copy(
+                        lists = sortedLists(lists, _uiState.value.sortOption),
+                        isLoading = false
+                    )
                     resolveParticipants(lists)
                 }
         }
@@ -107,9 +153,9 @@ class ListsViewModel @Inject constructor(
         }
     }
 
-    fun createList(title: String, type: ListType, onCreated: (String) -> Unit) {
+    fun createList(title: String, type: ListType, genericStyle: GenericListStyle = GenericListStyle.BULLET, onCreated: (String) -> Unit) {
         viewModelScope.launch {
-            createListUseCase(title, type)
+            createListUseCase(title, type, genericStyle = genericStyle)
                 .onSuccess { listData -> onCreated(listData.id) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }

@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
 import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.HistoryAction
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListHistoryEntry
@@ -101,13 +102,14 @@ class ListRepositoryImpl @Inject constructor(
             .collect { send(it) }
     }
 
-    override suspend fun createList(title: String, type: ListType, chatId: String?): Result<ListData> {
+    override suspend fun createList(title: String, type: ListType, chatId: String?, genericStyle: GenericListStyle): Result<ListData> {
         return try {
             val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
             val now = System.currentTimeMillis()
             val listData = ListData(
                 title = title,
                 type = type,
+                genericStyle = genericStyle,
                 createdBy = userId,
                 createdAt = now,
                 updatedAt = now,
@@ -225,6 +227,15 @@ class ListRepositoryImpl @Inject constructor(
     override suspend fun updateListType(listId: String, type: ListType): Result<Unit> {
         return try {
             listSource.updateListType(listId, type)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun updateGenericStyle(listId: String, style: GenericListStyle): Result<Unit> {
+        return try {
+            listSource.updateGenericStyle(listId, style)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

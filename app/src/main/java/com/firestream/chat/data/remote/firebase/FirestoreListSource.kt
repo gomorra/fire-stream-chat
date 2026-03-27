@@ -1,5 +1,6 @@
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
@@ -58,7 +59,8 @@ class FirestoreListSource @Inject constructor(
             "updatedAt" to list.updatedAt,
             "participants" to list.participants,
             "items" to list.items.map { itemToMap(it) },
-            "sharedChatIds" to list.sharedChatIds
+            "sharedChatIds" to list.sharedChatIds,
+            "genericStyle" to list.genericStyle.name
         )
         val docRef = listsCollection.add(data).await()
         return docRef.id
@@ -131,6 +133,15 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
+    suspend fun updateGenericStyle(listId: String, style: GenericListStyle) {
+        listsCollection.document(listId).update(
+            mapOf(
+                "genericStyle" to style.name,
+                "updatedAt" to System.currentTimeMillis()
+            )
+        ).await()
+    }
+
     private fun itemToMap(item: ListItem): Map<String, Any?> = mapOf(
         "id" to item.id,
         "text" to item.text,
@@ -156,7 +167,9 @@ class FirestoreListSource @Inject constructor(
                 ?.filterIsInstance<String>() ?: emptyList(),
             items = rawItems.map { mapToListItem(it) },
             sharedChatIds = (data["sharedChatIds"] as? List<*>)
-                ?.filterIsInstance<String>() ?: emptyList()
+                ?.filterIsInstance<String>() ?: emptyList(),
+            genericStyle = runCatching { GenericListStyle.valueOf(data["genericStyle"] as? String ?: "") }
+                .getOrDefault(GenericListStyle.BULLET)
         )
     }
 

@@ -1017,7 +1017,7 @@ fun ChatScreen(
     if (showCreateListSheet) {
         CreateListSheet(
             onDismiss = { showCreateListSheet = false },
-            onCreateList = { title, type, _ ->
+            onCreateList = { title, type, _, _ ->
                 viewModel.createAndSendList(title, type)
                 showCreateListSheet = false
             }

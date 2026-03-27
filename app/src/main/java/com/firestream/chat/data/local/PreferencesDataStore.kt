@@ -48,6 +48,9 @@ class PreferencesDataStore @Inject constructor(
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
 
+    // Lists sort option
+    private val listSortOptionKey = stringPreferencesKey("list_sort_option")
+
     // Last open chat (restore on launch)
     private val lastChatIdKey = stringPreferencesKey("last_chat_id")
     private val lastRecipientIdKey = stringPreferencesKey("last_recipient_id")
@@ -176,6 +179,16 @@ class PreferencesDataStore @Inject constructor(
             prefs.remove(lastChatIdKey)
             prefs.remove(lastRecipientIdKey)
         }
+    }
+
+    // --- Lists sort ---
+
+    val listSortOptionFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[listSortOptionKey] ?: "MODIFIED"
+    }
+
+    suspend fun setListSortOption(option: String) {
+        context.dataStore.edit { prefs -> prefs[listSortOptionKey] = option }
     }
 
     suspend fun addRecentEmoji(emoji: String) {

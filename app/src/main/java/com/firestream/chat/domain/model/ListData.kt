@@ -6,6 +6,8 @@ enum class ListType {
     GENERIC
 }
 
+enum class GenericListStyle { BULLET, NUMBER, DASH, NONE }
+
 data class ListItem(
     val id: String = "",
     val text: String = "",
@@ -25,5 +27,6 @@ data class ListData(
     val updatedAt: Long = System.currentTimeMillis(),
     val participants: List<String> = emptyList(),
     val items: List<ListItem> = emptyList(),
-    val sharedChatIds: List<String> = emptyList()
+    val sharedChatIds: List<String> = emptyList(),
+    val genericStyle: GenericListStyle = GenericListStyle.BULLET
 )

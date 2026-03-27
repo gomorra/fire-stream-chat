@@ -17,15 +17,20 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.ShoppingCart
-import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -44,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.ui.lists.ListSortOption
 import com.firestream.chat.ui.chat.CreateListSheet
 import com.firestream.chat.ui.chat.ForwardChatPicker
 import java.text.SimpleDateFormat
@@ -59,6 +65,7 @@ internal fun ListsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateSheet by remember { mutableStateOf(false) }
+    var showSortMenu by remember { mutableStateOf(false) }
     var selectedListForAction by remember { mutableStateOf<ListData?>(null) }
     var showSharePicker by remember { mutableStateOf(false) }
     var shareListId by remember { mutableStateOf("") }
@@ -68,6 +75,34 @@ internal fun ListsScreen(
             TopAppBar(
                 title = { Text("Lists") },
                 windowInsets = WindowInsets(0, 0, 0, 0),
+                actions = {
+                    IconButton(onClick = { showSortMenu = true }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Sort,
+                            contentDescription = "Sort",
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = showSortMenu,
+                        onDismissRequest = { showSortMenu = false }
+                    ) {
+                        ListSortOption.entries.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(option.displayName) },
+                                leadingIcon = {
+                                    if (uiState.sortOption == option) {
+                                        Icon(Icons.Default.Check, contentDescription = null)
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setSortOption(option)
+                                    showSortMenu = false
+                                }
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary
@@ -136,8 +171,8 @@ internal fun ListsScreen(
     if (showCreateSheet) {
         CreateListSheet(
             onDismiss = { showCreateSheet = false },
-            onCreateList = { title, type, _ ->
-                viewModel.createList(title, type) { listId ->
+            onCreateList = { title, type, _, genericStyle ->
+                viewModel.createList(title, type, genericStyle) { listId ->
                     onListCreated(listId)
                 }
                 showCreateSheet = false

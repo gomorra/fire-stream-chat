@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
@@ -22,6 +23,7 @@ import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
 import com.firestream.chat.domain.usecase.list.UnshareListFromChatUseCase
+import com.firestream.chat.domain.usecase.list.UpdateGenericStyleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +63,7 @@ class ListDetailViewModel @Inject constructor(
     private val reorderListItemsUseCase: ReorderListItemsUseCase,
     private val updateListTitleUseCase: UpdateListTitleUseCase,
     private val updateListTypeUseCase: UpdateListTypeUseCase,
+    private val updateGenericStyleUseCase: UpdateGenericStyleUseCase,
     private val shareListToChatUseCase: ShareListToChatUseCase,
     private val unshareListFromChatUseCase: UnshareListFromChatUseCase,
     private val deleteListUseCase: DeleteListUseCase,
@@ -213,6 +216,13 @@ class ListDetailViewModel @Inject constructor(
     fun updateType(type: ListType) {
         viewModelScope.launch {
             updateListTypeUseCase(listId, type)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun updateGenericStyle(style: GenericListStyle) {
+        viewModelScope.launch {
+            updateGenericStyleUseCase(listId, style)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }

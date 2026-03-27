@@ -2,7 +2,7 @@ package com.firestream.chat.ui.lists
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,22 +15,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -52,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -62,11 +64,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
@@ -74,8 +76,10 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import kotlinx.coroutines.launch
@@ -91,17 +95,17 @@ fun ListDetailScreen(
     val uiState by viewModel.uiState.collectAsState()
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showSharePicker by remember { mutableStateOf(false) }
+    var showStyleMenu by remember { mutableStateOf(false) }
     var newItemText by remember { mutableStateOf("") }
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
-    var draggedItemKey by remember { mutableStateOf<String?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
     var pendingRemoval by remember { mutableStateOf<ListItem?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val addItemFocusRequester = remember { FocusRequester() }
     val titleFocusRequester = remember { FocusRequester() }
+    val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -193,6 +197,18 @@ fun ListDetailScreen(
                                 showSharePicker = true
                             }
                         )
+                        if (uiState.listData?.type == ListType.GENERIC) {
+                            DropdownMenuItem(
+                                text = { Text("List style") },
+                                leadingIcon = {
+                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    showStyleMenu = true
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Delete list") },
                             leadingIcon = {
@@ -241,7 +257,29 @@ fun ListDetailScreen(
             }
             else -> {
                 val listData = uiState.listData!!
-                val displayItems = uiState.displayItems.filter { it.id != pendingRemoval?.id }
+                var localItems by remember(uiState.displayItems) { mutableStateOf(uiState.displayItems) }
+                var draggedItemId by remember { mutableStateOf<String?>(null) }
+                val displayItems = localItems.filter { it.id != pendingRemoval?.id }
+
+                val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
+                    if (draggedItemId == null) draggedItemId = localItems.getOrNull(from.index)?.id
+                    localItems = localItems.toMutableList().apply {
+                        add(to.index, removeAt(from.index))
+                    }
+                }
+
+                LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
+                    if (!reorderableLazyListState.isAnyItemDragging) {
+                        val id = draggedItemId ?: return@LaunchedEffect
+                        draggedItemId = null
+                        val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
+                        val finalTo = localItems.indexOfFirst { it.id == id }
+                        if (originalFrom >= 0 && finalTo >= 0 && originalFrom != finalTo) {
+                            viewModel.reorderItems(originalFrom, finalTo)
+                        }
+                    }
+                }
+
                 LaunchedEffect(listData.items.size) {
                     if (displayItems.isNotEmpty()) listState.animateScrollToItem(displayItems.size - 1)
                 }
@@ -250,70 +288,80 @@ fun ListDetailScreen(
                         .fillMaxSize()
                         .padding(padding)
                         .imePadding()
+                        .pointerInput(Unit) {
+                            detectTapGestures { focusManager.clearFocus() }
+                        }
                 ) {
                     LazyColumn(
                         state = listState,
                         modifier = Modifier.weight(1f)
                     ) {
-                        items(displayItems, key = { it.id }) { item ->
-                            val isDragging = item.id == draggedItemKey
-                            Column(
-                                modifier = Modifier
-                                    .zIndex(if (isDragging) 1f else 0f)
-                                    .graphicsLayer {
-                                        translationY = if (isDragging) dragOffset else 0f
-                                        shadowElevation = if (isDragging) 8f else 0f
-                                    }
-                                    .then(
-                                        if (isDragging) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                                        else Modifier
-                                    )
-                                    .animateItem()
-                            ) {
-                                ListItemRow(
-                                    item = item,
-                                    listType = listData.type,
-                                    onToggle = { viewModel.toggleItem(item.id) },
-                                    onRemove = {
-                                        pendingRemoval = item
-                                        coroutineScope.launch {
-                                            val result = snackbarHostState.showSnackbar(
-                                                message = "\"${item.text}\" removed",
-                                                actionLabel = "Undo",
-                                                duration = SnackbarDuration.Short
-                                            )
-                                            if (result == SnackbarResult.ActionPerformed) {
-                                                pendingRemoval = null
-                                            } else {
-                                                pendingRemoval?.let { viewModel.removeItem(it.id) }
-                                                pendingRemoval = null
+                        itemsIndexed(displayItems, key = { _, it -> it.id }) { index, item ->
+                            ReorderableItem(reorderableLazyListState, key = item.id) { isDragging ->
+                                val dismissState = rememberSwipeToDismissBoxState(
+                                    confirmValueChange = { value ->
+                                        if (value == SwipeToDismissBoxValue.EndToStart) {
+                                            pendingRemoval = item
+                                            coroutineScope.launch {
+                                                val result = snackbarHostState.showSnackbar(
+                                                    message = "\"${item.text}\" removed",
+                                                    actionLabel = "Undo",
+                                                    duration = SnackbarDuration.Short
+                                                )
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    pendingRemoval = null
+                                                } else {
+                                                    pendingRemoval?.let { viewModel.removeItem(it.id) }
+                                                    pendingRemoval = null
+                                                }
                                             }
-                                        }
-                                    },
-                                    onEdit = { newText -> viewModel.updateItem(item.id, newText) },
-                                    onDragStart = {
-                                        draggedItemKey = item.id
-                                        dragOffset = 0f
-                                    },
-                                    onDrag = { delta -> dragOffset += delta },
-                                    onDragEnd = {
-                                        val fromIndex = displayItems.indexOfFirst { it.id == draggedItemKey }
-                                        if (fromIndex >= 0) {
-                                            val visible = listState.layoutInfo.visibleItemsInfo
-                                            val avgHeight = if (visible.isNotEmpty())
-                                                visible.map { it.size }.average().toFloat()
-                                            else 60f
-                                            val slots = (dragOffset / avgHeight).roundToInt()
-                                            val toIndex = (fromIndex + slots).coerceIn(0, displayItems.size - 1)
-                                            if (fromIndex != toIndex) {
-                                                viewModel.reorderItems(fromIndex, toIndex)
-                                            }
-                                        }
-                                        draggedItemKey = null
-                                        dragOffset = 0f
+                                            true
+                                        } else false
                                     }
                                 )
-                                HorizontalDivider()
+                                Column(
+                                    modifier = Modifier
+                                        .then(
+                                            if (isDragging) Modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                            else Modifier
+                                        )
+                                        .animateItem()
+                                ) {
+                                    SwipeToDismissBox(
+                                        state = dismissState,
+                                        enableDismissFromStartToEnd = false,
+                                        backgroundContent = {
+                                            val color = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
+                                                MaterialTheme.colorScheme.error
+                                            else
+                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .background(color),
+                                                contentAlignment = Alignment.CenterEnd
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Delete,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.padding(end = 16.dp)
+                                                )
+                                            }
+                                        }
+                                    ) {
+                                        ListItemRow(
+                                            item = item,
+                                            listType = listData.type,
+                                            itemIndex = index,
+                                            genericStyle = listData.genericStyle,
+                                            dragHandleModifier = Modifier.draggableHandle(),
+                                            onToggle = { viewModel.toggleItem(item.id) },
+                                            onEdit = { newText -> viewModel.updateItem(item.id, newText) }
+                                        )
+                                    }
+                                    HorizontalDivider()
+                                }
                             }
                         }
 
@@ -385,18 +433,59 @@ fun ListDetailScreen(
             onDismiss = { showSharePicker = false }
         )
     }
+
+    if (showStyleMenu) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showStyleMenu = false },
+            title = { Text("List style") },
+            text = {
+                Column {
+                    val currentStyle = uiState.listData?.genericStyle ?: GenericListStyle.BULLET
+                    GenericListStyle.entries.forEach { style ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    viewModel.updateGenericStyle(style)
+                                    showStyleMenu = false
+                                }
+                                .padding(vertical = 12.dp, horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            androidx.compose.material3.RadioButton(
+                                selected = currentStyle == style,
+                                onClick = {
+                                    viewModel.updateGenericStyle(style)
+                                    showStyleMenu = false
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(text = style.displayName(), style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+                }
+            },
+            confirmButton = {}
+        )
+    }
+}
+
+private fun GenericListStyle.displayName(): String = when (this) {
+    GenericListStyle.BULLET -> "• Bullet"
+    GenericListStyle.NUMBER -> "1. Number"
+    GenericListStyle.DASH -> "– Dash"
+    GenericListStyle.NONE -> "None"
 }
 
 @Composable
 private fun ListItemRow(
     item: ListItem,
     listType: ListType,
+    itemIndex: Int = 0,
+    genericStyle: GenericListStyle = GenericListStyle.BULLET,
+    dragHandleModifier: Modifier = Modifier,
     onToggle: () -> Unit,
-    onRemove: () -> Unit,
-    onEdit: (String) -> Unit,
-    onDragStart: () -> Unit = {},
-    onDrag: (Float) -> Unit = {},
-    onDragEnd: () -> Unit = {}
+    onEdit: (String) -> Unit
 ) {
     var isEditing by remember { mutableStateOf(false) }
     var editValue by remember(item.id) {
@@ -433,13 +522,23 @@ private fun ListItemRow(
                 )
             }
             ListType.GENERIC -> {
-                Text(
-                    text = "\u2022",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier
-                        .padding(start = 12.dp, end = 12.dp)
-                        .clickable(onClick = onToggle)
-                )
+                val prefix = when (genericStyle) {
+                    GenericListStyle.BULLET -> "\u2022"
+                    GenericListStyle.NUMBER -> "${itemIndex + 1}."
+                    GenericListStyle.DASH -> "\u2013"
+                    GenericListStyle.NONE -> null
+                }
+                if (prefix != null) {
+                    Text(
+                        text = prefix,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .padding(start = 12.dp, end = 12.dp)
+                            .clickable(onClick = onToggle)
+                    )
+                } else {
+                    Spacer(modifier = Modifier.width(12.dp))
+                }
             }
         }
 
@@ -494,15 +593,6 @@ private fun ListItemRow(
                     tint = MaterialTheme.colorScheme.primary
                 )
             }
-        } else {
-            IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = "Remove",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
-                )
-            }
         }
 
         Icon(
@@ -510,17 +600,7 @@ private fun ListItemRow(
             contentDescription = "Drag to reorder",
             modifier = Modifier
                 .size(24.dp)
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragStart = { onDragStart() },
-                        onDragEnd = { onDragEnd() },
-                        onDragCancel = { onDragEnd() },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            onDrag(dragAmount)
-                        }
-                    )
-                },
+                .then(dragHandleModifier),
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
         )
     }

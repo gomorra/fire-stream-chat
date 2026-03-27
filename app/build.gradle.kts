@@ -130,6 +130,9 @@ dependencies {
     // QR Code
     implementation(libs.zxing.core)
 
+    // Reorderable drag-and-drop
+    implementation(libs.reorderable)
+
     // WebRTC
     implementation(libs.stream.webrtc.android)
 
