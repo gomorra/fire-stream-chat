@@ -51,6 +51,7 @@ import java.util.Locale
 @Composable
 internal fun ListContextSheet(
     listData: ListData,
+    isOwner: Boolean,
     history: List<ListHistoryEntry> = emptyList(),
     onDismiss: () -> Unit,
     onShare: () -> Unit,
@@ -81,21 +82,25 @@ internal fun ListContextSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(
-                    onClick = onShare,
-                    label = { Text("Share") },
-                    leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
-                )
+                if (isOwner) {
+                    AssistChip(
+                        onClick = onShare,
+                        label = { Text("Share") },
+                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                    )
+                }
                 AssistChip(
                     onClick = { showRenameDialog = true },
                     label = { Text("Rename") },
                     leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
                 )
-                AssistChip(
-                    onClick = onDelete,
-                    label = { Text("Delete") },
-                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
-                )
+                if (isOwner) {
+                    AssistChip(
+                        onClick = onDelete,
+                        label = { Text("Delete") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))

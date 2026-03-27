@@ -138,7 +138,9 @@ fun ListDetailScreen(
 
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        snackbarHost = {
+            SnackbarHost(snackbarHostState, modifier = Modifier.imePadding())
+        },
         topBar = {
             TopAppBar(
                 scrollBehavior = scrollBehavior,
@@ -187,16 +189,19 @@ fun ListDetailScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Manage sharing") },
-                            leadingIcon = {
-                                Icon(Icons.Default.Share, contentDescription = null)
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                showSharePicker = true
-                            }
-                        )
+                        val isOwner = uiState.listData?.createdBy == uiState.currentUserId
+                        if (isOwner) {
+                            DropdownMenuItem(
+                                text = { Text("Manage sharing") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Share, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    showSharePicker = true
+                                }
+                            )
+                        }
                         if (uiState.listData?.type == ListType.GENERIC) {
                             DropdownMenuItem(
                                 text = { Text("List style") },
@@ -209,20 +214,22 @@ fun ListDetailScreen(
                                 }
                             )
                         }
-                        DropdownMenuItem(
-                            text = { Text("Delete list") },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Delete,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.error
-                                )
-                            },
-                            onClick = {
-                                showOverflowMenu = false
-                                viewModel.deleteList()
-                            }
-                        )
+                        if (isOwner) {
+                            DropdownMenuItem(
+                                text = { Text("Delete list") },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Delete,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    viewModel.deleteList()
+                                }
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -276,11 +283,11 @@ fun ListDetailScreen(
 
                 LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
                     if (!reorderableLazyListState.isAnyItemDragging) {
-                        localItems = uiState.displayItems
                         val id = draggedItemId ?: return@LaunchedEffect
                         draggedItemId = null
                         val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
                         val finalTo = localItems.indexOfFirst { it.id == id }
+                        localItems = uiState.displayItems
                         if (originalFrom >= 0 && finalTo >= 0 && originalFrom != finalTo) {
                             viewModel.reorderItems(originalFrom, finalTo)
                         }
@@ -338,20 +345,20 @@ fun ListDetailScreen(
                                         state = dismissState,
                                         enableDismissFromStartToEnd = false,
                                         backgroundContent = {
-                                            val color = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
+                                            val iconTint = if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart)
                                                 MaterialTheme.colorScheme.error
                                             else
-                                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f)
+                                                Color.White
                                             Box(
                                                 modifier = Modifier
                                                     .fillMaxSize()
-                                                    .background(color),
+                                                    .background(Color(0xFF424242)),
                                                 contentAlignment = Alignment.CenterEnd
                                             ) {
                                                 Icon(
                                                     Icons.Default.Delete,
                                                     contentDescription = null,
-                                                    tint = Color.White,
+                                                    tint = iconTint,
                                                     modifier = Modifier.padding(end = 16.dp)
                                                 )
                                             }
@@ -510,6 +517,7 @@ private fun ListItemRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
