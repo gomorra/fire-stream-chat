@@ -329,8 +329,8 @@ fun ListDetailScreen(
                                                     pendingRemoval = null
                                                 }
                                             }
-                                            true
-                                        } else false
+                                        }
+                                        false // Never persist EndToStart — item hidden via pendingRemoval filter
                                     }
                                 )
                                 Column(

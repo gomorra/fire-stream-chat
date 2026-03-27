@@ -19,6 +19,7 @@ import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import com.firestream.chat.domain.usecase.list.UpdateGenericStyleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -56,6 +57,7 @@ class ListDetailViewModelTest {
     private val deleteListUseCase = mockk<DeleteListUseCase>()
     private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>(relaxed = true)
     private val chatRepository = mockk<ChatRepository>()
+    private val listRepository = mockk<ListRepository>(relaxed = true)
     private val authSource = mockk<FirebaseAuthSource>()
     private val userRepository = mockk<UserRepository>()
 
@@ -88,6 +90,7 @@ class ListDetailViewModelTest {
             deleteListUseCase = deleteListUseCase,
             sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase,
             chatRepository = chatRepository,
+            listRepository = listRepository,
             authSource = authSource,
             userRepository = userRepository
         )

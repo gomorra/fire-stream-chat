@@ -103,6 +103,12 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
+    suspend fun removeParticipant(listId: String, userId: String) {
+        listsCollection.document(listId).update(
+            "participants", FieldValue.arrayRemove(userId)
+        ).await()
+    }
+
     suspend fun updateListTitle(listId: String, title: String) {
         listsCollection.document(listId).update(
             mapOf(

@@ -12,6 +12,7 @@ import com.firestream.chat.ui.chat.resolveChatParticipants
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.usecase.list.AddListItemUseCase
 import com.firestream.chat.domain.usecase.list.DeleteListUseCase
@@ -69,6 +70,7 @@ class ListDetailViewModel @Inject constructor(
     private val deleteListUseCase: DeleteListUseCase,
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase,
     private val chatRepository: ChatRepository,
+    private val listRepository: ListRepository,
     private val authSource: FirebaseAuthSource,
     private val userRepository: UserRepository
 ) : ViewModel() {
@@ -237,6 +239,13 @@ class ListDetailViewModel @Inject constructor(
     fun unshareFromChat(chatId: String) {
         viewModelScope.launch {
             unshareListFromChatUseCase(listId, chatId)
+                .onSuccess {
+                    val chat = _uiState.value.chats.find { it.id == chatId }
+                    val owner = _uiState.value.listData?.createdBy ?: return@onSuccess
+                    chat?.participants?.filter { it != owner }?.forEach { userId ->
+                        listRepository.removeParticipant(listId, userId)
+                    }
+                }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }

@@ -332,4 +332,13 @@ class ListRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun removeParticipant(listId: String, userId: String): Result<Unit> {
+        return try {
+            listSource.removeParticipant(listId, userId)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 }
