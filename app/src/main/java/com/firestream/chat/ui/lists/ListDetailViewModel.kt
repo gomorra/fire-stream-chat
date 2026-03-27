@@ -21,6 +21,7 @@ import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
+import com.firestream.chat.domain.usecase.list.UnshareListFromChatUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -33,7 +34,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val DEBOUNCE_MS = 30_000L
+private const val DEBOUNCE_MS = 15_000L
 
 data class ListDetailUiState(
     val listData: ListData? = null,
@@ -61,6 +62,7 @@ class ListDetailViewModel @Inject constructor(
     private val updateListTitleUseCase: UpdateListTitleUseCase,
     private val updateListTypeUseCase: UpdateListTypeUseCase,
     private val shareListToChatUseCase: ShareListToChatUseCase,
+    private val unshareListFromChatUseCase: UnshareListFromChatUseCase,
     private val deleteListUseCase: DeleteListUseCase,
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase,
     private val chatRepository: ChatRepository,
@@ -74,6 +76,7 @@ class ListDetailViewModel @Inject constructor(
     val uiState: StateFlow<ListDetailUiState> = _uiState.asStateFlow()
 
     private var pendingDiff = ListDiff()
+    private var pendingSharedChatIds: List<String> = emptyList()
     private var debounceJob: Job? = null
 
     init {
@@ -120,6 +123,9 @@ class ListDetailViewModel @Inject constructor(
 
     private fun accumulateAndDebounce(diff: ListDiff) {
         pendingDiff = ListDiff.accumulate(pendingDiff, diff)
+        // Capture sharedChatIds now — don't rely on UI state at flush time (Firestore race)
+        val currentIds = _uiState.value.listData?.sharedChatIds ?: emptyList()
+        if (currentIds.isNotEmpty()) pendingSharedChatIds = currentIds
         debounceJob?.cancel()
         debounceJob = viewModelScope.launch {
             delay(DEBOUNCE_MS)
@@ -133,9 +139,11 @@ class ListDetailViewModel @Inject constructor(
         pendingDiff = ListDiff()
 
         val listData = _uiState.value.listData ?: return
-        if (listData.sharedChatIds.isEmpty()) return
+        val chatIds = pendingSharedChatIds.ifEmpty { listData.sharedChatIds }
+        pendingSharedChatIds = emptyList()
+        if (chatIds.isEmpty()) return
 
-        sendListUpdateToChatsUseCase(listId, listData.title, listData.sharedChatIds, diff)
+        sendListUpdateToChatsUseCase(listId, listData.title, chatIds, diff)
     }
 
     fun addItem(text: String, quantity: String? = null, unit: String? = null) {
@@ -216,10 +224,31 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
-    fun deleteList() {
+    fun unshareFromChat(chatId: String) {
         viewModelScope.launch {
+            unshareListFromChatUseCase(listId, chatId)
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
+    fun deleteList() {
+        val listData = _uiState.value.listData ?: return
+        viewModelScope.launch {
+            // Flush any pending diff before deleting
+            debounceJob?.cancel()
+            flushPendingDiff()
+
             deleteListUseCase(listId)
-                .onSuccess { _uiState.value = _uiState.value.copy(isDeleted = true) }
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(isDeleted = true)
+                    // Immediately notify all shared chats about deletion
+                    if (listData.sharedChatIds.isNotEmpty()) {
+                        sendListUpdateToChatsUseCase(
+                            listId, listData.title, listData.sharedChatIds,
+                            ListDiff(deleted = true)
+                        )
+                    }
+                }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }

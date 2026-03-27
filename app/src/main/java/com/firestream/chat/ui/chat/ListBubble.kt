@@ -66,7 +66,11 @@ internal fun ListBubble(
                         bottomEnd = if (isOwnMessage) 4.dp else 16.dp
                     )
                 )
-                .clickable(onClick = onClick)
+                .then(
+                    if (listData != null || (message.listDiff != null && !message.listDiff.deleted))
+                        Modifier.clickable(onClick = onClick)
+                    else Modifier
+                )
                 .padding(12.dp)
         ) {
             val diff = message.listDiff
@@ -191,7 +195,7 @@ private fun DiffContent(
         }
 
         Text(
-            text = "List updated",
+            text = if (diff.deleted) "List deleted" else "List updated",
             style = MaterialTheme.typography.labelSmall,
             color = textColor.copy(alpha = 0.6f)
         )
@@ -231,11 +235,13 @@ private fun DiffContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Tap to view",
-                style = MaterialTheme.typography.labelSmall,
-                color = textColor.copy(alpha = 0.5f)
-            )
+            if (!diff.deleted) {
+                Text(
+                    text = "Tap to view",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.5f)
+                )
+            }
             Text(
                 text = formatTimestamp(timestamp),
                 color = textColor.copy(alpha = 0.7f),

@@ -25,4 +25,5 @@ interface ListRepository {
     suspend fun addHistoryEntry(listId: String, entry: ListHistoryEntry): Result<Unit>
     // Shared chat tracking
     suspend fun updateSharedChatIds(listId: String, chatId: String): Result<Unit>
+    suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit>
 }

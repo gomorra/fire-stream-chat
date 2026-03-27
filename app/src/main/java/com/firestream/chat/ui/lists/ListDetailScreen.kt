@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -78,7 +79,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import kotlinx.coroutines.launch
-import com.firestream.chat.ui.chat.ForwardChatPicker
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -145,7 +145,8 @@ fun ListDetailScreen(
                             onValueChange = { titleEditValue = it },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .focusRequester(titleFocusRequester),
+                                .focusRequester(titleFocusRequester)
+                                .onFocusChanged { if (!it.isFocused && isEditingTitle) submitTitleEdit() },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.titleLarge.copy(
                                 color = MaterialTheme.colorScheme.onPrimary
@@ -183,7 +184,7 @@ fun ListDetailScreen(
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
                         DropdownMenuItem(
-                            text = { Text("Share to chat") },
+                            text = { Text("Manage sharing") },
                             leadingIcon = {
                                 Icon(Icons.Default.Share, contentDescription = null)
                             },
@@ -374,15 +375,14 @@ fun ListDetailScreen(
     }
 
     if (showSharePicker) {
-        ForwardChatPicker(
+        ListShareSheet(
             chats = uiState.chats,
+            sharedChatIds = uiState.listData?.sharedChatIds ?: emptyList(),
             currentUserId = uiState.currentUserId,
-            onDismiss = { showSharePicker = false },
-            onForward = { chatId, _ ->
-                viewModel.shareToChat(chatId)
-                showSharePicker = false
-            },
-            users = uiState.chatParticipants
+            chatParticipants = uiState.chatParticipants,
+            onShare = { chatId -> viewModel.shareToChat(chatId) },
+            onUnshare = { chatId -> viewModel.unshareFromChat(chatId) },
+            onDismiss = { showSharePicker = false }
         )
     }
 }
@@ -451,7 +451,8 @@ private fun ListItemRow(
                     onValueChange = { editValue = it },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .focusRequester(editFocusRequester),
+                        .focusRequester(editFocusRequester)
+                        .onFocusChanged { if (!it.isFocused && isEditing) submitEdit() },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = LocalContentColor.current

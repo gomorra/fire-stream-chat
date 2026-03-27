@@ -67,7 +67,15 @@ class ListRepositoryImpl @Inject constructor(
             try {
                 listSource.observeList(listId).collectLatest { listData ->
                     if (listData != null) {
-                        listDao.insert(ListEntity.fromDomain(listData))
+                        // Preserve local sharedChatIds if Firestore doc doesn't yet reflect them
+                        // (Firestore propagation delay can cause the snapshot to arrive before
+                        // the arrayUnion update, wiping local sharedChatIds and breaking the debounce flush)
+                        val mergedSharedChatIds = if (listData.sharedChatIds.isEmpty()) {
+                            listDao.getById(listId)?.toDomain()?.sharedChatIds ?: emptyList()
+                        } else {
+                            listData.sharedChatIds
+                        }
+                        listDao.insert(ListEntity.fromDomain(listData.copy(sharedChatIds = mergedSharedChatIds)))
                     } else {
                         listDao.delete(listId)
                     }
@@ -198,7 +206,6 @@ class ListRepositoryImpl @Inject constructor(
     override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> {
         return try {
             listSource.updateListItems(listId, items)
-            recordHistory(listId, HistoryAction.REORDERED)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -293,6 +300,21 @@ class ListRepositoryImpl @Inject constructor(
                     org.json.JSONArray(updatedIds).toString(),
                     now
                 )
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit> {
+        return try {
+            listSource.removeSharedChatId(listId, chatId)
+            val entity = listDao.getById(listId)
+            if (entity != null) {
+                val arr = org.json.JSONArray(entity.sharedChatIds)
+                val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
+                listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), System.currentTimeMillis())
             }
             Result.success(Unit)
         } catch (e: Exception) {
