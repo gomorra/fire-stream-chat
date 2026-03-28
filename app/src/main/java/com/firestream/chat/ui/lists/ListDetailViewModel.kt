@@ -14,20 +14,7 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.domain.usecase.list.AddListItemUseCase
-import com.firestream.chat.domain.usecase.list.DeleteListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListUseCase
-import com.firestream.chat.domain.usecase.list.ReorderListItemsUseCase
-import com.firestream.chat.domain.usecase.list.RemoveListItemUseCase
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
-import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
-import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
-import com.firestream.chat.domain.usecase.list.UnshareListFromChatUseCase
-import com.firestream.chat.domain.usecase.list.ClearCheckedItemsUseCase
-import com.firestream.chat.domain.usecase.list.UpdateGenericStyleUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -58,19 +45,6 @@ data class ListDetailUiState(
 @HiltViewModel
 class ListDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val observeListUseCase: ObserveListUseCase,
-    private val addListItemUseCase: AddListItemUseCase,
-    private val removeListItemUseCase: RemoveListItemUseCase,
-    private val toggleListItemUseCase: ToggleListItemUseCase,
-    private val updateListItemUseCase: UpdateListItemUseCase,
-    private val reorderListItemsUseCase: ReorderListItemsUseCase,
-    private val updateListTitleUseCase: UpdateListTitleUseCase,
-    private val updateListTypeUseCase: UpdateListTypeUseCase,
-    private val updateGenericStyleUseCase: UpdateGenericStyleUseCase,
-    private val shareListToChatUseCase: ShareListToChatUseCase,
-    private val unshareListFromChatUseCase: UnshareListFromChatUseCase,
-    private val deleteListUseCase: DeleteListUseCase,
-    private val clearCheckedItemsUseCase: ClearCheckedItemsUseCase,
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase,
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
@@ -114,7 +88,7 @@ class ListDetailViewModel @Inject constructor(
 
     private fun observeList() {
         viewModelScope.launch {
-            observeListUseCase(listId)
+            listRepository.observeList(listId)
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
@@ -159,7 +133,7 @@ class ListDetailViewModel @Inject constructor(
     fun addItem(text: String, quantity: String? = null, unit: String? = null) {
         if (text.isBlank()) return
         viewModelScope.launch {
-            addListItemUseCase(listId, text, quantity, unit)
+            listRepository.addItem(listId, text, quantity, unit)
                 .onSuccess { accumulateAndDebounce(ListDiff(added = listOf(text))) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -168,7 +142,7 @@ class ListDetailViewModel @Inject constructor(
     fun removeItem(itemId: String) {
         val itemText = _uiState.value.listData?.items?.find { it.id == itemId }?.text ?: itemId
         viewModelScope.launch {
-            removeListItemUseCase(listId, itemId)
+            listRepository.removeItem(listId, itemId)
                 .onSuccess { accumulateAndDebounce(ListDiff(removed = listOf(itemText))) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -177,7 +151,7 @@ class ListDetailViewModel @Inject constructor(
     fun clearCheckedItems() {
         if (_uiState.value.listData?.items?.none { it.isChecked } == true) return
         viewModelScope.launch {
-            clearCheckedItemsUseCase(listId)
+            listRepository.clearCheckedItems(listId)
                 .onSuccess { clearedTexts ->
                     if (clearedTexts.isNotEmpty()) {
                         accumulateAndDebounce(ListDiff(removed = clearedTexts))
@@ -190,7 +164,7 @@ class ListDetailViewModel @Inject constructor(
     fun toggleItem(itemId: String) {
         val item = _uiState.value.listData?.items?.find { it.id == itemId }
         viewModelScope.launch {
-            toggleListItemUseCase(listId, itemId)
+            listRepository.toggleItemChecked(listId, itemId)
                 .onSuccess {
                     if (item != null) {
                         val diff = if (item.isChecked) {
@@ -207,7 +181,7 @@ class ListDetailViewModel @Inject constructor(
 
     fun updateItem(itemId: String, text: String, quantity: String? = null, unit: String? = null) {
         viewModelScope.launch {
-            updateListItemUseCase(listId, itemId, text, quantity, unit)
+            listRepository.updateItem(listId, itemId, text, quantity, unit)
                 .onSuccess { accumulateAndDebounce(ListDiff(edited = listOf(text))) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -220,14 +194,14 @@ class ListDetailViewModel @Inject constructor(
             add(toIndex, removeAt(fromIndex))
         }
         viewModelScope.launch {
-            reorderListItemsUseCase(listId, reordered)
+            listRepository.reorderItems(listId, reordered)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 
     fun updateTitle(title: String) {
         viewModelScope.launch {
-            updateListTitleUseCase(listId, title)
+            listRepository.updateListTitle(listId, title)
                 .onSuccess { accumulateAndDebounce(ListDiff(titleChanged = title)) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -235,21 +209,21 @@ class ListDetailViewModel @Inject constructor(
 
     fun updateType(type: ListType) {
         viewModelScope.launch {
-            updateListTypeUseCase(listId, type)
+            listRepository.updateListType(listId, type)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 
     fun updateGenericStyle(style: GenericListStyle) {
         viewModelScope.launch {
-            updateGenericStyleUseCase(listId, style)
+            listRepository.updateGenericStyle(listId, style)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 
     fun shareToChat(chatId: String) {
         viewModelScope.launch {
-            shareListToChatUseCase(listId, chatId)
+            listRepository.shareListToChat(listId, chatId)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
@@ -262,7 +236,7 @@ class ListDetailViewModel @Inject constructor(
                 listId, listData.title, listOf(chatId),
                 ListDiff(unshared = true)
             )
-            unshareListFromChatUseCase(listId, chatId)
+            listRepository.unshareListFromChat(listId, chatId)
                 .onSuccess {
                     val chat = _uiState.value.chats.find { it.id == chatId }
                     val owner = listData.createdBy
@@ -280,7 +254,7 @@ class ListDetailViewModel @Inject constructor(
             debounceJob?.cancel()
             flushPendingDiff()
 
-            deleteListUseCase(listId)
+            listRepository.deleteList(listId)
                 .onSuccess {
                     // Send notification before setting isDeleted — viewModelScope must stay alive
                     if (listData.sharedChatIds.isNotEmpty()) {

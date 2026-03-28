@@ -2,16 +2,12 @@ package com.firestream.chat.ui.lists
 
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.list.CreateListUseCase
-import com.firestream.chat.domain.usecase.list.DeleteListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
-import com.firestream.chat.domain.usecase.list.ObserveMyListsUseCase
-import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -34,12 +30,7 @@ import org.junit.Test
 class ListsViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    private val observeMyListsUseCase = mockk<ObserveMyListsUseCase>()
-    private val createListUseCase = mockk<CreateListUseCase>()
-    private val shareListToChatUseCase = mockk<ShareListToChatUseCase>()
-    private val deleteListUseCase = mockk<DeleteListUseCase>()
-    private val updateListTitleUseCase = mockk<UpdateListTitleUseCase>()
-    private val observeListHistoryUseCase = mockk<ObserveListHistoryUseCase>()
+    private val listRepository = mockk<ListRepository>()
     private val chatRepository = mockk<ChatRepository>()
     private val authSource = mockk<FirebaseAuthSource>()
     private val userRepository = mockk<UserRepository>()
@@ -51,6 +42,7 @@ class ListsViewModelTest {
         every { authSource.currentUserId } returns "user1"
         every { chatRepository.getChats() } returns flowOf(emptyList())
         every { preferencesDataStore.listSortOptionFlow } returns MutableStateFlow("MODIFIED")
+        every { preferencesDataStore.pinnedListIdsFlow } returns MutableStateFlow(emptySet())
     }
 
     @After
@@ -59,12 +51,7 @@ class ListsViewModelTest {
     }
 
     private fun createViewModel(): ListsViewModel = ListsViewModel(
-        observeMyListsUseCase = observeMyListsUseCase,
-        createListUseCase = createListUseCase,
-        shareListToChatUseCase = shareListToChatUseCase,
-        deleteListUseCase = deleteListUseCase,
-        updateListTitleUseCase = updateListTitleUseCase,
-        observeListHistoryUseCase = observeListHistoryUseCase,
+        listRepository = listRepository,
         chatRepository = chatRepository,
         authSource = authSource,
         userRepository = userRepository,
@@ -77,7 +64,7 @@ class ListsViewModelTest {
             ListData(id = "1", title = "Groceries", type = ListType.SHOPPING),
             ListData(id = "2", title = "Tasks", type = ListType.CHECKLIST)
         )
-        every { observeMyListsUseCase() } returns flowOf(lists)
+        every { listRepository.observeMyLists() } returns flowOf(lists)
 
         val viewModel = createViewModel()
         runCurrent()
@@ -89,10 +76,10 @@ class ListsViewModelTest {
     }
 
     @Test
-    fun `createList calls use case and invokes callback`() = runTest {
-        every { observeMyListsUseCase() } returns flowOf(emptyList())
+    fun `createList calls repository and invokes callback`() = runTest {
+        every { listRepository.observeMyLists() } returns flowOf(emptyList())
         val created = ListData(id = "new1", title = "New List", type = ListType.GENERIC)
-        coEvery { createListUseCase("New List", ListType.GENERIC, null) } returns Result.success(created)
+        coEvery { listRepository.createList("New List", ListType.GENERIC, genericStyle = GenericListStyle.BULLET) } returns Result.success(created)
 
         val viewModel = createViewModel()
         runCurrent()
@@ -106,8 +93,8 @@ class ListsViewModelTest {
 
     @Test
     fun `createList failure sets error`() = runTest {
-        every { observeMyListsUseCase() } returns flowOf(emptyList())
-        coEvery { createListUseCase(any(), any(), any()) } returns Result.failure(Exception("Oops"))
+        every { listRepository.observeMyLists() } returns flowOf(emptyList())
+        coEvery { listRepository.createList(any(), any(), any(), any()) } returns Result.failure(Exception("Oops"))
 
         val viewModel = createViewModel()
         runCurrent()

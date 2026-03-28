@@ -11,13 +11,8 @@ import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.list.CreateListUseCase
-import com.firestream.chat.domain.usecase.list.DeleteListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListHistoryUseCase
-import com.firestream.chat.domain.usecase.list.ObserveMyListsUseCase
-import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.firestream.chat.ui.chat.resolveChatParticipants
 import kotlinx.coroutines.Job
@@ -59,12 +54,7 @@ data class ListsUiState(
 
 @HiltViewModel
 class ListsViewModel @Inject constructor(
-    private val observeMyListsUseCase: ObserveMyListsUseCase,
-    private val createListUseCase: CreateListUseCase,
-    private val shareListToChatUseCase: ShareListToChatUseCase,
-    private val deleteListUseCase: DeleteListUseCase,
-    private val updateListTitleUseCase: UpdateListTitleUseCase,
-    private val observeListHistoryUseCase: ObserveListHistoryUseCase,
+    private val listRepository: ListRepository,
     private val chatRepository: ChatRepository,
     private val authSource: FirebaseAuthSource,
     private val userRepository: UserRepository,
@@ -167,7 +157,7 @@ class ListsViewModel @Inject constructor(
 
     private fun observeLists() {
         viewModelScope.launch {
-            observeMyListsUseCase()
+            listRepository.observeMyLists()
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
@@ -216,7 +206,7 @@ class ListsViewModel @Inject constructor(
 
     fun createList(title: String, type: ListType, genericStyle: GenericListStyle = GenericListStyle.BULLET, onCreated: (String) -> Unit) {
         viewModelScope.launch {
-            createListUseCase(title, type, genericStyle = genericStyle)
+            listRepository.createList(title, type, genericStyle = genericStyle)
                 .onSuccess { listData -> onCreated(listData.id) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -224,21 +214,21 @@ class ListsViewModel @Inject constructor(
 
     fun shareListToChat(listId: String, chatId: String) {
         viewModelScope.launch {
-            shareListToChatUseCase(listId, chatId)
+            listRepository.shareListToChat(listId, chatId)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 
     fun deleteList(listId: String) {
         viewModelScope.launch {
-            deleteListUseCase(listId)
+            listRepository.deleteList(listId)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 
     fun renameList(listId: String, title: String) {
         viewModelScope.launch {
-            updateListTitleUseCase(listId, title)
+            listRepository.updateListTitle(listId, title)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
@@ -246,7 +236,7 @@ class ListsViewModel @Inject constructor(
     fun loadHistory(listId: String) {
         historyJob?.cancel()
         historyJob = viewModelScope.launch {
-            observeListHistoryUseCase(listId)
+            listRepository.observeHistory(listId)
                 .catch { }
                 .collect { history ->
                     _uiState.value = _uiState.value.copy(selectedListHistory = history)

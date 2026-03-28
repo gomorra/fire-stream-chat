@@ -4,8 +4,6 @@ import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.User
-import com.firestream.chat.domain.usecase.auth.GetCurrentUserUseCase
-import com.firestream.chat.domain.usecase.auth.VerifyOtpUseCase
 import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthOptions
@@ -32,8 +30,6 @@ data class AuthUiState(
 
 @HiltViewModel
 class AuthViewModel @Inject constructor(
-    private val verifyOtpUseCase: VerifyOtpUseCase,
-    private val getCurrentUserUseCase: GetCurrentUserUseCase,
     private val authRepository: AuthRepository,
     private val firebaseAuth: FirebaseAuth
 ) : ViewModel() {
@@ -47,9 +43,9 @@ class AuthViewModel @Inject constructor(
 
     private fun checkLoginStatus() {
         viewModelScope.launch {
-            if (getCurrentUserUseCase.isLoggedIn) {
+            if (authRepository.isLoggedIn) {
                 try {
-                    val result = withTimeout(5_000) { getCurrentUserUseCase() }
+                    val result = withTimeout(5_000) { authRepository.getCurrentUser() }
                     result.onSuccess { user ->
                         if (user != null && user.displayName.isNotEmpty()) {
                             _uiState.value = _uiState.value.copy(isLoggedIn = true, isCheckingAuth = false, user = user)
@@ -105,7 +101,7 @@ class AuthViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
-            verifyOtpUseCase(verificationId, otp)
+            authRepository.verifyOtp(verificationId, otp)
                 .onSuccess { user ->
                     val isNew = user.displayName.isEmpty()
                     _uiState.value = _uiState.value.copy(

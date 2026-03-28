@@ -4,21 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
-import com.firestream.chat.domain.usecase.list.AddListItemUseCase
-import com.firestream.chat.domain.usecase.list.ClearCheckedItemsUseCase
-import com.firestream.chat.domain.usecase.list.DeleteListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListUseCase
-import com.firestream.chat.domain.usecase.list.ReorderListItemsUseCase
-import com.firestream.chat.domain.usecase.list.RemoveListItemUseCase
-import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
-import com.firestream.chat.domain.usecase.list.UnshareListFromChatUseCase
-import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
-import com.firestream.chat.domain.usecase.list.UpdateGenericStyleUseCase
-import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
+import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -44,20 +31,7 @@ import org.junit.Test
 class ListDetailViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    private val observeListUseCase = mockk<ObserveListUseCase>()
-    private val addListItemUseCase = mockk<AddListItemUseCase>()
-    private val removeListItemUseCase = mockk<RemoveListItemUseCase>()
-    private val toggleListItemUseCase = mockk<ToggleListItemUseCase>()
-    private val updateListItemUseCase = mockk<UpdateListItemUseCase>()
-    private val reorderListItemsUseCase = mockk<ReorderListItemsUseCase>()
-    private val updateListTitleUseCase = mockk<UpdateListTitleUseCase>()
-    private val updateListTypeUseCase = mockk<UpdateListTypeUseCase>()
-    private val updateGenericStyleUseCase = mockk<UpdateGenericStyleUseCase>(relaxed = true)
-    private val shareListToChatUseCase = mockk<ShareListToChatUseCase>()
-    private val unshareListFromChatUseCase = mockk<UnshareListFromChatUseCase>()
-    private val deleteListUseCase = mockk<DeleteListUseCase>()
     private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>(relaxed = true)
-    private val clearCheckedItemsUseCase = mockk<ClearCheckedItemsUseCase>(relaxed = true)
     private val chatRepository = mockk<ChatRepository>()
     private val listRepository = mockk<ListRepository>(relaxed = true)
     private val authSource = mockk<FirebaseAuthSource>()
@@ -78,20 +52,7 @@ class ListDetailViewModelTest {
     private fun buildViewModel(): ListDetailViewModel {
         return ListDetailViewModel(
             savedStateHandle = SavedStateHandle(mapOf("listId" to "list1")),
-            observeListUseCase = observeListUseCase,
-            addListItemUseCase = addListItemUseCase,
-            removeListItemUseCase = removeListItemUseCase,
-            toggleListItemUseCase = toggleListItemUseCase,
-            updateListItemUseCase = updateListItemUseCase,
-            reorderListItemsUseCase = reorderListItemsUseCase,
-            updateListTitleUseCase = updateListTitleUseCase,
-            updateListTypeUseCase = updateListTypeUseCase,
-            updateGenericStyleUseCase = updateGenericStyleUseCase,
-            shareListToChatUseCase = shareListToChatUseCase,
-            unshareListFromChatUseCase = unshareListFromChatUseCase,
-            deleteListUseCase = deleteListUseCase,
             sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase,
-            clearCheckedItemsUseCase = clearCheckedItemsUseCase,
             chatRepository = chatRepository,
             listRepository = listRepository,
             authSource = authSource,
@@ -107,7 +68,7 @@ class ListDetailViewModelTest {
             type = ListType.SHOPPING,
             items = listOf(ListItem(id = "i1", text = "Milk"))
         )
-        every { observeListUseCase("list1") } returns flowOf(listData)
+        every { listRepository.observeList("list1") } returns flowOf(listData)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -119,9 +80,9 @@ class ListDetailViewModelTest {
     }
 
     @Test
-    fun `addItem calls use case`() = runTest {
-        every { observeListUseCase("list1") } returns flowOf(ListData(id = "list1"))
-        coEvery { addListItemUseCase("list1", "Eggs", null, null) } returns Result.success(Unit)
+    fun `addItem calls repository`() = runTest {
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
+        coEvery { listRepository.addItem("list1", "Eggs", null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -129,12 +90,12 @@ class ListDetailViewModelTest {
         viewModel.addItem("Eggs")
         runCurrent()
 
-        coVerify(exactly = 1) { addListItemUseCase("list1", "Eggs", null, null) }
+        coVerify(exactly = 1) { listRepository.addItem("list1", "Eggs", null, null) }
     }
 
     @Test
     fun `addItem ignores blank text`() = runTest {
-        every { observeListUseCase("list1") } returns flowOf(ListData(id = "list1"))
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -142,13 +103,13 @@ class ListDetailViewModelTest {
         viewModel.addItem("   ")
         runCurrent()
 
-        coVerify(exactly = 0) { addListItemUseCase(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { listRepository.addItem(any(), any(), any(), any()) }
     }
 
     @Test
-    fun `toggleItem calls use case`() = runTest {
-        every { observeListUseCase("list1") } returns flowOf(ListData(id = "list1"))
-        coEvery { toggleListItemUseCase("list1", "i1") } returns Result.success(Unit)
+    fun `toggleItem calls repository`() = runTest {
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
+        coEvery { listRepository.toggleItemChecked("list1", "i1") } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -156,13 +117,13 @@ class ListDetailViewModelTest {
         viewModel.toggleItem("i1")
         runCurrent()
 
-        coVerify(exactly = 1) { toggleListItemUseCase("list1", "i1") }
+        coVerify(exactly = 1) { listRepository.toggleItemChecked("list1", "i1") }
     }
 
     @Test
-    fun `deleteList calls use case and sets isDeleted`() = runTest {
-        every { observeListUseCase("list1") } returns flowOf(ListData(id = "list1"))
-        coEvery { deleteListUseCase("list1") } returns Result.success(Unit)
+    fun `deleteList calls repository and sets isDeleted`() = runTest {
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
+        coEvery { listRepository.deleteList("list1") } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -171,6 +132,6 @@ class ListDetailViewModelTest {
         runCurrent()
 
         assert(viewModel.uiState.value.isDeleted)
-        coVerify(exactly = 1) { deleteListUseCase("list1") }
+        coVerify(exactly = 1) { listRepository.deleteList("list1") }
     }
 }
