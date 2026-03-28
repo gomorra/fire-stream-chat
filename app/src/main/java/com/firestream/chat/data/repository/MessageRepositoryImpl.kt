@@ -776,6 +776,33 @@ class MessageRepositoryImpl @Inject constructor(
         return try {
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
             val timestamp = System.currentTimeMillis()
+            val content = "\uD83D\uDCCB List: $listTitle"
+
+            // Merge into the last message if it's a diff bubble for the same list from this user
+            if (listDiff != null && !listDiff.deleted && !listDiff.unshared) {
+                val lastEntity = messageDao.getLastMessageByChatId(chatId)
+                if (lastEntity != null) {
+                    val lastMessage = lastEntity.toDomain()
+                    if (lastMessage.type == MessageType.LIST
+                        && lastMessage.listId == listId
+                        && lastMessage.listDiff != null
+                        && !lastMessage.listDiff.deleted
+                        && !lastMessage.listDiff.unshared
+                        && lastMessage.senderId == senderId
+                    ) {
+                        val mergedDiff = ListDiff.accumulate(lastMessage.listDiff, listDiff)
+                        messageSource.updateListMessageDiff(chatId, lastMessage.id, content, mergedDiff.toMap(), timestamp)
+                        val updatedMessage = lastMessage.copy(
+                            content = content,
+                            listDiff = mergedDiff,
+                            timestamp = timestamp,
+                            editedAt = timestamp
+                        )
+                        messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+                        return Result.success(updatedMessage)
+                    }
+                }
+            }
 
             val remoteId = messageSource.sendListMessage(
                 chatId = chatId,
@@ -790,7 +817,7 @@ class MessageRepositoryImpl @Inject constructor(
                 id = remoteId,
                 chatId = chatId,
                 senderId = senderId,
-                content = "\uD83D\uDCCB List: $listTitle",
+                content = content,
                 type = MessageType.LIST,
                 status = MessageStatus.SENT,
                 timestamp = timestamp,

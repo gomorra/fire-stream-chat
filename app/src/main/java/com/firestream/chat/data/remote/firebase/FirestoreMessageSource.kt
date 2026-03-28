@@ -376,6 +376,30 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
+    suspend fun updateListMessageDiff(
+        chatId: String,
+        messageId: String,
+        content: String,
+        listDiff: Map<String, Any?>,
+        timestamp: Long
+    ) {
+        firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update(mapOf(
+                "content" to content,
+                "listDiff" to listDiff,
+                "timestamp" to timestamp,
+                "editedAt" to timestamp
+            )).await()
+
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to content,
+                "lastMessageTimestamp" to timestamp
+            )
+        ).await()
+    }
+
     suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean) {
         firestore
             .collection("chats").document(chatId)
