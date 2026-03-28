@@ -55,6 +55,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -107,6 +108,7 @@ data class ChatUiState(
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
+    val displayNameToUserId: Map<String, String> get() = participantNameMap.entries.associate { (k, v) -> v to k }
 }
 
 @HiltViewModel
@@ -161,11 +163,9 @@ class ChatViewModel @Inject constructor(
     private var searchJob: Job? = null
     private var screenVisible = false
     private var allGroupParticipants: List<User> = emptyList()
-    // Cached inverse of participantNameMap (displayName -> userId) for mention extraction on send
-    private var displayNameToUserId: Map<String, String> = emptyMap()
 
     init {
-        _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
+        _uiState.update { it.copy(currentUserId = authRepository.currentUserId ?: "") }
         loadMessages()
         observeTyping()
         loadAvailableChats()
@@ -183,19 +183,21 @@ class ChatViewModel @Inject constructor(
                     val isGroup = chat.type == ChatType.GROUP
                     val isBroadcast = chat.type == ChatType.BROADCAST
                     val broadcastRecipientIds = if (isBroadcast) chat.participants.filter { it != uid } else emptyList()
-                    _uiState.value = _uiState.value.copy(
-                        isGroupChat = isGroup,
-                        // Only overwrite chatName from the chat document for named chats
-                        // (groups/broadcasts). For individual chats chat.name is null and
-                        // overwriting here would race with observeRecipient() which sets the
-                        // recipient's displayName as chatName from a faster snapshot listener.
-                        chatName = if (isGroup || isBroadcast) chat.name else _uiState.value.chatName,
-                        chatAvatarUrl = chat.avatarUrl,
-                        canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
-                        isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
-                        isBroadcast = isBroadcast,
-                        broadcastRecipientIds = broadcastRecipientIds
-                    )
+                    _uiState.update {
+                        it.copy(
+                            isGroupChat = isGroup,
+                            // Only overwrite chatName from the chat document for named chats
+                            // (groups/broadcasts). For individual chats chat.name is null and
+                            // overwriting here would race with observeRecipient() which sets the
+                            // recipient's displayName as chatName from a faster snapshot listener.
+                            chatName = if (isGroup || isBroadcast) chat.name else it.chatName,
+                            chatAvatarUrl = chat.avatarUrl,
+                            canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
+                            isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
+                            isBroadcast = isBroadcast,
+                            broadcastRecipientIds = broadcastRecipientIds
+                        )
+                    }
                     if (isGroup) loadGroupParticipants(chat.participants)
                 }
         }
@@ -209,8 +211,7 @@ class ChatViewModel @Inject constructor(
                 .filterNotNull()
             val nameMap = users.associate { it.uid to it.displayName }
             allGroupParticipants = users
-            displayNameToUserId = nameMap.entries.associate { it.value to it.key }
-            _uiState.value = _uiState.value.copy(participantNameMap = nameMap)
+            _uiState.update { it.copy(participantNameMap = nameMap) }
         }
     }
 
@@ -219,12 +220,13 @@ class ChatViewModel @Inject constructor(
             userRepository.observeUser(recipientId)
                 .catch { /* non-fatal */ }
                 .collect { user ->
-                    _uiState.value = _uiState.value.copy(
-                        chatName = user.displayName.takeIf { it.isNotBlank() } ?: _uiState.value.chatName,
-                        recipientAvatarUrl = user.avatarUrl,
-                        isRecipientOnline = user.isOnline
-                    )
-                    // Reuse this single listener for read receipts instead of a duplicate observeUser call
+                    _uiState.update {
+                        it.copy(
+                            chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.chatName,
+                            recipientAvatarUrl = user.avatarUrl,
+                            isRecipientOnline = user.isOnline
+                        )
+                    }
                     updateReadReceiptsAllowed(recipientEnabled = user.readReceiptsEnabled)
                 }
         }
@@ -242,8 +244,6 @@ class ChatViewModel @Inject constructor(
                 updateReadReceiptsAllowed(localEnabled = localEnabled)
             }
         }
-        // Note: recipient's readReceiptsEnabled is handled inside observeRecipient() to avoid
-        // opening a second Firestore listener on the same user document.
     }
 
     private var localReadReceipts: Boolean = true
@@ -256,7 +256,7 @@ class ChatViewModel @Inject constructor(
         localReadReceipts = localEnabled
         recipientReadReceipts = recipientEnabled
         val allowed = localEnabled && recipientEnabled
-        _uiState.value = _uiState.value.copy(readReceiptsAllowed = allowed)
+        _uiState.update { it.copy(readReceiptsAllowed = allowed) }
     }
 
     fun setScreenVisible(visible: Boolean) {
@@ -279,17 +279,16 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             getMessagesUseCase(chatId)
                 .catch { e ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = e.message
-                    )
+                    _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
                 .collectLatest { messages ->
-                    _uiState.value = _uiState.value.copy(
-                        messages = messages,
-                        isLoading = false,
-                        pinnedMessages = messages.filter { it.isPinned }
-                    )
+                    _uiState.update {
+                        it.copy(
+                            messages = messages,
+                            isLoading = false,
+                            pinnedMessages = messages.filter { msg -> msg.isPinned }
+                        )
+                    }
                     // Mark incoming messages as read
                     markIncomingMessagesAsRead(messages)
                     // Fetch link previews for text messages with URLs
@@ -347,9 +346,7 @@ class ChatViewModel @Inject constructor(
                 if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
                 viewModelScope.launch {
                     val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
-                    _uiState.value = _uiState.value.copy(
-                        linkPreviews = _uiState.value.linkPreviews + (url to preview)
-                    )
+                    _uiState.update { it.copy(linkPreviews = it.linkPreviews + (url to preview)) }
                 }
             }
         }
@@ -360,8 +357,9 @@ class ChatViewModel @Inject constructor(
             chatRepository.observeTyping(chatId)
                 .catch { /* ignore typing errors */ }
                 .collect { typingIds ->
-                    val othersTyping = typingIds.filter { it != _uiState.value.currentUserId }
-                    _uiState.value = _uiState.value.copy(typingUserIds = othersTyping)
+                    _uiState.update { state ->
+                        state.copy(typingUserIds = typingIds.filter { it != state.currentUserId })
+                    }
                 }
         }
     }
@@ -386,17 +384,17 @@ class ChatViewModel @Inject constructor(
         val state = _uiState.value
         viewModelScope.launch {
             chatRepository.setTyping(chatId, false)
-            _uiState.value = _uiState.value.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList())
+            _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList()) }
             if (state.isBroadcast) {
                 sendBroadcastMessageUseCase(chatId, content, state.broadcastRecipientIds)
-                    .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
-                    .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
             } else {
                 val replyToId = state.replyToMessage?.id
-                val mentions = if (state.isGroupChat) parseMentionsUseCase(content, displayNameToUserId) else emptyList()
+                val mentions = if (state.isGroupChat) parseMentionsUseCase(content, state.displayNameToUserId) else emptyList()
                 sendMessageUseCase(chatId, content, recipientId, replyToId, mentions, emojiSizes)
-                    .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
-                    .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
             }
         }
     }
@@ -409,9 +407,9 @@ class ChatViewModel @Inject constructor(
             val candidates = allGroupParticipants.filter {
                 query.isEmpty() || it.displayName.contains(query, ignoreCase = true)
             }.take(8)
-            _uiState.value = _uiState.value.copy(mentionCandidates = candidates)
+            _uiState.update { it.copy(mentionCandidates = candidates) }
         } else {
-            _uiState.value = _uiState.value.copy(mentionCandidates = emptyList())
+            _uiState.update { it.copy(mentionCandidates = emptyList()) }
         }
     }
 
@@ -423,7 +421,7 @@ class ChatViewModel @Inject constructor(
         } else {
             currentText
         }
-        _uiState.value = _uiState.value.copy(mentionCandidates = emptyList())
+        _uiState.update { it.copy(mentionCandidates = emptyList()) }
         return newText
     }
 
@@ -437,44 +435,44 @@ class ChatViewModel @Inject constructor(
     fun deleteMessage(messageId: String) {
         viewModelScope.launch {
             deleteMessageUseCase(chatId, messageId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
     fun startEdit(message: Message) {
-        _uiState.value = _uiState.value.copy(editingMessage = message)
+        _uiState.update { it.copy(editingMessage = message) }
     }
 
     fun cancelEdit() {
-        _uiState.value = _uiState.value.copy(editingMessage = null)
+        _uiState.update { it.copy(editingMessage = null) }
     }
 
     fun confirmEdit(newContent: String) {
         val msg = _uiState.value.editingMessage ?: return
         if (newContent.isBlank()) return
-        _uiState.value = _uiState.value.copy(editingMessage = null)
+        _uiState.update { it.copy(editingMessage = null) }
         viewModelScope.launch {
             editMessageUseCase(chatId, msg.id, newContent)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
     fun sendMediaMessage(uri: Uri, mimeType: String) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSending = true)
+            _uiState.update { it.copy(isSending = true) }
             sendMediaMessageUseCase(chatId, uri, mimeType, recipientId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
-                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
 
     // Phase 1: reply-to
     fun setReplyTo(message: Message) {
-        _uiState.value = _uiState.value.copy(replyToMessage = message)
+        _uiState.update { it.copy(replyToMessage = message) }
     }
 
     fun clearReplyTo() {
-        _uiState.value = _uiState.value.copy(replyToMessage = null)
+        _uiState.update { it.copy(replyToMessage = null) }
     }
 
     // Phase 1: reactions
@@ -494,17 +492,17 @@ class ChatViewModel @Inject constructor(
     fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) {
         viewModelScope.launch {
             forwardMessageUseCase(message, targetChatId, targetRecipientId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
     // Phase 1: voice messages
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSending = true)
+            _uiState.update { it.copy(isSending = true) }
             sendVoiceMessageUseCase(chatId, uri, recipientId, durationSeconds)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
-                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
 
@@ -512,7 +510,7 @@ class ChatViewModel @Inject constructor(
     fun toggleStar(message: Message) {
         viewModelScope.launch {
             starMessageUseCase(message.id, !message.isStarred)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
@@ -522,7 +520,7 @@ class ChatViewModel @Inject constructor(
             try {
                 val chats = getChatsUseCase().first()
                 val participants = chats.resolveChatParticipants(_uiState.value.currentUserId, userRepository)
-                _uiState.value = _uiState.value.copy(availableChats = chats, chatParticipants = participants)
+                _uiState.update { it.copy(availableChats = chats, chatParticipants = participants) }
             } catch (_: Exception) {
                 // Non-critical — forward picker will show empty
             }
@@ -531,63 +529,67 @@ class ChatViewModel @Inject constructor(
 
     // In-chat search with debounce
     fun onSearchQueryChange(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query)
+        _uiState.update { it.copy(searchQuery = query) }
         searchJob?.cancel()
         if (query.isBlank()) {
-            _uiState.value = _uiState.value.copy(searchResults = emptyList())
+            _uiState.update { it.copy(searchResults = emptyList()) }
             return
         }
         searchJob = viewModelScope.launch {
             delay(300)
             try {
                 val results = searchMessagesUseCase(query, chatId)
-                _uiState.value = _uiState.value.copy(searchResults = results)
+                _uiState.update { it.copy(searchResults = results) }
             } catch (_: Exception) {
-                _uiState.value = _uiState.value.copy(searchResults = emptyList())
+                _uiState.update { it.copy(searchResults = emptyList()) }
             }
         }
     }
 
     fun toggleSearch() {
-        val newActive = !_uiState.value.isSearchActive
-        _uiState.value = _uiState.value.copy(
-            isSearchActive = newActive,
-            searchQuery = if (newActive) _uiState.value.searchQuery else "",
-            searchResults = if (newActive) _uiState.value.searchResults else emptyList()
-        )
-        if (!newActive) searchJob?.cancel()
+        _uiState.update {
+            val newActive = !it.isSearchActive
+            it.copy(
+                isSearchActive = newActive,
+                searchQuery = if (newActive) it.searchQuery else "",
+                searchResults = if (newActive) it.searchResults else emptyList()
+            )
+        }
+        if (!_uiState.value.isSearchActive) searchJob?.cancel()
     }
 
     fun clearSearch() {
         searchJob?.cancel()
-        _uiState.value = _uiState.value.copy(
-            isSearchActive = false,
-            searchQuery = "",
-            searchResults = emptyList()
-        )
+        _uiState.update {
+            it.copy(
+                isSearchActive = false,
+                searchQuery = "",
+                searchResults = emptyList()
+            )
+        }
     }
 
     // Phase 5.3: polls
     fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSending = true)
+            _uiState.update { it.copy(isSending = true) }
             sendPollUseCase(chatId, question, options, isMultipleChoice, isAnonymous)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message, isSending = false) }
-                .onSuccess { _uiState.value = _uiState.value.copy(isSending = false) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
 
     fun votePoll(messageId: String, optionIds: List<String>) {
         viewModelScope.launch {
             votePollUseCase(chatId, messageId, optionIds)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
     fun closePoll(messageId: String) {
         viewModelScope.launch {
             closePollUseCase(chatId, messageId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
@@ -595,7 +597,7 @@ class ChatViewModel @Inject constructor(
     fun togglePin(messageId: String, pinned: Boolean) {
         viewModelScope.launch {
             pinMessageUseCase(chatId, messageId, pinned)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
 
@@ -616,9 +618,7 @@ class ChatViewModel @Inject constructor(
                     observeListUseCase(listId)
                         .catch { /* non-fatal */ }
                         .collect { listData ->
-                            _uiState.value = _uiState.value.copy(
-                                listDataCache = _uiState.value.listDataCache + (listId to listData)
-                            )
+                            _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to listData)) }
                         }
                 }
             }
@@ -627,15 +627,15 @@ class ChatViewModel @Inject constructor(
 
     fun createAndSendList(title: String, type: ListType) {
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isSending = true)
+            _uiState.update { it.copy(isSending = true) }
             createListUseCase(title, type, chatId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
-            _uiState.value = _uiState.value.copy(isSending = false)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            _uiState.update { it.copy(isSending = false) }
         }
     }
 
     fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
+        _uiState.update { it.copy(error = null) }
     }
 
     // Emoji recents
@@ -644,7 +644,7 @@ class ChatViewModel @Inject constructor(
             preferencesDataStore.recentEmojisFlow
                 .distinctUntilChanged()
                 .collect { recents ->
-                    _uiState.value = _uiState.value.copy(recentEmojis = recents)
+                    _uiState.update { it.copy(recentEmojis = recents) }
                 }
         }
     }

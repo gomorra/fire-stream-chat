@@ -5,6 +5,7 @@ import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.usecase.list.AddListItemUseCase
+import com.firestream.chat.domain.usecase.list.ClearCheckedItemsUseCase
 import com.firestream.chat.domain.usecase.list.DeleteListUseCase
 import com.firestream.chat.domain.usecase.list.ObserveListUseCase
 import com.firestream.chat.domain.usecase.list.ReorderListItemsUseCase
@@ -56,6 +57,7 @@ class ListDetailViewModelTest {
     private val unshareListFromChatUseCase = mockk<UnshareListFromChatUseCase>()
     private val deleteListUseCase = mockk<DeleteListUseCase>()
     private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>(relaxed = true)
+    private val clearCheckedItemsUseCase = mockk<ClearCheckedItemsUseCase>(relaxed = true)
     private val chatRepository = mockk<ChatRepository>()
     private val listRepository = mockk<ListRepository>(relaxed = true)
     private val authSource = mockk<FirebaseAuthSource>()
@@ -89,6 +91,7 @@ class ListDetailViewModelTest {
             unshareListFromChatUseCase = unshareListFromChatUseCase,
             deleteListUseCase = deleteListUseCase,
             sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase,
+            clearCheckedItemsUseCase = clearCheckedItemsUseCase,
             chatRepository = chatRepository,
             listRepository = listRepository,
             authSource = authSource,
