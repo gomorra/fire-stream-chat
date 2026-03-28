@@ -19,8 +19,8 @@ class ListDiffTest {
     }
 
     @Test
-    fun `isEmpty is false when reordered is true`() {
-        assertFalse(ListDiff(reordered = true).isEmpty)
+    fun `isEmpty is false when edited is non-empty`() {
+        assertFalse(ListDiff(edited = listOf("Milk")).isEmpty)
     }
 
     // --- toSummaryString ---
@@ -37,16 +37,16 @@ class ListDiffTest {
             removed = listOf("C"),
             checked = listOf("D"),
             unchecked = listOf("E", "F"),
-            titleChanged = "New Title",
-            reordered = true
+            edited = listOf("G"),
+            titleChanged = "New Title"
         )
         val summary = diff.toSummaryString()
         assertTrue(summary.contains("+2 added"))
         assertTrue(summary.contains("-1 removed"))
         assertTrue(summary.contains("1 checked"))
         assertTrue(summary.contains("2 unchecked"))
+        assertTrue(summary.contains("1 edited"))
         assertTrue(summary.contains("title changed"))
-        assertTrue(summary.contains("reordered"))
     }
 
     // --- toMap / fromMap round-trip ---
@@ -58,8 +58,8 @@ class ListDiffTest {
             removed = listOf("Bread"),
             checked = listOf("Butter"),
             unchecked = listOf("Cheese"),
-            titleChanged = "Updated Title",
-            reordered = true
+            edited = listOf("Sugar"),
+            titleChanged = "Updated Title"
         )
 
         val map = diff.toMap()
@@ -69,12 +69,12 @@ class ListDiffTest {
         assertEquals(diff.removed, restored.removed)
         assertEquals(diff.checked, restored.checked)
         assertEquals(diff.unchecked, restored.unchecked)
+        assertEquals(diff.edited, restored.edited)
         assertEquals(diff.titleChanged, restored.titleChanged)
-        assertEquals(diff.reordered, restored.reordered)
     }
 
     @Test
-    fun `toMap omits empty lists and false reordered`() {
+    fun `toMap omits empty lists`() {
         val diff = ListDiff(added = listOf("Milk"))
         val map = diff.toMap()
 
@@ -82,8 +82,8 @@ class ListDiffTest {
         assertFalse(map.containsKey("removed"))
         assertFalse(map.containsKey("checked"))
         assertFalse(map.containsKey("unchecked"))
+        assertFalse(map.containsKey("edited"))
         assertFalse(map.containsKey("titleChanged"))
-        assertFalse(map.containsKey("reordered"))
     }
 
     @Test
@@ -92,8 +92,8 @@ class ListDiffTest {
 
         assertTrue(restored.added.isEmpty())
         assertTrue(restored.removed.isEmpty())
+        assertTrue(restored.edited.isEmpty())
         assertNull(restored.titleChanged)
-        assertFalse(restored.reordered)
         assertTrue(restored.isEmpty)
     }
 
@@ -164,13 +164,13 @@ class ListDiffTest {
     }
 
     @Test
-    fun `accumulate - reordered is sticky once true`() {
-        val base = ListDiff(reordered = true)
-        val update = ListDiff(added = listOf("Item"))
+    fun `accumulate - edited items are collected`() {
+        val base = ListDiff(edited = listOf("Milk"))
+        val update = ListDiff(edited = listOf("Eggs"))
 
         val result = ListDiff.accumulate(base, update)
 
-        assertTrue(result.reordered)
+        assertEquals(listOf("Milk", "Eggs"), result.edited)
     }
 
     @Test

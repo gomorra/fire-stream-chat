@@ -84,6 +84,8 @@ class ListDetailViewModel @Inject constructor(
     private var pendingDiff = ListDiff()
     private var pendingSharedChatIds: List<String> = emptyList()
     private var debounceJob: Job? = null
+    // Prevents the Firestore observer from triggering navigation while we send the delete notification
+    private var isDeletingList = false
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
@@ -115,7 +117,7 @@ class ListDetailViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
                 .collect { listData ->
-                    if (listData == null && !_uiState.value.isLoading) {
+                    if (listData == null && !_uiState.value.isLoading && !isDeletingList) {
                         _uiState.value = _uiState.value.copy(isDeleted = true, isLoading = false)
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -204,7 +206,6 @@ class ListDetailViewModel @Inject constructor(
         }
         viewModelScope.launch {
             reorderListItemsUseCase(listId, reordered)
-                .onSuccess { accumulateAndDebounce(ListDiff(reordered = true)) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
@@ -253,23 +254,27 @@ class ListDetailViewModel @Inject constructor(
 
     fun deleteList() {
         val listData = _uiState.value.listData ?: return
+        isDeletingList = true
         viewModelScope.launch {
-            // Flush any pending diff before deleting
             debounceJob?.cancel()
             flushPendingDiff()
 
             deleteListUseCase(listId)
                 .onSuccess {
-                    _uiState.value = _uiState.value.copy(isDeleted = true)
-                    // Immediately notify all shared chats about deletion
+                    // Send notification before setting isDeleted — viewModelScope must stay alive
                     if (listData.sharedChatIds.isNotEmpty()) {
                         sendListUpdateToChatsUseCase(
                             listId, listData.title, listData.sharedChatIds,
                             ListDiff(deleted = true)
                         )
                     }
+                    isDeletingList = false
+                    _uiState.value = _uiState.value.copy(isDeleted = true)
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    isDeletingList = false
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
         }
     }
 

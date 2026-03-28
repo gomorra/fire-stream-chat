@@ -7,12 +7,11 @@ data class ListDiff(
     val unchecked: List<String> = emptyList(),
     val edited: List<String> = emptyList(),
     val titleChanged: String? = null,
-    val reordered: Boolean = false,
     val deleted: Boolean = false
 ) {
     val isEmpty: Boolean
         get() = !deleted && added.isEmpty() && removed.isEmpty() && checked.isEmpty() &&
-                unchecked.isEmpty() && edited.isEmpty() && titleChanged == null && !reordered
+                unchecked.isEmpty() && edited.isEmpty() && titleChanged == null
 
     fun toSummaryString(): String {
         if (deleted) return "list deleted"
@@ -23,7 +22,6 @@ data class ListDiff(
         if (unchecked.isNotEmpty()) parts.add("${unchecked.size} unchecked")
         if (edited.isNotEmpty()) parts.add("${edited.size} edited")
         if (titleChanged != null) parts.add("title changed")
-        if (reordered) parts.add("reordered")
         return parts.joinToString(", ").ifEmpty { "no changes" }
     }
 
@@ -34,7 +32,6 @@ data class ListDiff(
         if (unchecked.isNotEmpty()) put("unchecked", unchecked)
         if (edited.isNotEmpty()) put("edited", edited)
         if (titleChanged != null) put("titleChanged", titleChanged)
-        if (reordered) put("reordered", true)
         if (deleted) put("deleted", true)
     }
 
@@ -47,7 +44,6 @@ data class ListDiff(
             unchecked = (map["unchecked"] as? List<String>) ?: emptyList(),
             edited = (map["edited"] as? List<String>) ?: emptyList(),
             titleChanged = map["titleChanged"] as? String,
-            reordered = map["reordered"] as? Boolean ?: false,
             deleted = map["deleted"] as? Boolean ?: false
         )
 
@@ -73,7 +69,6 @@ data class ListDiff(
                 if (item in checkedSet) checkedSet.remove(item) else uncheckedSet.add(item)
             }
 
-            // Edited: keep only the latest text for each position (last write wins)
             val editedSet = current.edited.toMutableList()
             editedSet.addAll(new.edited)
 
@@ -83,8 +78,7 @@ data class ListDiff(
                 checked = checkedSet,
                 unchecked = uncheckedSet,
                 edited = editedSet,
-                titleChanged = new.titleChanged ?: current.titleChanged,
-                reordered = current.reordered || new.reordered
+                titleChanged = new.titleChanged ?: current.titleChanged
             )
         }
     }

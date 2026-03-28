@@ -208,10 +208,6 @@ private fun DiffContent(
             DiffRow(prefix = "✎", prefixColor = textColor.copy(alpha = 0.8f),
                 text = "Renamed to \"${diff.titleChanged}\"", textColor = textColor)
         }
-        if (diff.reordered) {
-            DiffRow(prefix = "↕", prefixColor = textColor.copy(alpha = 0.8f),
-                text = "Items reordered", textColor = textColor)
-        }
         diff.added.forEach { item ->
             DiffRow(prefix = "+", prefixColor = DiffGreen, text = item, textColor = textColor)
         }
