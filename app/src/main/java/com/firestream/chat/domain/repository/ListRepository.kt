@@ -13,6 +13,7 @@ interface ListRepository {
     suspend fun createList(title: String, type: ListType, chatId: String? = null, genericStyle: GenericListStyle = GenericListStyle.BULLET): Result<ListData>
     suspend fun addItem(listId: String, text: String, quantity: String? = null, unit: String? = null): Result<Unit>
     suspend fun removeItem(listId: String, itemId: String): Result<Unit>
+    suspend fun clearCheckedItems(listId: String): Result<List<String>>
     suspend fun toggleItemChecked(listId: String, itemId: String): Result<Unit>
     suspend fun updateItem(listId: String, itemId: String, text: String, quantity: String? = null, unit: String? = null): Result<Unit>
     suspend fun reorderItems(listId: String, items: List<com.firestream.chat.domain.model.ListItem>): Result<Unit>

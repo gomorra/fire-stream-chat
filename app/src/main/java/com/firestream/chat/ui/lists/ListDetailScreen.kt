@@ -2,7 +2,7 @@ package com.firestream.chat.ui.lists
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,7 +67,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
@@ -99,7 +98,9 @@ fun ListDetailScreen(
     var newItemText by remember { mutableStateOf("") }
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
+    var titleHadFocus by remember(isEditingTitle) { mutableStateOf(false) }
     var pendingRemoval by remember { mutableStateOf<ListItem?>(null) }
+    var editingItemId by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -152,7 +153,10 @@ fun ListDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(titleFocusRequester)
-                                .onFocusChanged { if (!it.isFocused && isEditingTitle) submitTitleEdit() },
+                                .onFocusChanged { state ->
+                                    if (state.isFocused) titleHadFocus = true
+                                    else if (titleHadFocus && isEditingTitle) submitTitleEdit()
+                                },
                             singleLine = true,
                             textStyle = MaterialTheme.typography.titleLarge.copy(
                                 color = MaterialTheme.colorScheme.onPrimary
@@ -166,11 +170,13 @@ fun ListDetailScreen(
                             text = uiState.listData?.title ?: "List",
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable {
-                                val title = uiState.listData?.title ?: return@clickable
-                                titleEditValue = TextFieldValue(title, TextRange(title.length))
-                                isEditingTitle = true
-                            }
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val title = uiState.listData?.title ?: return@clickable
+                                    titleEditValue = TextFieldValue(title, TextRange(title.length))
+                                    isEditingTitle = true
+                                }
                         )
                     }
                 },
@@ -189,6 +195,19 @@ fun ListDetailScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
+                        val checkedCount = uiState.listData?.items?.count { it.isChecked } ?: 0
+                        if (checkedCount > 0) {
+                            DropdownMenuItem(
+                                text = { Text("Clear all checked ($checkedCount)") },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Check, contentDescription = null)
+                                },
+                                onClick = {
+                                    showOverflowMenu = false
+                                    viewModel.clearCheckedItems()
+                                }
+                            )
+                        }
                         if (uiState.isOwner) {
                             DropdownMenuItem(
                                 text = { Text("Manage sharing") },
@@ -301,8 +320,13 @@ fun ListDetailScreen(
                         .fillMaxSize()
                         .padding(padding)
                         .imePadding()
-                        .pointerInput(Unit) {
-                            detectTapGestures { focusManager.clearFocus() }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            if (isEditingTitle) submitTitleEdit()
+                            editingItemId = null
+                            focusManager.clearFocus()
                         }
                 ) {
                     LazyColumn(
@@ -368,9 +392,20 @@ fun ListDetailScreen(
                                             listType = listData.type,
                                             itemIndex = index,
                                             genericStyle = listData.genericStyle,
+                                            isEditing = editingItemId == item.id,
                                             dragHandleModifier = Modifier.draggableHandle(),
-                                            onToggle = { viewModel.toggleItem(item.id) },
-                                            onEdit = { newText -> viewModel.updateItem(item.id, newText) }
+                                            onStartEdit = { editingItemId = item.id },
+                                            onFinishEdit = { newText ->
+                                                if (newText != null && newText != item.text) {
+                                                    viewModel.updateItem(item.id, newText)
+                                                }
+                                                editingItemId = null
+                                            },
+                                            onToggle = {
+                                                editingItemId = null
+                                                focusManager.clearFocus()
+                                                viewModel.toggleItem(item.id)
+                                            }
                                         )
                                     }
                                     HorizontalDivider()
@@ -407,7 +442,10 @@ fun ListDetailScreen(
                             value = newItemText,
                             onValueChange = { newItemText = it },
                             placeholder = { Text("Add item...") },
-                            modifier = Modifier.weight(1f).focusRequester(addItemFocusRequester),
+                            modifier = Modifier
+                                .weight(1f)
+                                .focusRequester(addItemFocusRequester)
+                                .onFocusChanged { if (it.isFocused) editingItemId = null },
                             singleLine = true
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -489,27 +527,30 @@ private fun ListItemRow(
     listType: ListType,
     itemIndex: Int = 0,
     genericStyle: GenericListStyle = GenericListStyle.BULLET,
+    isEditing: Boolean,
     dragHandleModifier: Modifier = Modifier,
-    onToggle: () -> Unit,
-    onEdit: (String) -> Unit
+    onStartEdit: () -> Unit,
+    onFinishEdit: (newText: String?) -> Unit,
+    onToggle: () -> Unit
 ) {
-    var isEditing by remember { mutableStateOf(false) }
     var editValue by remember(item.id) {
         mutableStateOf(TextFieldValue(item.text, TextRange(item.text.length)))
     }
     val editFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    var hadFocus by remember(isEditing) { mutableStateOf(false) }
 
+    // Sync editValue when entering edit mode (item text may have changed)
     LaunchedEffect(isEditing) {
-        if (isEditing) editFocusRequester.requestFocus()
+        if (isEditing) {
+            editValue = TextFieldValue(item.text, TextRange(item.text.length))
+            editFocusRequester.requestFocus()
+        }
     }
 
     fun submitEdit() {
         val newText = editValue.text.trim()
-        if (newText.isNotBlank() && newText != item.text) {
-            onEdit(newText)
-        }
-        isEditing = false
+        onFinishEdit(newText.ifBlank { null })
         keyboardController?.hide()
     }
 
@@ -549,8 +590,15 @@ private fun ListItemRow(
             }
         }
 
-        // Text area — tap to edit
-        Column(modifier = Modifier.weight(1f)) {
+        // Text area — tap anywhere in this column to edit
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .then(
+                    if (!isEditing) Modifier.clickable { onStartEdit() }
+                    else Modifier
+                )
+        ) {
             if (isEditing) {
                 BasicTextField(
                     value = editValue,
@@ -558,7 +606,10 @@ private fun ListItemRow(
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(editFocusRequester)
-                        .onFocusChanged { if (!it.isFocused && isEditing) submitEdit() },
+                        .onFocusChanged { state ->
+                            if (state.isFocused) hadFocus = true
+                            else if (hadFocus && isEditing) submitEdit()
+                        },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = LocalContentColor.current
@@ -575,11 +626,7 @@ private fun ListItemRow(
                     color = if (item.isChecked)
                         MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
                     else
-                        MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.clickable {
-                        editValue = TextFieldValue(item.text, TextRange(item.text.length))
-                        isEditing = true
-                    }
+                        MaterialTheme.colorScheme.onSurface
                 )
                 if (listType == ListType.SHOPPING && (item.quantity != null || item.unit != null)) {
                     Text(

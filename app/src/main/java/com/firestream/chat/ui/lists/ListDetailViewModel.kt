@@ -24,6 +24,7 @@ import com.firestream.chat.domain.usecase.list.ShareListToChatUseCase
 import com.firestream.chat.domain.usecase.list.ToggleListItemUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListItemUseCase
 import com.firestream.chat.domain.usecase.list.UnshareListFromChatUseCase
+import com.firestream.chat.domain.usecase.list.ClearCheckedItemsUseCase
 import com.firestream.chat.domain.usecase.list.UpdateGenericStyleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTitleUseCase
 import com.firestream.chat.domain.usecase.list.UpdateListTypeUseCase
@@ -69,6 +70,7 @@ class ListDetailViewModel @Inject constructor(
     private val shareListToChatUseCase: ShareListToChatUseCase,
     private val unshareListFromChatUseCase: UnshareListFromChatUseCase,
     private val deleteListUseCase: DeleteListUseCase,
+    private val clearCheckedItemsUseCase: ClearCheckedItemsUseCase,
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase,
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
@@ -172,6 +174,19 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
+    fun clearCheckedItems() {
+        if (_uiState.value.listData?.items?.none { it.isChecked } == true) return
+        viewModelScope.launch {
+            clearCheckedItemsUseCase(listId)
+                .onSuccess { clearedTexts ->
+                    if (clearedTexts.isNotEmpty()) {
+                        accumulateAndDebounce(ListDiff(removed = clearedTexts))
+                    }
+                }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+        }
+    }
+
     fun toggleItem(itemId: String) {
         val item = _uiState.value.listData?.items?.find { it.id == itemId }
         viewModelScope.launch {
@@ -241,10 +256,16 @@ class ListDetailViewModel @Inject constructor(
 
     fun unshareFromChat(chatId: String) {
         viewModelScope.launch {
+            val listData = _uiState.value.listData ?: return@launch
+            // Send unshared bubble before removing access
+            sendListUpdateToChatsUseCase(
+                listId, listData.title, listOf(chatId),
+                ListDiff(unshared = true)
+            )
             unshareListFromChatUseCase(listId, chatId)
                 .onSuccess {
                     val chat = _uiState.value.chats.find { it.id == chatId }
-                    val owner = _uiState.value.listData?.createdBy ?: return@onSuccess
+                    val owner = listData.createdBy
                     val toRemove = chat?.participants?.filter { it != owner } ?: return@onSuccess
                     if (toRemove.isNotEmpty()) listRepository.removeParticipants(listId, toRemove)
                 }

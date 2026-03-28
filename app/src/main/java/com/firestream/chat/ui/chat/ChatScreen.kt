@@ -158,7 +158,14 @@ fun ChatScreen(
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
-    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val configuration = LocalConfiguration.current
+    val screenHeightDp = configuration.screenHeightDp
+    val screenWidthDp = configuration.screenWidthDp
+    // Height that shows exactly 5 emoji rows: search bar + 5 rows + category toolbar
+    val emojiPanelHeightDp = run {
+        val cellDp = (screenWidthDp - 30) / 8  // 8 cols, 16dp h-padding + 7×2dp gaps
+        52 + 5 * cellDp + 4 * 2 + 40           // search + rows + row-gaps + toolbar
+    }
 
     BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
 
@@ -949,7 +956,7 @@ fun ChatScreen(
                         }
                     },
                     onRecentUsed = { viewModel.addRecentEmoji(it) },
-                    modifier = Modifier.height((screenHeightDp / 3).dp)
+                    modifier = Modifier.height(emojiPanelHeightDp.dp)
                 )
             }
         }

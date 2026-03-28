@@ -94,6 +94,8 @@ class ListRepositoryImpl @Inject constructor(
             try {
                 listSource.observeMyLists(userId).collectLatest { lists ->
                     listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
+                    val activeIds = lists.map { it.id }
+                    if (activeIds.isNotEmpty()) listDao.deleteExcept(activeIds) else listDao.deleteExcept(emptyList())
                 }
             } catch (_: Exception) { }
         }
@@ -160,6 +162,23 @@ class ListRepositoryImpl @Inject constructor(
             listSource.removeItem(listId, item)
             recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
             Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun clearCheckedItems(listId: String): Result<List<String>> {
+        return try {
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+            val checkedItems = list.items.filter { it.isChecked }
+            if (checkedItems.isEmpty()) return Result.success(emptyList())
+            val remaining = list.items.filter { !it.isChecked }
+            listSource.updateListItems(listId, remaining)
+            checkedItems.forEach { item ->
+                recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = item.id, itemText = item.text)
+            }
+            Result.success(checkedItems.map { it.text })
         } catch (e: Exception) {
             Result.failure(e)
         }

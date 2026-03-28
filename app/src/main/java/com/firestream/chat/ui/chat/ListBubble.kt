@@ -67,7 +67,7 @@ internal fun ListBubble(
                     )
                 )
                 .then(
-                    if (listData != null || (message.listDiff != null && !message.listDiff.deleted))
+                    if (listData != null || (message.listDiff != null && !message.listDiff.deleted && !message.listDiff.unshared))
                         Modifier.clickable(onClick = onClick)
                     else Modifier
                 )
@@ -195,7 +195,11 @@ private fun DiffContent(
         }
 
         Text(
-            text = if (diff.deleted) "List deleted" else "List updated",
+            text = when {
+                diff.unshared -> "List unshared"
+                diff.deleted -> "List deleted"
+                else -> "List updated"
+            },
             style = MaterialTheme.typography.labelSmall,
             color = textColor.copy(alpha = 0.6f)
         )
@@ -235,7 +239,7 @@ private fun DiffContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!diff.deleted) {
+            if (!diff.deleted && !diff.unshared) {
                 Text(
                     text = "Tap to view",
                     style = MaterialTheme.typography.labelSmall,
