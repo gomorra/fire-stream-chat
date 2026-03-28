@@ -82,6 +82,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -171,6 +173,9 @@ fun ChatScreen(
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
+
+    // Snackbar host state
+    val snackbarHostState = remember { SnackbarHostState() }
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -267,6 +272,7 @@ fun ChatScreen(
 
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
@@ -592,8 +598,16 @@ fun ChatScreen(
                                         message = message,
                                         listData = uiState.listDataCache[message.listId],
                                         isOwnMessage = isOwn,
+                                        chatId = viewModel.chatId,
                                         onClick = {
                                             message.listId?.let { onListClick(it) }
+                                        },
+                                        onUnsharedListClick = {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(
+                                                    "This list is no longer shared with this chat"
+                                                )
+                                            }
                                         }
                                     )
                                 } else {

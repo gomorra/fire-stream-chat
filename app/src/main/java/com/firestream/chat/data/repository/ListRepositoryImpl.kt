@@ -14,7 +14,7 @@ import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.model.MessageType
+
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -126,7 +126,7 @@ class ListRepositoryImpl @Inject constructor(
 
             // If created from a chat, auto-send a list message and track sharedChatId
             if (chatId != null) {
-                messageRepository.get().sendListMessage(chatId, remoteId, title)
+                messageRepository.get().sendListMessage(chatId, remoteId, title, com.firestream.chat.domain.model.ListDiff(shared = true))
                 listSource.updateSharedChatIds(remoteId, chatId)
             }
 
@@ -285,24 +285,25 @@ class ListRepositoryImpl @Inject constructor(
             // Track this chat as a shared destination
             updateSharedChatIds(listId, chatId)
 
-            messageRepository.get().sendListMessage(chatId, listId, list.title)
+            messageRepository.get().sendListMessage(chatId, listId, list.title, com.firestream.chat.domain.model.ListDiff(shared = true))
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
     override fun getSharedListsForChat(chatId: String): Flow<List<ListData>> = channelFlow {
-        messageDao.getMessagesByChatId(chatId)
-            .map { messages ->
-                messages
-                    .filter { it.type == MessageType.LIST.name && it.listId != null }
-                    .mapNotNull { it.listId }
-                    .distinct()
-            }
-            .collectLatest { listIds ->
-                val lists = listIds.mapNotNull { listDao.getById(it)?.toDomain() }
-                send(lists)
-            }
+        // Use Firestore query on sharedChatIds for real-time add/remove.
+        // When a list is unshared, Firestore fires immediately so the receiver
+        // sees the list removed from SharedListsScreen without any delay.
+        launch {
+            try {
+                listSource.observeSharedListsForChat(chatId).collectLatest { lists ->
+                    // Cache received lists locally so detail screens work offline
+                    listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
+                    send(lists)
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     override fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> =

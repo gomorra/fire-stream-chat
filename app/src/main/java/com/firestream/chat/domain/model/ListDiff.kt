@@ -8,14 +8,16 @@ data class ListDiff(
     val edited: List<String> = emptyList(),
     val titleChanged: String? = null,
     val deleted: Boolean = false,
-    val unshared: Boolean = false
+    val unshared: Boolean = false,
+    val shared: Boolean = false
 ) {
     val isEmpty: Boolean
-        get() = !deleted && !unshared && added.isEmpty() && removed.isEmpty() && checked.isEmpty() &&
+        get() = !deleted && !unshared && !shared && added.isEmpty() && removed.isEmpty() && checked.isEmpty() &&
                 unchecked.isEmpty() && edited.isEmpty() && titleChanged == null
 
     fun toSummaryString(): String {
         if (unshared) return "list unshared"
+        if (shared) return "list shared"
         if (deleted) return "list deleted"
         val parts = mutableListOf<String>()
         if (added.isNotEmpty()) parts.add("+${added.size} added")
@@ -36,6 +38,7 @@ data class ListDiff(
         if (titleChanged != null) put("titleChanged", titleChanged)
         if (deleted) put("deleted", true)
         if (unshared) put("unshared", true)
+        if (shared) put("shared", true)
     }
 
     companion object {
@@ -48,7 +51,8 @@ data class ListDiff(
             edited = (map["edited"] as? List<String>) ?: emptyList(),
             titleChanged = map["titleChanged"] as? String,
             deleted = map["deleted"] as? Boolean ?: false,
-            unshared = map["unshared"] as? Boolean ?: false
+            unshared = map["unshared"] as? Boolean ?: false,
+            shared = map["shared"] as? Boolean ?: false
         )
 
         fun accumulate(current: ListDiff, new: ListDiff): ListDiff {

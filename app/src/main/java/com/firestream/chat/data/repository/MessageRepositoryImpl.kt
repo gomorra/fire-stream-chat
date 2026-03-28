@@ -779,7 +779,7 @@ class MessageRepositoryImpl @Inject constructor(
             val content = "\uD83D\uDCCB List: $listTitle"
 
             // Merge into the last message if it's a diff bubble for the same list from this user
-            if (listDiff != null && !listDiff.deleted && !listDiff.unshared) {
+            if (listDiff != null && !listDiff.deleted && !listDiff.unshared && !listDiff.shared) {
                 val lastEntity = messageDao.getLastMessageByChatId(chatId)
                 if (lastEntity != null) {
                     val lastMessage = lastEntity.toDomain()

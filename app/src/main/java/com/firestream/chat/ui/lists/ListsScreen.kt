@@ -276,7 +276,8 @@ private fun ListRow(
         }
 
         val overflow = (listData.participants.size - 1 - participants.size).coerceAtLeast(0)
-        if (participants.isNotEmpty() || overflow > 0) {
+        // Only show avatars while the list is actively shared to at least one chat
+        if (listData.sharedChatIds.isNotEmpty() && (participants.isNotEmpty() || overflow > 0)) {
             Spacer(modifier = Modifier.width(8.dp))
             AvatarStack(users = participants, overflow = overflow)
         }

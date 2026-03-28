@@ -42,7 +42,9 @@ internal fun ListBubble(
     message: Message,
     listData: ListData?,
     isOwnMessage: Boolean,
-    onClick: () -> Unit
+    chatId: String,
+    onClick: () -> Unit,
+    onUnsharedListClick: () -> Unit = {}
 ) {
     val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
@@ -66,10 +68,21 @@ internal fun ListBubble(
                         bottomEnd = if (isOwnMessage) 4.dp else 16.dp
                     )
                 )
-                .then(
-                    if (listData != null || (message.listDiff != null && !message.listDiff.deleted && !message.listDiff.unshared))
+            .then(
+                    // Clickable if:
+                    //  - listData is present AND the list is still shared to this chat
+                    //  - OR it's a diff bubble that isn't deleted/unshared/shared-only
+                    if (listData != null && chatId in listData.sharedChatIds) {
                         Modifier.clickable(onClick = onClick)
-                    else Modifier
+                    } else if (listData == null && message.listDiff != null
+                        && !message.listDiff.deleted && !message.listDiff.unshared && !message.listDiff.shared) {
+                        Modifier.clickable(onClick = onClick)
+                    } else if (listData != null && chatId !in listData.sharedChatIds) {
+                        // List exists but no longer shared to this chat — show snackbar on tap
+                        Modifier.clickable(onClick = onUnsharedListClick)
+                    } else {
+                        Modifier
+                    }
                 )
                 .padding(12.dp)
         ) {
@@ -91,7 +104,8 @@ internal fun ListBubble(
                 else -> StandardListContent(
                     listData = listData,
                     textColor = textColor,
-                    timestamp = message.timestamp
+                    timestamp = message.timestamp,
+                    isShared = chatId in listData.sharedChatIds
                 )
             }
         }
@@ -102,7 +116,8 @@ internal fun ListBubble(
 private fun StandardListContent(
     listData: ListData,
     textColor: Color,
-    timestamp: Long
+    timestamp: Long,
+    isShared: Boolean = true
 ) {
     Column {
         Row(
@@ -148,11 +163,20 @@ private fun StandardListContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = "Tap to view",
-                style = MaterialTheme.typography.labelSmall,
-                color = textColor.copy(alpha = 0.5f)
-            )
+            if (isShared) {
+                Text(
+                    text = "Tap to view",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.5f)
+                )
+            } else {
+                Text(
+                    text = "No longer shared",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.4f),
+                    fontStyle = FontStyle.Italic
+                )
+            }
             Text(
                 text = formatTimestamp(timestamp),
                 color = textColor.copy(alpha = 0.7f),
@@ -196,6 +220,7 @@ private fun DiffContent(
 
         Text(
             text = when {
+                diff.shared -> "List shared"
                 diff.unshared -> "List unshared"
                 diff.deleted -> "List deleted"
                 else -> "List updated"
@@ -239,7 +264,7 @@ private fun DiffContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!diff.deleted && !diff.unshared) {
+            if (!diff.deleted && !diff.unshared && !diff.shared) {
                 Text(
                     text = "Tap to view",
                     style = MaterialTheme.typography.labelSmall,

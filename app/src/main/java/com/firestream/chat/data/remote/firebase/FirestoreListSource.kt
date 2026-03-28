@@ -33,6 +33,22 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
+    fun observeSharedListsForChat(chatId: String): Flow<List<ListData>> = callbackFlow {
+        val listener: ListenerRegistration = listsCollection
+            .whereArrayContains("sharedChatIds", chatId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val lists = snapshot?.documents?.mapNotNull { doc ->
+                    doc.data?.let { mapToListData(doc.id, it) }
+                } ?: emptyList()
+                trySend(lists)
+            }
+        awaitClose { listener.remove() }
+    }
+
     fun observeMyLists(userId: String): Flow<List<ListData>> = callbackFlow {
         val listener: ListenerRegistration = listsCollection
             .whereArrayContains("participants", userId)
