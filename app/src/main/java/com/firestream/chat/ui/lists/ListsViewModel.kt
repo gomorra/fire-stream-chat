@@ -48,7 +48,9 @@ data class ListsUiState(
     val participantAvatars: Map<String, List<User>> = emptyMap(),
     val sortOption: ListSortOption = ListSortOption.MODIFIED,
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val searchQuery: String = "",
+    val isSearchBarVisible: Boolean = false
 ) {
     fun isOwner(list: ListData) = list.createdBy == currentUserId
 }
@@ -88,7 +90,7 @@ class ListsViewModel @Inject constructor(
                 if (option == _uiState.value.sortOption) return@onEach
                 _uiState.value = _uiState.value.copy(
                     sortOption = option,
-                    lists = sortedLists(rawLists, option)
+                    lists = filteredAndSorted(rawLists, option, _uiState.value.searchQuery)
                 )
             }
             .launchIn(viewModelScope)
@@ -101,10 +103,41 @@ class ListsViewModel @Inject constructor(
         ListSortOption.CREATOR -> lists.sortedWith(compareBy({ it.createdBy }, { it.title }))
     }
 
+    private fun filteredAndSorted(lists: List<ListData>, option: ListSortOption, query: String): List<ListData> {
+        val base = if (query.isBlank()) lists else lists.filter { list ->
+            list.title.contains(query, ignoreCase = true) ||
+                list.items.any { it.text.contains(query, ignoreCase = true) }
+        }
+        return sortedLists(base, option)
+    }
+
     fun setSortOption(option: ListSortOption) {
         viewModelScope.launch {
             preferencesDataStore.setListSortOption(option.name)
         }
+    }
+
+    fun toggleSearchBar() {
+        val nowVisible = !_uiState.value.isSearchBarVisible
+        _uiState.value = _uiState.value.copy(
+            isSearchBarVisible = nowVisible,
+            searchQuery = if (!nowVisible) "" else _uiState.value.searchQuery,
+            lists = if (!nowVisible) filteredAndSorted(rawLists, _uiState.value.sortOption, "") else _uiState.value.lists
+        )
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _uiState.value = _uiState.value.copy(
+            searchQuery = query,
+            lists = filteredAndSorted(rawLists, _uiState.value.sortOption, query)
+        )
+    }
+
+    fun clearSearch() {
+        _uiState.value = _uiState.value.copy(
+            searchQuery = "",
+            lists = filteredAndSorted(rawLists, _uiState.value.sortOption, "")
+        )
     }
 
     private fun observeLists() {
@@ -116,7 +149,7 @@ class ListsViewModel @Inject constructor(
                 .collect { lists ->
                     rawLists = lists
                     _uiState.value = _uiState.value.copy(
-                        lists = sortedLists(lists, _uiState.value.sortOption),
+                        lists = filteredAndSorted(lists, _uiState.value.sortOption, _uiState.value.searchQuery),
                         isLoading = false
                     )
                     resolveParticipants(lists)
