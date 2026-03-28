@@ -4,7 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ChatRepository
-import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
+import com.firestream.chat.domain.repository.ContactRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +22,7 @@ data class ContactsUiState(
 
 @HiltViewModel
 class ContactsViewModel @Inject constructor(
-    private val syncContactsUseCase: SyncContactsUseCase,
+    private val contactRepository: ContactRepository,
     private val chatRepository: ChatRepository
 ) : ViewModel() {
 
@@ -35,7 +35,7 @@ class ContactsViewModel @Inject constructor(
 
     private fun loadContacts() {
         viewModelScope.launch {
-            syncContactsUseCase()
+            contactRepository.syncContacts()
                 .onSuccess { contacts ->
                     _uiState.value = _uiState.value.copy(
                         contacts = contacts,

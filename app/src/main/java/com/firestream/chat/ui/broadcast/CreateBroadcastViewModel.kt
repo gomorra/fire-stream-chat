@@ -4,8 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.usecase.chat.CreateBroadcastListUseCase
-import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
+import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ContactRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,9 +26,9 @@ data class CreateBroadcastUiState(
 
 @HiltViewModel
 class CreateBroadcastViewModel @Inject constructor(
-    private val syncContactsUseCase: SyncContactsUseCase,
-    private val createBroadcastListUseCase: CreateBroadcastListUseCase,
-    private val authRepository: AuthRepository
+    private val authRepository: AuthRepository,
+    private val contactRepository: ContactRepository,
+    private val chatRepository: ChatRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CreateBroadcastUiState())
@@ -40,7 +40,7 @@ class CreateBroadcastViewModel @Inject constructor(
 
     private fun loadContacts() {
         viewModelScope.launch {
-            syncContactsUseCase()
+            contactRepository.syncContacts()
                 .onSuccess { contacts ->
                     _uiState.value = _uiState.value.copy(
                         contacts = contacts,
@@ -92,7 +92,7 @@ class CreateBroadcastViewModel @Inject constructor(
         val name = state.name.ifBlank { "Broadcast list" }
         _uiState.value = state.copy(isCreating = true)
         viewModelScope.launch {
-            createBroadcastListUseCase(name, state.selectedIds.toList())
+            chatRepository.createBroadcastList(name, state.selectedIds.toList())
                 .onSuccess { chat ->
                     _uiState.value = _uiState.value.copy(isCreating = false)
                     onCreated(chat.id)

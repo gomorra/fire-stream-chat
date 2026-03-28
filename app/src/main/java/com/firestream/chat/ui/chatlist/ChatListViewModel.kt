@@ -11,8 +11,6 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -44,9 +42,7 @@ data class ChatListUiState(
 
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
-    private val getChatsUseCase: GetChatsUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
-    private val syncContactsUseCase: SyncContactsUseCase,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
@@ -70,7 +66,7 @@ class ChatListViewModel @Inject constructor(
 
     private fun syncContacts() {
         viewModelScope.launch {
-            syncContactsUseCase()
+            contactRepository.syncContacts()
                 .onFailure { /* non-fatal: contacts sync is best-effort */ }
         }
     }
@@ -91,7 +87,7 @@ class ChatListViewModel @Inject constructor(
 
     private fun loadChats() {
         viewModelScope.launch {
-            getChatsUseCase()
+            chatRepository.getChats()
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,

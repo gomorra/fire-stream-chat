@@ -8,10 +8,10 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
+import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.call.GetCallLogUseCase
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -33,8 +33,8 @@ class CallsViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private val getCallLogUseCase = mockk<GetCallLogUseCase>()
-    private val getChatsUseCase = mockk<GetChatsUseCase>()
+    private val messageRepository = mockk<MessageRepository>()
+    private val chatRepository = mockk<ChatRepository>()
     private val authRepository = mockk<AuthRepository>()
     private val contactRepository = mockk<ContactRepository>()
     private val userRepository = mockk<UserRepository>()
@@ -72,8 +72,8 @@ class CallsViewModelTest {
     }
 
     private fun buildViewModel() = CallsViewModel(
-        getCallLogUseCase = getCallLogUseCase,
-        getChatsUseCase = getChatsUseCase,
+        messageRepository = messageRepository,
+        chatRepository = chatRepository,
         authRepository = authRepository,
         contactRepository = contactRepository,
         userRepository = userRepository
@@ -81,8 +81,8 @@ class CallsViewModelTest {
 
     @Test
     fun `entries are empty when no CALL messages`() = runTest {
-        every { getCallLogUseCase() } returns flowOf(emptyList())
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(emptyList())
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -92,8 +92,8 @@ class CallsViewModelTest {
 
     @Test
     fun `isLoading transitions to false after first emission`() = runTest {
-        every { getCallLogUseCase() } returns flowOf(emptyList())
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(emptyList())
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -107,8 +107,8 @@ class CallsViewModelTest {
             id = "m1", chatId = chatId, senderId = currentUserId,
             type = MessageType.CALL, content = "remote_hangup", duration = 120
         )
-        every { getCallLogUseCase() } returns flowOf(listOf(message))
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -125,8 +125,8 @@ class CallsViewModelTest {
             id = "m1", chatId = chatId, senderId = otherUserId,
             type = MessageType.CALL, content = "hangup", duration = 60
         )
-        every { getCallLogUseCase() } returns flowOf(listOf(message))
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -140,8 +140,8 @@ class CallsViewModelTest {
             id = "m1", chatId = chatId, senderId = otherUserId,
             type = MessageType.CALL, content = "declined", duration = null
         )
-        every { getCallLogUseCase() } returns flowOf(listOf(message))
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -155,8 +155,8 @@ class CallsViewModelTest {
             id = "m1", chatId = chatId, senderId = otherUserId,
             type = MessageType.CALL, content = "timeout", duration = null
         )
-        every { getCallLogUseCase() } returns flowOf(listOf(message))
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()
@@ -170,8 +170,8 @@ class CallsViewModelTest {
             id = "m1", chatId = chatId, senderId = otherUserId,
             type = MessageType.CALL, content = "hangup"
         )
-        every { getCallLogUseCase() } returns flowOf(listOf(message))
-        every { getChatsUseCase() } returns flowOf(listOf(testChat))
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
 
         val vm = buildViewModel()
         advanceUntilIdle()

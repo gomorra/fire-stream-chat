@@ -4,8 +4,8 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.usecase.chat.CreateBroadcastListUseCase
-import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
+import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ContactRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -28,9 +28,9 @@ class CreateBroadcastViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
-    private lateinit var syncContactsUseCase: SyncContactsUseCase
-    private lateinit var createBroadcastListUseCase: CreateBroadcastListUseCase
     private lateinit var authRepository: AuthRepository
+    private lateinit var contactRepository: ContactRepository
+    private lateinit var chatRepository: ChatRepository
 
     private val contacts = listOf(
         Contact(uid = "user1", displayName = "Alice", phoneNumber = "+1111"),
@@ -41,11 +41,11 @@ class CreateBroadcastViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        syncContactsUseCase = mockk()
-        createBroadcastListUseCase = mockk()
         authRepository = mockk()
+        contactRepository = mockk()
+        chatRepository = mockk()
         every { authRepository.currentUserId } returns "creator"
-        coEvery { syncContactsUseCase() } returns Result.success(contacts)
+        coEvery { contactRepository.syncContacts() } returns Result.success(contacts)
     }
 
     @After
@@ -54,9 +54,9 @@ class CreateBroadcastViewModelTest {
     }
 
     private fun createViewModel() = CreateBroadcastViewModel(
-        syncContactsUseCase = syncContactsUseCase,
-        createBroadcastListUseCase = createBroadcastListUseCase,
-        authRepository = authRepository
+        authRepository = authRepository,
+        contactRepository = contactRepository,
+        chatRepository = chatRepository
     )
 
     @Test
@@ -110,7 +110,7 @@ class CreateBroadcastViewModelTest {
     @Test
     fun `createBroadcast calls use case with selected recipients`() = runTest {
         val chat = Chat(id = "b1", type = ChatType.BROADCAST, name = "Test Broadcast")
-        coEvery { createBroadcastListUseCase(any(), any()) } returns Result.success(chat)
+        coEvery { chatRepository.createBroadcastList(any(), any()) } returns Result.success(chat)
         val viewModel = createViewModel()
         viewModel.toggleSelection("user1")
         viewModel.toggleSelection("user2")
@@ -126,7 +126,7 @@ class CreateBroadcastViewModelTest {
     @Test
     fun `createBroadcast uses default name when blank`() = runTest {
         val chat = Chat(id = "b1", type = ChatType.BROADCAST, name = "Broadcast list")
-        coEvery { createBroadcastListUseCase("Broadcast list", listOf("user1")) } returns Result.success(chat)
+        coEvery { chatRepository.createBroadcastList("Broadcast list", listOf("user1")) } returns Result.success(chat)
         val viewModel = createViewModel()
         viewModel.toggleSelection("user1")
         // name is blank by default
@@ -139,7 +139,7 @@ class CreateBroadcastViewModelTest {
 
     @Test
     fun `createBroadcast sets error on failure`() = runTest {
-        coEvery { createBroadcastListUseCase(any(), any()) } returns Result.failure(Exception("Network error"))
+        coEvery { chatRepository.createBroadcastList(any(), any()) } returns Result.failure(Exception("Network error"))
         val viewModel = createViewModel()
         viewModel.toggleSelection("user1")
 
@@ -160,7 +160,7 @@ class CreateBroadcastViewModelTest {
 
     @Test
     fun `contacts load error is reflected in state`() = runTest {
-        coEvery { syncContactsUseCase() } returns Result.failure(Exception("Load failed"))
+        coEvery { contactRepository.syncContacts() } returns Result.failure(Exception("Load failed"))
 
         val viewModel = createViewModel()
 

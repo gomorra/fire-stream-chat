@@ -11,10 +11,9 @@ import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMessageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,9 +40,8 @@ data class SharePickerUiState(
 
 @HiltViewModel
 class SharePickerViewModel @Inject constructor(
-    private val getChatsUseCase: GetChatsUseCase,
-    private val sendMessageUseCase: SendMessageUseCase,
-    private val sendMediaMessageUseCase: SendMediaMessageUseCase,
+    private val chatRepository: ChatRepository,
+    private val messageRepository: MessageRepository,
     private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
@@ -63,7 +61,7 @@ class SharePickerViewModel @Inject constructor(
 
     private fun loadChats() {
         viewModelScope.launch {
-            val chats = getChatsUseCase().first()
+            val chats = chatRepository.getChats().first()
             _uiState.value = _uiState.value.copy(chats = chats, filteredChats = chats)
             loadParticipantProfiles(chats)
         }
@@ -146,11 +144,11 @@ class SharePickerViewModel @Inject constructor(
                     runCatching {
                         when (val content = state.sharedContent) {
                             is SharedContent.Text ->
-                                sendMessageUseCase(chat.id, content.text, recipientId)
+                                messageRepository.sendMessage(chat.id, content.text, recipientId)
                             is SharedContent.Media ->
                                 content.items.map { item ->
                                     async {
-                                        sendMediaMessageUseCase(
+                                        messageRepository.sendMediaMessage(
                                             chat.id,
                                             Uri.parse(item.cachedUri),
                                             item.mimeType,

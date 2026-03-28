@@ -7,10 +7,10 @@ import com.firestream.chat.domain.model.CallLogEntry
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
+import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.call.GetCallLogUseCase
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,8 +30,8 @@ data class CallsUiState(
 
 @HiltViewModel
 class CallsViewModel @Inject constructor(
-    private val getCallLogUseCase: GetCallLogUseCase,
-    private val getChatsUseCase: GetChatsUseCase,
+    private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
     private val authRepository: AuthRepository,
     private val contactRepository: ContactRepository,
     private val userRepository: UserRepository
@@ -63,7 +63,7 @@ class CallsViewModel @Inject constructor(
 
     private fun loadCallLog() {
         viewModelScope.launch {
-            combine(getCallLogUseCase(), getChatsUseCase()) { messages, chats ->
+            combine(messageRepository.getCallLog(), chatRepository.getChats()) { messages, chats ->
                 val chatMap = chats.associateBy { it.id }
                 messages.mapNotNull { message ->
                     val chat = chatMap[message.chatId] ?: return@mapNotNull null
