@@ -51,12 +51,23 @@ This document provides a detailed specification and architectural overview of th
 - **FCM Wake-Up**: Incoming calls trigger a high-priority FCM push notification so the callee's device wakes up even in the background.
 - **Lock-Screen UI**: `CallActivity` is a separate Activity (not part of the NavHost) to support rendering on the lock screen.
 - **In-Call Controls**: Mute microphone and toggle speakerphone.
+- **Call Log**: Dedicated Calls tab (next to Chats in the bottom nav) shows a history of incoming, outgoing, and missed calls sourced from call-type messages in the Room database.
+
+### Shared Lists
+
+- **List Types**: Three list types — `CHECKLIST`, `SHOPPING`, and `GENERIC` (with bullet/number/dash/none style options).
+- **List Items**: Each item has text, check state, optional quantity/unit fields, order index, and the ID of the user who added it.
+- **Sharing**: Lists can be shared into one or more chats as a `LIST` message bubble. Recipients see the live list state and can interact with items.
+- **Diff & Sync**: Client-side `ListDiff` accumulates mutations (add, update, reorder, check, remove, title change, type change). A 30-second debounce in `ListDetailViewModel` sends a single update bubble to all `sharedChatIds`.
+- **History**: Every mutation is recorded via `ObserveListHistoryUseCase` / `FirestoreListHistorySource`. History is written fire-and-forget with a `SupervisorJob` scope so it never blocks the main flow.
+- **Undo**: Removed items are filtered from the display via a `pendingRemoval` set; the actual `removeItem()` call fires only on snackbar dismiss.
+- **Unshared Lists**: Lists that have been unshared from a chat show a locked-state indicator in the `ListBubble`.
 
 ### Organization & User Management
 
 - **Local & Global Search**: Full-text search support to locate messages either within a specific conversation or globally across all chats.
 - **Shared Media**: Dedicated screens in User Profile to browse shared images.
-- **Online/Last Seen Presence**: Live presence indicating user availability. Privacy controls exist to configure who can view the last seen status.
+- **Online/Last Seen Presence**: Live presence backed by Firebase Realtime Database (`RealtimePresenceSource`). `AppLifecycleObserver` (process-level `DefaultLifecycleObserver` registered on `ProcessLifecycleOwner`) manages the online/offline transition — this eliminates false-offline flickers during Activity transitions (e.g. opening `CallActivity`, permission dialogs). `syncPresenceToFirestore` Cloud Function mirrors RTDB state to Firestore for abrupt-disconnect cases. Privacy controls exist to configure who can view the last seen status.
 - **Profile Setup**: Phone-number authentication with profile creation (Display Name, Status Text, Avatar URL).
 - **Blocking Mechanism**: Block/unblock users to prevent communication.
 - **Share Intent**: External share intents (text or media) are routed through a `SharePickerScreen` so users can forward content into any chat.
@@ -146,7 +157,7 @@ The most isolated layer, containing enterprise-wide and application-specific bus
 
 - **Models**: Plain Kotlin Data Classes (`Message`, `User`, `Chat`, `Poll`, `CallState`, `GroupPermissions`, etc.). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
 - **Repository Interfaces**: Abstractions (`MessageRepository`, `UserRepository`, `CallRepository`, etc.) dictating what required data operations are available without knowing _how_ they're implemented.
-- **Use Cases**: Single-responsibility executors (47 total across 5 domains) that encapsulate business logic. Organized into `auth/`, `chat/`, `contact/`, `message/`, and `call/` subdirectories.
+- **Use Cases**: Single-responsibility executors (67 total across 6 domains) that encapsulate business logic. Organized into `auth/`, `call/`, `chat/`, `contact/`, `list/`, and `message/` subdirectories.
 
 ### 3.2 Data Layer
 
@@ -161,7 +172,8 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 12 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ForwardChatPicker`, `EmojiPicker`, `PollBubble`, `CreatePollSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`), all with `internal` visibility.
+- **ChatScreen** is split into 17 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`), all with `internal` visibility.
+- **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
 
@@ -387,6 +399,19 @@ erDiagram
         Boolean isRegistered
     }
 
+    lists {
+        String id PK
+        String title
+        String type
+        String createdBy
+        Long createdAt
+        Long updatedAt
+        String participantsJSON
+        String itemsJSON
+        String sharedChatIdsJSON
+        String genericStyle
+    }
+
     signal_identities {
         String address PK
         String identityKey
@@ -425,6 +450,7 @@ erDiagram
     chats ||--o{ messages : "contains"
     users ||--o{ messages : "sends"
     users ||--o{ contacts : "has"
+    users ||--o{ lists : "owns"
 ```
 
 _The seven Signal tables (`signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) preserve the persistent cryptographic state required by the Signal Protocol, including post-quantum Kyber pre-keys._
@@ -490,9 +516,11 @@ data class Message(
 )
 ```
 
-### GroupPermissions
+### GroupRole / GroupPermissions
 
 ```kotlin
+enum class GroupRole { OWNER, ADMIN, MEMBER }
+
 data class GroupPermissions(
     val sendMessages: GroupRole = GroupRole.MEMBER,
     val editGroupInfo: GroupRole = GroupRole.ADMIN,
@@ -520,6 +548,52 @@ data class PollOption(
 )
 ```
 
+### ListData / ListItem
+
+```kotlin
+enum class ListType { CHECKLIST, SHOPPING, GENERIC }
+enum class GenericListStyle { BULLET, NUMBER, DASH, NONE }
+
+data class ListItem(
+    val id: String,
+    val text: String,
+    val isChecked: Boolean,
+    val quantity: String?,
+    val unit: String?,
+    val order: Int,
+    val addedBy: String
+)
+
+data class ListData(
+    val id: String,
+    val title: String,
+    val type: ListType,
+    val createdBy: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val participants: List<String>,
+    val items: List<ListItem>,
+    val sharedChatIds: List<String>,
+    val genericStyle: GenericListStyle
+)
+```
+
+### CallLogEntry
+
+```kotlin
+enum class CallDirection { OUTGOING, INCOMING, MISSED }
+
+data class CallLogEntry(
+    val callId: String,
+    val remoteUserId: String,
+    val remoteName: String,
+    val remoteAvatarUrl: String?,
+    val direction: CallDirection,
+    val timestamp: Long,
+    val durationSeconds: Int?
+)
+```
+
 ### CallState
 
 ```kotlin
@@ -539,19 +613,24 @@ enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
 
 ## 10. Screen Navigation Architecture
 
-The application uses a single `NavHost` in `MainActivity` for all routes except `CallActivity`, which is launched via Intent for lock-screen support.
+The application uses a single `NavHost` in `MainActivity` for all routes except `CallActivity`, which is launched via Intent for lock-screen support. The `CHAT_LIST` route renders `MainScreen`, which hosts a `HorizontalPager` with Chats, Calls, and Lists tabs — the Calls and Lists tabs are internal pager state, not NavHost routes.
 
 ```mermaid
 graph TD
     %% Auth Flow
-    Login[LoginScreen] -->|Already Logged In| ChatList[ChatListScreen]
+    Login[LoginScreen] -->|Already Logged In| Main[MainScreen - 3 tabs]
     Login -->|OTP Sent| Otp[OtpScreen]
-    Otp -->|Existing User| ChatList
+    Otp -->|Existing User| Main
     Otp -->|New User| ProfileSetup[ProfileSetupScreen]
-    ProfileSetup -->|Profile Complete| ChatList
+    ProfileSetup -->|Profile Complete| Main
     Settings[SettingsScreen] -->|Sign Out| Login
 
-    %% Main Flow
+    %% Main Tabs (internal pager state)
+    Main -->|Chats tab| ChatList[ChatListScreen]
+    Main -->|Calls tab| CallsLog[CallsScreen - call log]
+    Main -->|Lists tab| Lists[ListsScreen]
+
+    %% From ChatList
     ChatList -->|Settings| Settings
     ChatList -->|New Chat| Contacts[ContactsScreen]
     ChatList -->|New Group| CreateGroup[CreateGroupScreen]
@@ -575,8 +654,14 @@ graph TD
     Chat -->|View Profile| Profile
     Chat -->|Group Settings| GroupSettings[GroupSettingsScreen]
     Chat -->|Voice Call| CallActivity[CallActivity - separate Activity]
+    Chat -->|Shared Media| SharedMedia[SharedMediaScreen]
+    Chat -->|Shared Lists| SharedLists[SharedListsScreen]
 
     GroupSettings -->|Add Member| Contacts
+
+    %% Lists flows
+    Lists -->|Open List| ListDetail[ListDetailScreen]
+    SharedLists -->|Open List| ListDetail
 
     %% Share Intent
     ShareIntent[External Share Intent] -->|chatId| SharePicker[SharePickerScreen]
@@ -585,23 +670,26 @@ graph TD
 
 ### Navigation Routes
 
-| Route              | Arguments                   | Description               |
-| ------------------ | --------------------------- | ------------------------- |
-| `LOGIN`            | —                           | Phone number entry        |
-| `OTP`              | verificationId, phoneNumber | OTP verification          |
-| `PROFILE_SETUP`    | —                           | Initial profile creation  |
-| `CHAT_LIST`        | —                           | Main screen               |
-| `CHAT`             | chatId, recipientId         | Chat conversation         |
-| `CONTACTS`         | —                           | Contact list for new chat |
-| `MESSAGE_INFO`     | messageId, chatId           | Delivery/read timestamps  |
-| `SETTINGS`         | —                           | App settings              |
-| `USER_PROFILE`     | userId                      | User profile view         |
-| `STARRED_MESSAGES` | —                           | Bookmarked messages       |
-| `ARCHIVED_CHATS`   | —                           | Archived conversations    |
-| `GROUP_SETTINGS`   | chatId                      | Group admin screen        |
-| `CREATE_GROUP`     | —                           | Group creation            |
-| `CREATE_BROADCAST` | —                           | Broadcast list creation   |
-| `SHARE_PICKER`     | —                           | External share target     |
+| Route              | Arguments                    | Description                        |
+| ------------------ | ---------------------------- | ---------------------------------- |
+| `LOGIN`            | —                            | Phone number entry                 |
+| `OTP`              | verificationId, phoneNumber  | OTP verification                   |
+| `PROFILE_SETUP`    | —                            | Initial profile creation           |
+| `CHAT_LIST`        | —                            | Main screen (renders `MainScreen`) |
+| `CHAT`             | chatId, recipientId          | Chat conversation                  |
+| `CONTACTS`         | —                            | Contact list for new chat          |
+| `MESSAGE_INFO`     | messageId, chatId            | Delivery/read timestamps           |
+| `SETTINGS`         | —                            | App settings                       |
+| `USER_PROFILE`     | userId                       | User profile view                  |
+| `STARRED_MESSAGES` | —                            | Bookmarked messages                |
+| `ARCHIVED_CHATS`   | —                            | Archived conversations             |
+| `GROUP_SETTINGS`   | chatId                       | Group admin screen                 |
+| `CREATE_GROUP`     | —                            | Group creation                     |
+| `CREATE_BROADCAST` | —                            | Broadcast list creation            |
+| `SHARE_PICKER`     | —                            | External share target              |
+| `SHARED_MEDIA`     | chatId                       | Shared images gallery for a chat   |
+| `LIST_DETAIL`      | listId, autoFocus            | List editing / detail view         |
+| `SHARED_LISTS`     | chatId                       | Lists shared into a specific chat  |
 
 ---
 
@@ -619,48 +707,53 @@ com.firestream.chat/
 │   │   ├── SignalManager.kt
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
-│   │   ├── dao/                 # ChatDao, ContactDao, MessageDao, SignalDao, UserDao
-│   │   ├── entity/              # 4 core + 7 Signal entities
+│   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, SignalDao, UserDao
+│   │   ├── entity/              # 5 core (Chat, Contact, List, Message, User) + 7 Signal entities
 │   │   ├── AppDatabase.kt
 │   │   ├── Converters.kt
 │   │   └── PreferencesDataStore.kt
 │   ├── remote/
 │   │   ├── fcm/FCMService.kt
-│   │   ├── firebase/            # FirebaseAuthSource, FirestoreCallSource,
-│   │   │                        # FirestoreMessageSource, FirestoreUserSource,
-│   │   │                        # FirebaseKeySource, FirebaseStorageSource
-│   │   └── LinkPreviewSource.kt
-│   ├── repository/              # AuthRepositoryImpl, ChatRepositoryImpl,
-│   │                            # ContactRepositoryImpl, MessageRepositoryImpl,
-│   │                            # UserRepositoryImpl, CallRepositoryImpl
+│   │   └── firebase/            # FirebaseAuthSource, FirestoreCallSource,
+│   │                            # FirestoreListSource, FirestoreListHistorySource,
+│   │                            # FirestoreMessageSource, FirestoreUserSource,
+│   │                            # FirebaseKeySource, FirebaseStorageSource,
+│   │                            # RealtimePresenceSource, LinkPreviewSource
+│   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
+│   │                            # ChatRepositoryImpl, ContactRepositoryImpl,
+│   │                            # ListRepositoryImpl, MessageRepositoryImpl,
+│   │                            # UserRepositoryImpl
 │   └── share/
 │       ├── SharedContentHolder.kt
 │       └── ShareContentResolver.kt
 ├── di/                          # AppModule, DatabaseModule, CryptoModule, NetworkModule
 ├── domain/
-│   ├── model/                   # Chat, Message, User, Contact, Poll, CallState,
-│   │                            # CallSignalingData, IceCandidateData, GroupPermissions,
-│   │                            # GroupRole, ChatType, MessageType, MessageStatus,
+│   ├── model/                   # Chat, Message, User, Contact, Poll, CallState, CallLogEntry,
+│   │                            # CallSignalingData, IceCandidateData, GroupPermissions, GroupRole,
+│   │                            # ListData, ListItem, ListDiff, ListHistoryEntry, HistoryAction,
 │   │                            # MediaAttachment, SharedContent
-│   ├── repository/              # Auth, Chat, Contact, Message, User, Call interfaces
+│   ├── repository/              # Auth, Call, Chat, Contact, List, Message, User interfaces
 │   ├── usecase/
 │   │   ├── auth/                # GetCurrentUser, VerifyOtp
-│   │   ├── call/                # Initiate, Answer, Decline, End
-│   │   ├── chat/                # 19 use cases — group mgmt, permissions,
+│   │   ├── call/                # Initiate, Answer, Decline, End, GetCallLog
+│   │   ├── chat/                # 21 use cases — group mgmt, permissions,
 │   │   │                        # invite links, archive/pin/mute, broadcast
 │   │   ├── contact/             # Search, Sync
+│   │   ├── list/                # 18 use cases — create, share, items, history
 │   │   └── message/             # 19 use cases — send, edit, delete, react,
-│   │                            # forward, star, poll, mentions, broadcast
+│   │                            # forward, star, poll, mentions, broadcast, list
 │   └── util/MentionParser.kt
 ├── navigation/NavGraph.kt
 ├── ui/
 │   ├── auth/                    # Login, Otp, ProfileSetup, AuthViewModel
-│   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton
 │   ├── broadcast/               # CreateBroadcastScreen, CreateBroadcastViewModel
+│   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton
+│   ├── calls/                   # CallsScreen, CallsViewModel (call log tab)
 │   ├── chat/                    # ChatScreen, ChatViewModel, MessageBubble,
-│   │                            # VoiceMessagePlayer, LinkPreviewCard,
-│   │                            # FullscreenImageViewer, ForwardChatPicker,
-│   │                            # EmojiPicker, PollBubble, CreatePollSheet,
+│   │                            # VoiceMessagePlayer, LinkPreviewCard, FullscreenImageViewer,
+│   │                            # ForwardChatPicker, EmojiHandlerPanel, EmojiSearchData,
+│   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
+│   │                            # SharedMediaScreen, SharedMediaViewModel,
 │   │                            # MessageInfoScreen, ChatUtils
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,
 │   │                            # ArchivedChatsScreen
@@ -669,11 +762,18 @@ com.firestream.chat/
 │   ├── group/                   # CreateGroupScreen, CreateGroupViewModel,
 │   │                            # GroupSettingsScreen, GroupSettingsViewModel,
 │   │                            # QrCodeGenerator
+│   ├── lists/                   # ListsScreen, ListsViewModel, ListDetailScreen,
+│   │                            # ListDetailViewModel, SharedListsScreen,
+│   │                            # SharedListsViewModel, AvatarStack,
+│   │                            # ListContextSheet, ListShareSheet
+│   ├── main/                    # MainScreen (HorizontalPager — Chats/Calls/Lists tabs),
+│   │                            # BottomNavBar
 │   ├── profile/                 # ProfileScreen, ProfileViewModel
 │   ├── settings/                # SettingsScreen, SettingsViewModel
 │   ├── share/                   # SharePickerScreen, SharePickerViewModel
 │   ├── starred/                 # StarredMessagesScreen, StarredMessagesViewModel
 │   └── theme/                   # Color, Shape, Theme, Type
+├── AppLifecycleObserver.kt      # Process-level lifecycle — drives RTDB online/offline presence
 ├── FireStreamApp.kt
 └── MainActivity.kt
 ```
@@ -682,7 +782,7 @@ com.firestream.chat/
 
 ## 12. Firebase Cloud Functions
 
-Two functions in `functions/index.js` (Node.js 20 runtime):
+Three functions in `functions/index.js` (Node.js 20 runtime):
 
 ### `sendPushNotification`
 
@@ -698,3 +798,10 @@ Two functions in `functions/index.js` (Node.js 20 runtime):
 - Fetches caller and callee user documents
 - Sends a high-priority FCM data message to the callee
 - **FCM Payload**: `type: "call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`
+
+### `syncPresenceToFirestore`
+
+- **Trigger**: Firebase Realtime Database write at `/presence/{userId}`
+- Mirrors `isOnline` and `lastSeen` fields to the matching Firestore `users/{userId}` document
+- Uses a `lastSeen` transaction guard to reject out-of-order invocations (Cloud Functions can be delivered out of sequence)
+- Handles abrupt disconnects that RTDB `onDisconnect()` catches but the app never explicitly wrote back to Firestore
