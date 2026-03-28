@@ -2,7 +2,6 @@ package com.firestream.chat.ui.chat
 
 import android.content.Context
 import android.net.Uri
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,10 +9,9 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.domain.model.Chat
-import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.ListData
+import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.model.MessageStatus
-import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
@@ -21,46 +19,32 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
+import com.firestream.chat.domain.usecase.list.CreateListUseCase
+import com.firestream.chat.domain.usecase.list.ObserveListUseCase
 import com.firestream.chat.domain.usecase.message.AddReactionUseCase
+import com.firestream.chat.domain.usecase.message.ClosePollUseCase
 import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
 import com.firestream.chat.domain.usecase.message.EditMessageUseCase
 import com.firestream.chat.domain.usecase.message.ForwardMessageUseCase
 import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
-import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
-import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
-import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendPollUseCase
-import com.firestream.chat.domain.usecase.message.VotePollUseCase
-import com.firestream.chat.domain.usecase.message.ClosePollUseCase
 import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
 import com.firestream.chat.domain.usecase.message.PinMessageUseCase
+import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
+import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
 import com.firestream.chat.domain.usecase.message.SendListMessageUseCase
-import com.firestream.chat.domain.usecase.list.CreateListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListUseCase
-import com.firestream.chat.domain.model.ListData
-import com.firestream.chat.domain.model.ListType
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendMessageUseCase
+import com.firestream.chat.domain.usecase.message.SendPollUseCase
+import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
 import com.firestream.chat.domain.usecase.message.StarMessageUseCase
+import com.firestream.chat.domain.usecase.message.VotePollUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -71,39 +55,27 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val typingUserIds: List<String> = emptyList(),
     val editingMessage: Message? = null,
-    // Phase 1 state
     val replyToMessage: Message? = null,
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),
-    // Forward picker
     val availableChats: List<Chat> = emptyList(),
     val chatParticipants: Map<String, User> = emptyMap(),
-    // In-chat search
     val searchQuery: String = "",
     val searchResults: List<Message> = emptyList(),
     val isSearchActive: Boolean = false,
-    // Read receipts — true only when BOTH users have read receipts enabled
     val readReceiptsAllowed: Boolean = true,
-    // Phase 5: group management
     val isGroupChat: Boolean = false,
     val chatName: String? = null,
-    // Phase 5.2: group permissions
     val canSendMessages: Boolean = true,
     val isAnnouncementMode: Boolean = false,
-    // Phase 5.4: mentions — non-empty list means picker is visible
     val mentionCandidates: List<User> = emptyList(),
     val participantNameMap: Map<String, String> = emptyMap(),
-    // Phase 5.5: broadcast
     val isBroadcast: Boolean = false,
     val broadcastRecipientIds: List<String> = emptyList(),
-    // Emoji recents (from DataStore)
     val recentEmojis: List<String> = emptyList(),
-    // Recipient profile (individual chats only)
     val recipientAvatarUrl: String? = null,
     val isRecipientOnline: Boolean = false,
     val chatAvatarUrl: String? = null,
-    // Lists feature
     val listDataCache: Map<String, ListData?> = emptyMap(),
-    // Pinned messages
     val pinnedMessages: List<Message> = emptyList()
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
@@ -159,507 +131,89 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    private var typingDebounceJob: Job? = null
-    private var searchJob: Job? = null
-    private var screenVisible = false
-    private var allGroupParticipants: List<User> = emptyList()
+    // Managers
+    private val pollManager = ChatPollManager(
+        chatId, sendPollUseCase, votePollUseCase, closePollUseCase, _uiState, viewModelScope
+    )
+    private val searchManager = ChatSearchManager(
+        chatId, searchMessagesUseCase, _uiState, viewModelScope
+    )
+    private val messageActions = ChatMessageActions(
+        chatId, deleteMessageUseCase, editMessageUseCase, addReactionUseCase,
+        removeReactionUseCase, starMessageUseCase, pinMessageUseCase,
+        forwardMessageUseCase, _uiState, viewModelScope
+    )
+    private val messageSender = ChatMessageSender(
+        chatId, recipientId, sendMessageUseCase, sendMediaMessageUseCase,
+        sendVoiceMessageUseCase, sendBroadcastMessageUseCase, parseMentionsUseCase,
+        chatRepository, _uiState, viewModelScope
+    )
+    private val messageLoader = ChatMessageLoader(
+        chatId, getMessagesUseCase, observeListUseCase, linkPreviewSource,
+        chatRepository, messageRepository, context, _uiState, viewModelScope
+    )
+    private val infoManager = ChatInfoManager(
+        chatId, recipientId, chatRepository, userRepository, preferencesDataStore,
+        checkGroupPermissionUseCase, getChatsUseCase, createListUseCase, _uiState, viewModelScope
+    )
 
     init {
         _uiState.update { it.copy(currentUserId = authRepository.currentUserId ?: "") }
-        loadMessages()
-        observeTyping()
-        loadAvailableChats()
-        observeReadReceiptsAllowed()
-        loadChatInfo()
-        observeRecentEmojis()
-        if (recipientId.isNotBlank()) observeRecipient()
+        messageLoader.start()
+        infoManager.start()
     }
 
-    private fun loadChatInfo() {
-        viewModelScope.launch {
-            chatRepository.getChatById(chatId)
-                .onSuccess { chat ->
-                    val uid = _uiState.value.currentUserId
-                    val isGroup = chat.type == ChatType.GROUP
-                    val isBroadcast = chat.type == ChatType.BROADCAST
-                    val broadcastRecipientIds = if (isBroadcast) chat.participants.filter { it != uid } else emptyList()
-                    _uiState.update {
-                        it.copy(
-                            isGroupChat = isGroup,
-                            // Only overwrite chatName from the chat document for named chats
-                            // (groups/broadcasts). For individual chats chat.name is null and
-                            // overwriting here would race with observeRecipient() which sets the
-                            // recipient's displayName as chatName from a faster snapshot listener.
-                            chatName = if (isGroup || isBroadcast) chat.name else it.chatName,
-                            chatAvatarUrl = chat.avatarUrl,
-                            canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
-                            isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
-                            isBroadcast = isBroadcast,
-                            broadcastRecipientIds = broadcastRecipientIds
-                        )
-                    }
-                    if (isGroup) loadGroupParticipants(chat.participants)
-                }
-        }
-    }
+    // ── Message loading & visibility ──
+    fun setScreenVisible(visible: Boolean) = messageLoader.setScreenVisible(visible)
 
-    private fun loadGroupParticipants(participantIds: List<String>) {
-        viewModelScope.launch {
-            val users = participantIds
-                .map { userId -> async { userRepository.getUserById(userId).getOrNull() } }
-                .awaitAll()
-                .filterNotNull()
-            val nameMap = users.associate { it.uid to it.displayName }
-            allGroupParticipants = users
-            _uiState.update { it.copy(participantNameMap = nameMap) }
-        }
-    }
+    // ── Message sending ──
+    fun onTyping(text: String) = messageSender.onTyping(text)
+    fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageSender.sendMessage(content, emojiSizes)
+    fun sendMediaMessage(uri: Uri, mimeType: String) = messageSender.sendMediaMessage(uri, mimeType)
+    fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
 
-    private fun observeRecipient() {
-        viewModelScope.launch {
-            userRepository.observeUser(recipientId)
-                .catch { /* non-fatal */ }
-                .collect { user ->
-                    _uiState.update {
-                        it.copy(
-                            chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.chatName,
-                            recipientAvatarUrl = user.avatarUrl,
-                            isRecipientOnline = user.isOnline
-                        )
-                    }
-                    updateReadReceiptsAllowed(recipientEnabled = user.readReceiptsEnabled)
-                }
-        }
-    }
+    // ── Message actions ──
+    fun deleteMessage(messageId: String) = messageActions.deleteMessage(messageId)
+    fun startEdit(message: Message) = messageActions.startEdit(message)
+    fun cancelEdit() = messageActions.cancelEdit()
+    fun confirmEdit(newContent: String) = messageActions.confirmEdit(newContent)
+    fun setReplyTo(message: Message) = messageActions.setReplyTo(message)
+    fun clearReplyTo() = messageActions.clearReplyTo()
+    fun toggleReaction(messageId: String, emoji: String) = messageActions.toggleReaction(messageId, emoji)
+    fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) =
+        messageActions.forwardMessage(message, targetChatId, targetRecipientId)
+    fun toggleStar(message: Message) = messageActions.toggleStar(message)
+    fun togglePin(messageId: String, pinned: Boolean) = messageActions.togglePin(messageId, pinned)
 
-    /**
-     * Observe both the local user's read receipts preference AND the recipient's
-     * Firestore setting. Read receipts are only allowed when BOTH are enabled.
-     * The recipient's setting is handled by observeRecipient() to avoid a duplicate listener.
-     */
-    private fun observeReadReceiptsAllowed() {
-        // Local user's setting
-        viewModelScope.launch {
-            preferencesDataStore.readReceiptsFlow.collect { localEnabled ->
-                updateReadReceiptsAllowed(localEnabled = localEnabled)
-            }
-        }
-    }
+    // ── Search ──
+    fun onSearchQueryChange(query: String) = searchManager.onSearchQueryChange(query)
+    fun toggleSearch() = searchManager.toggleSearch()
+    fun clearSearch() = searchManager.clearSearch()
 
-    private var localReadReceipts: Boolean = true
-    private var recipientReadReceipts: Boolean = true
+    // ── Polls ──
+    fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) =
+        pollManager.sendPoll(question, options, isMultipleChoice, isAnonymous)
+    fun votePoll(messageId: String, optionIds: List<String>) = pollManager.votePoll(messageId, optionIds)
+    fun closePoll(messageId: String) = pollManager.closePoll(messageId)
 
-    private fun updateReadReceiptsAllowed(
-        localEnabled: Boolean = localReadReceipts,
-        recipientEnabled: Boolean = recipientReadReceipts
-    ) {
-        localReadReceipts = localEnabled
-        recipientReadReceipts = recipientEnabled
-        val allowed = localEnabled && recipientEnabled
-        _uiState.update { it.copy(readReceiptsAllowed = allowed) }
-    }
-
-    fun setScreenVisible(visible: Boolean) {
-        val wasVisible = screenVisible
-        screenVisible = visible
-        if (visible && !wasVisible) {
-            viewModelScope.launch { chatRepository.resetUnreadCount(chatId) }
-            // When screen becomes visible, check for unread messages
-            val messages = _uiState.value.messages
-            if (messages.isNotEmpty()) {
-                markIncomingMessagesAsRead(messages)
-            }
-        } else {
-            // Cancel pending read receipt when leaving the screen
-            readReceiptJob?.cancel()
-        }
-    }
-
-    private fun loadMessages() {
-        viewModelScope.launch {
-            getMessagesUseCase(chatId)
-                .catch { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
-                }
-                .collectLatest { messages ->
-                    _uiState.update {
-                        it.copy(
-                            messages = messages,
-                            isLoading = false,
-                            pinnedMessages = messages.filter { msg -> msg.isPinned }
-                        )
-                    }
-                    // Mark incoming messages as read
-                    markIncomingMessagesAsRead(messages)
-                    // Fetch link previews for text messages with URLs
-                    fetchLinkPreviewsFor(messages)
-                    // Observe list data for LIST messages
-                    observeListMessages(messages)
-                }
-        }
-    }
-
-    private var readReceiptJob: Job? = null
-
-    private fun markIncomingMessagesAsRead(messages: List<Message>) {
-        if (!screenVisible) return
-        val currentUserId = _uiState.value.currentUserId
-        if (currentUserId.isEmpty()) return
-
-        // Step 1: Any SENT messages need to be marked DELIVERED first
-        val needsDelivery = messages
-            .filter { it.senderId != currentUserId && it.status == MessageStatus.SENT }
-            .map { it.id }
-        if (needsDelivery.isNotEmpty()) {
-            viewModelScope.launch {
-                messageRepository.markMessagesAsDelivered(chatId, needsDelivery)
-            }
-            // Return here — the Firestore update will trigger a new collect emission
-            // with DELIVERED status, at which point we'll proceed to mark READ below.
-            // This ensures the sender sees ✓✓ before it turns blue.
-            return
-        }
-
-        // Step 2: Skip READ marking if either user has disabled read receipts
-        if (!_uiState.value.readReceiptsAllowed) return
-
-        // Step 3: Mark DELIVERED messages as READ after a short delay
-        val needsRead = messages
-            .filter { it.senderId != currentUserId && it.status == MessageStatus.DELIVERED }
-            .map { it.id }
-        if (needsRead.isEmpty()) return
-
-        readReceiptJob?.cancel()
-        readReceiptJob = viewModelScope.launch {
-            delay(1500)
-            if (screenVisible) {
-                messageRepository.markMessagesAsRead(chatId, needsRead)
-                NotificationManagerCompat.from(context).cancel(chatId.hashCode())
-            }
-        }
-    }
-
-    private fun fetchLinkPreviewsFor(messages: List<Message>) {
-        messages.forEach { msg ->
-            if (msg.type.name == "TEXT") {
-                val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
-                if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
-                viewModelScope.launch {
-                    val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
-                    _uiState.update { it.copy(linkPreviews = it.linkPreviews + (url to preview)) }
-                }
-            }
-        }
-    }
-
-    private fun observeTyping() {
-        viewModelScope.launch {
-            chatRepository.observeTyping(chatId)
-                .catch { /* ignore typing errors */ }
-                .collect { typingIds ->
-                    _uiState.update { state ->
-                        state.copy(typingUserIds = typingIds.filter { it != state.currentUserId })
-                    }
-                }
-        }
-    }
-
-    fun onTyping(text: String) {
-        if (text.isNotBlank()) {
-            viewModelScope.launch { chatRepository.setTyping(chatId, true) }
-            typingDebounceJob?.cancel()
-            typingDebounceJob = viewModelScope.launch {
-                delay(4_000)
-                chatRepository.setTyping(chatId, false)
-            }
-        } else {
-            typingDebounceJob?.cancel()
-            viewModelScope.launch { chatRepository.setTyping(chatId, false) }
-        }
-    }
-
-    fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) {
-        if (content.isBlank()) return
-        typingDebounceJob?.cancel()
-        val state = _uiState.value
-        viewModelScope.launch {
-            chatRepository.setTyping(chatId, false)
-            _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList()) }
-            if (state.isBroadcast) {
-                sendBroadcastMessageUseCase(chatId, content, state.broadcastRecipientIds)
-                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
-            } else {
-                val replyToId = state.replyToMessage?.id
-                val mentions = if (state.isGroupChat) parseMentionsUseCase(content, state.displayNameToUserId) else emptyList()
-                sendMessageUseCase(chatId, content, recipientId, replyToId, mentions, emojiSizes)
-                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
-            }
-        }
-    }
-
+    // ── Mentions ──
     fun onTypingWithMentions(text: String) {
-        onTyping(text)
-        if (!_uiState.value.isGroupChat) return
-        val query = extractMentionQuery(text)
-        if (query != null) {
-            val candidates = allGroupParticipants.filter {
-                query.isEmpty() || it.displayName.contains(query, ignoreCase = true)
-            }.take(8)
-            _uiState.update { it.copy(mentionCandidates = candidates) }
-        } else {
-            _uiState.update { it.copy(mentionCandidates = emptyList()) }
-        }
+        messageSender.onTyping(text)
+        infoManager.updateMentionCandidates(text)
     }
+    fun selectMention(user: User, currentText: String): String = infoManager.selectMention(user, currentText)
 
-    /** Returns the new text with the selected mention inserted; caller must update their text field. */
-    fun selectMention(user: User, currentText: String): String {
-        val atIndex = currentText.lastIndexOf('@')
-        val newText = if (atIndex >= 0) {
-            currentText.substring(0, atIndex + 1) + user.displayName + " "
-        } else {
-            currentText
-        }
-        _uiState.update { it.copy(mentionCandidates = emptyList()) }
-        return newText
-    }
+    // ── Lists ──
+    fun createAndSendList(title: String, type: ListType) = infoManager.createAndSendList(title, type)
 
-    private fun extractMentionQuery(text: String): String? {
-        val atIndex = text.lastIndexOf('@')
-        if (atIndex < 0) return null
-        val afterAt = text.substring(atIndex + 1)
-        return if (afterAt.contains(' ')) null else afterAt
-    }
+    // ── Emoji ──
+    fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
 
-    fun deleteMessage(messageId: String) {
-        viewModelScope.launch {
-            deleteMessageUseCase(chatId, messageId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    fun startEdit(message: Message) {
-        _uiState.update { it.copy(editingMessage = message) }
-    }
-
-    fun cancelEdit() {
-        _uiState.update { it.copy(editingMessage = null) }
-    }
-
-    fun confirmEdit(newContent: String) {
-        val msg = _uiState.value.editingMessage ?: return
-        if (newContent.isBlank()) return
-        _uiState.update { it.copy(editingMessage = null) }
-        viewModelScope.launch {
-            editMessageUseCase(chatId, msg.id, newContent)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    fun sendMediaMessage(uri: Uri, mimeType: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true) }
-            sendMediaMessageUseCase(chatId, uri, mimeType, recipientId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
-        }
-    }
-
-    // Phase 1: reply-to
-    fun setReplyTo(message: Message) {
-        _uiState.update { it.copy(replyToMessage = message) }
-    }
-
-    fun clearReplyTo() {
-        _uiState.update { it.copy(replyToMessage = null) }
-    }
-
-    // Phase 1: reactions
-    fun toggleReaction(messageId: String, emoji: String) {
-        val currentUserId = _uiState.value.currentUserId
-        val message = _uiState.value.messages.find { it.id == messageId } ?: return
-        viewModelScope.launch {
-            if (message.reactions[currentUserId] == emoji) {
-                removeReactionUseCase(chatId, messageId, currentUserId)
-            } else {
-                addReactionUseCase(chatId, messageId, currentUserId, emoji)
-            }
-        }
-    }
-
-    // Phase 1: forwarding
-    fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) {
-        viewModelScope.launch {
-            forwardMessageUseCase(message, targetChatId, targetRecipientId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    // Phase 1: voice messages
-    fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true) }
-            sendVoiceMessageUseCase(chatId, uri, recipientId, durationSeconds)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
-        }
-    }
-
-    // Phase 2: star/unstar a message
-    fun toggleStar(message: Message) {
-        viewModelScope.launch {
-            starMessageUseCase(message.id, !message.isStarred)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    // Load available chats for the forward picker
-    private fun loadAvailableChats() {
-        viewModelScope.launch {
-            try {
-                val chats = getChatsUseCase().first()
-                val participants = chats.resolveChatParticipants(_uiState.value.currentUserId, userRepository)
-                _uiState.update { it.copy(availableChats = chats, chatParticipants = participants) }
-            } catch (_: Exception) {
-                // Non-critical — forward picker will show empty
-            }
-        }
-    }
-
-    // In-chat search with debounce
-    fun onSearchQueryChange(query: String) {
-        _uiState.update { it.copy(searchQuery = query) }
-        searchJob?.cancel()
-        if (query.isBlank()) {
-            _uiState.update { it.copy(searchResults = emptyList()) }
-            return
-        }
-        searchJob = viewModelScope.launch {
-            delay(300)
-            try {
-                val results = searchMessagesUseCase(query, chatId)
-                _uiState.update { it.copy(searchResults = results) }
-            } catch (_: Exception) {
-                _uiState.update { it.copy(searchResults = emptyList()) }
-            }
-        }
-    }
-
-    fun toggleSearch() {
-        _uiState.update {
-            val newActive = !it.isSearchActive
-            it.copy(
-                isSearchActive = newActive,
-                searchQuery = if (newActive) it.searchQuery else "",
-                searchResults = if (newActive) it.searchResults else emptyList()
-            )
-        }
-        if (!_uiState.value.isSearchActive) searchJob?.cancel()
-    }
-
-    fun clearSearch() {
-        searchJob?.cancel()
-        _uiState.update {
-            it.copy(
-                isSearchActive = false,
-                searchQuery = "",
-                searchResults = emptyList()
-            )
-        }
-    }
-
-    // Phase 5.3: polls
-    fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true) }
-            sendPollUseCase(chatId, question, options, isMultipleChoice, isAnonymous)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
-        }
-    }
-
-    fun votePoll(messageId: String, optionIds: List<String>) {
-        viewModelScope.launch {
-            votePollUseCase(chatId, messageId, optionIds)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    fun closePoll(messageId: String) {
-        viewModelScope.launch {
-            closePollUseCase(chatId, messageId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    // Message pinning
-    fun togglePin(messageId: String, pinned: Boolean) {
-        viewModelScope.launch {
-            pinMessageUseCase(chatId, messageId, pinned)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-        }
-    }
-
-    // Lists
-    private val observedListIds = mutableSetOf<String>()
-
-    private fun observeListMessages(messages: List<Message>) {
-        val listIds = messages
-            .filter { it.type == MessageType.LIST && it.listId != null }
-            .mapNotNull { it.listId }
-            .distinct()
-            .take(10) // Cap concurrent listeners
-
-        listIds.forEach { listId ->
-            if (listId !in observedListIds) {
-                observedListIds.add(listId)
-                viewModelScope.launch {
-                    observeListUseCase(listId)
-                        .catch { /* non-fatal */ }
-                        .collect { listData ->
-                            _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to listData)) }
-                        }
-                }
-            }
-        }
-    }
-
-    fun createAndSendList(title: String, type: ListType) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true) }
-            createListUseCase(title, type, chatId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-            _uiState.update { it.copy(isSending = false) }
-        }
-    }
-
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
-    }
-
-    // Emoji recents
-    private fun observeRecentEmojis() {
-        viewModelScope.launch {
-            preferencesDataStore.recentEmojisFlow
-                .distinctUntilChanged()
-                .collect { recents ->
-                    _uiState.update { it.copy(recentEmojis = recents) }
-                }
-        }
-    }
-
-    fun addRecentEmoji(emoji: String) {
-        viewModelScope.launch {
-            preferencesDataStore.addRecentEmoji(emoji)
-        }
-    }
+    // ── Error ──
+    fun clearError() { _uiState.update { it.copy(error = null) } }
 
     override fun onCleared() {
         super.onCleared()
-        typingDebounceJob?.cancel()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            chatRepository.setTyping(chatId, false)
-        }
+        messageSender.onCleared()
     }
 }
