@@ -1,11 +1,11 @@
 package com.firestream.chat.domain.usecase.message
 
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.PollRepository
 import javax.inject.Inject
 
 class SendPollUseCase @Inject constructor(
-    private val messageRepository: MessageRepository
+    private val pollRepository: PollRepository
 ) {
     suspend operator fun invoke(
         chatId: String,
@@ -14,6 +14,6 @@ class SendPollUseCase @Inject constructor(
         isMultipleChoice: Boolean,
         isAnonymous: Boolean
     ): Result<Message> {
-        return messageRepository.sendPoll(chatId, question, options, isMultipleChoice, isAnonymous)
+        return pollRepository.sendPoll(chatId, question, options, isMultipleChoice, isAnonymous)
     }
 }

@@ -12,8 +12,6 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
-import com.firestream.chat.domain.model.Poll
-import com.firestream.chat.domain.model.PollOption
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.NonCancellable
@@ -31,8 +29,6 @@ import com.firestream.chat.BuildConfig
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
-
-private const val POLL_CONTENT = "📊 Poll"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -576,119 +572,6 @@ class MessageRepositoryImpl @Inject constructor(
         return messageDao.getSharedMediaForUser(userId).map { entities -> entities.map { it.toDomain() } }
     }
 
-    override suspend fun sendPoll(
-        chatId: String,
-        question: String,
-        options: List<String>,
-        isMultipleChoice: Boolean,
-        isAnonymous: Boolean
-    ): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
-            val timestamp = System.currentTimeMillis()
-
-            val pollOptions = options.mapIndexed { index, text ->
-                PollOption(id = "opt_$index", text = text)
-            }
-            val poll = Poll(
-                question = question,
-                options = pollOptions,
-                isMultipleChoice = isMultipleChoice,
-                isAnonymous = isAnonymous
-            )
-
-            val pollDataMap = buildPollFirestoreMap(poll)
-
-            val remoteId = messageSource.sendPollMessage(
-                chatId = chatId,
-                senderId = senderId,
-                pollData = pollDataMap,
-                timestamp = timestamp
-            )
-
-            val message = Message(
-                id = remoteId,
-                chatId = chatId,
-                senderId = senderId,
-                content = POLL_CONTENT,
-                type = MessageType.POLL,
-                status = MessageStatus.SENT,
-                timestamp = timestamp,
-                pollData = poll
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
-
-            Result.success(message)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun votePoll(chatId: String, messageId: String, optionIds: List<String>): Result<Unit> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
-            val entity = messageDao.getMessageById(messageId) ?: throw Exception("Message not found")
-            val poll = entity.toDomain().pollData ?: throw Exception("Not a poll message")
-            if (poll.isClosed) throw Exception("Poll is closed")
-
-            messageSource.votePoll(chatId, messageId, userId, optionIds)
-
-            // Update local cache
-            val updatedOptions = poll.options.map { option ->
-                val voters = option.voterIds.toMutableList()
-                if (optionIds.contains(option.id)) {
-                    if (!voters.contains(userId)) voters.add(userId)
-                } else if (!poll.isMultipleChoice) {
-                    voters.remove(userId)
-                }
-                option.copy(voterIds = voters)
-            }
-            val updatedPoll = poll.copy(options = updatedOptions)
-            val updatedMessage = entity.toDomain().copy(pollData = updatedPoll)
-            messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun closePoll(chatId: String, messageId: String): Result<Unit> {
-        return try {
-            messageSource.closePoll(chatId, messageId)
-
-            val entity = messageDao.getMessageById(messageId)
-            if (entity != null) {
-                val msg = entity.toDomain()
-                val updatedPoll = msg.pollData?.copy(isClosed = true)
-                messageDao.insertMessage(MessageEntity.fromDomain(msg.copy(pollData = updatedPoll)))
-            }
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun parsePollFromFirestore(data: Map<String, Any?>): Poll {
-        val options = (data["options"] as? List<Map<String, Any?>>)?.map { opt ->
-            PollOption(
-                id = opt["id"] as? String ?: "",
-                text = opt["text"] as? String ?: "",
-                voterIds = (opt["voterIds"] as? List<String>) ?: emptyList()
-            )
-        } ?: emptyList()
-
-        return Poll(
-            question = data["question"] as? String ?: "",
-            options = options,
-            isMultipleChoice = data["isMultipleChoice"] as? Boolean ?: false,
-            isAnonymous = data["isAnonymous"] as? Boolean ?: false,
-            isClosed = data["isClosed"] as? Boolean ?: false
-        )
-    }
-
     override suspend fun sendBroadcastMessage(
         broadcastChatId: String,
         content: String,
@@ -854,19 +737,4 @@ class MessageRepositoryImpl @Inject constructor(
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
 
-    private fun buildPollFirestoreMap(poll: Poll): Map<String, Any?> {
-        return mapOf(
-            "question" to poll.question,
-            "isMultipleChoice" to poll.isMultipleChoice,
-            "isAnonymous" to poll.isAnonymous,
-            "isClosed" to poll.isClosed,
-            "options" to poll.options.map { option ->
-                mapOf(
-                    "id" to option.id,
-                    "text" to option.text,
-                    "voterIds" to option.voterIds
-                )
-            }
-        )
-    }
 }

@@ -32,10 +32,6 @@ interface MessageRepository {
     // Shared media
     fun getSharedMedia(chatId: String): Flow<List<Message>>
     fun getSharedMediaForUser(userId: String): Flow<List<Message>>
-    // Phase 5.3: polls
-    suspend fun sendPoll(chatId: String, question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean): Result<Message>
-    suspend fun votePoll(chatId: String, messageId: String, optionIds: List<String>): Result<Unit>
-    suspend fun closePoll(chatId: String, messageId: String): Result<Unit>
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
     // Lists

@@ -4,7 +4,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.Poll
 import com.firestream.chat.domain.model.PollOption
-import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.PollRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -16,13 +16,13 @@ import org.junit.Test
 
 class SendPollUseCaseTest {
 
-    private lateinit var messageRepository: MessageRepository
+    private lateinit var pollRepository: PollRepository
     private lateinit var useCase: SendPollUseCase
 
     @Before
     fun setUp() {
-        messageRepository = mockk()
-        useCase = SendPollUseCase(messageRepository)
+        pollRepository = mockk()
+        useCase = SendPollUseCase(pollRepository)
     }
 
     @Test
@@ -44,7 +44,7 @@ class SendPollUseCaseTest {
         )
 
         coEvery {
-            messageRepository.sendPoll("chat1", "Is this working?", options, false, false)
+            pollRepository.sendPoll("chat1", "Is this working?", options, false, false)
         } returns Result.success(message)
 
         val result = useCase("chat1", "Is this working?", options, false, false)
@@ -53,14 +53,14 @@ class SendPollUseCaseTest {
         assertEquals(MessageType.POLL, result.getOrNull()?.type)
         assertEquals("Is this working?", result.getOrNull()?.pollData?.question)
         coVerify(exactly = 1) {
-            messageRepository.sendPoll("chat1", "Is this working?", options, false, false)
+            pollRepository.sendPoll("chat1", "Is this working?", options, false, false)
         }
     }
 
     @Test
     fun `invoke returns failure when repository fails`() = runTest {
         coEvery {
-            messageRepository.sendPoll(any(), any(), any(), any(), any())
+            pollRepository.sendPoll(any(), any(), any(), any(), any())
         } returns Result.failure(Exception("Network error"))
 
         val result = useCase("chat1", "Question?", listOf("A", "B"), false, false)
@@ -84,7 +84,7 @@ class SendPollUseCaseTest {
         )
 
         coEvery {
-            messageRepository.sendPoll("chat1", "Pick multiple", options, true, true)
+            pollRepository.sendPoll("chat1", "Pick multiple", options, true, true)
         } returns Result.success(message)
 
         val result = useCase("chat1", "Pick multiple", options, true, true)
