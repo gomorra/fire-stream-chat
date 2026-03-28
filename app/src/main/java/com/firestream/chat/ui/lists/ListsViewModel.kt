@@ -47,12 +47,14 @@ data class ListsUiState(
     val selectedListHistory: List<ListHistoryEntry> = emptyList(),
     val participantAvatars: Map<String, List<User>> = emptyMap(),
     val sortOption: ListSortOption = ListSortOption.MODIFIED,
+    val pinnedListIds: Set<String> = emptySet(),
     val isLoading: Boolean = true,
     val error: String? = null,
     val searchQuery: String = "",
     val isSearchBarVisible: Boolean = false
 ) {
     fun isOwner(list: ListData) = list.createdBy == currentUserId
+    fun isPinned(list: ListData) = list.id in pinnedListIds
 }
 
 @HiltViewModel
@@ -79,8 +81,28 @@ class ListsViewModel @Inject constructor(
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
         observeSortOption()
+        observePinnedListIds()
         observeLists()
         observeChats()
+    }
+
+    private fun observePinnedListIds() {
+        preferencesDataStore.pinnedListIdsFlow
+            .onEach { pinned ->
+                _uiState.value = _uiState.value.copy(
+                    pinnedListIds = pinned,
+                    lists = filteredAndSorted(rawLists, _uiState.value.sortOption, _uiState.value.searchQuery, pinned)
+                )
+            }
+            .launchIn(viewModelScope)
+    }
+
+    fun togglePin(listId: String) {
+        viewModelScope.launch {
+            val current = _uiState.value.pinnedListIds
+            val updated = if (listId in current) current - listId else current + listId
+            preferencesDataStore.setPinnedListIds(updated)
+        }
     }
 
     private fun observeSortOption() {
@@ -96,19 +118,22 @@ class ListsViewModel @Inject constructor(
             .launchIn(viewModelScope)
     }
 
-    private fun sortedLists(lists: List<ListData>, option: ListSortOption): List<ListData> = when (option) {
-        ListSortOption.TYPE -> lists.sortedWith(compareBy({ it.type.ordinal }, { it.title }))
-        ListSortOption.CREATED -> lists.sortedByDescending { it.createdAt }
-        ListSortOption.MODIFIED -> lists.sortedByDescending { it.updatedAt }
-        ListSortOption.CREATOR -> lists.sortedWith(compareBy({ it.createdBy }, { it.title }))
+    private fun sortedLists(lists: List<ListData>, option: ListSortOption, pinned: Set<String>): List<ListData> {
+        val sorted = when (option) {
+            ListSortOption.TYPE -> lists.sortedWith(compareBy({ it.type.ordinal }, { it.title }))
+            ListSortOption.CREATED -> lists.sortedByDescending { it.createdAt }
+            ListSortOption.MODIFIED -> lists.sortedByDescending { it.updatedAt }
+            ListSortOption.CREATOR -> lists.sortedWith(compareBy({ it.createdBy }, { it.title }))
+        }
+        return sorted.sortedWith(compareByDescending { it.id in pinned })
     }
 
-    private fun filteredAndSorted(lists: List<ListData>, option: ListSortOption, query: String): List<ListData> {
+    private fun filteredAndSorted(lists: List<ListData>, option: ListSortOption, query: String, pinned: Set<String> = _uiState.value.pinnedListIds): List<ListData> {
         val base = if (query.isBlank()) lists else lists.filter { list ->
             list.title.contains(query, ignoreCase = true) ||
                 list.items.any { it.text.contains(query, ignoreCase = true) }
         }
-        return sortedLists(base, option)
+        return sortedLists(base, option, pinned)
     }
 
     fun setSortOption(option: ListSortOption) {

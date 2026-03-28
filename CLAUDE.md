@@ -62,25 +62,44 @@ Plans must include a recommendation table per step:
 
 ## Plan Execution Workflow
 
+### Automated execution via skills
+
+Use `/build [plan-name]` to execute an entire plan end-to-end, or `/step [plan-name] [step-number]` for a single step. These skills automatically:
+- Switch models per step (via Agent tool's `model` parameter)
+- Run `/simplify-review` (always Sonnet) after each step
+- Run tests + build + commit
+
+### Execution order
+
+Plans must include an **Order** line that defines the build sequence:
+- `→` = sequential (wait for previous step)
+- `+` = parallel (run simultaneously)
+- Example: `Order: 1 → 2 → 3+4 → 5` — steps 3 and 4 run in parallel after 2; step 5 waits for both
+
+**Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
+
+### Per-step display
+
 **At the start of each implementation step, display:**
 > **Step X — Model: [Opus|Sonnet] / Effort: [High|Medium|Low]**
 
 This must appear before any code changes are made for that step.
 
+### Post-step workflow
+
 **After each sub-feature, ALWAYS run these steps in order without waiting to be asked:**
-1. `/simplify` — review changed code for quality
+1. `/simplify-review` — review changed code for quality (always Sonnet/Medium)
 2. `./gradlew test` — unit tests must pass
 3. `./gradlew assembleDebug` — build must be clean
 4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 
-**Parallel vs. sequential:** Run sub-features in parallel only when they touch different files. If two steps modify the same files, run them sequentially. When in doubt, sequential is safer.
+### Token efficiency
 
-**Token efficiency:**
 - When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
 - When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
 
-**Optional:** After completing an entire phase, run `/simplify` on the full phase diff as a final quality pass.
+**Optional:** After completing an entire phase, run `/simplify-review` on the full phase diff as a final quality pass.
 
 ## Architecture
 

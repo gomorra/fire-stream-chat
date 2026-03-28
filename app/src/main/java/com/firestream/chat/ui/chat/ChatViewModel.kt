@@ -15,30 +15,12 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.list.CreateListUseCase
-import com.firestream.chat.domain.usecase.list.ObserveListUseCase
-import com.firestream.chat.domain.usecase.message.AddReactionUseCase
-import com.firestream.chat.domain.usecase.message.ClosePollUseCase
-import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
-import com.firestream.chat.domain.usecase.message.EditMessageUseCase
-import com.firestream.chat.domain.usecase.message.ForwardMessageUseCase
-import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
-import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
-import com.firestream.chat.domain.usecase.message.PinMessageUseCase
-import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
-import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendListMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendPollUseCase
-import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
-import com.firestream.chat.domain.usecase.message.StarMessageUseCase
-import com.firestream.chat.domain.usecase.message.VotePollUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -86,32 +68,14 @@ data class ChatUiState(
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
-    private val getMessagesUseCase: GetMessagesUseCase,
-    private val sendMessageUseCase: SendMessageUseCase,
-    private val deleteMessageUseCase: DeleteMessageUseCase,
-    private val editMessageUseCase: EditMessageUseCase,
-    private val sendMediaMessageUseCase: SendMediaMessageUseCase,
-    private val addReactionUseCase: AddReactionUseCase,
-    private val removeReactionUseCase: RemoveReactionUseCase,
-    private val forwardMessageUseCase: ForwardMessageUseCase,
-    private val sendVoiceMessageUseCase: SendVoiceMessageUseCase,
-    private val starMessageUseCase: StarMessageUseCase,
-    private val sendPollUseCase: SendPollUseCase,
-    private val votePollUseCase: VotePollUseCase,
-    private val closePollUseCase: ClosePollUseCase,
-    private val parseMentionsUseCase: ParseMentionsUseCase,
-    private val sendBroadcastMessageUseCase: SendBroadcastMessageUseCase,
-    private val pinMessageUseCase: PinMessageUseCase,
-    private val sendListMessageUseCase: SendListMessageUseCase,
-    private val createListUseCase: CreateListUseCase,
-    private val observeListUseCase: ObserveListUseCase,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
-    private val getChatsUseCase: GetChatsUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
     private val linkPreviewSource: LinkPreviewSource,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository,
+    private val listRepository: ListRepository,
     private val messageRepository: MessageRepository,
+    private val pollRepository: PollRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     @ApplicationContext private val context: Context
@@ -132,29 +96,18 @@ class ChatViewModel @Inject constructor(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     // Managers
-    private val pollManager = ChatPollManager(
-        chatId, sendPollUseCase, votePollUseCase, closePollUseCase, _uiState, viewModelScope
-    )
-    private val searchManager = ChatSearchManager(
-        chatId, searchMessagesUseCase, _uiState, viewModelScope
-    )
-    private val messageActions = ChatMessageActions(
-        chatId, deleteMessageUseCase, editMessageUseCase, addReactionUseCase,
-        removeReactionUseCase, starMessageUseCase, pinMessageUseCase,
-        forwardMessageUseCase, _uiState, viewModelScope
-    )
+    private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
+    private val searchManager = ChatSearchManager(chatId, searchMessagesUseCase, _uiState, viewModelScope)
+    private val messageActions = ChatMessageActions(chatId, messageRepository, _uiState, viewModelScope)
     private val messageSender = ChatMessageSender(
-        chatId, recipientId, sendMessageUseCase, sendMediaMessageUseCase,
-        sendVoiceMessageUseCase, sendBroadcastMessageUseCase, parseMentionsUseCase,
-        chatRepository, _uiState, viewModelScope
+        chatId, recipientId, chatRepository, messageRepository, _uiState, viewModelScope
     )
     private val messageLoader = ChatMessageLoader(
-        chatId, getMessagesUseCase, observeListUseCase, linkPreviewSource,
-        chatRepository, messageRepository, context, _uiState, viewModelScope
+        chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, context, _uiState, viewModelScope
     )
     private val infoManager = ChatInfoManager(
-        chatId, recipientId, chatRepository, userRepository, preferencesDataStore,
-        checkGroupPermissionUseCase, getChatsUseCase, createListUseCase, _uiState, viewModelScope
+        chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
+        checkGroupPermissionUseCase, _uiState, viewModelScope
     )
 
     init {

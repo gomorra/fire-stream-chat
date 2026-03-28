@@ -14,20 +14,18 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.list.CreateListUseCase
 
 internal class ChatInfoManager(
     private val chatId: String,
     private val recipientId: String,
     private val chatRepository: ChatRepository,
+    private val listRepository: ListRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
-    private val getChatsUseCase: GetChatsUseCase,
-    private val createListUseCase: CreateListUseCase,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope
 ) {
@@ -123,7 +121,7 @@ internal class ChatInfoManager(
     private fun loadAvailableChats() {
         scope.launch {
             try {
-                val chats = getChatsUseCase().first()
+                val chats = chatRepository.getChats().first()
                 val participants = chats.resolveChatParticipants(_uiState.value.currentUserId, userRepository)
                 _uiState.update { it.copy(availableChats = chats, chatParticipants = participants) }
             } catch (_: Exception) {
@@ -182,7 +180,7 @@ internal class ChatInfoManager(
     fun createAndSendList(title: String, type: ListType) {
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
-            createListUseCase(title, type, chatId)
+            listRepository.createList(title, type, chatId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
             _uiState.update { it.copy(isSending = false) }
         }

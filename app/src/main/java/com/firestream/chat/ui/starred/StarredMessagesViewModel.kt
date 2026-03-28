@@ -3,8 +3,7 @@ package com.firestream.chat.ui.starred
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.usecase.message.GetStarredMessagesUseCase
-import com.firestream.chat.domain.usecase.message.StarMessageUseCase
+import com.firestream.chat.domain.repository.MessageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,8 +20,7 @@ data class StarredMessagesUiState(
 
 @HiltViewModel
 class StarredMessagesViewModel @Inject constructor(
-    private val getStarredMessagesUseCase: GetStarredMessagesUseCase,
-    private val starMessageUseCase: StarMessageUseCase
+    private val messageRepository: MessageRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(StarredMessagesUiState())
@@ -30,7 +28,7 @@ class StarredMessagesViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            getStarredMessagesUseCase()
+            messageRepository.getStarredMessages()
                 .catch { e -> _uiState.value = _uiState.value.copy(error = e.message, isLoading = false) }
                 .collect { messages ->
                     _uiState.value = _uiState.value.copy(messages = messages, isLoading = false)
@@ -40,7 +38,7 @@ class StarredMessagesViewModel @Inject constructor(
 
     fun unstarMessage(messageId: String) {
         viewModelScope.launch {
-            starMessageUseCase(messageId, false)
+            messageRepository.starMessage(messageId, false)
         }
     }
 }

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
@@ -221,6 +222,7 @@ internal fun ListsScreen(
                                 ListRow(
                                     listData = listData,
                                     participants = uiState.participantAvatars[listData.id] ?: emptyList(),
+                                    isPinned = uiState.isPinned(listData),
                                     onClick = { onListClick(listData.id) },
                                     onLongClick = {
                                         selectedListForAction = listData
@@ -252,6 +254,7 @@ internal fun ListsScreen(
         ListContextSheet(
             listData = listData,
             isOwner = uiState.isOwner(listData),
+            isPinned = uiState.isPinned(listData),
             history = uiState.selectedListHistory,
             onDismiss = {
                 selectedListForAction = null
@@ -270,6 +273,11 @@ internal fun ListsScreen(
             },
             onRename = { newTitle ->
                 viewModel.renameList(listData.id, newTitle)
+                selectedListForAction = null
+                viewModel.clearSelectedList()
+            },
+            onTogglePin = {
+                viewModel.togglePin(listData.id)
                 selectedListForAction = null
                 viewModel.clearSelectedList()
             }
@@ -295,6 +303,7 @@ internal fun ListsScreen(
 private fun ListRow(
     listData: ListData,
     participants: List<com.firestream.chat.domain.model.User>,
+    isPinned: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -350,6 +359,15 @@ private fun ListRow(
             AvatarStack(users = participants, overflow = overflow)
         }
 
+        if (isPinned) {
+            Icon(
+                imageVector = Icons.Default.PushPin,
+                contentDescription = "Pinned",
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+        }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = SimpleDateFormat("MMM d", Locale.getDefault())

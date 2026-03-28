@@ -102,6 +102,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
@@ -152,6 +153,7 @@ fun ChatScreen(
     var initialScrollDone by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showCreatePollSheet by remember { mutableStateOf(false) }
     var showCreateListSheet by remember { mutableStateOf(false) }
@@ -173,6 +175,8 @@ fun ChatScreen(
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
+    // ID of the message whose reaction chips should be scrolled into view after reacting
+    var reactionScrollTarget by remember { mutableStateOf<String?>(null) }
 
     // Snackbar host state
     val snackbarHostState = remember { SnackbarHostState() }
@@ -240,6 +244,30 @@ fun ChatScreen(
                 listState.animateScrollToItem(uiState.messages.size - 1)
             }
         }
+    }
+
+    // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
+    LaunchedEffect(reactionScrollTarget) {
+        val target = reactionScrollTarget ?: return@LaunchedEffect
+        val idx = uiState.messages.indexOfFirst { it.id == target }
+        if (idx < 0) { reactionScrollTarget = null; return@LaunchedEffect }
+
+        // Wait for the reaction row to render (Firestore round-trip + recomposition)
+        delay(250)
+
+        val viewportHeight = listState.layoutInfo.viewportSize.height
+        var item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+        if (item == null) {
+            listState.animateScrollToItem(idx)
+            delay(100)
+            item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+        }
+        item?.let {
+            val marginPx = with(density) { 12.dp.toPx() }
+            val overshoot = it.offset + it.size + marginPx - viewportHeight
+            if (overshoot > 0) listState.animateScrollBy(overshoot)
+        }
+        reactionScrollTarget = null
     }
 
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
@@ -1081,6 +1109,8 @@ fun ChatScreen(
                 currentReaction = targetMsg.reactions[uiState.currentUserId],
                 recentEmojis = uiState.recentEmojis,
                 onEmojiSelected = { emoji, _ ->
+                    val isAdding = targetMsg.reactions[uiState.currentUserId] != emoji
+                    if (isAdding) reactionScrollTarget = targetMsg.id
                     viewModel.toggleReaction(targetMsg.id, emoji)
                     reactionTargetMessage = null
                 },

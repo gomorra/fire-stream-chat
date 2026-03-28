@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
@@ -52,11 +53,13 @@ import java.util.Locale
 internal fun ListContextSheet(
     listData: ListData,
     isOwner: Boolean,
+    isPinned: Boolean = false,
     history: List<ListHistoryEntry> = emptyList(),
     onDismiss: () -> Unit,
     onShare: () -> Unit,
     onDelete: () -> Unit,
-    onRename: (String) -> Unit
+    onRename: (String) -> Unit,
+    onTogglePin: () -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -82,6 +85,11 @@ internal fun ListContextSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                AssistChip(
+                    onClick = { onTogglePin(); onDismiss() },
+                    label = { Text(if (isPinned) "Unpin" else "Pin") },
+                    leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) }
+                )
                 if (isOwner) {
                     AssistChip(
                         onClick = onShare,

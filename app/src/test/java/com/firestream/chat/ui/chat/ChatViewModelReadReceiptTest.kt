@@ -11,26 +11,12 @@ import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
-import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.message.AddReactionUseCase
-import com.firestream.chat.domain.usecase.message.ClosePollUseCase
-import com.firestream.chat.domain.usecase.message.DeleteMessageUseCase
-import com.firestream.chat.domain.usecase.message.EditMessageUseCase
-import com.firestream.chat.domain.usecase.message.ForwardMessageUseCase
-import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
-import com.firestream.chat.domain.usecase.message.ParseMentionsUseCase
-import com.firestream.chat.domain.usecase.message.RemoveReactionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
-import com.firestream.chat.domain.usecase.message.SendBroadcastMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMediaMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendMessageUseCase
-import com.firestream.chat.domain.usecase.message.SendPollUseCase
-import com.firestream.chat.domain.usecase.message.SendVoiceMessageUseCase
-import com.firestream.chat.domain.usecase.message.StarMessageUseCase
-import com.firestream.chat.domain.usecase.message.VotePollUseCase
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -63,33 +49,14 @@ class ChatViewModelReadReceiptTest {
     private val readReceiptsFlow = MutableStateFlow(true)
     private val recipientFlow = MutableSharedFlow<User>(replay = 1)
 
-    // All 26 constructor deps
-    private val getMessagesUseCase = mockk<GetMessagesUseCase>()
-    private val sendMessageUseCase = mockk<SendMessageUseCase>()
-    private val deleteMessageUseCase = mockk<DeleteMessageUseCase>()
-    private val editMessageUseCase = mockk<EditMessageUseCase>()
-    private val sendMediaMessageUseCase = mockk<SendMediaMessageUseCase>()
-    private val addReactionUseCase = mockk<AddReactionUseCase>()
-    private val removeReactionUseCase = mockk<RemoveReactionUseCase>()
-    private val forwardMessageUseCase = mockk<ForwardMessageUseCase>()
-    private val sendVoiceMessageUseCase = mockk<SendVoiceMessageUseCase>()
-    private val starMessageUseCase = mockk<StarMessageUseCase>()
-    private val sendPollUseCase = mockk<SendPollUseCase>()
-    private val votePollUseCase = mockk<VotePollUseCase>()
-    private val closePollUseCase = mockk<ClosePollUseCase>()
-    private val parseMentionsUseCase = mockk<ParseMentionsUseCase>()
-    private val sendBroadcastMessageUseCase = mockk<SendBroadcastMessageUseCase>()
-    private val pinMessageUseCase = mockk<com.firestream.chat.domain.usecase.message.PinMessageUseCase>()
-    private val sendListMessageUseCase = mockk<com.firestream.chat.domain.usecase.message.SendListMessageUseCase>()
-    private val createListUseCase = mockk<com.firestream.chat.domain.usecase.list.CreateListUseCase>()
-    private val observeListUseCase = mockk<com.firestream.chat.domain.usecase.list.ObserveListUseCase>()
     private val checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>()
-    private val getChatsUseCase = mockk<GetChatsUseCase>()
     private val searchMessagesUseCase = mockk<SearchMessagesUseCase>()
     private val linkPreviewSource = mockk<LinkPreviewSource>()
     private val authRepository = mockk<AuthRepository>()
     private val chatRepository = mockk<ChatRepository>()
+    private val listRepository = mockk<ListRepository>()
     private val messageRepository = mockk<MessageRepository>()
+    private val pollRepository = mockk<PollRepository>()
     private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val context = mockk<android.content.Context>(relaxed = true)
@@ -108,18 +75,16 @@ class ChatViewModelReadReceiptTest {
         every { authRepository.currentUserId } returns "uid1"
 
         // Messages
-        every { getMessagesUseCase(any()) } returns messagesFlow
+        every { messageRepository.getMessages(any()) } returns messagesFlow
         every { linkPreviewSource.extractUrl(any()) } returns null
 
         // Chat
         every { chatRepository.observeTyping(any()) } returns emptyFlow()
+        every { chatRepository.getChats() } returns flowOf(emptyList<Chat>())
         coEvery { chatRepository.getChatById(any()) } returns Result.success(
             Chat(id = "chat1", type = ChatType.INDIVIDUAL)
         )
         coEvery { chatRepository.resetUnreadCount(any()) } returns Result.success(Unit)
-
-        // Forward picker
-        every { getChatsUseCase() } returns flowOf(emptyList<Chat>())
 
         // Preferences
         every { preferencesDataStore.readReceiptsFlow } returns readReceiptsFlow
@@ -250,32 +215,14 @@ class ChatViewModelReadReceiptTest {
 
     private fun buildViewModel() = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "recipientId" to "recipient1")),
-        getMessagesUseCase = getMessagesUseCase,
-        sendMessageUseCase = sendMessageUseCase,
-        deleteMessageUseCase = deleteMessageUseCase,
-        editMessageUseCase = editMessageUseCase,
-        sendMediaMessageUseCase = sendMediaMessageUseCase,
-        addReactionUseCase = addReactionUseCase,
-        removeReactionUseCase = removeReactionUseCase,
-        forwardMessageUseCase = forwardMessageUseCase,
-        sendVoiceMessageUseCase = sendVoiceMessageUseCase,
-        starMessageUseCase = starMessageUseCase,
-        sendPollUseCase = sendPollUseCase,
-        votePollUseCase = votePollUseCase,
-        closePollUseCase = closePollUseCase,
-        parseMentionsUseCase = parseMentionsUseCase,
-        sendBroadcastMessageUseCase = sendBroadcastMessageUseCase,
-        pinMessageUseCase = pinMessageUseCase,
-        sendListMessageUseCase = sendListMessageUseCase,
-        createListUseCase = createListUseCase,
-        observeListUseCase = observeListUseCase,
         checkGroupPermissionUseCase = checkGroupPermissionUseCase,
-        getChatsUseCase = getChatsUseCase,
         searchMessagesUseCase = searchMessagesUseCase,
         linkPreviewSource = linkPreviewSource,
         authRepository = authRepository,
         chatRepository = chatRepository,
+        listRepository = listRepository,
         messageRepository = messageRepository,
+        pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
         context = context

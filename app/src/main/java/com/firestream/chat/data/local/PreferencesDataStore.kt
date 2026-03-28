@@ -51,6 +51,9 @@ class PreferencesDataStore @Inject constructor(
     // Lists sort option
     private val listSortOptionKey = stringPreferencesKey("list_sort_option")
 
+    // Pinned list IDs
+    private val pinnedListIdsKey = stringPreferencesKey("pinned_list_ids")
+
     // Last open chat (restore on launch)
     private val lastChatIdKey = stringPreferencesKey("last_chat_id")
     private val lastRecipientIdKey = stringPreferencesKey("last_recipient_id")
@@ -189,6 +192,19 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setListSortOption(option: String) {
         context.dataStore.edit { prefs -> prefs[listSortOptionKey] = option }
+    }
+
+    // --- Pinned lists ---
+
+    val pinnedListIdsFlow: Flow<Set<String>> = context.dataStore.data.map { prefs ->
+        val raw = prefs[pinnedListIdsKey] ?: return@map emptySet()
+        raw.split(",").filter { it.isNotEmpty() }.toSet()
+    }
+
+    suspend fun setPinnedListIds(ids: Set<String>) {
+        context.dataStore.edit { prefs ->
+            prefs[pinnedListIdsKey] = ids.joinToString(",")
+        }
     }
 
     suspend fun addRecentEmoji(emoji: String) {

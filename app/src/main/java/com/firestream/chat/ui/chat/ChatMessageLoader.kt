@@ -15,14 +15,12 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
-import com.firestream.chat.domain.usecase.list.ObserveListUseCase
-import com.firestream.chat.domain.usecase.message.GetMessagesUseCase
 
 internal class ChatMessageLoader(
     private val chatId: String,
-    private val getMessagesUseCase: GetMessagesUseCase,
-    private val observeListUseCase: ObserveListUseCase,
+    private val listRepository: ListRepository,
     private val linkPreviewSource: LinkPreviewSource,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
@@ -56,7 +54,7 @@ internal class ChatMessageLoader(
 
     private fun loadMessages() {
         scope.launch {
-            getMessagesUseCase(chatId)
+            messageRepository.getMessages(chatId)
                 .catch { e ->
                     _uiState.update { it.copy(isLoading = false, error = e.message) }
                 }
@@ -149,7 +147,7 @@ internal class ChatMessageLoader(
             if (listId !in observedListIds) {
                 observedListIds.add(listId)
                 scope.launch {
-                    observeListUseCase(listId)
+                    listRepository.observeList(listId)
                         .catch { /* non-fatal */ }
                         .collect { listData ->
                             _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to listData)) }
