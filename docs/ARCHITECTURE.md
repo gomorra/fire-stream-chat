@@ -172,7 +172,7 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 17 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`), all with `internal` visibility.
+- **ChatScreen** is split into 23 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -722,6 +722,7 @@ com.firestream.chat/
 │   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
 │   │                            # ChatRepositoryImpl, ContactRepositoryImpl,
 │   │                            # ListRepositoryImpl, MessageRepositoryImpl,
+│   │                            # PollRepositoryImpl, PollMapper,
 │   │                            # UserRepositoryImpl
 │   └── share/
 │       ├── SharedContentHolder.kt
@@ -732,7 +733,7 @@ com.firestream.chat/
 │   │                            # CallSignalingData, IceCandidateData, GroupPermissions, GroupRole,
 │   │                            # ListData, ListItem, ListDiff, ListHistoryEntry, HistoryAction,
 │   │                            # MediaAttachment, SharedContent
-│   ├── repository/              # Auth, Call, Chat, Contact, List, Message, User interfaces
+│   ├── repository/              # Auth, Call, Chat, Contact, List, Message, Poll, User interfaces
 │   ├── usecase/
 │   │   ├── auth/                # GetCurrentUser, VerifyOtp
 │   │   ├── call/                # Initiate, Answer, Decline, End, GetCallLog
@@ -749,9 +750,12 @@ com.firestream.chat/
 │   ├── broadcast/               # CreateBroadcastScreen, CreateBroadcastViewModel
 │   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton
 │   ├── calls/                   # CallsScreen, CallsViewModel (call log tab)
-│   ├── chat/                    # ChatScreen, ChatViewModel, MessageBubble,
-│   │                            # VoiceMessagePlayer, LinkPreviewCard, FullscreenImageViewer,
-│   │                            # ForwardChatPicker, EmojiHandlerPanel, EmojiSearchData,
+│   ├── chat/                    # ChatScreen, ChatViewModel (orchestrator),
+│   │                            # ChatPollManager, ChatSearchManager, ChatMessageActions,
+│   │                            # ChatMessageSender, ChatMessageLoader, ChatInfoManager,
+│   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
+│   │                            # FullscreenImageViewer, ForwardChatPicker,
+│   │                            # EmojiHandlerPanel, EmojiSearchData,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
 │   │                            # SharedMediaScreen, SharedMediaViewModel,
 │   │                            # MessageInfoScreen, ChatUtils
