@@ -227,6 +227,10 @@ private fun DiffContent(
             DiffRow(prefix = "○", prefixColor = textColor.copy(alpha = 0.6f), text = item,
                 textColor = textColor)
         }
+        diff.edited.forEach { item ->
+            DiffRow(prefix = "✎", prefixColor = textColor.copy(alpha = 0.8f), text = item,
+                textColor = textColor)
+        }
 
         Spacer(modifier = Modifier.height(4.dp))
 

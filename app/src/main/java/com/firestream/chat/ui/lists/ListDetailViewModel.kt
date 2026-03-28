@@ -191,6 +191,7 @@ class ListDetailViewModel @Inject constructor(
     fun updateItem(itemId: String, text: String, quantity: String? = null, unit: String? = null) {
         viewModelScope.launch {
             updateListItemUseCase(listId, itemId, text, quantity, unit)
+                .onSuccess { accumulateAndDebounce(ListDiff(edited = listOf(text))) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
