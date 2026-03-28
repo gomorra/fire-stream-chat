@@ -7,14 +7,11 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.chat.ArchiveChatUseCase
-import com.firestream.chat.domain.usecase.chat.DeleteChatUseCase
 import com.firestream.chat.domain.usecase.chat.GetChatsUseCase
-import com.firestream.chat.domain.usecase.chat.MuteChatUseCase
-import com.firestream.chat.domain.usecase.chat.PinChatUseCase
 import com.firestream.chat.domain.usecase.contact.SyncContactsUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -34,13 +31,10 @@ data class ChatListUiState(
     val error: String? = null,
     val currentUserId: String = "",
     val pendingDeleteChatId: String? = null,
-    // Phase 2: search
     val searchQuery: String = "",
     val searchResults: List<Message> = emptyList(),
     val isSearchActive: Boolean = false,
-    // Phase 2: archived section toggle
     val showArchived: Boolean = false,
-    // Phase 2: mute dialog
     val pendingMuteChatId: String? = null,
     val contacts: Map<String, Contact> = emptyMap(),
     // Presence: set of recipient user IDs currently online
@@ -51,13 +45,10 @@ data class ChatListUiState(
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
     private val getChatsUseCase: GetChatsUseCase,
-    private val deleteChatUseCase: DeleteChatUseCase,
-    private val pinChatUseCase: PinChatUseCase,
-    private val archiveChatUseCase: ArchiveChatUseCase,
-    private val muteChatUseCase: MuteChatUseCase,
     private val searchMessagesUseCase: SearchMessagesUseCase,
     private val syncContactsUseCase: SyncContactsUseCase,
     private val authRepository: AuthRepository,
+    private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val contactRepository: ContactRepository,
     private val userRepository: UserRepository
@@ -202,11 +193,10 @@ class ChatListViewModel @Inject constructor(
         val chatId = _uiState.value.pendingDeleteChatId ?: return
         _uiState.value = _uiState.value.copy(pendingDeleteChatId = null)
         viewModelScope.launch {
-            deleteChatUseCase(chatId)
+            chatRepository.deleteChat(chatId)
         }
     }
 
-    // Phase 2: pin — max 3 pinned chats
     fun togglePin(chatId: String, currentlyPinned: Boolean) {
         val pinnedCount = _uiState.value.chats.count { it.isPinned && !it.isArchived }
         if (!currentlyPinned && pinnedCount >= 3) {
@@ -214,18 +204,16 @@ class ChatListViewModel @Inject constructor(
             return
         }
         viewModelScope.launch {
-            pinChatUseCase(chatId, !currentlyPinned)
+            chatRepository.pinChat(chatId, !currentlyPinned)
         }
     }
 
-    // Phase 2: archive
     fun toggleArchive(chatId: String, currentlyArchived: Boolean) {
         viewModelScope.launch {
-            archiveChatUseCase(chatId, !currentlyArchived)
+            chatRepository.archiveChat(chatId, !currentlyArchived)
         }
     }
 
-    // Phase 2: mute
     fun requestMuteChat(chatId: String) {
         _uiState.value = _uiState.value.copy(pendingMuteChatId = chatId)
     }
@@ -238,16 +226,14 @@ class ChatListViewModel @Inject constructor(
         val chatId = _uiState.value.pendingMuteChatId ?: return
         _uiState.value = _uiState.value.copy(pendingMuteChatId = null)
         viewModelScope.launch {
-            muteChatUseCase(chatId, muteUntil)
+            chatRepository.muteChat(chatId, muteUntil)
         }
     }
 
-    // Phase 2: archived section toggle
     fun toggleShowArchived() {
         _uiState.value = _uiState.value.copy(showArchived = !_uiState.value.showArchived)
     }
 
-    // Phase 2: global search with 300 ms debounce
     fun onSearchQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(searchQuery = query, isSearchActive = query.isNotEmpty())
         searchJob?.cancel()

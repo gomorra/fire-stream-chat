@@ -10,13 +10,6 @@ import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.chat.ApproveMemberUseCase
-import com.firestream.chat.domain.usecase.chat.GenerateInviteLinkUseCase
-import com.firestream.chat.domain.usecase.chat.LeaveGroupUseCase
-import com.firestream.chat.domain.usecase.chat.RejectMemberUseCase
-import com.firestream.chat.domain.usecase.chat.RevokeInviteLinkUseCase
-import com.firestream.chat.domain.usecase.chat.SetRequireApprovalUseCase
-import com.firestream.chat.domain.usecase.chat.UpdateGroupDescriptionUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,14 +47,7 @@ class GroupSettingsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val userRepository: UserRepository,
-    private val authRepository: AuthRepository,
-    private val updateGroupDescriptionUseCase: UpdateGroupDescriptionUseCase,
-    private val generateInviteLinkUseCase: GenerateInviteLinkUseCase,
-    private val revokeInviteLinkUseCase: RevokeInviteLinkUseCase,
-    private val setRequireApprovalUseCase: SetRequireApprovalUseCase,
-    private val approveMemberUseCase: ApproveMemberUseCase,
-    private val rejectMemberUseCase: RejectMemberUseCase,
-    private val leaveGroupUseCase: LeaveGroupUseCase
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
@@ -174,7 +160,7 @@ class GroupSettingsViewModel @Inject constructor(
     fun updateDescription(description: String) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSavingDescription = true)
-            updateGroupDescriptionUseCase(chatId, description)
+            chatRepository.updateGroupDescription(chatId, description)
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(
                         isSavingDescription = false,
@@ -189,7 +175,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun generateInviteLink() {
         viewModelScope.launch {
-            generateInviteLinkUseCase(chatId)
+            chatRepository.generateInviteLink(chatId)
                 .onSuccess { token ->
                     _uiState.value = _uiState.value.copy(
                         chat = _uiState.value.chat?.copy(inviteLink = token),
@@ -202,7 +188,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun revokeInviteLink() {
         viewModelScope.launch {
-            revokeInviteLinkUseCase(chatId)
+            chatRepository.revokeInviteLink(chatId)
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(
                         chat = _uiState.value.chat?.copy(inviteLink = null),
@@ -215,7 +201,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun setRequireApproval(enabled: Boolean) {
         viewModelScope.launch {
-            setRequireApprovalUseCase(chatId, enabled)
+            chatRepository.setRequireApproval(chatId, enabled)
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(
                         chat = _uiState.value.chat?.copy(requireApproval = enabled)
@@ -227,7 +213,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun approveMember(userId: String) {
         viewModelScope.launch {
-            approveMemberUseCase(chatId, userId)
+            chatRepository.approveMember(chatId, userId)
                 .onSuccess { loadGroupDetails() }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -235,7 +221,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun rejectMember(userId: String) {
         viewModelScope.launch {
-            rejectMemberUseCase(chatId, userId)
+            chatRepository.rejectMember(chatId, userId)
                 .onSuccess { loadGroupDetails() }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
@@ -251,7 +237,7 @@ class GroupSettingsViewModel @Inject constructor(
 
     fun leaveGroup() {
         viewModelScope.launch {
-            leaveGroupUseCase(chatId)
+            chatRepository.leaveGroup(chatId)
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(leftGroup = true)
                 }

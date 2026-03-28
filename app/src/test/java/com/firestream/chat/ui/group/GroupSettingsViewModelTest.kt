@@ -8,15 +8,7 @@ import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.chat.ApproveMemberUseCase
-import com.firestream.chat.domain.usecase.chat.GenerateInviteLinkUseCase
-import com.firestream.chat.domain.usecase.chat.LeaveGroupUseCase
-import com.firestream.chat.domain.usecase.chat.RejectMemberUseCase
-import com.firestream.chat.domain.usecase.chat.RevokeInviteLinkUseCase
-import com.firestream.chat.domain.usecase.chat.SetRequireApprovalUseCase
-import com.firestream.chat.domain.usecase.chat.UpdateGroupDescriptionUseCase
 import io.mockk.coEvery
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -40,13 +32,6 @@ class GroupSettingsViewModelTest {
     private lateinit var chatRepository: ChatRepository
     private lateinit var userRepository: UserRepository
     private lateinit var authRepository: AuthRepository
-    private lateinit var updateGroupDescriptionUseCase: UpdateGroupDescriptionUseCase
-    private lateinit var generateInviteLinkUseCase: GenerateInviteLinkUseCase
-    private lateinit var revokeInviteLinkUseCase: RevokeInviteLinkUseCase
-    private lateinit var setRequireApprovalUseCase: SetRequireApprovalUseCase
-    private lateinit var approveMemberUseCase: ApproveMemberUseCase
-    private lateinit var rejectMemberUseCase: RejectMemberUseCase
-    private lateinit var leaveGroupUseCase: LeaveGroupUseCase
 
     private val testChat = Chat(
         id = "chat1",
@@ -63,13 +48,6 @@ class GroupSettingsViewModelTest {
         chatRepository = mockk()
         userRepository = mockk()
         authRepository = mockk()
-        updateGroupDescriptionUseCase = UpdateGroupDescriptionUseCase(chatRepository)
-        generateInviteLinkUseCase = GenerateInviteLinkUseCase(chatRepository)
-        revokeInviteLinkUseCase = RevokeInviteLinkUseCase(chatRepository)
-        setRequireApprovalUseCase = SetRequireApprovalUseCase(chatRepository)
-        approveMemberUseCase = ApproveMemberUseCase(chatRepository)
-        rejectMemberUseCase = RejectMemberUseCase(chatRepository)
-        leaveGroupUseCase = LeaveGroupUseCase(chatRepository)
 
         every { authRepository.currentUserId } returns "user1"
         coEvery { chatRepository.getChatById("chat1") } returns Result.success(testChat)
@@ -89,14 +67,7 @@ class GroupSettingsViewModelTest {
             savedStateHandle = savedStateHandle,
             chatRepository = chatRepository,
             userRepository = userRepository,
-            authRepository = authRepository,
-            updateGroupDescriptionUseCase = updateGroupDescriptionUseCase,
-            generateInviteLinkUseCase = generateInviteLinkUseCase,
-            revokeInviteLinkUseCase = revokeInviteLinkUseCase,
-            setRequireApprovalUseCase = setRequireApprovalUseCase,
-            approveMemberUseCase = approveMemberUseCase,
-            rejectMemberUseCase = rejectMemberUseCase,
-            leaveGroupUseCase = leaveGroupUseCase
+            authRepository = authRepository
         )
     }
 
