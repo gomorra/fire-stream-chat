@@ -2,6 +2,7 @@ package com.firestream.chat.data.util
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -60,6 +61,7 @@ class MediaFileManager @Inject constructor(
                         }
                     } ?: throw Exception("Empty response body")
                 }
+                scanFile(localFile)
                 myDeferred.complete(localFile)
                 localFile
             } catch (e: Exception) {
@@ -111,6 +113,7 @@ class MediaFileManager @Inject constructor(
                     input.copyTo(output)
                 }
             } ?: throw Exception("Failed to open source URI")
+            scanFile(localFile)
             localFile
         }
 
@@ -136,6 +139,7 @@ class MediaFileManager @Inject constructor(
                     oldFile.copyTo(newFile)
                 }
                 oldFile.delete()
+                scanFile(newFile)
                 moved++
                 onProgress(moved, total)
             }
@@ -146,6 +150,10 @@ class MediaFileManager @Inject constructor(
 
             moved
         }
+
+    fun scanFile(file: File) {
+        MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+    }
 
     private fun extractExtension(url: String): String {
         // Strip query params, then get extension
