@@ -121,6 +121,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
@@ -243,8 +244,38 @@ fun ChatScreen(
             val nearBottom = (uiState.messages.size - 1 - lastVisible) <= visibleCount
             if (nearBottom) {
                 listState.animateScrollToItem(uiState.messages.size - 1)
+                // For tall items (e.g. images), the bottom edge may still be clipped after
+                // scrollToItem positions the item's top. Wait one frame for layout then nudge.
+                delay(50)
+                val layoutInfo = listState.layoutInfo
+                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
+                if (lastVisibleItem != null) {
+                    val itemBottom = lastVisibleItem.offset + lastVisibleItem.size
+                    val viewportEnd = layoutInfo.viewportEndOffset
+                    if (itemBottom > viewportEnd) {
+                        listState.animateScrollBy((itemBottom - viewportEnd).toFloat())
+                    }
+                }
             }
         }
+    }
+
+    // Scroll correction for receiver images that load from URL after initial layout.
+    // Coil's AsyncImage expands to its natural aspect-ratio height once decoded, which can
+    // push the bottom of the last message below the viewport. Only nudge when the very last
+    // message is the one that just grew — the 10 px threshold prevents micro-jitter.
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.layoutInfo }
+            .collect { layoutInfo ->
+                val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return@collect
+                if (lastVisible.index == uiState.messages.lastIndex) {
+                    val itemBottom = lastVisible.offset + lastVisible.size
+                    val viewportEnd = layoutInfo.viewportEndOffset
+                    if (itemBottom > viewportEnd + 10) {
+                        listState.animateScrollBy((itemBottom - viewportEnd).toFloat())
+                    }
+                }
+            }
     }
 
     // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
