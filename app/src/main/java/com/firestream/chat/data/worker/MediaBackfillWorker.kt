@@ -45,9 +45,26 @@ class MediaBackfillWorker @AssistedInject constructor(
             }
         }
 
+        // Migrate old files from filesDir/media/ to externalMediaDirs
+        val migrated = mediaFileManager.migrateFromInternalStorage()
+        if (migrated > 0) {
+            Log.w(TAG, "Backfill: migrated $migrated files to external storage")
+            // Update localUri paths in Room to point to new location
+            val allMedia = messageDao.getAllMediaMessages()
+            for (msg in allMedia) {
+                val oldUri = msg.localUri ?: continue
+                if (!oldUri.contains("/files/media/")) continue
+                val ext = oldUri.substringAfterLast(".", "jpg")
+                val newFile = mediaFileManager.getLocalFile(msg.chatId, msg.id, ext)
+                if (newFile.exists()) {
+                    messageDao.updateLocalUri(msg.id, newFile.absolutePath)
+                }
+            }
+        }
+
         val messages = messageDao.getMessagesWithoutLocalMedia()
         val total = messages.size
-        Log.w(TAG, "Backfill: found $total messages without local media")
+        Log.w(TAG, "Backfill: found $total messages without local media (need download)")
         if (total == 0) return Result.success()
 
         var done = 0

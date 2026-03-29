@@ -114,6 +114,39 @@ class MediaFileManager @Inject constructor(
             localFile
         }
 
+    /**
+     * Migrate files from old internal storage (filesDir/media/) to external media dir.
+     * Returns the number of files moved.
+     */
+    suspend fun migrateFromInternalStorage(onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): Int =
+        withContext(Dispatchers.IO) {
+            val oldRoot = File(context.filesDir, "media")
+            if (!oldRoot.exists()) return@withContext 0
+
+            var moved = 0
+            val chatDirs = oldRoot.listFiles()?.filter { it.isDirectory } ?: return@withContext 0
+            val allFiles = chatDirs.flatMap { chatDir ->
+                chatDir.listFiles()?.map { chatDir.name to it } ?: emptyList()
+            }
+            val total = allFiles.size
+
+            for ((chatId, oldFile) in allFiles) {
+                val newFile = File(File(mediaRoot, chatId).also { it.mkdirs() }, oldFile.name)
+                if (!newFile.exists()) {
+                    oldFile.copyTo(newFile)
+                }
+                oldFile.delete()
+                moved++
+                onProgress(moved, total)
+            }
+
+            // Clean up empty dirs
+            chatDirs.forEach { it.deleteRecursively() }
+            if (oldRoot.listFiles()?.isEmpty() == true) oldRoot.delete()
+
+            moved
+        }
+
     private fun extractExtension(url: String): String {
         // Strip query params, then get extension
         val path = url.substringBefore("?").substringBefore("#")
