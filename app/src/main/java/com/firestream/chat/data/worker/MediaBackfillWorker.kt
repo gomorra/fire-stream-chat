@@ -3,6 +3,7 @@ package com.firestream.chat.data.worker
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -37,21 +38,28 @@ class MediaBackfillWorker @AssistedInject constructor(
 
         val messages = messageDao.getMessagesWithoutLocalMedia()
         val total = messages.size
+        Log.d(TAG, "Backfill: found $total messages without local media")
         if (total == 0) return Result.success()
 
         var done = 0
         for (msg in messages) {
             try {
+                Log.d(TAG, "Backfill: downloading ${msg.id} from ${msg.mediaUrl}")
                 val file = mediaFileManager.downloadAndSave(msg.chatId, msg.id, msg.mediaUrl!!)
                 messageDao.updateLocalUri(msg.id, file.absolutePath)
-            } catch (_: Exception) {
-                // Skip failed downloads, continue with next
+                Log.d(TAG, "Backfill: saved ${msg.id} → ${file.absolutePath}")
+            } catch (e: Exception) {
+                Log.e(TAG, "Backfill: failed ${msg.id}: ${e.message}")
             } finally {
                 done++
                 setProgress(workDataOf("done" to done, "total" to total))
             }
         }
         return Result.success()
+    }
+
+    companion object {
+        private const val TAG = "MediaBackfillWorker"
     }
 
     private fun isOnWifi(): Boolean {
