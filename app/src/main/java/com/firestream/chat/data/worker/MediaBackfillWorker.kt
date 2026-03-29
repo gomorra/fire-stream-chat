@@ -28,33 +28,43 @@ class MediaBackfillWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val isManual = inputData.getBoolean("manual", false)
+        Log.w(TAG, "Backfill started — manual=$isManual")
+
         if (!isManual) {
-            when (preferencesDataStore.autoDownloadFlow.first()) {
-                AutoDownloadOption.NEVER -> return Result.success()
-                AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) return Result.success()
+            val option = preferencesDataStore.autoDownloadFlow.first()
+            when (option) {
+                AutoDownloadOption.NEVER -> {
+                    Log.w(TAG, "Backfill skipped: AutoDownload=NEVER")
+                    return Result.success()
+                }
+                AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) {
+                    Log.w(TAG, "Backfill skipped: WIFI_ONLY but not on WiFi")
+                    return Result.success()
+                }
                 AutoDownloadOption.ALWAYS -> Unit
             }
         }
 
         val messages = messageDao.getMessagesWithoutLocalMedia()
         val total = messages.size
-        Log.d(TAG, "Backfill: found $total messages without local media")
+        Log.w(TAG, "Backfill: found $total messages without local media")
         if (total == 0) return Result.success()
 
         var done = 0
         for (msg in messages) {
             try {
-                Log.d(TAG, "Backfill: downloading ${msg.id} from ${msg.mediaUrl}")
+                Log.w(TAG, "Backfill: downloading ${msg.id} url=${msg.mediaUrl?.take(80)}")
                 val file = mediaFileManager.downloadAndSave(msg.chatId, msg.id, msg.mediaUrl!!)
                 messageDao.updateLocalUri(msg.id, file.absolutePath)
-                Log.d(TAG, "Backfill: saved ${msg.id} → ${file.absolutePath}")
+                Log.w(TAG, "Backfill: saved ${msg.id} → ${file.name}")
             } catch (e: Exception) {
-                Log.e(TAG, "Backfill: failed ${msg.id}: ${e.message}")
+                Log.e(TAG, "Backfill: failed ${msg.id}: ${e.message}", e)
             } finally {
                 done++
                 setProgress(workDataOf("done" to done, "total" to total))
             }
         }
+        Log.w(TAG, "Backfill complete: $done/$total")
         return Result.success()
     }
 

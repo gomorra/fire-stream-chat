@@ -295,7 +295,32 @@ fun SettingsScreen(
             )
 
             // Download All Media button / progress
-            if (!uiState.mediaBackfillRunning) {
+            if (uiState.mediaBackfillRunning && uiState.mediaBackfillProgress != null) {
+                val progress = uiState.mediaBackfillProgress!!
+                ListItem(
+                    headlineContent = { Text("Downloading Media...") },
+                    supportingContent = {
+                        Column {
+                            Text(
+                                "${progress.first}/${progress.second}",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            LinearProgressIndicator(
+                                progress = { progress.first.toFloat() / progress.second },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    leadingContent = {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                )
+            } else {
                 ListItem(
                     headlineContent = { Text("Download All Media") },
                     supportingContent = {
@@ -312,37 +337,6 @@ fun SettingsScreen(
                         )
                     },
                     modifier = Modifier.clickable { viewModel.startMediaBackfill() }
-                )
-            } else {
-                val progress = uiState.mediaBackfillProgress
-                val progressText = if (progress != null) {
-                    "${progress.first}/${progress.second}"
-                } else {
-                    "Downloading..."
-                }
-                ListItem(
-                    headlineContent = { Text("Downloading Media...") },
-                    supportingContent = {
-                        Column {
-                            Text(progressText, style = MaterialTheme.typography.bodySmall)
-                            Spacer(Modifier.height(4.dp))
-                            if (progress != null && progress.second > 0) {
-                                LinearProgressIndicator(
-                                    progress = { progress.first.toFloat() / progress.second },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            } else {
-                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                            }
-                        }
-                    },
-                    leadingContent = {
-                        Icon(
-                            Icons.Default.Download,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
                 )
             }
 
