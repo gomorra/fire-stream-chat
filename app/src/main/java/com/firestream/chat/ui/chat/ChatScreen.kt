@@ -144,6 +144,7 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val uploadProgressMap by viewModel.uploadProgress.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
     // Tracks char-index → size multiplier for emojis inserted via the picker.
     // Indices are based on messageText.length at insertion time and cleared on send/cancel.
@@ -668,6 +669,7 @@ fun ChatScreen(
                                                 onMessageInfoClick(message, chatParticipants)
                                             }
                                         } else null,
+                                        uploadProgress = uploadProgressMap[message.id],
                                         onImageClick = { _ -> fullscreenImageMessage = message },
                                         onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
                                             {
@@ -1141,7 +1143,8 @@ fun ChatScreen(
     AnimatedVisibility(visible = fullscreenImageMessage != null, enter = fadeIn(), exit = fadeOut()) {
         fullscreenImageMessage?.let { msg ->
             FullscreenImageViewer(
-                imageUrl = msg.localUri ?: msg.mediaUrl ?: "",
+                imageUrl = msg.mediaUrl ?: "",
+                localUri = msg.localUri,
                 onDismiss = { fullscreenImageMessage = null },
                 onSaveToGallery = {
                     viewModel.saveImageToGallery(msg.localUri, msg.mediaUrl)

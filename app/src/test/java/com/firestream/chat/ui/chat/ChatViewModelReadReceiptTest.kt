@@ -78,6 +78,7 @@ class ChatViewModelReadReceiptTest {
 
         // Messages
         every { messageRepository.getMessages(any()) } returns messagesFlow
+        every { messageRepository.uploadProgress } returns MutableStateFlow(emptyMap())
         every { linkPreviewSource.extractUrl(any()) } returns null
 
         // Chat

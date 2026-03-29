@@ -34,13 +34,18 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import java.io.File
 
 @Composable
 internal fun FullscreenImageViewer(
     imageUrl: String,
+    localUri: String? = null,
     onDismiss: () -> Unit,
     onSaveToGallery: (() -> Unit)? = null
 ) {
+    // Prefer local file for faster loading, fall back to remote URL
+    val imageModel: Any = if (localUri != null && File(localUri).exists()) File(localUri) else imageUrl
+
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
@@ -74,7 +79,7 @@ internal fun FullscreenImageViewer(
         contentAlignment = Alignment.Center
     ) {
         AsyncImage(
-            model = imageUrl,
+            model = imageModel,
             contentDescription = "Full screen image",
             contentScale = ContentScale.Fit,
             modifier = Modifier

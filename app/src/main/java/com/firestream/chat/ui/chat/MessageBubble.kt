@@ -14,13 +14,16 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -71,7 +74,9 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import androidx.compose.ui.graphics.Color
 import com.firestream.chat.ui.theme.ReadReceiptBlue
+import java.io.File
 import kotlin.math.roundToInt
 
 // Emoji size factors: emoji are always this multiple of the surrounding text size.
@@ -97,7 +102,8 @@ internal fun MessageBubble(
     onPinClick: () -> Unit = {},
     onInfoClick: (() -> Unit)?,
     onImageClick: (String) -> Unit = {},
-    onCallClick: (() -> Unit)? = null
+    onCallClick: (() -> Unit)? = null,
+    uploadProgress: Float? = null
 ) {
     val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
@@ -221,25 +227,71 @@ internal fun MessageBubble(
 
                     when (message.type) {
                         MessageType.IMAGE -> {
-                            if (message.status == MessageStatus.SENDING || message.mediaUrl == null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.65f)
-                                        .aspectRatio(4 / 3f),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(color = textColor)
-                                }
+                            val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
+                                message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
                             } else {
-                                AsyncImage(
-                                    model = message.mediaUrl,
-                                    contentDescription = "Image",
-                                    contentScale = ContentScale.FillWidth,
-                                    modifier = Modifier
-                                        .fillMaxWidth(0.65f)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { message.mediaUrl?.let { onImageClick(it) } }
-                                )
+                                4f / 3f // fallback for old messages without dimensions
+                            }
+
+                            // Determine image source: prefer local file, fall back to remote URL
+                            val imageModel: Any? = when {
+                                message.localUri != null && File(message.localUri).exists() -> File(message.localUri)
+                                message.mediaUrl != null -> message.mediaUrl
+                                else -> null
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp)
+                                    .then(
+                                        if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
+                                        else Modifier
+                                    )
+                                    .heightIn(min = 100.dp, max = 400.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        val clickUrl = message.localUri ?: message.mediaUrl
+                                        clickUrl?.let { onImageClick(it) }
+                                    }
+                            ) {
+                                if (imageModel != null) {
+                                    AsyncImage(
+                                        model = imageModel,
+                                        contentDescription = "Image",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+
+                                    // Upload progress overlay
+                                    if (uploadProgress != null && uploadProgress < 1f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(8.dp)
+                                                .size(28.dp)
+                                                .background(
+                                                    color = Color.Black.copy(alpha = 0.5f),
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                progress = { uploadProgress },
+                                                modifier = Modifier.size(20.dp),
+                                                color = Color.White,
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    // No image source available yet — show loading placeholder
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(color = textColor, modifier = Modifier.size(24.dp))
+                                    }
+                                }
                             }
                         }
                         MessageType.VOICE -> {
