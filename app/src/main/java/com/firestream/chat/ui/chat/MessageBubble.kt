@@ -616,7 +616,7 @@ internal fun MessageBubble(
         }
 
         if (groupedReactions.isNotEmpty()) {
-            val reactionFontSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.25f
+            val reactionFontSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.2f
             FlowRow(
                 modifier = Modifier.padding(top = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
