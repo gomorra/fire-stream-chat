@@ -2,7 +2,6 @@ package com.firestream.chat.data.util
 
 import android.content.ContentValues
 import android.content.Context
-
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -25,16 +24,17 @@ class MediaFileManager @Inject constructor(
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
 
+    // Pictures/FireStream/ — shared storage, visible in Google Photos, no permissions needed
+    @Suppress("DEPRECATION")
     private val mediaRoot: File by lazy {
-        // Android/media/com.firestream.chat/ — app-specific external storage,
-        // visible in file managers, no permissions needed on API 29+
-        (context.externalMediaDirs?.firstOrNull() ?: File(context.filesDir, "media")).also { it.mkdirs() }
+        File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
+            "FireStream"
+        )
     }
 
     fun getLocalFile(chatId: String, messageId: String, extension: String): File {
-        val dir = File(mediaRoot, chatId)
-        dir.mkdirs()
-        return File(dir, "$messageId.${normalizeExtension(extension)}")
+        return File(File(mediaRoot, chatId), "$messageId.${normalizeExtension(extension)}")
     }
 
     fun fileExists(chatId: String, messageId: String, extension: String): Boolean {
@@ -55,13 +55,10 @@ class MediaFileManager @Inject constructor(
                 val request = Request.Builder().url(mediaUrl).build()
                 httpClient.newCall(request).execute().use { response ->
                     if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
-                    response.body?.byteStream()?.use { input ->
-                        localFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
-                    } ?: throw Exception("Empty response body")
+                    val inputStream = response.body?.byteStream()
+                        ?: throw Exception("Empty response body")
+                    writeViaMediaStore(chatId, localFile.name, mimeFromExtension(extension), inputStream)
                 }
-                registerWithMediaStore(localFile)
                 myDeferred.complete(localFile)
                 localFile
             } catch (e: Exception) {
@@ -74,24 +71,14 @@ class MediaFileManager @Inject constructor(
 
     suspend fun saveToGallery(localFile: File, mimeType: String): Uri =
         withContext(Dispatchers.IO) {
-            val relativePath = if (mimeType.startsWith("image/")) {
-                "${Environment.DIRECTORY_PICTURES}/FireStream"
-            } else {
-                "${Environment.DIRECTORY_DOWNLOADS}/FireStream"
-            }
-
-            val collection = if (mimeType.startsWith("image/")) {
-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            } else {
-                MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            }
-
+            // Copy to Pictures/ root (not FireStream subfolder) for explicit user save
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, localFile.name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
             }
 
+            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val resolver = context.contentResolver
             val uri = resolver.insert(collection, values)
                 ?: throw Exception("Failed to create MediaStore entry")
@@ -108,80 +95,101 @@ class MediaFileManager @Inject constructor(
     suspend fun copyToLocal(chatId: String, messageId: String, sourceUri: Uri, extension: String): File =
         withContext(Dispatchers.IO) {
             val localFile = getLocalFile(chatId, messageId, extension)
-            context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                localFile.outputStream().use { output ->
-                    input.copyTo(output)
-                }
-            } ?: throw Exception("Failed to open source URI")
-            registerWithMediaStore(localFile)
+            if (localFile.exists()) return@withContext localFile
+
+            val inputStream = context.contentResolver.openInputStream(sourceUri)
+                ?: throw Exception("Failed to open source URI")
+            inputStream.use { input ->
+                writeViaMediaStore(chatId, localFile.name, mimeFromExtension(extension), input)
+            }
             localFile
         }
 
     /**
-     * Migrate files from old internal storage (filesDir/media/) to external media dir.
-     * Returns the number of files moved.
+     * Write content to Pictures/FireStream/{chatId}/ via MediaStore.
+     * The file is owned by our app (readable via File API) and indexed by Google Photos.
      */
-    suspend fun migrateFromInternalStorage(onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): Int =
-        withContext(Dispatchers.IO) {
-            val oldRoot = File(context.filesDir, "media")
-            if (!oldRoot.exists()) return@withContext 0
+    private fun writeViaMediaStore(
+        chatId: String,
+        displayName: String,
+        mimeType: String,
+        inputStream: java.io.InputStream
+    ) {
+        val relativePath = "${Environment.DIRECTORY_PICTURES}/FireStream/$chatId"
 
-            var moved = 0
-            val chatDirs = oldRoot.listFiles()?.filter { it.isDirectory } ?: return@withContext 0
-            val allFiles = chatDirs.flatMap { chatDir ->
-                chatDir.listFiles()?.map { chatDir.name to it } ?: emptyList()
-            }
-            val total = allFiles.size
-
-            for ((chatId, oldFile) in allFiles) {
-                val newFile = File(File(mediaRoot, chatId).also { it.mkdirs() }, oldFile.name)
-                if (!newFile.exists()) {
-                    oldFile.copyTo(newFile)
-                }
-                oldFile.delete()
-                registerWithMediaStore(newFile)
-                moved++
-                onProgress(moved, total)
-            }
-
-            // Clean up empty dirs
-            chatDirs.forEach { it.deleteRecursively() }
-            if (oldRoot.listFiles()?.isEmpty() == true) oldRoot.delete()
-
-            moved
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
         }
 
-    /**
-     * Register a file with MediaStore so it appears in Google Photos and gallery apps.
-     * Creates a copy in Pictures/FireStream/. Skips if already registered.
-     */
-    suspend fun registerWithMediaStore(file: File) {
-        val mimeType = when (file.extension.lowercase()) {
-            "jpg", "jpeg" -> "image/jpeg"
-            "png" -> "image/png"
-            "gif" -> "image/gif"
-            "webp" -> "image/webp"
-            "mp4" -> "video/mp4"
-            else -> return
+        val collection = if (mimeType.startsWith("video/")) {
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        } else {
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         }
 
-        // Check if already registered by display name
-        val existing = context.contentResolver.query(
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-            arrayOf(MediaStore.MediaColumns._ID),
-            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
-            arrayOf(file.name),
-            null
-        )?.use { it.count } ?: 0
-        if (existing > 0) return
+        val resolver = context.contentResolver
+        val uri = resolver.insert(collection, values)
+            ?: throw Exception("Failed to create MediaStore entry")
 
         try {
-            saveToGallery(file, mimeType)
-        } catch (_: Exception) { }
+            resolver.openOutputStream(uri)?.use { output ->
+                inputStream.copyTo(output)
+            } ?: throw Exception("Failed to open output stream")
+
+            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+
+    /**
+     * Migrate files from old storage locations to Pictures/FireStream/.
+     * Handles both filesDir/media/ (old internal) and Android/media/ (old external).
+     */
+    suspend fun migrateOldStorage(): Int = withContext(Dispatchers.IO) {
+        var moved = 0
+        // Old location 1: filesDir/media/
+        moved += migrateDirectory(File(context.filesDir, "media"))
+        // Old location 2: Android/media/com.firestream.chat/
+        val oldExternal = context.externalMediaDirs?.firstOrNull()
+        if (oldExternal != null) moved += migrateDirectory(oldExternal)
+        moved
+    }
+
+    private suspend fun migrateDirectory(root: File): Int {
+        if (!root.exists()) return 0
+
+        var moved = 0
+        val chatDirs = root.listFiles()?.filter { it.isDirectory } ?: return 0
+
+        for (chatDir in chatDirs) {
+            val chatId = chatDir.name
+            val files = chatDir.listFiles() ?: continue
+            for (oldFile in files) {
+                val newFile = getLocalFile(chatId, oldFile.nameWithoutExtension, oldFile.extension)
+                if (!newFile.exists()) {
+                    oldFile.inputStream().use { input ->
+                        writeViaMediaStore(chatId, newFile.name, mimeFromExtension(oldFile.extension), input)
+                    }
+                }
+                oldFile.delete()
+                moved++
+            }
+        }
+
+        // Clean up
+        chatDirs.forEach { it.deleteRecursively() }
+        if (root.listFiles()?.isEmpty() == true) root.delete()
+
+        return moved
     }
 
     private fun extractExtension(url: String): String {
-        // Strip query params, then get extension
         val path = url.substringBefore("?").substringBefore("#")
         val ext = path.substringAfterLast(".", "")
         return normalizeExtension(if (ext.length in 1..5) ext else "jpg")
@@ -192,5 +200,14 @@ class MediaFileManager @Inject constructor(
         "tiff" -> "tif"
         "mpeg" -> "mpg"
         else -> lower
+    }
+
+    private fun mimeFromExtension(ext: String): String = when (normalizeExtension(ext)) {
+        "jpg" -> "image/jpeg"
+        "png" -> "image/png"
+        "gif" -> "image/gif"
+        "webp" -> "image/webp"
+        "mp4" -> "video/mp4"
+        else -> "application/octet-stream"
     }
 }

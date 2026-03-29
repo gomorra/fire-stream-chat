@@ -45,18 +45,17 @@ class MediaBackfillWorker @AssistedInject constructor(
             }
         }
 
-        // Migrate old files from filesDir/media/ to externalMediaDirs
-        val migrated = mediaFileManager.migrateFromInternalStorage()
+        // Migrate files from old storage locations to Pictures/FireStream/
+        val migrated = mediaFileManager.migrateOldStorage()
         if (migrated > 0) {
-            Log.w(TAG, "Backfill: migrated $migrated files to external storage")
-            // Update localUri paths in Room to point to new location
+            Log.w(TAG, "Backfill: migrated $migrated files to Pictures/FireStream/")
+            // Update all localUri paths in Room to point to new location
             val allMedia = messageDao.getAllMediaMessages()
             for (msg in allMedia) {
                 val oldUri = msg.localUri ?: continue
-                if (!oldUri.contains("/files/media/")) continue
                 val ext = oldUri.substringAfterLast(".", "jpg")
                 val newFile = mediaFileManager.getLocalFile(msg.chatId, msg.id, ext)
-                if (newFile.exists()) {
+                if (newFile.exists() && newFile.absolutePath != oldUri) {
                     messageDao.updateLocalUri(msg.id, newFile.absolutePath)
                 }
             }
