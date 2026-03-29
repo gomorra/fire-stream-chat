@@ -159,7 +159,7 @@ fun ChatScreen(
     var showCreateListSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
+    var fullscreenImageMessage by remember { mutableStateOf<com.firestream.chat.domain.model.Message?>(null) }
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
@@ -668,7 +668,7 @@ fun ChatScreen(
                                                 onMessageInfoClick(message, chatParticipants)
                                             }
                                         } else null,
-                                        onImageClick = { url -> fullscreenImageUrl = url },
+                                        onImageClick = { _ -> fullscreenImageMessage = message },
                                         onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
                                             {
                                                 val callIntent = Intent(context, CallActivity::class.java).apply {
@@ -1134,13 +1134,19 @@ fun ChatScreen(
         )
     }
 
-    BackHandler(enabled = fullscreenImageUrl != null) {
-        fullscreenImageUrl = null
+    BackHandler(enabled = fullscreenImageMessage != null) {
+        fullscreenImageMessage = null
     }
 
-    AnimatedVisibility(visible = fullscreenImageUrl != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenImageUrl?.let { url ->
-            FullscreenImageViewer(imageUrl = url, onDismiss = { fullscreenImageUrl = null })
+    AnimatedVisibility(visible = fullscreenImageMessage != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenImageMessage?.let { msg ->
+            FullscreenImageViewer(
+                imageUrl = msg.localUri ?: msg.mediaUrl ?: "",
+                onDismiss = { fullscreenImageMessage = null },
+                onSaveToGallery = {
+                    viewModel.saveImageToGallery(msg.localUri, msg.mediaUrl)
+                }
+            )
         }
     }
 }

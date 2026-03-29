@@ -1,5 +1,7 @@
 package com.firestream.chat.di
 
+import android.content.Context
+import android.net.ConnectivityManager
 import com.firestream.chat.data.repository.AuthRepositoryImpl
 import com.firestream.chat.data.repository.CallRepositoryImpl
 import com.firestream.chat.data.repository.ChatRepositoryImpl
@@ -25,6 +27,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
@@ -63,6 +66,17 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindListRepository(impl: ListRepositoryImpl): ListRepository
+}
+
+@Module
+@InstallIn(SingletonComponent::class)
+object SystemModule {
+
+    @Provides
+    @Singleton
+    fun provideConnectivityManager(@ApplicationContext context: Context): ConnectivityManager {
+        return context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
 }
 
 @Module

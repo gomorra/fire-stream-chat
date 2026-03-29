@@ -13,6 +13,7 @@ import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -23,10 +24,16 @@ import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class ChatUiState(
@@ -78,6 +85,7 @@ class ChatViewModel @Inject constructor(
     private val pollRepository: PollRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
+    private val mediaFileManager: MediaFileManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -94,6 +102,9 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private val _snackbarEvent = MutableSharedFlow<String>()
+    val snackbarEvent: SharedFlow<String> = _snackbarEvent.asSharedFlow()
 
     // Managers
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
@@ -161,6 +172,23 @@ class ChatViewModel @Inject constructor(
 
     // ── Emoji ──
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
+
+    // ── Save to gallery ──
+    fun saveImageToGallery(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val file = when {
+                    localUri != null && File(localUri).exists() -> File(localUri)
+                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "gallery_${System.currentTimeMillis()}", mediaUrl)
+                    else -> throw Exception("No image source available")
+                }
+                mediaFileManager.saveToGallery(file, mimeType)
+                _snackbarEvent.emit("Saved to gallery")
+            } catch (e: Exception) {
+                _snackbarEvent.emit("Failed to save: ${e.message}")
+            }
+        }
+    }
 
     // ── Error ──
     fun clearError() { _uiState.update { it.copy(error = null) } }

@@ -130,6 +130,11 @@ dependencies {
     // QR Code
     implementation(libs.zxing.core)
 
+    // WorkManager
+    implementation(libs.work.runtime.ktx)
+    implementation(libs.hilt.work)
+    ksp(libs.hilt.work.compiler)
+
     // Reorderable drag-and-drop
     implementation(libs.reorderable)
 

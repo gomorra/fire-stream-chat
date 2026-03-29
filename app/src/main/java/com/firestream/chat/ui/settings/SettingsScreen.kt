@@ -43,6 +43,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -283,6 +284,41 @@ fun SettingsScreen(
                 subtitle = autoDownloadLabel,
                 onClick = { showAutoDownloadPicker = true }
             )
+
+            // Media backfill status
+            if (uiState.mediaBackfillRunning) {
+                val progress = uiState.mediaBackfillProgress
+                val subtitle = if (progress != null) {
+                    "Downloading media... ${progress.first}/${progress.second}"
+                } else {
+                    "Downloading media..."
+                }
+                ListItem(
+                    headlineContent = { Text("Media Sync") },
+                    supportingContent = {
+                        Column {
+                            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+                            if (progress != null && progress.second > 0) {
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(
+                                    progress = { progress.first.toFloat() / progress.second },
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            } else {
+                                Spacer(Modifier.height(4.dp))
+                                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    },
+                    leadingContent = {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                )
+            }
 
             // Help section
             Spacer(Modifier.height(8.dp))

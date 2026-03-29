@@ -38,6 +38,10 @@ okhttp = "4.12.0"
 # QR Code
 zxing = "3.5.3"
 
+# WorkManager
+work = "2.9.1"
+hilt-work = "1.2.0"
+
 # Reorderable
 reorderable = "2.4.3"
 
@@ -106,6 +110,11 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 
 # QR Code
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
+
+# WorkManager
+work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hilt-work" }
+hilt-work-compiler = { group = "androidx.hilt", name = "hilt-compiler", version.ref = "hilt-work" }
 
 # Reorderable
 reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.ref = "reorderable" }

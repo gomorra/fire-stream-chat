@@ -1,8 +1,11 @@
 package com.firestream.chat.ui.settings
 
 import android.content.Context
+import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.NotificationSound
@@ -37,7 +40,10 @@ data class SettingsUiState(
     val vibration: Boolean = true,
     // Storage
     val cacheSize: Long = 0L,
-    val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY
+    val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
+    // Media backfill
+    val mediaBackfillProgress: Pair<Int, Int>? = null,
+    val mediaBackfillRunning: Boolean = false
 )
 
 @HiltViewModel
@@ -51,10 +57,13 @@ class SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
+    private var backfillObserver: Observer<List<WorkInfo>>? = null
+
     init {
         loadCurrentUser()
         observePreferences()
         calculateCacheSize()
+        observeBackfillProgress()
     }
 
     private fun loadCurrentUser() {
@@ -181,6 +190,54 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val size = getDirSize(appContext.cacheDir)
             _uiState.value = _uiState.value.copy(cacheSize = size)
+        }
+    }
+
+    private fun observeBackfillProgress() {
+        try {
+            val liveData = WorkManager.getInstance(appContext)
+                .getWorkInfosForUniqueWorkLiveData("media_backfill")
+            val observer = Observer<List<WorkInfo>> { workInfos ->
+                val workInfo = workInfos?.firstOrNull()
+                if (workInfo == null) {
+                    _uiState.value = _uiState.value.copy(
+                        mediaBackfillRunning = false,
+                        mediaBackfillProgress = null
+                    )
+                    return@Observer
+                }
+                when (workInfo.state) {
+                    WorkInfo.State.RUNNING -> {
+                        val done = workInfo.progress.getInt("done", 0)
+                        val total = workInfo.progress.getInt("total", 0)
+                        _uiState.value = _uiState.value.copy(
+                            mediaBackfillRunning = true,
+                            mediaBackfillProgress = if (total > 0) Pair(done, total) else null
+                        )
+                    }
+                    else -> {
+                        _uiState.value = _uiState.value.copy(
+                            mediaBackfillRunning = false,
+                            mediaBackfillProgress = null
+                        )
+                    }
+                }
+            }
+            backfillObserver = observer
+            liveData.observeForever(observer)
+        } catch (_: IllegalStateException) {
+            // WorkManager not initialized (e.g., in unit tests)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        backfillObserver?.let { observer ->
+            try {
+                WorkManager.getInstance(appContext)
+                    .getWorkInfosForUniqueWorkLiveData("media_backfill")
+                    .removeObserver(observer)
+            } catch (_: IllegalStateException) { }
         }
     }
 

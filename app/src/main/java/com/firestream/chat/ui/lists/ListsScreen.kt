@@ -368,10 +368,10 @@ private fun ListRow(
             )
             Spacer(modifier = Modifier.width(4.dp))
         }
+        val dateFormat = remember { SimpleDateFormat("MMM d", Locale.getDefault()) }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            text = SimpleDateFormat("MMM d", Locale.getDefault())
-                .format(Date(listData.updatedAt)),
+            text = dateFormat.format(Date(listData.updatedAt)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

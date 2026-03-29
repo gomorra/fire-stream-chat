@@ -1,7 +1,15 @@
 package com.firestream.chat
 
 import android.app.Application
+import androidx.hilt.work.HiltWorkerFactory
 import androidx.lifecycle.ProcessLifecycleOwner
+import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import com.firestream.chat.data.worker.MediaBackfillWorker
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
 import java.util.concurrent.Executors
@@ -9,10 +17,18 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltAndroidApp
-class FireStreamApp : Application() {
+class FireStreamApp : Application(), Configuration.Provider {
 
     @Inject
     lateinit var appLifecycleObserver: AppLifecycleObserver
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -20,6 +36,19 @@ class FireStreamApp : Application() {
         // Must happen after super.onCreate() so Hilt completes injection.
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
+
+        // Enqueue media backfill worker to download missing local media
+        WorkManager.getInstance(this).enqueueUniqueWork(
+            "media_backfill",
+            ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<MediaBackfillWorker>()
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build()
+                )
+                .build()
+        )
     }
 
     private fun cleanOldSharedMedia() {

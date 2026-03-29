@@ -15,6 +15,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import io.mockk.coEvery
@@ -59,6 +60,7 @@ class ChatViewModelReadReceiptTest {
     private val pollRepository = mockk<PollRepository>()
     private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
+    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val context = mockk<android.content.Context>(relaxed = true)
 
     private lateinit var viewModel: ChatViewModel
@@ -225,6 +227,7 @@ class ChatViewModelReadReceiptTest {
         pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
+        mediaFileManager = mediaFileManager,
         context = context
     )
 }

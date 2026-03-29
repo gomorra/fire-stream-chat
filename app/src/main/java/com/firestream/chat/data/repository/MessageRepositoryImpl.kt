@@ -1,26 +1,35 @@
 package com.firestream.chat.data.repository
 
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
+import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -37,8 +46,13 @@ class MessageRepositoryImpl @Inject constructor(
     private val authSource: FirebaseAuthSource,
     private val signalManager: SignalManager,
     private val storageSource: FirebaseStorageSource,
-    private val chatRepository: dagger.Lazy<ChatRepository>
+    private val chatRepository: dagger.Lazy<ChatRepository>,
+    private val mediaFileManager: MediaFileManager,
+    private val preferencesDataStore: PreferencesDataStore,
+    private val connectivityManager: ConnectivityManager
 ) : MessageRepository {
+
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun getMessages(chatId: String): Flow<List<Message>> {
         val currentUid = authSource.currentUserId ?: ""
@@ -170,6 +184,13 @@ class MessageRepositoryImpl @Inject constructor(
                                 mediaHeight = raw.mediaHeight
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
+
+                            // Auto-download media for incoming messages
+                            if (message.mediaUrl != null && message.localUri == null &&
+                                message.type in listOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
+                            ) {
+                                tryAutoDownload(message)
+                            }
                         }
                     }
                 }
@@ -742,4 +763,26 @@ class MessageRepositoryImpl @Inject constructor(
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
 
+    private fun tryAutoDownload(message: Message) {
+        downloadScope.launch {
+            try {
+                val option = preferencesDataStore.autoDownloadFlow.first()
+                if (option == AutoDownloadOption.NEVER) return@launch
+                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) return@launch
+
+                val file = mediaFileManager.downloadAndSave(
+                    message.chatId, message.id, message.mediaUrl!!
+                )
+                messageDao.updateLocalUri(message.id, file.absolutePath)
+            } catch (_: Exception) {
+                // Best-effort download; failures are silently ignored
+            }
+        }
+    }
+
+    private fun isOnWifi(): Boolean {
+        val network = connectivityManager.activeNetwork ?: return false
+        val caps = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
 }

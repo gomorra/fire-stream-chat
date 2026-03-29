@@ -195,9 +195,9 @@ private fun HistoryEntryRow(entry: ListHistoryEntry) {
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
+        val dateFormat = remember { SimpleDateFormat("MMM d, HH:mm", Locale.getDefault()) }
         Text(
-            text = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
-                .format(Date(entry.timestamp)),
+            text = dateFormat.format(Date(entry.timestamp)),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
         )

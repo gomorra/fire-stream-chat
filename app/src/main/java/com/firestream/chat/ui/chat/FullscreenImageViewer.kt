@@ -5,15 +5,19 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,7 +36,11 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
 @Composable
-internal fun FullscreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
+internal fun FullscreenImageViewer(
+    imageUrl: String,
+    onDismiss: () -> Unit,
+    onSaveToGallery: (() -> Unit)? = null
+) {
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
 
@@ -78,22 +86,43 @@ internal fun FullscreenImageViewer(imageUrl: String, onDismiss: () -> Unit) {
                     translationY = offset.y
                 )
         )
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(12.dp)
-                .size(36.dp)
-                .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center
         ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Close",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
-            )
+            if (onSaveToGallery != null) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
+                        .clickable(onClick = onSaveToGallery),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Download,
+                        contentDescription = "Save to gallery",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

@@ -76,6 +76,13 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp DESC LIMIT 1")
     suspend fun getLastMessageByChatId(chatId: String): MessageEntity?
 
+    // Local media
+    @Query("UPDATE messages SET localUri = :localUri WHERE id = :messageId")
+    suspend fun updateLocalUri(messageId: String, localUri: String)
+
+    @Query("SELECT * FROM messages WHERE type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
+
     // Call log
     @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")
     fun getCallMessages(): Flow<List<MessageEntity>>
