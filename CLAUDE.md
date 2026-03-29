@@ -80,19 +80,12 @@ This must appear before any code changes are made for that step.
 
 ### Post-step workflow
 
-**After each phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
-1. `./gradlew test` — unit tests must pass
-2. `./gradlew assembleDebug` — build must be clean
-3. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
-4. `/simplify` — spawn a **Sonnet sub-agent** (`Agent` tool with `model: "sonnet"`) to review changed code for quality and fix issues. Do not run `/simplify` inline or use `/simplify-review`. Do not use `/build` or `/step` skills — implement plans directly with the selected model.
-5. **Write unit tests** when the step introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
-6. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+7. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 
 ### Token efficiency
 
 - When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
 - When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
-
 
 ## Architecture
 
