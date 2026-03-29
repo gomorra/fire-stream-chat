@@ -7,7 +7,7 @@ This document provides a detailed specification and architectural overview of th
 ### Core Messaging
 
 - **1-on-1 Chat**: Text messaging with real-time syncing.
-- **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed.
+- **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed. Local-first media pipeline: images are compressed (`ImageCompressor`), stored locally (`MediaFileManager` at `filesDir/media/{chatId}/`), displayed immediately from local files, and uploaded to Firebase Storage with a progress overlay. `MediaBackfillWorker` runs on first launch to download existing media. Full quality opt-in via DataStore preference.
 - **End-to-End Encryption (E2EE)**: All messages are encrypted natively on the client device using the **Signal Protocol** before transmission. Encryption is disabled in debug builds (`BuildConfig.DEBUG` guard) — messages are sent as plaintext to avoid key-loss issues during development.
 - **Read Receipts Status**:
   - **Sent** (Single gray tick): Message reached the server.
@@ -155,9 +155,9 @@ graph TD
 
 The most isolated layer, containing enterprise-wide and application-specific business logic.
 
-- **Models**: Plain Kotlin Data Classes (`Message`, `User`, `Chat`, `Poll`, `CallState`, `GroupPermissions`, etc.). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
-- **Repository Interfaces**: Abstractions (`MessageRepository`, `UserRepository`, `CallRepository`, etc.) dictating what required data operations are available without knowing _how_ they're implemented.
-- **Use Cases**: Single-responsibility executors (67 total across 6 domains) that encapsulate business logic. Organized into `auth/`, `call/`, `chat/`, `contact/`, `list/`, and `message/` subdirectories.
+- **Models**: 18 plain Kotlin data classes (`Message`, `User`, `Chat`, `Contact`, `Poll`, `PollOption`, `CallState`, `CallLogEntry`, `CallSignalingData`, `IceCandidateData`, `GroupPermissions`, `GroupRole`, `ListData`, `ListItem`, `ListDiff`, `ListHistoryEntry`, `HistoryAction`, `MediaAttachment`, `SharedContent`, `MessageStatus`, `MessageType`, `ChatType`). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
+- **Repository Interfaces**: 8 abstractions (`AuthRepository`, `CallRepository`, `ChatRepository`, `ContactRepository`, `ListRepository`, `MessageRepository`, `PollRepository`, `UserRepository`) dictating what required data operations are available without knowing _how_ they're implemented.
+- **Use Cases**: Single-responsibility executors organized into `chat/`, `list/`, and `message/` subdirectories: `CheckGroupPermissionUseCase`, `SendListUpdateToChatsUseCase`, `SearchMessagesUseCase`.
 
 ### 3.2 Data Layer
 
@@ -166,6 +166,7 @@ The concrete implementation resolving the Repository Interfaces.
 - **Local Sources**: Room DB handles the reactive caching. The app primarily drives the UI from Room via `Flow`.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firestore, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: `SignalManager` and `SignalProtocolStoreImpl` orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
+- **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). `MediaBackfillWorker` (WorkManager) runs a one-time job on first launch to download existing media, respecting `AutoDownloadOption` and network constraints.
 - **Call Infrastructure**: `CallService` (foreground service) owns the WebRTC peer connection lifecycle. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
 
 ### 3.3 UI / Presentation Layer
@@ -377,10 +378,14 @@ erDiagram
         String status
         String mediaUrl
         String mediaThumbnailUrl
+        String localUri
+        Int mediaWidth
+        Int mediaHeight
         Long timestamp
         Long editedAt
         Boolean isStarred
         Boolean isForwarded
+        Boolean isPinned
         String reactionsJSON
         String replyToId
         Int duration
@@ -389,6 +394,9 @@ erDiagram
         String pollDataJSON
         String mentionsJSON
         Long deletedAt
+        String emojiSizesJSON
+        String listId
+        String listDiffJSON
     }
 
     contacts {
@@ -497,9 +505,12 @@ data class Message(
     val chatId: String,
     val senderId: String,
     val content: String,
-    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL
+    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
+    val localUri: String?,                   // local file path for media (offline-first)
+    val mediaWidth: Int?,                    // original image width for aspect ratio
+    val mediaHeight: Int?,                   // original image height for aspect ratio
     val status: MessageStatus,   // SENDING | SENT | DELIVERED | READ | FAILED
     val replyToId: String?,
     val timestamp: Long,
@@ -512,7 +523,11 @@ data class Message(
     val deliveredTo: Map<String, Long>,   // userId → timestamp (group chats)
     val pollData: Poll?,
     val mentions: List<String>,           // userIds + "everyone"
-    val deletedAt: Long?
+    val deletedAt: Long?,
+    val emojiSizes: Map<Int, Float>,       // character index → size multiplier (0.8–2.5)
+    val listId: String?,                   // associated shared list ID
+    val listDiff: ListDiff?,               // list mutation summary for LIST messages
+    val isPinned: Boolean
 )
 ```
 
@@ -545,6 +560,22 @@ data class PollOption(
     val id: String,
     val text: String,
     val voterIds: List<String>
+)
+```
+
+### ListDiff
+
+```kotlin
+data class ListDiff(
+    val added: List<String>,
+    val removed: List<String>,
+    val checked: List<String>,
+    val unchecked: List<String>,
+    val edited: List<String>,
+    val titleChanged: String?,
+    val deleted: Boolean,
+    val unshared: Boolean,            // list was unshared from a chat
+    val shared: Boolean               // list was shared into a chat
 )
 ```
 
@@ -708,10 +739,15 @@ com.firestream.chat/
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
 │   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, SignalDao, UserDao
-│   │   ├── entity/              # 5 core (Chat, Contact, List, Message, User) + 7 Signal entities
+│   │   ├── entity/              # 5 core (Chat, Contact, List, Message, User) + 6 Signal entities + SignalTrustedIdentity
 │   │   ├── AppDatabase.kt
 │   │   ├── Converters.kt
 │   │   └── PreferencesDataStore.kt
+│   ├── util/
+│   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
+│   │   └── MediaFileManager.kt  # Local media storage & gallery export
+│   ├── worker/
+│   │   └── MediaBackfillWorker.kt # WorkManager job to backfill local media
 │   ├── remote/
 │   │   ├── fcm/FCMService.kt
 │   │   └── firebase/            # FirebaseAuthSource, FirestoreCallSource,
@@ -729,20 +765,17 @@ com.firestream.chat/
 │       └── ShareContentResolver.kt
 ├── di/                          # AppModule, DatabaseModule, CryptoModule, NetworkModule
 ├── domain/
-│   ├── model/                   # Chat, Message, User, Contact, Poll, CallState, CallLogEntry,
-│   │                            # CallSignalingData, IceCandidateData, GroupPermissions, GroupRole,
-│   │                            # ListData, ListItem, ListDiff, ListHistoryEntry, HistoryAction,
-│   │                            # MediaAttachment, SharedContent
-│   ├── repository/              # Auth, Call, Chat, Contact, List, Message, Poll, User interfaces
+│   ├── model/                   # Chat, Message, User, Contact, Poll, PollOption,
+│   │                            # CallState, CallLogEntry, CallSignalingData, IceCandidateData,
+│   │                            # GroupPermissions, GroupRole, ListData, ListItem, ListDiff,
+│   │                            # ListHistoryEntry, HistoryAction, MediaAttachment,
+│   │                            # SharedContent, MessageStatus, MessageType, ChatType
+│   ├── repository/              # AuthRepository, CallRepository, ChatRepository, ContactRepository,
+│   │                            # ListRepository, MessageRepository, PollRepository, UserRepository
 │   ├── usecase/
-│   │   ├── auth/                # GetCurrentUser, VerifyOtp
-│   │   ├── call/                # Initiate, Answer, Decline, End, GetCallLog
-│   │   ├── chat/                # 21 use cases — group mgmt, permissions,
-│   │   │                        # invite links, archive/pin/mute, broadcast
-│   │   ├── contact/             # Search, Sync
-│   │   ├── list/                # 18 use cases — create, share, items, history
-│   │   └── message/             # 19 use cases — send, edit, delete, react,
-│   │                            # forward, star, poll, mentions, broadcast, list
+│   │   ├── chat/                # CheckGroupPermissionUseCase
+│   │   ├── list/                # SendListUpdateToChatsUseCase
+│   │   └── message/             # SearchMessagesUseCase
 │   └── util/MentionParser.kt
 ├── navigation/NavGraph.kt
 ├── ui/

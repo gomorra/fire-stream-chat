@@ -123,7 +123,7 @@ If any condition fails, run each step individually.
 ### Phase 3 — Wrap Up
 
 After all steps complete:
-1. **Final simplify review** — spawn Sonnet agent on the full phase diff (`git diff [first-commit]..HEAD`)
+1. **Final simplify review (4+ steps only)** — if the plan has 4 or more steps, spawn a Sonnet agent on the full phase diff (`git diff [first-commit]..HEAD`). Skip for plans with fewer than 4 steps.
 2. Update MEMORY.md with plan completion status, key patterns, deferred items
 3. Display summary:
    ```

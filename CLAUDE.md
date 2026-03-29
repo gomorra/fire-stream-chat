@@ -89,10 +89,11 @@ This must appear before any code changes are made for that step.
 
 **After each sub-feature, ALWAYS run these steps in order without waiting to be asked:**
 1. `/simplify-review` — review changed code for quality (always Sonnet/Medium)
-2. `./gradlew test` — unit tests must pass
-3. `./gradlew assembleDebug` — build must be clean
-4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
-5. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+2. **Write unit tests** when the step introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
+3. `./gradlew test` — unit tests must pass
+4. `./gradlew assembleDebug` — build must be clean
+5. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
+6. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 
 ### Token efficiency
 
