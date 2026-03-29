@@ -26,7 +26,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.first
@@ -53,6 +57,9 @@ class MessageRepositoryImpl @Inject constructor(
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
+    override val uploadProgress: StateFlow<Map<String, Float>> = _uploadProgress.asStateFlow()
 
     override fun getMessages(chatId: String): Flow<List<Message>> {
         val currentUid = authSource.currentUserId ?: ""
@@ -320,7 +327,13 @@ class MessageRepositoryImpl @Inject constructor(
             )
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-            val downloadUrl = storageSource.uploadMedia(chatId, tempId, uri, mimeType)
+            val downloadUrl = try {
+                storageSource.uploadMedia(chatId, tempId, uri, mimeType) { progress ->
+                    _uploadProgress.update { map -> map + (tempId to progress) }
+                }
+            } finally {
+                _uploadProgress.update { it - tempId }
+            }
 
             val remoteId: String
             if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
