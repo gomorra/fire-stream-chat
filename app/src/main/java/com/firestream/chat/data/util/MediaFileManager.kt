@@ -2,7 +2,7 @@ package com.firestream.chat.data.util
 
 import android.content.ContentValues
 import android.content.Context
-import android.media.MediaScannerConnection
+
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
@@ -61,7 +61,7 @@ class MediaFileManager @Inject constructor(
                         }
                     } ?: throw Exception("Empty response body")
                 }
-                scanFile(localFile)
+                registerWithMediaStore(localFile)
                 myDeferred.complete(localFile)
                 localFile
             } catch (e: Exception) {
@@ -113,7 +113,7 @@ class MediaFileManager @Inject constructor(
                     input.copyTo(output)
                 }
             } ?: throw Exception("Failed to open source URI")
-            scanFile(localFile)
+            registerWithMediaStore(localFile)
             localFile
         }
 
@@ -139,7 +139,7 @@ class MediaFileManager @Inject constructor(
                     oldFile.copyTo(newFile)
                 }
                 oldFile.delete()
-                scanFile(newFile)
+                registerWithMediaStore(newFile)
                 moved++
                 onProgress(moved, total)
             }
@@ -151,8 +151,33 @@ class MediaFileManager @Inject constructor(
             moved
         }
 
-    fun scanFile(file: File) {
-        MediaScannerConnection.scanFile(context, arrayOf(file.absolutePath), null, null)
+    /**
+     * Register a file with MediaStore so it appears in Google Photos and gallery apps.
+     * Creates a copy in Pictures/FireStream/. Skips if already registered.
+     */
+    suspend fun registerWithMediaStore(file: File) {
+        val mimeType = when (file.extension.lowercase()) {
+            "jpg", "jpeg" -> "image/jpeg"
+            "png" -> "image/png"
+            "gif" -> "image/gif"
+            "webp" -> "image/webp"
+            "mp4" -> "video/mp4"
+            else -> return
+        }
+
+        // Check if already registered by display name
+        val existing = context.contentResolver.query(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            arrayOf(MediaStore.MediaColumns._ID),
+            "${MediaStore.MediaColumns.DISPLAY_NAME} = ?",
+            arrayOf(file.name),
+            null
+        )?.use { it.count } ?: 0
+        if (existing > 0) return
+
+        try {
+            saveToGallery(file, mimeType)
+        } catch (_: Exception) { }
     }
 
     private fun extractExtension(url: String): String {
