@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -196,6 +197,7 @@ class SettingsViewModel @Inject constructor(
 
     fun startMediaBackfill() {
         val request = OneTimeWorkRequestBuilder<MediaBackfillWorker>()
+            .setInputData(workDataOf("manual" to true))
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -203,7 +205,7 @@ class SettingsViewModel @Inject constructor(
             )
             .build()
         WorkManager.getInstance(appContext)
-            .enqueueUniqueWork(WORK_MEDIA_BACKFILL, ExistingWorkPolicy.KEEP, request)
+            .enqueueUniqueWork(WORK_MEDIA_BACKFILL, ExistingWorkPolicy.REPLACE, request)
     }
 
     fun clearCache() {
@@ -237,6 +239,12 @@ class SettingsViewModel @Inject constructor(
                     return@Observer
                 }
                 when (workInfo.state) {
+                    WorkInfo.State.ENQUEUED -> {
+                        _uiState.value = _uiState.value.copy(
+                            mediaBackfillRunning = true,
+                            mediaBackfillProgress = null
+                        )
+                    }
                     WorkInfo.State.RUNNING -> {
                         val done = workInfo.progress.getInt("done", 0)
                         val total = workInfo.progress.getInt("total", 0)

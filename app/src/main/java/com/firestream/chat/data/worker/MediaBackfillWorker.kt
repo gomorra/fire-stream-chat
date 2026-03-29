@@ -26,10 +26,13 @@ class MediaBackfillWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        when (preferencesDataStore.autoDownloadFlow.first()) {
-            AutoDownloadOption.NEVER -> return Result.success()
-            AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) return Result.success()
-            AutoDownloadOption.ALWAYS -> Unit
+        val isManual = inputData.getBoolean("manual", false)
+        if (!isManual) {
+            when (preferencesDataStore.autoDownloadFlow.first()) {
+                AutoDownloadOption.NEVER -> return Result.success()
+                AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) return Result.success()
+                AutoDownloadOption.ALWAYS -> Unit
+            }
         }
 
         val messages = messageDao.getMessagesWithoutLocalMedia()
