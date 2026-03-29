@@ -616,28 +616,22 @@ internal fun MessageBubble(
         }
 
         if (groupedReactions.isNotEmpty()) {
+            val reactionFontSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.25f
             FlowRow(
                 modifier = Modifier.padding(top = 2.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 groupedReactions.forEach { (emoji, count) ->
                     val myReaction = message.reactions[currentUserId] == emoji
-                    AssistChip(
-                        onClick = { /* handled by reaction picker */ },
-                        label = {
-                            Text(
-                                text = if (count > 1) "$emoji $count" else emoji,
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontSize = MaterialTheme.typography.labelSmall.fontSize * 1.2f
-                                )
-                            )
-                        },
-                        modifier = Modifier.height(34.dp),
-                        border = BorderStroke(
-                            width = 1.dp,
-                            color = if (myReaction) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.outline
-                        )
+                    Text(
+                        text = if (count > 1) "$emoji $count" else emoji,
+                        fontSize = reactionFontSize.value.sp,
+                        color = if (myReaction) MaterialTheme.colorScheme.primary
+                            else Color.Unspecified,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { /* handled by reaction picker */ }
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
                     )
                 }
             }
