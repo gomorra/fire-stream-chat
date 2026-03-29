@@ -112,7 +112,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -177,6 +179,8 @@ fun ChatScreen(
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
+    // Swipe-to-react panel state
+    var swipeReactMessage by remember { mutableStateOf<Message?>(null) }
     // ID of the message whose reaction chips should be scrolled into view after reacting
     var reactionScrollTarget by remember { mutableStateOf<String?>(null) }
 
@@ -277,6 +281,12 @@ fun ChatScreen(
                     }
                 }
             }
+    }
+
+    // Dismiss swipe reaction panel when user scrolls
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { scrolling -> if (scrolling) swipeReactMessage = null }
     }
 
     // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
@@ -672,50 +682,78 @@ fun ChatScreen(
                                         }
                                     )
                                 } else {
-                                    MessageBubble(
-                                        message = message,
-                                        isOwnMessage = isOwn,
-                                        replyToMessage = replyToMessage,
-                                        linkPreview = linkPreview,
-                                        currentUserId = uiState.currentUserId,
-                                        readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
-                                        userIdToDisplayName = uiState.participantNameMap,
-                                        onDeleteClick = if (isOwn) {
-                                            { viewModel.deleteMessage(message.id) }
-                                        } else null,
-                                        onEditClick = if (isOwn && message.type == MessageType.TEXT) {
-                                            { viewModel.startEdit(message) }
-                                        } else null,
-                                        onReplyClick = { viewModel.setReplyTo(message) },
-                                        onReactionClick = { reactionTargetMessage = message },
-                                        onForwardClick = { forwardTargetMessage = message },
-                                        onStarClick = { viewModel.toggleStar(message) },
-                                        onPinClick = {
-                                            viewModel.togglePin(message.id, !message.isPinned)
-                                        },
-                                        onInfoClick = if (isOwn) {
-                                            {
-                                                val chatParticipants = uiState.availableChats
-                                                    .find { it.id == message.chatId }
-                                                    ?.participants ?: emptyList()
-                                                onMessageInfoClick(message, chatParticipants)
-                                            }
-                                        } else null,
-                                        uploadProgress = uploadProgressMap[message.id],
-                                        onImageClick = { _ -> fullscreenImageMessage = message },
-                                        onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
-                                            {
-                                                val callIntent = Intent(context, CallActivity::class.java).apply {
-                                                    putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                                    putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
-                                                    putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
-                                                    putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
-                                                    putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
+                                    Box {
+                                        MessageBubble(
+                                            message = message,
+                                            isOwnMessage = isOwn,
+                                            replyToMessage = replyToMessage,
+                                            linkPreview = linkPreview,
+                                            currentUserId = uiState.currentUserId,
+                                            readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
+                                            userIdToDisplayName = uiState.participantNameMap,
+                                            onDeleteClick = if (isOwn) {
+                                                { viewModel.deleteMessage(message.id) }
+                                            } else null,
+                                            onEditClick = if (isOwn && message.type == MessageType.TEXT) {
+                                                { viewModel.startEdit(message) }
+                                            } else null,
+                                            onReplyClick = { viewModel.setReplyTo(message) },
+                                            onReactionClick = { reactionTargetMessage = message },
+                                            onSwipeReact = { swipeReactMessage = message },
+                                            onForwardClick = { forwardTargetMessage = message },
+                                            onStarClick = { viewModel.toggleStar(message) },
+                                            onPinClick = {
+                                                viewModel.togglePin(message.id, !message.isPinned)
+                                            },
+                                            onInfoClick = if (isOwn) {
+                                                {
+                                                    val chatParticipants = uiState.availableChats
+                                                        .find { it.id == message.chatId }
+                                                        ?.participants ?: emptyList()
+                                                    onMessageInfoClick(message, chatParticipants)
                                                 }
-                                                context.startActivity(callIntent)
+                                            } else null,
+                                            uploadProgress = uploadProgressMap[message.id],
+                                            onImageClick = { _ -> fullscreenImageMessage = message },
+                                            onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
+                                                {
+                                                    val callIntent = Intent(context, CallActivity::class.java).apply {
+                                                        putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
+                                                        putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                                        putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
+                                                        putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                                        putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
+                                                    }
+                                                    context.startActivity(callIntent)
+                                                }
+                                            } else null
+                                        )
+
+                                        // Swipe-to-react panel popup
+                                        if (swipeReactMessage?.id == message.id) {
+                                            Popup(
+                                                alignment = if (isOwn) Alignment.TopEnd else Alignment.TopStart,
+                                                offset = IntOffset(0, -56),
+                                                onDismissRequest = { swipeReactMessage = null }
+                                            ) {
+                                                SwipeReactionPanel(
+                                                    recentEmojis = uiState.recentEmojis,
+                                                    currentReaction = message.reactions[uiState.currentUserId],
+                                                    onEmojiSelected = { emoji ->
+                                                        val isAdding = message.reactions[uiState.currentUserId] != emoji
+                                                        if (isAdding) reactionScrollTarget = message.id
+                                                        viewModel.toggleReaction(message.id, emoji)
+                                                        viewModel.addRecentEmoji(emoji)
+                                                        swipeReactMessage = null
+                                                    },
+                                                    onPlusClick = {
+                                                        swipeReactMessage = null
+                                                        reactionTargetMessage = message
+                                                    }
+                                                )
                                             }
-                                        } else null
-                                    )
+                                        }
+                                    }
                                 }
                             }
                         }

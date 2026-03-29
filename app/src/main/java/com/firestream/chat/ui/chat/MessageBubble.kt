@@ -8,6 +8,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -31,28 +33,40 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.LinkAnnotation
@@ -101,6 +115,7 @@ internal fun MessageBubble(
     onStarClick: () -> Unit = {},
     onPinClick: () -> Unit = {},
     onInfoClick: (() -> Unit)?,
+    onSwipeReact: () -> Unit = {},
     onImageClick: (String) -> Unit = {},
     onCallClick: (() -> Unit)? = null,
     uploadProgress: Float? = null
@@ -112,7 +127,13 @@ internal fun MessageBubble(
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     var showMenu by remember { mutableStateOf(false) }
-    var swipeOffset by remember { mutableFloatStateOf(0f) }
+    val swipeAnimatable = remember { Animatable(0f) }
+    val swipeOffset = swipeAnimatable.value
+    // 0 = undecided, 1 = right (reply), -1 = left (react)
+    var swipeDirection by remember { mutableIntStateOf(0) }
+    var hapticFired by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     val groupedReactions = message.reactions.values
         .groupBy { it }
@@ -125,27 +146,70 @@ internal fun MessageBubble(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (swipeOffset > 60f) {
-                            onReplyClick()
+                        val currentOffset = swipeAnimatable.value
+                        if (currentOffset > 80f) onReplyClick()
+                        if (currentOffset < -50f && message.deletedAt == null) onSwipeReact()
+                        swipeDirection = 0
+                        hapticFired = false
+                        scope.launch {
+                            swipeAnimatable.animateTo(
+                                0f,
+                                spring(dampingRatio = 0.6f, stiffness = 400f)
+                            )
                         }
-                        swipeOffset = 0f
                     },
                     onHorizontalDrag = { _, dragAmount ->
-                        if (!isOwnMessage || dragAmount > 0) {
-                            swipeOffset = (swipeOffset + dragAmount).coerceIn(0f, 80f)
+                        // Lock direction on first meaningful drag
+                        if (swipeDirection == 0) {
+                            swipeDirection = if (dragAmount > 0) 1 else -1
                         }
+                        val newOffset = when (swipeDirection) {
+                            1 -> (swipeAnimatable.value + dragAmount).coerceIn(0f, 120f)
+                            -1 -> if (message.deletedAt == null)
+                                (swipeAnimatable.value + dragAmount).coerceIn(-80f, 0f)
+                            else swipeAnimatable.value
+                            else -> swipeAnimatable.value
+                        }
+                        // Haptic when crossing threshold
+                        val crossedThreshold = (swipeDirection == 1 && newOffset > 80f && swipeAnimatable.value <= 80f) ||
+                                (swipeDirection == -1 && newOffset < -50f && swipeAnimatable.value >= -50f)
+                        if (crossedThreshold && !hapticFired) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            hapticFired = true
+                        }
+                        scope.launch { swipeAnimatable.snapTo(newOffset) }
                     }
                 )
             },
         horizontalAlignment = alignment
     ) {
-        if (swipeOffset > 20f) {
+        // Reply icon (right swipe)
+        if (swipeOffset > 30f) {
+            val progress = ((swipeOffset - 30f) / 50f).coerceIn(0f, 1f)
+            val iconScale = 0.5f + 0.5f * progress
             Box(modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)) {
                 Icon(
                     imageVector = Icons.Default.Reply,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = swipeOffset / 80f),
-                    modifier = Modifier.size(20.dp)
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = progress),
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
+                )
+            }
+        }
+        // React icon (left swipe)
+        if (swipeOffset < -15f) {
+            val progress = ((-swipeOffset - 15f) / 35f).coerceIn(0f, 1f)
+            val iconScale = 0.5f + 0.5f * progress
+            Box(modifier = Modifier.align(Alignment.End).padding(end = 4.dp)) {
+                Icon(
+                    imageVector = Icons.Default.EmojiEmotions,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = progress),
+                    modifier = Modifier
+                        .size(24.dp)
+                        .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
                 )
             }
         }
@@ -491,46 +555,73 @@ internal fun MessageBubble(
             }
 
             DropdownMenu(expanded = showMenu && message.deletedAt == null, onDismissRequest = { showMenu = false }) {
-                DropdownMenuItem(
-                    text = { Text("Reply") },
-                    leadingIcon = { Icon(Icons.Default.Reply, null) },
-                    onClick = { showMenu = false; onReplyClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text("React") },
-                    onClick = { showMenu = false; onReactionClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text("Forward") },
-                    leadingIcon = { Icon(Icons.Default.Share, null) },
-                    onClick = { showMenu = false; onForwardClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (message.isStarred) "Unstar" else "Star") },
-                    onClick = { showMenu = false; onStarClick() }
-                )
-                DropdownMenuItem(
-                    text = { Text(if (message.isPinned) "Unpin" else "Pin") },
-                    onClick = { showMenu = false; onPinClick() }
-                )
-                onEditClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Edit") },
-                        onClick = { showMenu = false; it() }
-                    )
-                }
-                onInfoClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Message Info") },
-                        leadingIcon = { Icon(Icons.Default.Info, null) },
-                        onClick = { showMenu = false; it() }
-                    )
-                }
-                onDeleteClick?.let {
-                    DropdownMenuItem(
-                        text = { Text("Delete for everyone", color = MaterialTheme.colorScheme.error) },
-                        onClick = { showMenu = false; it() }
-                    )
+                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                    FilledTonalButton(
+                        onClick = { showMenu = false; onReplyClick() },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Reply, null, modifier = Modifier.padding(end = 4.dp))
+                        Text("Reply")
+                    }
+                    FilledTonalButton(
+                        onClick = { showMenu = false; onReactionClick() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Default.EmojiEmotions, null, modifier = Modifier.padding(end = 4.dp))
+                        Text("React")
+                    }
+                    FilledTonalButton(
+                        onClick = { showMenu = false; onForwardClick() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
+                        Text("Forward")
+                    }
+                    FilledTonalButton(
+                        onClick = { showMenu = false; onStarClick() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Star, null, modifier = Modifier.padding(end = 4.dp))
+                        Text(if (message.isStarred) "Unstar" else "Star")
+                    }
+                    FilledTonalButton(
+                        onClick = { showMenu = false; onPinClick() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
+                        Text(if (message.isPinned) "Unpin" else "Pin")
+                    }
+                    onEditClick?.let {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; it() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Edit, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Edit")
+                        }
+                    }
+                    onInfoClick?.let {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; it() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Info, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Message Info")
+                        }
+                    }
+                    onDeleteClick?.let {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; it() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            colors = ButtonDefaults.filledTonalButtonColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer,
+                                contentColor = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        ) {
+                            Icon(Icons.Default.Delete, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Delete for everyone")
+                        }
+                    }
                 }
             }
         }
