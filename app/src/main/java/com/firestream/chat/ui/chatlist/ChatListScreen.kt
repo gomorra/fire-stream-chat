@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.NotificationsOff
@@ -22,10 +23,11 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -125,16 +127,22 @@ fun ChatListScreen(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("New Group") },
-                            leadingIcon = { Icon(Icons.Default.Group, null) },
-                            onClick = { showMenu = false; onNewGroupClick() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("New Broadcast") },
-                            leadingIcon = { Icon(Icons.Default.Campaign, null) },
-                            onClick = { showMenu = false; onNewBroadcastClick() }
-                        )
+                        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            FilledTonalButton(
+                                onClick = { showMenu = false; onNewGroupClick() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Group, null, modifier = Modifier.padding(end = 4.dp))
+                                Text("New Group")
+                            }
+                            FilledTonalButton(
+                                onClick = { showMenu = false; onNewBroadcastClick() },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Campaign, null, modifier = Modifier.padding(end = 4.dp))
+                                Text("New Broadcast")
+                            }
+                        }
                     }
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
@@ -362,25 +370,40 @@ private fun ChatItem(
             expanded = showMenu,
             onDismissRequest = { showMenu = false }
         ) {
-            DropdownMenuItem(
-                text = { Text(if (chat.isPinned) "Unpin" else "Pin") },
-                leadingIcon = { Icon(Icons.Default.PushPin, null) },
-                onClick = { showMenu = false; onPin() }
-            )
-            DropdownMenuItem(
-                text = { Text(if (chat.isArchived) "Unarchive" else "Archive") },
-                leadingIcon = { Icon(Icons.Default.Archive, null) },
-                onClick = { showMenu = false; onArchive() }
-            )
-            DropdownMenuItem(
-                text = { Text(if (isMuted) "Unmute" else "Mute") },
-                leadingIcon = { Icon(Icons.Default.NotificationsOff, null) },
-                onClick = { showMenu = false; onMute() }
-            )
-            DropdownMenuItem(
-                text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                onClick = { showMenu = false; onDelete() }
-            )
+            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                FilledTonalButton(
+                    onClick = { showMenu = false; onPin() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
+                    Text(if (chat.isPinned) "Unpin" else "Pin")
+                }
+                FilledTonalButton(
+                    onClick = { showMenu = false; onArchive() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.Archive, null, modifier = Modifier.padding(end = 4.dp))
+                    Text(if (chat.isArchived) "Unarchive" else "Archive")
+                }
+                FilledTonalButton(
+                    onClick = { showMenu = false; onMute() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.NotificationsOff, null, modifier = Modifier.padding(end = 4.dp))
+                    Text(if (isMuted) "Unmute" else "Mute")
+                }
+                FilledTonalButton(
+                    onClick = { showMenu = false; onDelete() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Delete")
+                }
+            }
         }
     }
 }

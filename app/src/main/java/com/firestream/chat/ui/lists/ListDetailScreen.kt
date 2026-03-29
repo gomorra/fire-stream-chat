@@ -610,13 +610,10 @@ private fun ListItemRow(
                             if (state.isFocused) hadFocus = true
                             else if (hadFocus && isEditing) submitEdit()
                         },
-                    singleLine = true,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = LocalContentColor.current
                     ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submitEdit() })
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
                 )
             } else {
                 Text(
