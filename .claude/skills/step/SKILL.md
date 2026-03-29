@@ -26,6 +26,7 @@ Execute a single implementation step from a plan file.
      - The full step description from the plan
      - The list of file paths to modify
      - Effort level (guides depth: High = thorough + edge cases + tests, Medium = follow patterns, Low = minimal targeted change)
+     - "Use Glob/Grep/Read tools for file search and content search. Do NOT use grep, find, cat, or head via Bash."
    - Use `isolation: "worktree"` only if the plan explicitly marks steps as parallel
 5. **After the implementation agent completes**, spawn a **simplify review agent** with `model: "sonnet"`:
 
@@ -36,9 +37,8 @@ Execute a single implementation step from a plan file.
    > 3. Do NOT change: formatting, imports, unchanged code, comments/docstrings, impossible error handling.
    > 4. Report each fix in one line; note deferrals with reason.
 
-6. **Test + build + commit** (run sequentially):
-   - `./gradlew test` — must pass
-   - `./gradlew assembleDebug` — must be clean
+6. **Test + build + commit:**
+   - `./gradlew test assembleDebug` — single Gradle invocation, reuses compilation. Both must pass.
    - Create a git commit following the repo's commit style
    - Update MEMORY.md with what was done
 

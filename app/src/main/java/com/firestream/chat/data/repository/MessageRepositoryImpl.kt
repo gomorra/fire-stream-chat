@@ -70,6 +70,7 @@ class MessageRepositoryImpl @Inject constructor(
         val currentUid = authSource.currentUserId ?: ""
 
         return channelFlow {
+            downloadPendingMediaForChat(chatId)
             launch {
                 signalManager.ensureInitialized()
                 messageSource.observeMessages(chatId).collectLatest { rawList ->
@@ -414,7 +415,18 @@ class MessageRepositoryImpl @Inject constructor(
             )
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
-            Result.success(sentMessage)
+            // Rename local file from tempId to remoteId to prevent orphaned files
+            val finalLocalUri: String? = if (localFile != null) {
+                val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
+                if (localFile.renameTo(newFile)) {
+                    messageDao.updateLocalUri(remoteId, newFile.absolutePath)
+                    newFile.absolutePath
+                } else {
+                    localFile.absolutePath
+                }
+            } else null
+
+            Result.success(sentMessage.copy(localUri = finalLocalUri))
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -829,6 +841,25 @@ class MessageRepositoryImpl @Inject constructor(
 
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
+
+    private fun downloadPendingMediaForChat(chatId: String) {
+        downloadScope.launch {
+            try {
+                val option = preferencesDataStore.autoDownloadFlow.first()
+                if (option == AutoDownloadOption.NEVER) return@launch
+                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) return@launch
+
+                val pending = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
+                for (entity in pending) {
+                    try {
+                        val url = entity.mediaUrl ?: continue
+                        val file = mediaFileManager.downloadAndSave(chatId, entity.id, url)
+                        messageDao.updateLocalUri(entity.id, file.absolutePath)
+                    } catch (_: Exception) { }
+                }
+            } catch (_: Exception) { }
+        }
+    }
 
     private fun tryAutoDownload(message: Message) {
         downloadScope.launch {

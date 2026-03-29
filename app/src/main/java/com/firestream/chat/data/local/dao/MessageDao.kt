@@ -83,6 +83,9 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
 
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    suspend fun getMessagesWithoutLocalMediaForChat(chatId: String): List<MessageEntity>
+
     // Call log
     @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")
     fun getCallMessages(): Flow<List<MessageEntity>>

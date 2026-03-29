@@ -66,16 +66,30 @@ If `$ARGUMENTS` is empty or blank:
 
 ### Phase 2 — Execute Steps in Order
 
-Walk the execution order left-to-right. For each position, run the **step lifecycle** below. Do NOT invoke `/step` — run it directly to avoid re-reading the plan.
+Walk the execution order left-to-right. Before executing, check if consecutive sequential steps can be **batched** (see batching rules below). Then for each position (single step, batch, or parallel group), run the appropriate lifecycle.
 
-#### Step Lifecycle (per step)
+#### Batching Rules
+
+Consecutive sequential steps may be combined into a single agent call when **all** of these hold:
+- Same recommended model (e.g., all Sonnet)
+- All effort = Low
+- Max 3 steps per batch
+- No step in the batch appears in a parallel group
+
+When batching, the agent implements all batched steps in one call, followed by one simplify review, one test+build, and one commit covering all batched steps. Display the batch as:
+> **Steps X, Y, Z (batched) — Model: [model] / Effort: Low**
+
+If any condition fails, run each step individually.
+
+#### Step Lifecycle (per step or batch)
 
 **a. Display step header:**
 > **Step X — Model: [model] / Effort: [effort]**
 
 **b. Spawn implementation agent** — use `Agent` tool with `model` set per the plan:
-- Pass the **full step description** from the plan and **file paths to modify** (not file contents — the agent reads them itself)
+- Pass the **full step description** from the plan (or all batched step descriptions) and **file paths to modify** (not file contents — the agent reads them itself)
 - Effort guides depth: High = thorough + edge cases + tests, Medium = follow patterns, Low = targeted change
+- The agent prompt MUST include: "Use Glob/Grep/Read tools for file search and content search. Do NOT use grep, find, cat, or head via Bash."
 
 **c. Spawn simplify review agent** — always `model: "sonnet"`:
 > Review all code changed since the last commit for quality and fix issues.
@@ -85,9 +99,8 @@ Walk the execution order left-to-right. For each position, run the **step lifecy
 > 3. Do NOT change: formatting, imports, unchanged code, comments/docstrings, impossible error handling.
 > 4. Report each fix in one line; note deferrals with reason.
 
-**d. Test + build:**
-- `./gradlew test` — must pass
-- `./gradlew assembleDebug` — must be clean
+**d. Test + build** — run as a single Gradle invocation:
+- `./gradlew test assembleDebug` — tests and build in one JVM, reuses compilation. Both must pass.
 
 **e. Commit** with a descriptive message following the repo's commit style.
 
@@ -115,6 +128,7 @@ After all steps complete:
 3. Display summary:
    ```
    Plan [plan-name] complete.
+   Plan file: [path to the plan .md file]
    Order: [order line]
    Steps: [N] / [N] succeeded
    Commits: [list of commit hashes + messages]
@@ -126,7 +140,7 @@ After all steps complete:
 - **Build failure:** Same as test failure
 - **Step produces no changes:** Log a warning and skip to next step
 - **Merge conflict (parallel):** Abort parallel, re-run conflicting steps sequentially
-- **User interruption:** Report which steps are done and which remain
+- **User interruption:** Report plan file path, which steps are done and which remain
 
 ## Examples
 
