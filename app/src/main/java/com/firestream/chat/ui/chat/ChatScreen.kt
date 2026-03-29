@@ -731,9 +731,11 @@ fun ChatScreen(
 
                                         // Swipe-to-react panel popup
                                         if (swipeReactMessage?.id == message.id) {
+                                            // 52.dp = panel content height (40dp emoji + 6dp×2 padding)
+                                            val panelOffsetPx = with(LocalDensity.current) { (-52).dp.roundToPx() }
                                             Popup(
                                                 alignment = if (isOwn) Alignment.TopEnd else Alignment.TopStart,
-                                                offset = IntOffset(0, -56),
+                                                offset = IntOffset(0, panelOffsetPx),
                                                 onDismissRequest = { swipeReactMessage = null }
                                             ) {
                                                 SwipeReactionPanel(

@@ -232,8 +232,8 @@ private val TOOLBAR_ENTRIES: List<ToolbarEntry> = buildList {
     PANEL_CATEGORIES.forEachIndexed { i, cat -> add(ToolbarEntry(cat.icon, i + 1)) }
 }
 
-// Quick reactions for reaction mode
-private val PANEL_QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+// Quick reactions shared by the full picker and the swipe-to-react panel
+internal val QUICK_REACTION_EMOJIS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
 
 // Pre-built static category portion (never changes — only Recents section varies)
 private val STATIC_CATEGORY_GRID: List<GridItem> = buildList {
@@ -519,7 +519,7 @@ private fun QuickReactionsRow(
             .padding(horizontal = 8.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
-        PANEL_QUICK_REACTIONS.forEach { emoji ->
+        QUICK_REACTION_EMOJIS.forEach { emoji ->
             SelectableEmojiBox(
                 icon = emoji,
                 isActive = currentReaction == emoji,

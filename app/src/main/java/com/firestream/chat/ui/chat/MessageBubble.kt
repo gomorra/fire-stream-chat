@@ -66,6 +66,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -94,8 +95,8 @@ import java.io.File
 import kotlin.math.roundToInt
 
 // Emoji size factors: emoji are always this multiple of the surrounding text size.
-private const val EMOJI_INLINE_SCALE = 1.3f  // inline emoji: 30% larger than the text
-private const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger than the text
+internal const val EMOJI_INLINE_SCALE = 1.3f  // inline emoji: 30% larger than the text
+internal const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger than the text
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
@@ -127,8 +128,11 @@ internal fun MessageBubble(
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     var showMenu by remember { mutableStateOf(false) }
-    val swipeAnimatable = remember { Animatable(0f) }
-    val swipeOffset = swipeAnimatable.value
+    // Direct state for drag tracking (no coroutine per pixel); Animatable only for spring-back
+    var swipeOffset by remember { mutableFloatStateOf(0f) }
+    val springAnimatable = remember { Animatable(0f) }
+    var isAnimatingBack by remember { mutableStateOf(false) }
+    val displayOffset = if (isAnimatingBack) springAnimatable.value else swipeOffset
     // 0 = undecided, 1 = right (reply), -1 = left (react)
     var swipeDirection by remember { mutableIntStateOf(0) }
     var hapticFired by remember { mutableStateOf(false) }
@@ -142,77 +146,62 @@ internal fun MessageBubble(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(swipeOffset.roundToInt(), 0) }
+            .offset { IntOffset(displayOffset.roundToInt(), 0) }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        val currentOffset = swipeAnimatable.value
-                        if (currentOffset > 80f) onReplyClick()
-                        if (currentOffset < -50f && message.deletedAt == null) onSwipeReact()
+                        if (swipeOffset > 80f) onReplyClick()
+                        if (swipeOffset < -50f && message.deletedAt == null) onSwipeReact()
                         swipeDirection = 0
                         hapticFired = false
+                        isAnimatingBack = true
                         scope.launch {
-                            swipeAnimatable.animateTo(
+                            springAnimatable.snapTo(swipeOffset)
+                            springAnimatable.animateTo(
                                 0f,
                                 spring(dampingRatio = 0.6f, stiffness = 400f)
                             )
+                            isAnimatingBack = false
+                            swipeOffset = 0f
                         }
                     },
                     onHorizontalDrag = { _, dragAmount ->
-                        // Lock direction on first meaningful drag
                         if (swipeDirection == 0) {
                             swipeDirection = if (dragAmount > 0) 1 else -1
                         }
                         val newOffset = when (swipeDirection) {
-                            1 -> (swipeAnimatable.value + dragAmount).coerceIn(0f, 120f)
+                            1 -> (swipeOffset + dragAmount).coerceIn(0f, 120f)
                             -1 -> if (message.deletedAt == null)
-                                (swipeAnimatable.value + dragAmount).coerceIn(-80f, 0f)
-                            else swipeAnimatable.value
-                            else -> swipeAnimatable.value
+                                (swipeOffset + dragAmount).coerceIn(-80f, 0f)
+                            else swipeOffset
+                            else -> swipeOffset
                         }
-                        // Haptic when crossing threshold
-                        val crossedThreshold = (swipeDirection == 1 && newOffset > 80f && swipeAnimatable.value <= 80f) ||
-                                (swipeDirection == -1 && newOffset < -50f && swipeAnimatable.value >= -50f)
+                        val crossedThreshold = (swipeDirection == 1 && newOffset > 80f && swipeOffset <= 80f) ||
+                                (swipeDirection == -1 && newOffset < -50f && swipeOffset >= -50f)
                         if (crossedThreshold && !hapticFired) {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             hapticFired = true
                         }
-                        scope.launch { swipeAnimatable.snapTo(newOffset) }
+                        swipeOffset = newOffset
                     }
                 )
             },
         horizontalAlignment = alignment
     ) {
-        // Reply icon (right swipe)
-        if (swipeOffset > 30f) {
-            val progress = ((swipeOffset - 30f) / 50f).coerceIn(0f, 1f)
-            val iconScale = 0.5f + 0.5f * progress
-            Box(modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)) {
-                Icon(
-                    imageVector = Icons.Default.Reply,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = progress),
-                    modifier = Modifier
-                        .size(24.dp)
-                        .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
-                )
-            }
-        }
-        // React icon (left swipe)
-        if (swipeOffset < -15f) {
-            val progress = ((-swipeOffset - 15f) / 35f).coerceIn(0f, 1f)
-            val iconScale = 0.5f + 0.5f * progress
-            Box(modifier = Modifier.align(Alignment.End).padding(end = 4.dp)) {
-                Icon(
-                    imageVector = Icons.Default.EmojiEmotions,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary.copy(alpha = progress),
-                    modifier = Modifier
-                        .size(24.dp)
-                        .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
-                )
-            }
-        }
+        SwipeActionIcon(
+            offset = displayOffset,
+            thresholdStart = 30f,
+            thresholdRange = 50f,
+            icon = Icons.Default.Reply,
+            modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)
+        )
+        SwipeActionIcon(
+            offset = -displayOffset,
+            thresholdStart = 15f,
+            thresholdRange = 35f,
+            icon = Icons.Default.EmojiEmotions,
+            modifier = Modifier.align(Alignment.End).padding(end = 4.dp)
+        )
 
         Box {
             Box(
@@ -652,6 +641,30 @@ internal fun MessageBubble(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SwipeActionIcon(
+    offset: Float,
+    thresholdStart: Float,
+    thresholdRange: Float,
+    icon: ImageVector,
+    modifier: Modifier = Modifier
+) {
+    if (offset > thresholdStart) {
+        val progress = ((offset - thresholdStart) / thresholdRange).coerceIn(0f, 1f)
+        val iconScale = 0.5f + 0.5f * progress
+        Box(modifier = modifier) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary.copy(alpha = progress),
+                modifier = Modifier
+                    .size(24.dp)
+                    .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
+            )
         }
     }
 }

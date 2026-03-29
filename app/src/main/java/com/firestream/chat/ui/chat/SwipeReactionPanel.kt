@@ -28,7 +28,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val DEFAULT_EMOJIS = listOf("👍", "❤️", "😂", "😢", "🙏")
+// Subset of QUICK_REACTION_EMOJIS — skip 😮 for the compact swipe panel
+private val DEFAULT_EMOJIS = QUICK_REACTION_EMOJIS.filter { it != "😮" }
 
 @Composable
 internal fun SwipeReactionPanel(
@@ -43,7 +44,8 @@ internal fun SwipeReactionPanel(
         DEFAULT_EMOJIS + recents
     }
 
-    val emojiSize = MaterialTheme.typography.bodyMedium.fontSize * 1.3f * 1.25f
+    // 125% of the inline emoji size used in chat bubbles
+    val emojiSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.25f
 
     Surface(
         modifier = modifier,
