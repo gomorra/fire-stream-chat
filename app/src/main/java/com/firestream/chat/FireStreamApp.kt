@@ -5,9 +5,9 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
 import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
+import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import dagger.hilt.android.HiltAndroidApp
@@ -37,11 +37,11 @@ class FireStreamApp : Application(), Configuration.Provider {
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
 
-        // Enqueue media backfill worker to download missing local media
-        WorkManager.getInstance(this).enqueueUniqueWork(
+        // Enqueue periodic media backfill worker to download missing local media
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "media_backfill",
-            ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<MediaBackfillWorker>()
+            ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<MediaBackfillWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
