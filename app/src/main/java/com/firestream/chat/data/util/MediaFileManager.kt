@@ -24,17 +24,16 @@ class MediaFileManager @Inject constructor(
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
 
-    // Pictures/FireStream/ — shared storage, visible in Google Photos, no permissions needed
     @Suppress("DEPRECATION")
     private val mediaRoot: File by lazy {
         File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES),
-            "FireStream"
+            MEDIA_FOLDER
         )
     }
 
     fun getLocalFile(chatId: String, messageId: String, extension: String): File {
-        return File(File(mediaRoot, chatId), "$messageId.${normalizeExtension(extension)}")
+        return File(mediaRoot, "$messageId.${normalizeExtension(extension)}")
     }
 
     fun fileExists(chatId: String, messageId: String, extension: String): Boolean {
@@ -57,7 +56,7 @@ class MediaFileManager @Inject constructor(
                     if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
                     val inputStream = response.body?.byteStream()
                         ?: throw Exception("Empty response body")
-                    writeViaMediaStore(chatId, localFile.name, mimeFromExtension(extension), inputStream)
+                    writeViaMediaStore(localFile.name, mimeFromExtension(extension), inputStream)
                 }
                 myDeferred.complete(localFile)
                 localFile
@@ -100,7 +99,7 @@ class MediaFileManager @Inject constructor(
             val inputStream = context.contentResolver.openInputStream(sourceUri)
                 ?: throw Exception("Failed to open source URI")
             inputStream.use { input ->
-                writeViaMediaStore(chatId, localFile.name, mimeFromExtension(extension), input)
+                writeViaMediaStore(localFile.name, mimeFromExtension(extension), input)
             }
             localFile
         }
@@ -110,12 +109,11 @@ class MediaFileManager @Inject constructor(
      * The file is owned by our app (readable via File API) and indexed by Google Photos.
      */
     private fun writeViaMediaStore(
-        chatId: String,
         displayName: String,
         mimeType: String,
         inputStream: java.io.InputStream
     ) {
-        val relativePath = "${Environment.DIRECTORY_PICTURES}/FireStream/$chatId"
+        val relativePath = "${Environment.DIRECTORY_PICTURES}/$MEDIA_FOLDER"
 
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
@@ -174,7 +172,7 @@ class MediaFileManager @Inject constructor(
                 val newFile = getLocalFile(chatId, oldFile.nameWithoutExtension, oldFile.extension)
                 if (!newFile.exists()) {
                     oldFile.inputStream().use { input ->
-                        writeViaMediaStore(chatId, newFile.name, mimeFromExtension(oldFile.extension), input)
+                        writeViaMediaStore(newFile.name, mimeFromExtension(oldFile.extension), input)
                     }
                 }
                 oldFile.delete()
@@ -200,6 +198,10 @@ class MediaFileManager @Inject constructor(
         "tiff" -> "tif"
         "mpeg" -> "mpg"
         else -> lower
+    }
+
+    companion object {
+        private const val MEDIA_FOLDER = "FireStream Images"
     }
 
     private fun mimeFromExtension(ext: String): String = when (normalizeExtension(ext)) {
