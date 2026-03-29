@@ -487,7 +487,9 @@ class MessageRepositoryImpl @Inject constructor(
                     timestamp = timestamp,
                     mediaUrl = message.mediaUrl,
                     isForwarded = true,
-                    plainContent = message.content
+                    plainContent = message.content,
+                    mediaWidth = message.mediaWidth,
+                    mediaHeight = message.mediaHeight
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -498,7 +500,9 @@ class MessageRepositoryImpl @Inject constructor(
                     replyToId = null,
                     timestamp = timestamp,
                     mediaUrl = message.mediaUrl,
-                    isForwarded = true
+                    isForwarded = true,
+                    mediaWidth = message.mediaWidth,
+                    mediaHeight = message.mediaHeight
                 )
             }
 
