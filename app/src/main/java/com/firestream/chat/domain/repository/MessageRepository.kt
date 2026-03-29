@@ -4,8 +4,10 @@ import android.net.Uri
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 
 interface MessageRepository {
+    val uploadProgress: StateFlow<Map<String, Float>>
     fun getMessages(chatId: String): Flow<List<Message>>
     suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null, mentions: List<String> = emptyList(), emojiSizes: Map<Int, Float> = emptyMap()): Result<Message>
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
