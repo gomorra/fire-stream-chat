@@ -37,7 +37,8 @@ data class SettingsUiState(
     val vibration: Boolean = true,
     // Storage
     val cacheSize: Long = 0L,
-    val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY
+    val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
+    val sendImagesFullQuality: Boolean = false
 )
 
 @HiltViewModel
@@ -119,6 +120,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(autoDownload = option)
             }
         }
+        viewModelScope.launch {
+            preferencesDataStore.sendImagesFullQualityFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(sendImagesFullQuality = enabled)
+            }
+        }
     }
 
     fun setTheme(theme: AppTheme) {
@@ -165,6 +171,10 @@ class SettingsViewModel @Inject constructor(
     // Storage
     fun setAutoDownload(option: AutoDownloadOption) {
         viewModelScope.launch { preferencesDataStore.setAutoDownload(option) }
+    }
+
+    fun setSendImagesFullQuality(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
     }
 
     fun clearCache() {

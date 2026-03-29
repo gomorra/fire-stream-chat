@@ -121,6 +121,9 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
 
+    // ExifInterface
+    implementation(libs.androidx.exifinterface)
+
     // DataStore
     implementation(libs.datastore.preferences)
 

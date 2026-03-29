@@ -44,6 +44,7 @@ class PreferencesDataStore @Inject constructor(
 
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
+    private val sendImagesFullQualityKey = booleanPreferencesKey("send_images_full_quality")
 
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
@@ -151,6 +152,14 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setAutoDownload(option: AutoDownloadOption) {
         context.dataStore.edit { prefs -> prefs[autoDownloadKey] = option.name }
+    }
+
+    val sendImagesFullQualityFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[sendImagesFullQualityKey] ?: false
+    }
+
+    suspend fun setSendImagesFullQuality(fullQuality: Boolean) {
+        context.dataStore.edit { prefs -> prefs[sendImagesFullQualityKey] = fullQuality }
     }
 
     // --- Emoji recents ---
