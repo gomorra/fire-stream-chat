@@ -54,6 +54,6 @@ class MediaBackfillWorker @AssistedInject constructor(
     private fun isOnWifi(): Boolean {
         val network = connectivityManager.activeNetwork ?: return false
         val caps = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
     }
 }

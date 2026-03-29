@@ -46,6 +46,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
+private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
+private const val VOICE_MESSAGE_CONTENT = "Voice message"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -225,7 +227,7 @@ class MessageRepositoryImpl @Inject constructor(
         emojiSizes: Map<Int, Float>
     ): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
@@ -315,7 +317,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
             val isImage = mimeType.startsWith("image/")
@@ -466,7 +468,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
@@ -526,7 +528,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendVoiceMessage(chatId: String, uri: Uri, recipientId: String, durationSeconds: Int): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
@@ -534,7 +536,7 @@ class MessageRepositoryImpl @Inject constructor(
                 id = tempId,
                 chatId = chatId,
                 senderId = senderId,
-                content = "Voice message",
+                content = VOICE_MESSAGE_CONTENT,
                 type = MessageType.VOICE,
                 status = MessageStatus.SENDING,
                 timestamp = timestamp,
@@ -547,7 +549,7 @@ class MessageRepositoryImpl @Inject constructor(
             val remoteId: String
             if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, "Voice message")
+                val encrypted = signalManager.encrypt(recipientId, VOICE_MESSAGE_CONTENT)
                 remoteId = messageSource.sendMessage(
                     chatId = chatId,
                     senderId = senderId,
@@ -563,7 +565,7 @@ class MessageRepositoryImpl @Inject constructor(
                 remoteId = messageSource.sendPlainMessage(
                     chatId = chatId,
                     senderId = senderId,
-                    content = "Voice message",
+                    content = VOICE_MESSAGE_CONTENT,
                     type = MessageType.VOICE,
                     replyToId = null,
                     timestamp = timestamp,
@@ -621,7 +623,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {
         return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val now = System.currentTimeMillis()
             val undeliveredIds = messageSource.getUndeliveredMessageIds(chatId, userId)
             for (id in undeliveredIds) {
@@ -637,7 +639,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit> {
         return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val now = System.currentTimeMillis()
             for (id in messageIds) {
                 try {
@@ -654,7 +656,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> {
         return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val now = System.currentTimeMillis()
             for (id in messageIds) {
                 try {
@@ -683,7 +685,7 @@ class MessageRepositoryImpl @Inject constructor(
         recipientIds: List<String>
     ): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val timestamp = System.currentTimeMillis()
 
             // 1. Save message to broadcast chat (sender's record)
@@ -762,7 +764,7 @@ class MessageRepositoryImpl @Inject constructor(
         listDiff: ListDiff?
     ): Result<Message> {
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val timestamp = System.currentTimeMillis()
             val content = "\uD83D\uDCCB List: $listTitle"
 
