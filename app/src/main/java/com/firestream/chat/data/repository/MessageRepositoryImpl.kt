@@ -12,6 +12,7 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
@@ -39,6 +40,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import com.firestream.chat.BuildConfig
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -52,6 +54,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val storageSource: FirebaseStorageSource,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val mediaFileManager: MediaFileManager,
+    private val imageCompressor: ImageCompressor,
     private val preferencesDataStore: PreferencesDataStore,
     private val connectivityManager: ConnectivityManager
 ) : MessageRepository {
@@ -312,8 +315,43 @@ class MessageRepositoryImpl @Inject constructor(
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
-            val messageType = if (mimeType.startsWith("image/")) MessageType.IMAGE else MessageType.DOCUMENT
+            val isImage = mimeType.startsWith("image/")
+            val messageType = if (isImage) MessageType.IMAGE else MessageType.DOCUMENT
             val filename = uri.lastPathSegment ?: "file"
+
+            // For images: compress/process and store locally
+            val localFile: File?
+            val mediaWidth: Int?
+            val mediaHeight: Int?
+            val uploadUri: Uri
+            val uploadMimeType: String
+            var tempCompressedFile: File? = null
+
+            try {
+                if (isImage) {
+                    val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
+                    val result = imageCompressor.processImage(uri, fullQuality)
+                    tempCompressedFile = result.file
+
+                    // Copy processed image to permanent local storage
+                    localFile = mediaFileManager.copyToLocal(
+                        chatId, tempId, Uri.fromFile(result.file), "jpg"
+                    )
+                    mediaWidth = result.width
+                    mediaHeight = result.height
+                    uploadUri = Uri.fromFile(localFile)
+                    uploadMimeType = result.mimeType
+                } else {
+                    localFile = null
+                    mediaWidth = null
+                    mediaHeight = null
+                    uploadUri = uri
+                    uploadMimeType = mimeType
+                }
+            } catch (e: Exception) {
+                tempCompressedFile?.let { if (it.exists()) it.delete() }
+                throw e
+            }
 
             val optimisticMessage = Message(
                 id = tempId,
@@ -323,16 +361,20 @@ class MessageRepositoryImpl @Inject constructor(
                 type = messageType,
                 status = MessageStatus.SENDING,
                 timestamp = timestamp,
-                localUri = uri.toString()
+                localUri = localFile?.absolutePath ?: uri.toString(),
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight
             )
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
             val downloadUrl = try {
-                storageSource.uploadMedia(chatId, tempId, uri, mimeType) { progress ->
+                storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
                     _uploadProgress.update { map -> map + (tempId to progress) }
                 }
             } finally {
                 _uploadProgress.update { it - tempId }
+                // Clean up temp compressed file from cacheDir/compressed/
+                tempCompressedFile?.let { if (it.exists()) it.delete() }
             }
 
             val remoteId: String
@@ -347,7 +389,9 @@ class MessageRepositoryImpl @Inject constructor(
                     type = messageType,
                     replyToId = null,
                     timestamp = timestamp,
-                    mediaUrl = downloadUrl
+                    mediaUrl = downloadUrl,
+                    mediaWidth = mediaWidth,
+                    mediaHeight = mediaHeight
                 )
             } else {
                 remoteId = messageSource.sendPlainMessage(
@@ -357,11 +401,20 @@ class MessageRepositoryImpl @Inject constructor(
                     type = messageType,
                     replyToId = null,
                     timestamp = timestamp,
-                    mediaUrl = downloadUrl
+                    mediaUrl = downloadUrl,
+                    mediaWidth = mediaWidth,
+                    mediaHeight = mediaHeight
                 )
             }
 
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
+            val sentMessage = optimisticMessage.copy(
+                id = remoteId,
+                status = MessageStatus.SENT,
+                mediaUrl = downloadUrl,
+                localUri = localFile?.absolutePath,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight
+            )
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
 
             Result.success(sentMessage)

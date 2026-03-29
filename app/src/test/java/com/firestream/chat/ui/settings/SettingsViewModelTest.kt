@@ -86,6 +86,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.DEFAULT)
         every { preferencesDataStore.vibrationFlow } returns flowOf(true)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
+        every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────

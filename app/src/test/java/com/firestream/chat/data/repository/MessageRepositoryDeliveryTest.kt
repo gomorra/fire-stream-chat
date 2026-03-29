@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.repository.ChatRepository
@@ -30,6 +31,7 @@ class MessageRepositoryDeliveryTest {
     private val storageSource = mockk<FirebaseStorageSource>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
+    private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
 
@@ -41,7 +43,7 @@ class MessageRepositoryDeliveryTest {
         coEvery { messageDao.updateMessageStatusBatch(any(), any()) } just Runs
         repository = MessageRepositoryImpl(
             messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            mediaFileManager, preferencesDataStore, connectivityManager
+            mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager
         )
     }
 
