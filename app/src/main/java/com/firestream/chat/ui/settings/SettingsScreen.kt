@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
@@ -283,6 +284,14 @@ fun SettingsScreen(
                 title = "Auto-download Media",
                 subtitle = autoDownloadLabel,
                 onClick = { showAutoDownloadPicker = true }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.Hd,
+                title = "Send Images in Full Quality",
+                subtitle = "Send images without compression (larger file size)",
+                checked = uiState.sendImagesFullQuality,
+                onCheckedChange = { viewModel.setSendImagesFullQuality(it) }
             )
 
             // Media backfill status

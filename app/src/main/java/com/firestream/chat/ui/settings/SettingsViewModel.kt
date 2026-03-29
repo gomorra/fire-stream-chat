@@ -41,6 +41,7 @@ data class SettingsUiState(
     // Storage
     val cacheSize: Long = 0L,
     val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
+    val sendImagesFullQuality: Boolean = false,
     // Media backfill
     val mediaBackfillProgress: Pair<Int, Int>? = null,
     val mediaBackfillRunning: Boolean = false
@@ -128,6 +129,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(autoDownload = option)
             }
         }
+        viewModelScope.launch {
+            preferencesDataStore.sendImagesFullQualityFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(sendImagesFullQuality = enabled)
+            }
+        }
     }
 
     fun setTheme(theme: AppTheme) {
@@ -174,6 +180,10 @@ class SettingsViewModel @Inject constructor(
     // Storage
     fun setAutoDownload(option: AutoDownloadOption) {
         viewModelScope.launch { preferencesDataStore.setAutoDownload(option) }
+    }
+
+    fun setSendImagesFullQuality(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
     }
 
     fun clearCache() {
