@@ -294,27 +294,44 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setSendImagesFullQuality(it) }
             )
 
-            // Media backfill status
-            if (uiState.mediaBackfillRunning) {
+            // Download All Media button / progress
+            if (!uiState.mediaBackfillRunning) {
+                ListItem(
+                    headlineContent = { Text("Download All Media") },
+                    supportingContent = {
+                        Text(
+                            "Download media from all chats",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    },
+                    leadingContent = {
+                        Icon(
+                            Icons.Default.Download,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    },
+                    modifier = Modifier.clickable { viewModel.startMediaBackfill() }
+                )
+            } else {
                 val progress = uiState.mediaBackfillProgress
-                val subtitle = if (progress != null) {
-                    "Downloading media... ${progress.first}/${progress.second}"
+                val progressText = if (progress != null) {
+                    "${progress.first}/${progress.second}"
                 } else {
-                    "Downloading media..."
+                    "Downloading..."
                 }
                 ListItem(
-                    headlineContent = { Text("Media Sync") },
+                    headlineContent = { Text("Downloading Media...") },
                     supportingContent = {
                         Column {
-                            Text(subtitle, style = MaterialTheme.typography.bodySmall)
+                            Text(progressText, style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(4.dp))
                             if (progress != null && progress.second > 0) {
-                                Spacer(Modifier.height(4.dp))
                                 LinearProgressIndicator(
                                     progress = { progress.first.toFloat() / progress.second },
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             } else {
-                                Spacer(Modifier.height(4.dp))
                                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                             }
                         }

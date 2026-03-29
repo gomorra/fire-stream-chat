@@ -4,8 +4,13 @@ import android.content.Context
 import androidx.lifecycle.Observer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.NotificationSound
@@ -46,6 +51,8 @@ data class SettingsUiState(
     val mediaBackfillProgress: Pair<Int, Int>? = null,
     val mediaBackfillRunning: Boolean = false
 )
+
+private const val WORK_MEDIA_BACKFILL = "media_backfill"
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -187,6 +194,18 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
     }
 
+    fun startMediaBackfill() {
+        val request = OneTimeWorkRequestBuilder<MediaBackfillWorker>()
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(appContext)
+            .enqueueUniqueWork(WORK_MEDIA_BACKFILL, ExistingWorkPolicy.KEEP, request)
+    }
+
     fun clearCache() {
         viewModelScope.launch {
             try {
@@ -207,7 +226,7 @@ class SettingsViewModel @Inject constructor(
     private fun observeBackfillProgress() {
         try {
             val liveData = WorkManager.getInstance(appContext)
-                .getWorkInfosForUniqueWorkLiveData("media_backfill")
+                .getWorkInfosForUniqueWorkLiveData(WORK_MEDIA_BACKFILL)
             val observer = Observer<List<WorkInfo>> { workInfos ->
                 val workInfo = workInfos?.firstOrNull()
                 if (workInfo == null) {
