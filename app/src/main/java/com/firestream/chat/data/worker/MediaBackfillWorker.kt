@@ -3,7 +3,6 @@ package com.firestream.chat.data.worker
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -28,28 +27,18 @@ class MediaBackfillWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         val isManual = inputData.getBoolean("manual", false)
-        Log.w(TAG, "Backfill started — manual=$isManual")
 
         if (!isManual) {
-            val option = preferencesDataStore.autoDownloadFlow.first()
-            when (option) {
-                AutoDownloadOption.NEVER -> {
-                    Log.w(TAG, "Backfill skipped: AutoDownload=NEVER")
-                    return Result.success()
-                }
-                AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) {
-                    Log.w(TAG, "Backfill skipped: WIFI_ONLY but not on WiFi")
-                    return Result.success()
-                }
+            when (preferencesDataStore.autoDownloadFlow.first()) {
+                AutoDownloadOption.NEVER -> return Result.success()
+                AutoDownloadOption.WIFI_ONLY -> if (!isOnWifi()) return Result.success()
                 AutoDownloadOption.ALWAYS -> Unit
             }
         }
 
-        // Migrate files from old storage locations to Pictures/FireStream/
+        // Migrate files from old storage locations to Pictures/FireStream Images/
         val migrated = mediaFileManager.migrateOldStorage()
         if (migrated > 0) {
-            Log.w(TAG, "Backfill: migrated $migrated files to Pictures/FireStream/")
-            // Update all localUri paths in Room to point to new location
             val allMedia = messageDao.getAllMediaMessages()
             for (msg in allMedia) {
                 val oldUri = msg.localUri ?: continue
@@ -62,40 +51,27 @@ class MediaBackfillWorker @AssistedInject constructor(
         }
 
         // Clear stale localUri values where file no longer exists
-        val allMedia = messageDao.getAllMediaMessages()
-        for (msg in allMedia) {
+        for (msg in messageDao.getAllMediaMessages()) {
             val uri = msg.localUri ?: continue
             if (!java.io.File(uri).exists()) {
                 messageDao.updateLocalUri(msg.id, null)
-                Log.w(TAG, "Backfill: cleared stale localUri for ${msg.id}")
             }
         }
 
         val messages = messageDao.getMessagesWithoutLocalMedia()
         val total = messages.size
-        Log.w(TAG, "Backfill: found $total messages without local media (need download)")
         if (total == 0) return Result.success()
 
         var done = 0
         for (msg in messages) {
             try {
-                Log.w(TAG, "Backfill: downloading ${msg.id} url=${msg.mediaUrl?.take(80)}")
                 val file = mediaFileManager.downloadAndSave(msg.chatId, msg.id, msg.mediaUrl!!)
                 messageDao.updateLocalUri(msg.id, file.absolutePath)
-                Log.w(TAG, "Backfill: saved ${msg.id} → ${file.name}")
-            } catch (e: Exception) {
-                Log.e(TAG, "Backfill: failed ${msg.id}: ${e.message}", e)
-            } finally {
-                done++
-                setProgress(workDataOf("done" to done, "total" to total))
-            }
+            } catch (_: Exception) { }
+            done++
+            setProgress(workDataOf("done" to done, "total" to total))
         }
-        Log.w(TAG, "Backfill complete: $done/$total")
         return Result.success()
-    }
-
-    companion object {
-        private const val TAG = "MediaBackfillWorker"
     }
 
     private fun isOnWifi(): Boolean {
