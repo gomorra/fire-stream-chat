@@ -44,7 +44,9 @@ data class RawFirestoreMessage(
     val emojiSizes: Map<Int, Float> = emptyMap(),
     val listId: String? = null,
     val listDiff: Map<String, Any?>? = null,
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    val mediaWidth: Int? = null,
+    val mediaHeight: Int? = null
 )
 
 private const val POLL_CONTENT = "📊 Poll"
@@ -85,7 +87,9 @@ class FirestoreMessageSource @Inject constructor(
         duration: Int? = null,
         mentions: List<String> = emptyList(),
         plainContent: String = "",
-        emojiSizes: Map<Int, Float> = emptyMap()
+        emojiSizes: Map<Int, Float> = emptyMap(),
+        mediaWidth: Int? = null,
+        mediaHeight: Int? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -102,6 +106,8 @@ class FirestoreMessageSource @Inject constructor(
             "mentions" to mentions,
             "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
+        if (mediaWidth != null) data["mediaWidth"] = mediaWidth
+        if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -138,7 +144,9 @@ class FirestoreMessageSource @Inject constructor(
         isForwarded: Boolean = false,
         duration: Int? = null,
         mentions: List<String> = emptyList(),
-        emojiSizes: Map<Int, Float> = emptyMap()
+        emojiSizes: Map<Int, Float> = emptyMap(),
+        mediaWidth: Int? = null,
+        mediaHeight: Int? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -154,6 +162,8 @@ class FirestoreMessageSource @Inject constructor(
             "mentions" to mentions,
             "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
+        if (mediaWidth != null) data["mediaWidth"] = mediaWidth
+        if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -460,7 +470,9 @@ class FirestoreMessageSource @Inject constructor(
             emojiSizes = parseIntFloatMap(data["emojiSizes"]),
             listId = data["listId"] as? String,
             listDiff = data["listDiff"] as? Map<String, Any?>,
-            isPinned = data["isPinned"] as? Boolean ?: false
+            isPinned = data["isPinned"] as? Boolean ?: false,
+            mediaWidth = (data["mediaWidth"] as? Long)?.toInt(),
+            mediaHeight = (data["mediaHeight"] as? Long)?.toInt()
         )
     }
 

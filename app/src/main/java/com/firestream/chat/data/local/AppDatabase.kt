@@ -37,7 +37,7 @@ import com.firestream.chat.data.local.entity.UserEntity
         SignalTrustedIdentityEntity::class,
         ListEntity::class
     ],
-    version = 14,
+    version = 15,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

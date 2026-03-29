@@ -100,7 +100,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 emojiSizes = raw.emojiSizes,
                                 listId = raw.listId,
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                                isPinned = raw.isPinned
+                                isPinned = raw.isPinned,
+                                mediaWidth = raw.mediaWidth,
+                                mediaHeight = raw.mediaHeight
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -163,7 +165,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 emojiSizes = raw.emojiSizes,
                                 listId = raw.listId,
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                                isPinned = raw.isPinned
+                                isPinned = raw.isPinned,
+                                mediaWidth = raw.mediaWidth,
+                                mediaHeight = raw.mediaHeight
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                         }
@@ -290,7 +294,8 @@ class MessageRepositoryImpl @Inject constructor(
                 content = filename,
                 type = messageType,
                 status = MessageStatus.SENDING,
-                timestamp = timestamp
+                timestamp = timestamp,
+                localUri = uri.toString()
             )
             messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
