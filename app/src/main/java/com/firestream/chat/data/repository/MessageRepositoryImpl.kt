@@ -45,6 +45,8 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
+private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
+
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
@@ -197,7 +199,7 @@ class MessageRepositoryImpl @Inject constructor(
 
                             // Auto-download media for incoming messages
                             if (message.mediaUrl != null && message.localUri == null &&
-                                message.type in listOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
+                                message.type in AUTO_DOWNLOAD_TYPES
                             ) {
                                 tryAutoDownload(message)
                             }
@@ -327,30 +329,25 @@ class MessageRepositoryImpl @Inject constructor(
             val uploadMimeType: String
             var tempCompressedFile: File? = null
 
-            try {
-                if (isImage) {
-                    val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
-                    val result = imageCompressor.processImage(uri, fullQuality)
-                    tempCompressedFile = result.file
+            if (isImage) {
+                val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
+                val result = imageCompressor.processImage(uri, fullQuality)
+                tempCompressedFile = result.file
 
-                    // Copy processed image to permanent local storage
-                    localFile = mediaFileManager.copyToLocal(
-                        chatId, tempId, Uri.fromFile(result.file), "jpg"
-                    )
-                    mediaWidth = result.width
-                    mediaHeight = result.height
-                    uploadUri = Uri.fromFile(localFile)
-                    uploadMimeType = result.mimeType
-                } else {
-                    localFile = null
-                    mediaWidth = null
-                    mediaHeight = null
-                    uploadUri = uri
-                    uploadMimeType = mimeType
-                }
-            } catch (e: Exception) {
-                tempCompressedFile?.let { if (it.exists()) it.delete() }
-                throw e
+                // Copy processed image to permanent local storage
+                localFile = mediaFileManager.copyToLocal(
+                    chatId, tempId, Uri.fromFile(result.file), "jpg"
+                )
+                mediaWidth = result.width
+                mediaHeight = result.height
+                uploadUri = Uri.fromFile(localFile)
+                uploadMimeType = result.mimeType
+            } else {
+                localFile = null
+                mediaWidth = null
+                mediaHeight = null
+                uploadUri = uri
+                uploadMimeType = mimeType
             }
 
             val optimisticMessage = Message(

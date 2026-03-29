@@ -59,6 +59,7 @@ class SettingsViewModel @Inject constructor(
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var backfillObserver: Observer<List<WorkInfo>>? = null
+    private var backfillLiveData: androidx.lifecycle.LiveData<List<WorkInfo>>? = null
 
     init {
         loadCurrentUser()
@@ -234,6 +235,7 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             backfillObserver = observer
+            backfillLiveData = liveData
             liveData.observeForever(observer)
         } catch (_: IllegalStateException) {
             // WorkManager not initialized (e.g., in unit tests)
@@ -244,9 +246,7 @@ class SettingsViewModel @Inject constructor(
         super.onCleared()
         backfillObserver?.let { observer ->
             try {
-                WorkManager.getInstance(appContext)
-                    .getWorkInfosForUniqueWorkLiveData("media_backfill")
-                    .removeObserver(observer)
+                backfillLiveData?.removeObserver(observer)
             } catch (_: IllegalStateException) { }
         }
     }

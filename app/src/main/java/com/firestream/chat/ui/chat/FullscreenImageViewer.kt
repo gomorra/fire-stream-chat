@@ -43,8 +43,11 @@ internal fun FullscreenImageViewer(
     onDismiss: () -> Unit,
     onSaveToGallery: (() -> Unit)? = null
 ) {
-    // Prefer local file for faster loading, fall back to remote URL
-    val imageModel: Any = if (localUri != null && File(localUri).exists()) File(localUri) else imageUrl
+    // Prefer local file for faster loading, fall back to remote URL.
+    // File.exists() is I/O; memoize per localUri so it only runs once per unique path.
+    val imageModel: Any = remember(localUri) {
+        if (localUri != null && File(localUri).exists()) File(localUri) else imageUrl
+    }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }

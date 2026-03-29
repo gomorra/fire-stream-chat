@@ -30,9 +30,10 @@ class MediaBackfillWorker @AssistedInject constructor(
                 messageDao.updateLocalUri(msg.id, file.absolutePath)
             } catch (_: Exception) {
                 // Skip failed downloads, continue with next
+            } finally {
+                done++
+                setProgress(workDataOf("done" to done, "total" to total))
             }
-            done++
-            setProgress(workDataOf("done" to done, "total" to total))
         }
         return Result.success()
     }

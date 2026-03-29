@@ -48,9 +48,8 @@ class ImageCompressor @Inject constructor(
         val sourceHeight = if (isRotated) originalWidth else originalHeight
 
         if (fullQuality) {
-            // Full quality: decode, apply rotation if needed, save as-is quality
-            val sampleSize = calculateInSampleSize(originalWidth, originalHeight, originalWidth, originalHeight)
-            val bitmap = decodeBitmap(uri, sampleSize)
+            // Full quality: decode full bitmap, apply rotation if needed, re-encode at 100
+            val bitmap = decodeBitmap(uri, sampleSize = 1)
             val rotated = applyRotation(bitmap, exifRotation)
             val outputFile = createTempFile()
             outputFile.outputStream().use { out ->

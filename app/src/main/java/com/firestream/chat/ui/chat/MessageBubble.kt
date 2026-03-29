@@ -233,9 +233,13 @@ internal fun MessageBubble(
                                 4f / 3f // fallback for old messages without dimensions
                             }
 
-                            // Determine image source: prefer local file, fall back to remote URL
+                            // Determine image source: prefer local file, fall back to remote URL.
+                            // File.exists() is I/O; memoize per localUri so it only runs once per unique path.
+                            val localFileExists = remember(message.localUri) {
+                                message.localUri != null && File(message.localUri).exists()
+                            }
                             val imageModel: Any? = when {
-                                message.localUri != null && File(message.localUri).exists() -> File(message.localUri)
+                                localFileExists -> File(message.localUri!!)
                                 message.mediaUrl != null -> message.mediaUrl
                                 else -> null
                             }

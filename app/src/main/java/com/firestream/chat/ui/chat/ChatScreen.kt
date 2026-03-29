@@ -268,7 +268,8 @@ fun ChatScreen(
         snapshotFlow { listState.layoutInfo }
             .collect { layoutInfo ->
                 val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return@collect
-                if (lastVisible.index == uiState.messages.lastIndex) {
+                val totalItems = layoutInfo.totalItemsCount
+                if (totalItems > 0 && lastVisible.index == totalItems - 1) {
                     val itemBottom = lastVisible.offset + lastVisible.size
                     val viewportEnd = layoutInfo.viewportEndOffset
                     if (itemBottom > viewportEnd + 10) {
