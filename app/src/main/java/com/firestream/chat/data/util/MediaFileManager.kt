@@ -6,11 +6,13 @@ import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +21,8 @@ class MediaFileManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient
 ) {
+
+    private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
 
     private val mediaRoot: File by lazy {
         // Android/media/com.firestream.chat/ — app-specific external storage,
@@ -42,16 +46,28 @@ class MediaFileManager @Inject constructor(
             val localFile = getLocalFile(chatId, messageId, extension)
             if (localFile.exists()) return@withContext localFile
 
-            val request = Request.Builder().url(mediaUrl).build()
-            httpClient.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
-                response.body?.byteStream()?.use { input ->
-                    localFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                } ?: throw Exception("Empty response body")
+            val myDeferred = CompletableDeferred<File>()
+            val existing = inFlightDownloads.putIfAbsent(messageId, myDeferred)
+            if (existing != null) return@withContext existing.await()
+
+            try {
+                val request = Request.Builder().url(mediaUrl).build()
+                httpClient.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
+                    response.body?.byteStream()?.use { input ->
+                        localFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: throw Exception("Empty response body")
+                }
+                myDeferred.complete(localFile)
+                localFile
+            } catch (e: Exception) {
+                myDeferred.completeExceptionally(e)
+                throw e
+            } finally {
+                inFlightDownloads.remove(messageId, myDeferred)
             }
-            localFile
         }
 
     suspend fun saveToGallery(localFile: File, mimeType: String): Uri =
