@@ -78,7 +78,7 @@ interface MessageDao {
 
     // Local media
     @Query("UPDATE messages SET localUri = :localUri WHERE id = :messageId")
-    suspend fun updateLocalUri(messageId: String, localUri: String)
+    suspend fun updateLocalUri(messageId: String, localUri: String?)
 
     @Query("SELECT * FROM messages WHERE type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>

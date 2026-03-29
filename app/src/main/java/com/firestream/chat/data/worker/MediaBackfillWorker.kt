@@ -61,6 +61,16 @@ class MediaBackfillWorker @AssistedInject constructor(
             }
         }
 
+        // Clear stale localUri values where file no longer exists
+        val allMedia = messageDao.getAllMediaMessages()
+        for (msg in allMedia) {
+            val uri = msg.localUri ?: continue
+            if (!java.io.File(uri).exists()) {
+                messageDao.updateLocalUri(msg.id, null)
+                Log.w(TAG, "Backfill: cleared stale localUri for ${msg.id}")
+            }
+        }
+
         val messages = messageDao.getMessagesWithoutLocalMedia()
         val total = messages.size
         Log.w(TAG, "Backfill: found $total messages without local media (need download)")
