@@ -40,7 +40,7 @@ class FireStreamApp : Application(), Configuration.Provider {
         // Enqueue periodic media backfill worker to download missing local media
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             "media_backfill",
-            ExistingPeriodicWorkPolicy.KEEP,
+            ExistingPeriodicWorkPolicy.REPLACE,
             PeriodicWorkRequestBuilder<MediaBackfillWorker>(15, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()

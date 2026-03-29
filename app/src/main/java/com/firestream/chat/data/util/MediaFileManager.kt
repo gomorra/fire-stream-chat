@@ -27,7 +27,7 @@ class MediaFileManager @Inject constructor(
     private val mediaRoot: File by lazy {
         // Android/media/com.firestream.chat/ — app-specific external storage,
         // visible in file managers, no permissions needed on API 29+
-        (context.externalMediaDirs.firstOrNull() ?: File(context.filesDir, "media")).also { it.mkdirs() }
+        (context.externalMediaDirs?.firstOrNull() ?: File(context.filesDir, "media")).also { it.mkdirs() }
     }
 
     fun getLocalFile(chatId: String, messageId: String, extension: String): File {
