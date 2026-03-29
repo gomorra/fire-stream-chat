@@ -29,7 +29,7 @@ class MediaFileManager @Inject constructor(
     fun getLocalFile(chatId: String, messageId: String, extension: String): File {
         val dir = File(mediaRoot, chatId)
         dir.mkdirs()
-        return File(dir, "$messageId.$extension")
+        return File(dir, "$messageId.${normalizeExtension(extension)}")
     }
 
     fun fileExists(chatId: String, messageId: String, extension: String): Boolean {
@@ -102,6 +102,13 @@ class MediaFileManager @Inject constructor(
         // Strip query params, then get extension
         val path = url.substringBefore("?").substringBefore("#")
         val ext = path.substringAfterLast(".", "")
-        return if (ext.length in 1..5) ext else "jpg"
+        return normalizeExtension(if (ext.length in 1..5) ext else "jpg")
+    }
+
+    private fun normalizeExtension(ext: String): String = when (val lower = ext.lowercase()) {
+        "jpeg" -> "jpg"
+        "tiff" -> "tif"
+        "mpeg" -> "mpg"
+        else -> lower
     }
 }
