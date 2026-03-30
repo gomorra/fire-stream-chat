@@ -80,34 +80,52 @@ internal fun ListContextSheet(
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
-            // Action chips
-            Row(
+            // Action chips — 2x2 grid
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                AssistChip(
-                    onClick = { onTogglePin(); onDismiss() },
-                    label = { Text(if (isPinned) "Unpin" else "Pin") },
-                    leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) }
-                )
-                if (isOwner) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     AssistChip(
-                        onClick = onShare,
-                        label = { Text("Share") },
-                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) }
+                        onClick = { onTogglePin(); onDismiss() },
+                        label = { Text(if (isPinned) "Unpin" else "Pin") },
+                        leadingIcon = { Icon(Icons.Default.PushPin, contentDescription = null) },
+                        modifier = Modifier.weight(1f)
                     )
+                    if (isOwner) {
+                        AssistChip(
+                            onClick = onShare,
+                            label = { Text("Share") },
+                            leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
-                AssistChip(
-                    onClick = { showRenameDialog = true },
-                    label = { Text("Rename") },
-                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) }
-                )
-                if (isOwner) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     AssistChip(
-                        onClick = onDelete,
-                        label = { Text("Delete") },
-                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) }
+                        onClick = { showRenameDialog = true },
+                        label = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        modifier = Modifier.weight(1f)
                     )
+                    if (isOwner) {
+                        AssistChip(
+                            onClick = onDelete,
+                            label = { Text("Delete") },
+                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
                 }
             }
 
