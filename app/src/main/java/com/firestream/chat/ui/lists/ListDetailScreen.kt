@@ -443,7 +443,7 @@ fun ListDetailScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.Bottom
                     ) {
                         OutlinedTextField(
                             value = newItemText,
@@ -453,7 +453,8 @@ fun ListDetailScreen(
                                 .weight(1f)
                                 .focusRequester(addItemFocusRequester)
                                 .onFocusChanged { if (it.isFocused) editingItemId = null },
-                            singleLine = true
+                            singleLine = false,
+                            maxLines = 4
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         IconButton(
