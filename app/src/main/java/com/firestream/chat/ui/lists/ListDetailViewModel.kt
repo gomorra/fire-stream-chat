@@ -162,20 +162,34 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun toggleItem(itemId: String) {
-        val item = _uiState.value.listData?.items?.find { it.id == itemId }
+        val currentList = _uiState.value.listData ?: return
+        val item = currentList.items.find { it.id == itemId } ?: return
+
+        // Optimistic update: toggle locally before Firestore round-trip
+        val updatedItems = currentList.items.map {
+            if (it.id == itemId) it.copy(isChecked = !it.isChecked) else it
+        }
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(items = updatedItems)
+        )
+
         viewModelScope.launch {
             listRepository.toggleItemChecked(listId, itemId)
                 .onSuccess {
-                    if (item != null) {
-                        val diff = if (item.isChecked) {
-                            ListDiff(unchecked = listOf(item.text))
-                        } else {
-                            ListDiff(checked = listOf(item.text))
-                        }
-                        accumulateAndDebounce(diff)
+                    val diff = if (item.isChecked) {
+                        ListDiff(unchecked = listOf(item.text))
+                    } else {
+                        ListDiff(checked = listOf(item.text))
                     }
+                    accumulateAndDebounce(diff)
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    // Revert on failure
+                    _uiState.value = _uiState.value.copy(
+                        listData = currentList,
+                        error = e.message
+                    )
+                }
         }
     }
 
