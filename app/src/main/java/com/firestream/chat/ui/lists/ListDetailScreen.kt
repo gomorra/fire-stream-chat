@@ -559,7 +559,7 @@ private fun ListItemRow(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.Top
     ) {
         // Checkbox/bullet — always toggles
         when (listType) {
@@ -610,13 +610,11 @@ private fun ListItemRow(
                             if (state.isFocused) hadFocus = true
                             else if (hadFocus && isEditing) submitEdit()
                         },
-                    singleLine = true,
+                    singleLine = false,
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = LocalContentColor.current
                     ),
-                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { submitEdit() })
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
                 )
             } else {
                 Text(
