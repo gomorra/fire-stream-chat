@@ -62,13 +62,6 @@ Plans must include a recommendation table per step:
 
 ## Plan Execution Workflow
 
-### Automated execution via skills
-
-Use `/build [plan-name]` to execute an entire plan end-to-end, or `/step [plan-name] [step-number]` for a single step. These skills automatically:
-- Switch models per step (via Agent tool's `model` parameter)
-- Run `/simplify-review` (always Sonnet) after each step
-- Run tests + build + commit
-
 ### Execution order
 
 Plans must include an **Order** line that defines the build sequence:
@@ -85,21 +78,14 @@ Plans must include an **Order** line that defines the build sequence:
 
 This must appear before any code changes are made for that step.
 
-### Post-step workflow
+### Post-step code review
 
-**After each sub-feature, ALWAYS run these steps in order without waiting to be asked:**
-1. `/simplify-review` — review changed code for quality (always Sonnet/Medium)
-2. `./gradlew test` — unit tests must pass
-3. `./gradlew assembleDebug` — build must be clean
-4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
-5. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+After each significant or larger change/feature, spawn a new Agent (Sonnet, Medium effort) to run `/simplify` on the diff **before** committing. Skip for trivial single-line or few-line fixes.
 
 ### Token efficiency
 
 - When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
 - When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
-
-**Optional:** After completing an entire phase, run `/simplify-review` on the full phase diff as a final quality pass.
 
 ## Architecture
 
