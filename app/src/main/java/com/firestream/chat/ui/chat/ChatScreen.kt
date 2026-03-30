@@ -247,6 +247,13 @@ fun ChatScreen(
         }
     }
 
+    // Always scroll to bottom when the user sends a message
+    LaunchedEffect(uiState.scrollToBottomTrigger) {
+        if (uiState.scrollToBottomTrigger > 0 && uiState.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.size - 1)
+        }
+    }
+
     // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
     LaunchedEffect(reactionScrollTarget) {
         val target = reactionScrollTarget ?: return@LaunchedEffect

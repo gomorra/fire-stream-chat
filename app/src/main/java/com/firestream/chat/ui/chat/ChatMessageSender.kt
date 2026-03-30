@@ -48,13 +48,13 @@ internal class ChatMessageSender(
             if (state.isBroadcast) {
                 messageRepository.sendBroadcastMessage(chatId, content, state.broadcastRecipientIds)
                     .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                    .onSuccess { _uiState.update { it.copy(isSending = false, scrollToBottomTrigger = it.scrollToBottomTrigger + 1) } }
             } else {
                 val replyToId = state.replyToMessage?.id
                 val mentions = if (state.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
                 messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
                     .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                    .onSuccess { _uiState.update { it.copy(isSending = false, scrollToBottomTrigger = it.scrollToBottomTrigger + 1) } }
             }
         }
     }
