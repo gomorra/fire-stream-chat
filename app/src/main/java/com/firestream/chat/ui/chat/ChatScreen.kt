@@ -83,6 +83,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -633,7 +634,8 @@ fun ChatScreen(
                                         onUnsharedListClick = {
                                             scope.launch {
                                                 snackbarHostState.showSnackbar(
-                                                    "This list is no longer shared with this chat"
+                                                    "This list is no longer shared with this chat",
+                                                    duration = SnackbarDuration.Short
                                                 )
                                             }
                                         }
