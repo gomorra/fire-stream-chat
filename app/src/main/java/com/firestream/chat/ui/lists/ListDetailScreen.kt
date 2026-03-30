@@ -286,6 +286,8 @@ fun ListDetailScreen(
                 var draggedItemId by remember { mutableStateOf<String?>(null) }
                 val displayItems = localItems.filter { it.id != pendingRemoval?.id }
 
+                var awaitingReorderSync by remember { mutableStateOf(false) }
+
                 val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
                     if (draggedItemId == null) draggedItemId = localItems.getOrNull(from.index)?.id
                     localItems = localItems.toMutableList().apply {
@@ -293,23 +295,28 @@ fun ListDetailScreen(
                     }
                 }
 
-                LaunchedEffect(reorderableLazyListState.isAnyItemDragging, uiState.displayItems) {
-                    if (!reorderableLazyListState.isAnyItemDragging) {
-                        val id = draggedItemId
-                        if (id != null) {
-                            // Drag ended: commit order if changed
-                            draggedItemId = null
-                            val originalFrom = uiState.displayItems.indexOfFirst { it.id == id }
-                            val finalTo = localItems.indexOfFirst { it.id == id }
-                            localItems = uiState.displayItems
-                            if (originalFrom >= 0 && finalTo >= 0 && originalFrom != finalTo) {
-                                viewModel.reorderItems(originalFrom, finalTo)
-                            }
-                        } else if (localItems != uiState.displayItems) {
-                            // Server update: sync local state
-                            localItems = uiState.displayItems
+                // Drag ended: commit reordered list
+                LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
+                    if (!reorderableLazyListState.isAnyItemDragging && draggedItemId != null) {
+                        val display = uiState.displayItems
+                        val changed = localItems.size != display.size ||
+                            localItems.indices.any { localItems[it].id != display[it].id }
+                        draggedItemId = null
+                        if (changed) {
+                            awaitingReorderSync = true
+                            viewModel.reorderItems(localItems)
                         }
                     }
+                }
+
+                // Server update: sync local state (skip while dragging or reorder in flight)
+                LaunchedEffect(uiState.displayItems) {
+                    if (draggedItemId != null) return@LaunchedEffect
+                    if (awaitingReorderSync) {
+                        awaitingReorderSync = false
+                        return@LaunchedEffect
+                    }
+                    localItems = uiState.displayItems
                 }
 
                 LaunchedEffect(listData.items.size) {

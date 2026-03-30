@@ -187,14 +187,9 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
-    fun reorderItems(fromIndex: Int, toIndex: Int) {
-        val items = _uiState.value.listData?.items ?: return
-        if (fromIndex == toIndex || fromIndex !in items.indices || toIndex !in items.indices) return
-        val reordered = items.toMutableList().apply {
-            add(toIndex, removeAt(fromIndex))
-        }
+    fun reorderItems(reorderedItems: List<ListItem>) {
         viewModelScope.launch {
-            listRepository.reorderItems(listId, reordered)
+            listRepository.reorderItems(listId, reorderedItems)
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
