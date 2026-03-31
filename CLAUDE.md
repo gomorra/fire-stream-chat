@@ -78,7 +78,7 @@ Plans must include an **Order** line that defines the build sequence:
 
 This must appear before any code changes are made for that step.
 
-### Post-step workflow
+### Post-step code review
 
 7. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 

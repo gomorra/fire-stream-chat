@@ -65,7 +65,8 @@ data class ChatUiState(
     val isRecipientOnline: Boolean = false,
     val chatAvatarUrl: String? = null,
     val listDataCache: Map<String, ListData?> = emptyMap(),
-    val pinnedMessages: List<Message> = emptyList()
+    val pinnedMessages: List<Message> = emptyList(),
+    val scrollToBottomTrigger: Int = 0
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl

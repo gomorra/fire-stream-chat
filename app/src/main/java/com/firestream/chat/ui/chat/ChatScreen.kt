@@ -83,6 +83,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -287,6 +288,13 @@ fun ChatScreen(
     LaunchedEffect(Unit) {
         snapshotFlow { listState.isScrollInProgress }
             .collect { scrolling -> if (scrolling) swipeReactMessage = null }
+    }
+
+    // Always scroll to bottom when the user sends a message
+    LaunchedEffect(uiState.scrollToBottomTrigger) {
+        if (uiState.scrollToBottomTrigger > 0 && uiState.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.size - 1)
+        }
     }
 
     // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
@@ -676,7 +684,8 @@ fun ChatScreen(
                                         onUnsharedListClick = {
                                             scope.launch {
                                                 snackbarHostState.showSnackbar(
-                                                    "This list is no longer shared with this chat"
+                                                    "This list is no longer shared with this chat",
+                                                    duration = SnackbarDuration.Short
                                                 )
                                             }
                                         }

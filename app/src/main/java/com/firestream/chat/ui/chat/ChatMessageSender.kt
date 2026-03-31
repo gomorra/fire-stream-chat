@@ -44,7 +44,7 @@ internal class ChatMessageSender(
         val state = _uiState.value
         scope.launch {
             chatRepository.setTyping(chatId, false)
-            _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList()) }
+            _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList(), scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
             if (state.isBroadcast) {
                 messageRepository.sendBroadcastMessage(chatId, content, state.broadcastRecipientIds)
                     .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }

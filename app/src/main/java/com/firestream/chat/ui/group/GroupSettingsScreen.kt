@@ -59,6 +59,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -136,7 +137,7 @@ fun GroupSettingsScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            scope.launch { snackbarHostState.showSnackbar(it) }
+            scope.launch { snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short) }
             viewModel.clearError()
         }
     }
@@ -327,7 +328,7 @@ fun GroupSettingsScreen(
                                     IconButton(onClick = {
                                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                         clipboard.setPrimaryClip(ClipData.newPlainText("Invite Link", inviteUrl))
-                                        scope.launch { snackbarHostState.showSnackbar("Link copied") }
+                                        scope.launch { snackbarHostState.showSnackbar("Link copied", duration = SnackbarDuration.Short) }
                                     }) {
                                         Icon(Icons.Default.ContentCopy, "Copy link")
                                     }
