@@ -45,6 +45,22 @@ class ListRepositoryImpl @Inject constructor(
 ) : ListRepository {
 
     private val historyScope = CoroutineScope(SupervisorJob())
+    private var listSyncJob: kotlinx.coroutines.Job? = null
+
+    /** Keeps Room in sync with Firestore regardless of which screen is active. */
+    private fun ensureListSyncRunning() {
+        val userId = authSource.currentUserId ?: return
+        if (listSyncJob?.isActive == true) return
+        listSyncJob = historyScope.launch {
+            try {
+                listSource.observeMyLists(userId).collectLatest { lists ->
+                    listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
+                    val activeIds = lists.map { it.id }
+                    if (activeIds.isNotEmpty()) listDao.deleteExcept(activeIds) else listDao.deleteExcept(emptyList())
+                }
+            } catch (_: Exception) { }
+        }
+    }
 
     private fun recordHistory(listId: String, action: HistoryAction, itemId: String? = null, itemText: String? = null) {
         val userId = authSource.currentUserId ?: return
@@ -90,20 +106,9 @@ class ListRepositoryImpl @Inject constructor(
             .collect { send(it) }
     }
 
-    override fun observeMyLists(): Flow<List<ListData>> = channelFlow {
-        val userId = authSource.currentUserId ?: return@channelFlow
-        launch {
-            try {
-                listSource.observeMyLists(userId).collectLatest { lists ->
-                    listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
-                    val activeIds = lists.map { it.id }
-                    if (activeIds.isNotEmpty()) listDao.deleteExcept(activeIds) else listDao.deleteExcept(emptyList())
-                }
-            } catch (_: Exception) { }
-        }
-        listDao.getAll()
-            .map { entities -> entities.map { it.toDomain() } }
-            .collect { send(it) }
+    override fun observeMyLists(): Flow<List<ListData>> {
+        ensureListSyncRunning()
+        return listDao.getAll().map { entities -> entities.map { it.toDomain() } }
     }
 
     override suspend fun createList(title: String, type: ListType, chatId: String?, genericStyle: GenericListStyle): Result<ListData> {

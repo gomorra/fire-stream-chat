@@ -156,9 +156,8 @@ exports.sendPushNotification = onDocumentCreated(
                             messageId: event.params.messageId,
                             chatType: chatType,
                             chatName: chatData.name || "",
-                            mentions: mentionsStr
-                            // Note: We don't send the message content here in the push payload
-                            // because it is (or will be) end-to-end encrypted in the database.
+                            mentions: mentionsStr,
+                            messageType: messageData.type || "TEXT"
                         },
                         android: {
                             priority: "high"

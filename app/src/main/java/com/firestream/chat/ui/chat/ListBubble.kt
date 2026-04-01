@@ -311,7 +311,7 @@ private fun DiffContent(
         Text(
             text = when {
                 diff.shared -> "📋 List shared"
-                diff.unshared -> "List unshared"
+                diff.unshared -> "📋 List unshared"
                 diff.deleted -> "List deleted"
                 else -> "List updated"
             },

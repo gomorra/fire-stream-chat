@@ -14,6 +14,7 @@ import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.google.firebase.messaging.FirebaseMessagingService
@@ -63,6 +64,7 @@ class FCMService : FirebaseMessagingService() {
         val chatType = data["chatType"] ?: "INDIVIDUAL"
         val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
         val mentions = data["mentions"]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+        val messageType = data["messageType"] ?: "TEXT"
 
         // Mark message as delivered when push notification is received
         if (messageId != null) {
@@ -83,7 +85,7 @@ class FCMService : FirebaseMessagingService() {
                 }
             }
 
-            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name)
+            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType)
         }
     }
 
@@ -105,7 +107,8 @@ class FCMService : FirebaseMessagingService() {
         senderId: String,
         senderName: String,
         chatName: String?,
-        isGroup: Boolean
+        isGroup: Boolean,
+        messageType: String = "TEXT"
     ) {
         val channelId = "fire_stream_messages"
         val notifId = chatId.hashCode()
@@ -125,7 +128,17 @@ class FCMService : FirebaseMessagingService() {
         if (isGroup) {
             style.setGroupConversation(true).setConversationTitle(chatName ?: chatId)
         }
-        style.addMessage("New message", System.currentTimeMillis(), sender)
+        val parsedType = runCatching { MessageType.valueOf(messageType) }.getOrNull()
+        val notificationText = when (parsedType) {
+            MessageType.LIST -> "\uD83D\uDCCB Shared a list"
+            MessageType.IMAGE -> "\uD83D\uDCF7 Photo"
+            MessageType.VIDEO -> "\uD83C\uDFA5 Video"
+            MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"
+            MessageType.DOCUMENT -> "\uD83D\uDCCE Document"
+            MessageType.POLL -> "\uD83D\uDCCA Poll"
+            else -> "New message"
+        }
+        style.addMessage(notificationText, System.currentTimeMillis(), sender)
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra("chatId", chatId)
