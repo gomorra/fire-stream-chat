@@ -108,7 +108,11 @@ class ListDetailViewModelTest {
 
     @Test
     fun `toggleItem calls repository`() = runTest {
-        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
+        val listData = ListData(
+            id = "list1",
+            items = listOf(ListItem(id = "i1", text = "Milk"))
+        )
+        every { listRepository.observeList("list1") } returns flowOf(listData)
         coEvery { listRepository.toggleItemChecked("list1", "i1") } returns Result.success(Unit)
 
         val viewModel = buildViewModel()

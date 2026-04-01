@@ -232,28 +232,38 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun shareToChat(chatId: String) {
+        val currentList = _uiState.value.listData ?: return
+        val optimisticIds = (currentList.sharedChatIds + chatId).distinct()
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(sharedChatIds = optimisticIds)
+        )
         viewModelScope.launch {
             listRepository.shareListToChat(listId, chatId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    // Only revert if observer hasn't already corrected the state
+                    if (_uiState.value.listData?.sharedChatIds == optimisticIds) {
+                        _uiState.value = _uiState.value.copy(listData = currentList)
+                    }
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
         }
     }
 
     fun unshareFromChat(chatId: String) {
+        val currentList = _uiState.value.listData ?: return
+        val optimisticIds = currentList.sharedChatIds.filter { it != chatId }
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(sharedChatIds = optimisticIds)
+        )
         viewModelScope.launch {
-            val listData = _uiState.value.listData ?: return@launch
-            // Send unshared bubble before removing access
-            sendListUpdateToChatsUseCase(
-                listId, listData.title, listOf(chatId),
-                ListDiff(unshared = true)
-            )
             listRepository.unshareListFromChat(listId, chatId)
-                .onSuccess {
-                    val chat = _uiState.value.chats.find { it.id == chatId }
-                    val owner = listData.createdBy
-                    val toRemove = chat?.participants?.filter { it != owner } ?: return@onSuccess
-                    if (toRemove.isNotEmpty()) listRepository.removeParticipants(listId, toRemove)
+                .onFailure { e ->
+                    // Only revert if observer hasn't already corrected the state
+                    if (_uiState.value.listData?.sharedChatIds == optimisticIds) {
+                        _uiState.value = _uiState.value.copy(listData = currentList)
+                    }
+                    _uiState.value = _uiState.value.copy(error = e.message)
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
 

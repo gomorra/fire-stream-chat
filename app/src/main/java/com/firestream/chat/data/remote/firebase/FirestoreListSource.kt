@@ -140,10 +140,28 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
+    suspend fun shareList(listId: String, participantIds: List<String>, chatId: String) {
+        listsCollection.document(listId).update(mapOf(
+            "participants" to FieldValue.arrayUnion(*participantIds.toTypedArray()),
+            "sharedChatIds" to FieldValue.arrayUnion(chatId),
+            "updatedAt" to System.currentTimeMillis()
+        )).await()
+    }
+
     suspend fun updateSharedChatIds(listId: String, chatId: String) {
         listsCollection.document(listId).update(
             "sharedChatIds", FieldValue.arrayUnion(chatId)
         ).await()
+    }
+
+    suspend fun unshareList(listId: String, participantIdsToRemove: List<String>, chatId: String) {
+        val updates = mutableMapOf<String, Any>(
+            "sharedChatIds" to FieldValue.arrayRemove(chatId)
+        )
+        if (participantIdsToRemove.isNotEmpty()) {
+            updates["participants"] = FieldValue.arrayRemove(*participantIdsToRemove.toTypedArray())
+        }
+        listsCollection.document(listId).update(updates).await()
     }
 
     suspend fun removeSharedChatId(listId: String, chatId: String) {

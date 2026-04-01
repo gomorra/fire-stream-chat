@@ -88,6 +88,11 @@ internal fun ListBubble(
         ) {
             val diff = message.listDiff
             when {
+                diff != null && diff.shared && listData != null -> SharedListContent(
+                    listData = listData,
+                    textColor = textColor,
+                    timestamp = message.timestamp
+                )
                 diff != null -> DiffContent(
                     diff = diff,
                     listTitle = listData?.title ?: message.content.removePrefix("📋 List: "),
@@ -108,6 +113,91 @@ internal fun ListBubble(
                     isShared = chatId in listData.sharedChatIds
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun SharedListContent(
+    listData: ListData,
+    textColor: Color,
+    timestamp: Long
+) {
+    Column {
+        Text(
+            text = "📋 Shared List",
+            style = MaterialTheme.typography.titleSmall,
+            color = textColor,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(color = textColor.copy(alpha = 0.2f))
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Icon(
+                imageVector = when (listData.type) {
+                    ListType.CHECKLIST -> Icons.Default.Checklist
+                    ListType.SHOPPING -> Icons.Default.ShoppingCart
+                    ListType.GENERIC -> Icons.AutoMirrored.Filled.List
+                },
+                contentDescription = null,
+                tint = textColor,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = listData.title,
+                style = MaterialTheme.typography.labelMedium,
+                color = textColor,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        if (listData.items.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            val previewItems = listData.items.take(3)
+            previewItems.forEach { item ->
+                val prefix = if (item.isChecked) "✓" else "○"
+                val prefixColor = if (item.isChecked) DiffGreen else textColor.copy(alpha = 0.6f)
+                DiffRow(
+                    prefix = prefix,
+                    prefixColor = prefixColor,
+                    text = item.text,
+                    textColor = if (item.isChecked) textColor.copy(alpha = 0.6f) else textColor
+                )
+            }
+            val remaining = listData.items.size - previewItems.size
+            if (remaining > 0) {
+                Text(
+                    text = "+$remaining more item${if (remaining != 1) "s" else ""}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(start = 12.dp, top = 2.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Tap to open",
+                style = MaterialTheme.typography.labelSmall,
+                color = textColor.copy(alpha = 0.5f)
+            )
+            Text(
+                text = formatTimestamp(timestamp),
+                color = textColor.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelSmall
+            )
         }
     }
 }
@@ -220,7 +310,7 @@ private fun DiffContent(
 
         Text(
             text = when {
-                diff.shared -> "List shared"
+                diff.shared -> "📋 List shared"
                 diff.unshared -> "List unshared"
                 diff.deleted -> "List deleted"
                 else -> "List updated"

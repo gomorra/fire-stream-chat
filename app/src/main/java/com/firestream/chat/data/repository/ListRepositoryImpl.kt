@@ -21,6 +21,8 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -276,14 +278,14 @@ class ListRepositoryImpl @Inject constructor(
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
 
-            // Add chat participants to list so they can access it
+            // Single atomic Firestore write: add all chat participants + sharedChatId
             val chat = chatRepository.get().getChatById(chatId).getOrThrow()
-            chat.participants.forEach { participantId ->
-                listSource.addParticipant(listId, participantId)
-            }
+            listSource.shareList(listId, chat.participants, chatId)
 
-            // Track this chat as a shared destination
-            updateSharedChatIds(listId, chatId)
+            // Update local Room cache immediately
+            val now = System.currentTimeMillis()
+            val updatedIds = (list.sharedChatIds + chatId).distinct()
+            listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
 
             messageRepository.get().sendListMessage(chatId, listId, list.title, com.firestream.chat.domain.model.ListDiff(shared = true))
         } catch (e: Exception) {
@@ -340,13 +342,32 @@ class ListRepositoryImpl @Inject constructor(
 
     override suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit> {
         return try {
-            listSource.removeSharedChatId(listId, chatId)
-            val entity = listDao.getById(listId)
-            if (entity != null) {
-                val arr = org.json.JSONArray(entity.sharedChatIds)
-                val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
-                listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), System.currentTimeMillis())
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+
+            // Send notification and fetch chat in parallel (no data dependency between them)
+            val chat = coroutineScope {
+                val msgJob = async {
+                    messageRepository.get().sendListMessage(
+                        chatId, listId, list.title,
+                        com.firestream.chat.domain.model.ListDiff(unshared = true)
+                    )
+                }
+                val chatJob = async {
+                    chatRepository.get().getChatById(chatId).getOrThrow()
+                }
+                msgJob.await()
+                chatJob.await()
             }
+            val toRemove = chat.participants.filter { it != list.createdBy }
+
+            listSource.unshareList(listId, toRemove, chatId)
+
+            val now = System.currentTimeMillis()
+            val arr = org.json.JSONArray(entity.sharedChatIds)
+            val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
+            listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
