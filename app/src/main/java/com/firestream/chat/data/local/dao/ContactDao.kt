@@ -20,4 +20,10 @@ interface ContactDao {
 
     @Query("DELETE FROM contacts")
     suspend fun deleteAll()
+
+    @Query("SELECT * FROM contacts")
+    suspend fun getAllContactsSync(): List<ContactEntity>
+
+    @Query("UPDATE contacts SET cachedAvatarUrl = :cachedUrl, localAvatarPath = :localPath WHERE uid = :uid")
+    suspend fun updateAvatarCache(uid: String, cachedUrl: String?, localPath: String?)
 }

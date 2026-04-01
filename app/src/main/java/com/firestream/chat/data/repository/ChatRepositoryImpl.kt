@@ -6,6 +6,7 @@ import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.GroupPermissions
@@ -32,7 +33,8 @@ class ChatRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
     private val firestore: FirebaseFirestore,
     private val authSource: FirebaseAuthSource,
-    private val storageSource: FirebaseStorageSource
+    private val storageSource: FirebaseStorageSource,
+    private val profileImageManager: ProfileImageManager
 ) : ChatRepository {
 
     private fun observeRemoteChats(): Flow<List<Chat>> = callbackFlow {
@@ -69,11 +71,32 @@ class ChatRepositoryImpl @Inject constructor(
                             entity.copy(
                                 isPinned = existing.isPinned,
                                 isArchived = existing.isArchived,
-                                muteUntil = existing.muteUntil
+                                muteUntil = existing.muteUntil,
+                                cachedAvatarUrl = existing.cachedAvatarUrl,
+                                localAvatarPath = existing.localAvatarPath
                             )
                         } else entity
                     }
                     chatDao.insertChats(entities)
+
+                    // Download avatars for group/broadcast chats whose URL changed
+                    for (chat in chats.filter { it.type != ChatType.INDIVIDUAL }) {
+                        val existing = existingMap[chat.id]
+                        if (chat.avatarUrl != null) {
+                            val needsDownload = chat.avatarUrl != existing?.cachedAvatarUrl ||
+                                existing?.localAvatarPath == null ||
+                                !profileImageManager.fileExists(chat.id)
+                            if (needsDownload) {
+                                try {
+                                    val file = profileImageManager.downloadAvatar(chat.id, chat.avatarUrl)
+                                    chatDao.updateAvatarCache(chat.id, chat.avatarUrl, file.absolutePath)
+                                } catch (_: Exception) { }
+                            }
+                        } else if (existing?.localAvatarPath != null) {
+                            profileImageManager.deleteAvatar(chat.id)
+                            chatDao.updateAvatarCache(chat.id, null, null)
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 // Sync failed (auth not ready, network error, etc.).
@@ -170,8 +193,10 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun uploadGroupAvatar(chatId: String, uri: Uri): Result<String> {
         return try {
+            val localFile = profileImageManager.saveLocalCopy(chatId, uri)
             val url = storageSource.uploadGroupAvatar(chatId, uri)
             updateGroup(chatId, name = null, avatarUrl = url).getOrThrow()
+            chatDao.updateAvatarCache(chatId, url, localFile.absolutePath)
             Result.success(url)
         } catch (e: Exception) {
             Result.failure(e)

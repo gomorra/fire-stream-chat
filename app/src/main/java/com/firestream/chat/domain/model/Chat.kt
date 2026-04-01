@@ -5,6 +5,7 @@ data class Chat(
     val type: ChatType = ChatType.INDIVIDUAL,
     val name: String? = null,
     val avatarUrl: String? = null,
+    val localAvatarPath: String? = null,
     val participants: List<String> = emptyList(),
     val lastMessage: Message? = null,
     val unreadCount: Int = 0,

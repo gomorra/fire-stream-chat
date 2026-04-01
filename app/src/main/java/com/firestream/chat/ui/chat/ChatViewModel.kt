@@ -62,14 +62,17 @@ data class ChatUiState(
     val broadcastRecipientIds: List<String> = emptyList(),
     val recentEmojis: List<String> = emptyList(),
     val recipientAvatarUrl: String? = null,
+    val recipientLocalAvatarPath: String? = null,
     val isRecipientOnline: Boolean = false,
     val chatAvatarUrl: String? = null,
+    val chatLocalAvatarPath: String? = null,
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val pinnedMessages: List<Message> = emptyList(),
     val scrollToBottomTrigger: Int = 0
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
+    val localAvatarPath: String? get() = recipientLocalAvatarPath ?: chatLocalAvatarPath
     val displayNameToUserId: Map<String, String> get() = participantNameMap.entries.associate { (k, v) -> v to k }
 }
 

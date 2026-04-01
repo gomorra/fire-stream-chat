@@ -133,18 +133,20 @@ class ChatListViewModel @Inject constructor(
                 userRepository.observeUser(recipientId)
                     .distinctUntilChanged { old, new ->
                         old.avatarUrl == new.avatarUrl &&
+                            old.localAvatarPath == new.localAvatarPath &&
                             old.displayName == new.displayName &&
                             old.isOnline == new.isOnline
                     }
                     .catch { }
                     .collect { user ->
                         val updatedContact = _uiState.value.contacts[recipientId]
-                            ?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
+                            ?.copy(avatarUrl = user.avatarUrl, localAvatarPath = user.localAvatarPath, displayName = user.displayName)
                             ?: Contact(
                                 uid = recipientId,
                                 phoneNumber = user.phoneNumber,
                                 displayName = user.displayName,
                                 avatarUrl = user.avatarUrl,
+                                localAvatarPath = user.localAvatarPath,
                                 isRegistered = true
                             )
                         val updatedOnline = if (user.isOnline) {

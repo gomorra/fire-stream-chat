@@ -7,10 +7,12 @@ import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,7 +23,8 @@ class UserRepositoryImpl @Inject constructor(
     private val userSource: FirestoreUserSource,
     private val authSource: FirebaseAuthSource,
     private val storageSource: FirebaseStorageSource,
-    private val presenceSource: RealtimePresenceSource
+    private val presenceSource: RealtimePresenceSource,
+    private val profileImageManager: ProfileImageManager
 ) : UserRepository {
 
     override fun observeUser(userId: String): Flow<User> {
@@ -31,7 +34,38 @@ class UserRepositoryImpl @Inject constructor(
         ) { user, isOnline ->
             user.copy(isOnline = isOnline)
         }.onEach { user ->
-            userDao.insertUser(UserEntity.fromDomain(user))
+            val existing = userDao.getUserById(user.uid)
+            // Preserve avatar cache fields during Firestore sync
+            val entity = UserEntity.fromDomain(user).let {
+                if (existing != null) {
+                    it.copy(
+                        cachedAvatarUrl = existing.cachedAvatarUrl,
+                        localAvatarPath = existing.localAvatarPath
+                    )
+                } else it
+            }
+            userDao.insertUser(entity)
+
+            // Download avatar if URL changed, local file is missing, or a previous download failed.
+            if (user.avatarUrl != null) {
+                val needsDownload = user.avatarUrl != existing?.cachedAvatarUrl ||
+                    existing?.localAvatarPath == null ||
+                    !profileImageManager.fileExists(user.uid)
+                if (needsDownload) {
+                    try {
+                        val file = profileImageManager.downloadAvatar(user.uid, user.avatarUrl)
+                        userDao.updateAvatarCache(user.uid, user.avatarUrl, file.absolutePath)
+                    } catch (_: Exception) { /* Will retry on next emission */ }
+                }
+            } else if (existing?.localAvatarPath != null) {
+                // Avatar was removed
+                profileImageManager.deleteAvatar(user.uid)
+                userDao.updateAvatarCache(user.uid, null, null)
+            }
+        }.map { user ->
+            // Re-read from Room to get localAvatarPath
+            val entity = userDao.getUserById(user.uid)
+            user.copy(localAvatarPath = entity?.localAvatarPath)
         }
     }
 
@@ -39,7 +73,12 @@ class UserRepositoryImpl @Inject constructor(
         return try {
             val cached = userDao.getUserById(userId)
             if (cached != null) {
-                Result.success(cached.toDomain())
+                val domain = cached.toDomain()
+                // Verify local file still exists
+                val localPath = if (cached.localAvatarPath != null && profileImageManager.fileExists(userId)) {
+                    cached.localAvatarPath
+                } else null
+                Result.success(domain.copy(localAvatarPath = localPath))
             } else {
                 val remote = userSource.getUserById(userId)
                     ?: return Result.failure(Exception("User not found"))
@@ -54,8 +93,12 @@ class UserRepositoryImpl @Inject constructor(
     override suspend fun uploadAvatar(uri: Uri): Result<String> {
         return try {
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            // Save local copy before uploading to avoid re-download
+            val localFile = profileImageManager.saveLocalCopy(uid, uri)
             val url = storageSource.uploadAvatar(uid, uri)
             userSource.updateProfile(uid, mapOf("avatarUrl" to url))
+            // Update cache immediately
+            userDao.updateAvatarCache(uid, url, localFile.absolutePath)
             Result.success(url)
         } catch (e: Exception) {
             Result.failure(e)

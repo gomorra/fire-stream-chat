@@ -10,13 +10,16 @@ data class ContactEntity(
     val phoneNumber: String,
     val displayName: String,
     val avatarUrl: String?,
-    val isRegistered: Boolean
+    val isRegistered: Boolean,
+    val cachedAvatarUrl: String? = null,
+    val localAvatarPath: String? = null
 ) {
     fun toDomain() = Contact(
         uid = uid,
         phoneNumber = phoneNumber,
         displayName = displayName,
         avatarUrl = avatarUrl,
+        localAvatarPath = localAvatarPath,
         isRegistered = isRegistered
     )
 

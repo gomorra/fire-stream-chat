@@ -55,6 +55,7 @@ internal class ChatInfoManager(
                             isGroupChat = isGroup,
                             chatName = if (isGroup || isBroadcast) chat.name else it.chatName,
                             chatAvatarUrl = chat.avatarUrl,
+                            chatLocalAvatarPath = chat.localAvatarPath,
                             canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
                             isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
                             isBroadcast = isBroadcast,
@@ -87,6 +88,7 @@ internal class ChatInfoManager(
                         it.copy(
                             chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.chatName,
                             recipientAvatarUrl = user.avatarUrl,
+                            recipientLocalAvatarPath = user.localAvatarPath,
                             isRecipientOnline = user.isOnline
                         )
                     }

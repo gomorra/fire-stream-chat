@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.entity.ContactEntity
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ContactRepository
 import com.google.firebase.firestore.FirebaseFirestore
@@ -14,12 +15,20 @@ import javax.inject.Singleton
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val contactDao: ContactDao,
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val profileImageManager: ProfileImageManager
 ) : ContactRepository {
 
     override fun getContacts(): Flow<List<Contact>> {
         return contactDao.getRegisteredContacts().map { entities ->
-            entities.map { it.toDomain() }
+            entities.map { entity ->
+                val domain = entity.toDomain()
+                // Verify local file still exists
+                val localPath = if (entity.localAvatarPath != null && profileImageManager.fileExists(entity.uid)) {
+                    entity.localAvatarPath
+                } else null
+                domain.copy(localAvatarPath = localPath)
+            }
         }
     }
 
@@ -38,7 +47,40 @@ class ContactRepositoryImpl @Inject constructor(
                     isRegistered = true
                 )
             }
-            contactDao.insertContacts(contacts.map { ContactEntity.fromDomain(it) })
+
+            // Preserve existing avatar cache fields during bulk insert
+            val existingMap = contactDao.getAllContactsSync().associateBy { it.uid }
+            val entities = contacts.map { contact ->
+                val existing = existingMap[contact.uid]
+                val entity = ContactEntity.fromDomain(contact)
+                if (existing != null) {
+                    entity.copy(
+                        cachedAvatarUrl = existing.cachedAvatarUrl,
+                        localAvatarPath = existing.localAvatarPath
+                    )
+                } else entity
+            }
+            contactDao.insertContacts(entities)
+
+            // Download avatars for contacts whose URL changed
+            for (contact in contacts) {
+                val existing = existingMap[contact.uid]
+                if (contact.avatarUrl != null) {
+                    val needsDownload = contact.avatarUrl != existing?.cachedAvatarUrl ||
+                        existing?.localAvatarPath == null ||
+                        !profileImageManager.fileExists(contact.uid)
+                    if (needsDownload) {
+                        try {
+                            val file = profileImageManager.downloadAvatar(contact.uid, contact.avatarUrl)
+                            contactDao.updateAvatarCache(contact.uid, contact.avatarUrl, file.absolutePath)
+                        } catch (_: Exception) { /* Will retry on next sync */ }
+                    }
+                } else if (existing?.localAvatarPath != null) {
+                    profileImageManager.deleteAvatar(contact.uid)
+                    contactDao.updateAvatarCache(contact.uid, null, null)
+                }
+            }
+
             Result.success(contacts)
         } catch (e: Exception) {
             Result.failure(e)

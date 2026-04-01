@@ -367,7 +367,8 @@ fun ChatScreen(
                             contentDescription = null,
                             icon = if (uiState.isGroupChat) Icons.Default.Group else Icons.Default.Person,
                             size = 36.dp,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(36.dp),
+                            localAvatarPath = uiState.localAvatarPath
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {

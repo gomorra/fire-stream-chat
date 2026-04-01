@@ -79,6 +79,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.components.resolveAvatarModel
 import com.firestream.chat.ui.theme.OnlineGreen
 import java.io.File
 import java.text.SimpleDateFormat
@@ -158,12 +159,15 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .size(96.dp)
                                 .clip(CircleShape)
-                                .clickable(enabled = user.avatarUrl != null) { fullscreenAvatar = true },
+                                .clickable(enabled = user.avatarUrl != null || user.localAvatarPath != null) { fullscreenAvatar = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (user.avatarUrl != null) {
+                            val avatarModel = remember(user.localAvatarPath, user.avatarUrl) {
+                                resolveAvatarModel(user.localAvatarPath, user.avatarUrl)
+                            }
+                            if (avatarModel != null) {
                                 AsyncImage(
-                                    model = user.avatarUrl,
+                                    model = avatarModel,
                                     contentDescription = "Avatar",
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -444,10 +448,15 @@ fun ProfileScreen(
 
     // Fullscreen avatar viewer
     val avatarUrl = uiState.user?.avatarUrl
+    val localAvatarPath = uiState.user?.localAvatarPath
     BackHandler(enabled = fullscreenAvatar) { fullscreenAvatar = false }
-    AnimatedVisibility(visible = fullscreenAvatar && avatarUrl != null, enter = fadeIn(), exit = fadeOut()) {
-        if (avatarUrl != null) {
-            FullscreenImageViewer(imageUrl = avatarUrl, onDismiss = { fullscreenAvatar = false })
+    AnimatedVisibility(visible = fullscreenAvatar && (avatarUrl != null || localAvatarPath != null), enter = fadeIn(), exit = fadeOut()) {
+        if (avatarUrl != null || localAvatarPath != null) {
+            FullscreenImageViewer(
+                imageUrl = avatarUrl ?: "",
+                localUri = localAvatarPath,
+                onDismiss = { fullscreenAvatar = false }
+            )
         }
     }
 

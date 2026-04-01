@@ -85,6 +85,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.components.resolveAvatarModel
 import java.io.File
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -192,12 +193,15 @@ fun GroupSettingsScreen(
                             modifier = Modifier
                                 .size(80.dp)
                                 .clip(CircleShape)
-                                .clickable(enabled = chat.avatarUrl != null) { fullscreenGroupAvatar = true },
+                                .clickable(enabled = chat.avatarUrl != null || chat.localAvatarPath != null) { fullscreenGroupAvatar = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            if (chat.avatarUrl != null) {
+                            val groupAvatarModel = remember(chat.localAvatarPath, chat.avatarUrl) {
+                                resolveAvatarModel(chat.localAvatarPath, chat.avatarUrl)
+                            }
+                            if (groupAvatarModel != null) {
                                 AsyncImage(
-                                    model = chat.avatarUrl,
+                                    model = groupAvatarModel,
                                     contentDescription = "Group avatar",
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()
@@ -541,10 +545,15 @@ fun GroupSettingsScreen(
 
     // Fullscreen group avatar viewer
     val avatarUrl = uiState.chat?.avatarUrl
+    val groupLocalAvatarPath = uiState.chat?.localAvatarPath
     BackHandler(enabled = fullscreenGroupAvatar) { fullscreenGroupAvatar = false }
-    AnimatedVisibility(visible = fullscreenGroupAvatar && avatarUrl != null, enter = fadeIn(), exit = fadeOut()) {
-        if (avatarUrl != null) {
-            FullscreenImageViewer(imageUrl = avatarUrl, onDismiss = { fullscreenGroupAvatar = false })
+    AnimatedVisibility(visible = fullscreenGroupAvatar && (avatarUrl != null || groupLocalAvatarPath != null), enter = fadeIn(), exit = fadeOut()) {
+        if (avatarUrl != null || groupLocalAvatarPath != null) {
+            FullscreenImageViewer(
+                imageUrl = avatarUrl ?: "",
+                localUri = groupLocalAvatarPath,
+                onDismiss = { fullscreenGroupAvatar = false }
+            )
         }
     }
 

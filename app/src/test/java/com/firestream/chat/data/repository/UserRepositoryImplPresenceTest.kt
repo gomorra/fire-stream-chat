@@ -5,6 +5,7 @@ import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
+import com.firestream.chat.data.util.ProfileImageManager
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -24,6 +25,7 @@ class UserRepositoryImplPresenceTest {
     private val authSource = mockk<FirebaseAuthSource>()
     private val storageSource = mockk<FirebaseStorageSource>()
     private val presenceSource = mockk<RealtimePresenceSource>()
+    private val profileImageManager = mockk<ProfileImageManager>()
 
     private lateinit var repository: UserRepositoryImpl
 
@@ -32,7 +34,7 @@ class UserRepositoryImplPresenceTest {
         every { presenceSource.startPresence(any()) } just Runs
         coEvery { presenceSource.goOffline(any()) } just Runs
 
-        repository = UserRepositoryImpl(userDao, userSource, authSource, storageSource, presenceSource)
+        repository = UserRepositoryImpl(userDao, userSource, authSource, storageSource, presenceSource, profileImageManager)
     }
 
     @Test

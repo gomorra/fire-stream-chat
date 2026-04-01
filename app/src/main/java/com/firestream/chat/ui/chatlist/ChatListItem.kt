@@ -54,6 +54,7 @@ fun ChatListItem(
         ?.let { contacts[it]?.displayName?.takeIf { n -> n.isNotBlank() } }
         ?: chat.name ?: "Chat"
     val avatarUrl = recipientId?.let { contacts[it]?.avatarUrl } ?: chat.avatarUrl
+    val localAvatarPath = recipientId?.let { contacts[it]?.localAvatarPath } ?: chat.localAvatarPath
 
     Row(
         modifier = modifier
@@ -73,7 +74,8 @@ fun ChatListItem(
                     else -> Icons.Default.Person
                 },
                 size = 52.dp,
-                modifier = Modifier.size(52.dp)
+                modifier = Modifier.size(52.dp),
+                localAvatarPath = localAvatarPath
             )
             if (isRecipientOnline) {
                 Surface(

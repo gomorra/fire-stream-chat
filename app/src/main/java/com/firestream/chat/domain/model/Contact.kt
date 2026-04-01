@@ -5,5 +5,6 @@ data class Contact(
     val phoneNumber: String = "",
     val displayName: String = "",
     val avatarUrl: String? = null,
+    val localAvatarPath: String? = null,
     val isRegistered: Boolean = false
 )

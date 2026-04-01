@@ -20,4 +20,7 @@ interface UserDao {
 
     @Query("DELETE FROM users WHERE uid = :uid")
     suspend fun deleteUser(uid: String)
+
+    @Query("UPDATE users SET cachedAvatarUrl = :cachedUrl, localAvatarPath = :localPath WHERE uid = :uid")
+    suspend fun updateAvatarCache(uid: String, cachedUrl: String?, localPath: String?)
 }

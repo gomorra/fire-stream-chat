@@ -14,13 +14,16 @@ data class UserEntity(
     val lastSeen: Long,
     val isOnline: Boolean,
     val publicIdentityKey: String,
-    val readReceiptsEnabled: Boolean = true
+    val readReceiptsEnabled: Boolean = true,
+    val cachedAvatarUrl: String? = null,
+    val localAvatarPath: String? = null
 ) {
     fun toDomain() = User(
         uid = uid,
         phoneNumber = phoneNumber,
         displayName = displayName,
         avatarUrl = avatarUrl,
+        localAvatarPath = localAvatarPath,
         statusText = statusText,
         lastSeen = lastSeen,
         isOnline = isOnline,

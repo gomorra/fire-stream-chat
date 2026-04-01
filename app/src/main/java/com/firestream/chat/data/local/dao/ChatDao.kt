@@ -39,4 +39,7 @@ interface ChatDao {
 
     @Query("UPDATE chats SET muteUntil = :muteUntil WHERE id = :chatId")
     suspend fun setMuteUntil(chatId: String, muteUntil: Long)
+
+    @Query("UPDATE chats SET cachedAvatarUrl = :cachedUrl, localAvatarPath = :localPath WHERE id = :chatId")
+    suspend fun updateAvatarCache(chatId: String, cachedUrl: String?, localPath: String?)
 }
