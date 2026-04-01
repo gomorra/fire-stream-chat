@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
+import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.ui.chat.resolveChatParticipants

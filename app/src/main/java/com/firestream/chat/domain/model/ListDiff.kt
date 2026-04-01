@@ -61,24 +61,30 @@ data class ListDiff(
             val checkedSet = current.checked.toMutableList()
             val uncheckedSet = current.unchecked.toMutableList()
 
-            // Adding then removing same item cancels out
+            // Adding then removing same item cancels out; skip duplicates
             for (item in new.added) {
-                if (item in removedSet) removedSet.remove(item) else addedSet.add(item)
+                if (item in removedSet) removedSet.remove(item)
+                else if (item !in addedSet) addedSet.add(item)
             }
             for (item in new.removed) {
-                if (item in addedSet) addedSet.remove(item) else removedSet.add(item)
+                if (item in addedSet) addedSet.remove(item)
+                else if (item !in removedSet) removedSet.add(item)
             }
 
-            // Check/uncheck same item cancels out
+            // Check/uncheck same item cancels out; skip duplicates
             for (item in new.checked) {
-                if (item in uncheckedSet) uncheckedSet.remove(item) else checkedSet.add(item)
+                if (item in uncheckedSet) uncheckedSet.remove(item)
+                else if (item !in checkedSet) checkedSet.add(item)
             }
             for (item in new.unchecked) {
-                if (item in checkedSet) checkedSet.remove(item) else uncheckedSet.add(item)
+                if (item in checkedSet) checkedSet.remove(item)
+                else if (item !in uncheckedSet) uncheckedSet.add(item)
             }
 
             val editedSet = current.edited.toMutableList()
-            editedSet.addAll(new.edited)
+            for (item in new.edited) {
+                if (item !in editedSet) editedSet.add(item)
+            }
 
             return ListDiff(
                 added = addedSet,

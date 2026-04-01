@@ -174,6 +174,36 @@ class ListDiffTest {
     }
 
     @Test
+    fun `accumulate - duplicate added items are deduplicated`() {
+        val base = ListDiff(added = listOf("Milk"))
+        val update = ListDiff(added = listOf("Milk"))
+
+        val result = ListDiff.accumulate(base, update)
+
+        assertEquals(listOf("Milk"), result.added)
+    }
+
+    @Test
+    fun `accumulate - duplicate checked items are deduplicated`() {
+        val base = ListDiff(checked = listOf("Milk"))
+        val update = ListDiff(checked = listOf("Milk"))
+
+        val result = ListDiff.accumulate(base, update)
+
+        assertEquals(listOf("Milk"), result.checked)
+    }
+
+    @Test
+    fun `accumulate - duplicate edited items are deduplicated`() {
+        val base = ListDiff(edited = listOf("Milk"))
+        val update = ListDiff(edited = listOf("Milk"))
+
+        val result = ListDiff.accumulate(base, update)
+
+        assertEquals(listOf("Milk"), result.edited)
+    }
+
+    @Test
     fun `accumulate - distinct items accumulate independently`() {
         val base = ListDiff(added = listOf("Milk"))
         val update = ListDiff(added = listOf("Eggs"))

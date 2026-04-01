@@ -138,7 +138,6 @@ internal fun MessageBubble(
     var hapticFired by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-
     val groupedReactions = message.reactions.values
         .groupBy { it }
         .mapValues { it.value.size }
@@ -188,21 +187,6 @@ internal fun MessageBubble(
             },
         horizontalAlignment = alignment
     ) {
-        SwipeActionIcon(
-            offset = displayOffset,
-            thresholdStart = 30f,
-            thresholdRange = 50f,
-            icon = Icons.Default.Reply,
-            modifier = Modifier.align(Alignment.Start).padding(start = 4.dp)
-        )
-        SwipeActionIcon(
-            offset = -displayOffset,
-            thresholdStart = 15f,
-            thresholdRange = 35f,
-            icon = Icons.Default.EmojiEmotions,
-            modifier = Modifier.align(Alignment.End).padding(end = 4.dp)
-        )
-
         Box {
             Box(
                 modifier = Modifier
@@ -613,6 +597,28 @@ internal fun MessageBubble(
                     }
                 }
             }
+
+            // Reply icon: fixed 8dp gap left of bubble, vertically centered
+            SwipeActionIcon(
+                offset = displayOffset,
+                thresholdStart = 30f,
+                thresholdRange = 50f,
+                icon = Icons.Default.Reply,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = (-32).dp)
+            )
+
+            // Emoji icon: fixed 8dp gap right of bubble, vertically centered
+            SwipeActionIcon(
+                offset = -displayOffset,
+                thresholdStart = 15f,
+                thresholdRange = 35f,
+                icon = Icons.Default.EmojiEmotions,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .offset(x = 32.dp)
+            )
         }
 
         if (groupedReactions.isNotEmpty()) {

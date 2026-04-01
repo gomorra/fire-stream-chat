@@ -547,6 +547,7 @@ private fun ListItemRow(
     val editFocusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     var hadFocus by remember(isEditing) { mutableStateOf(false) }
+    var submitted by remember(isEditing) { mutableStateOf(false) }
 
     // Sync editValue when entering edit mode (item text may have changed)
     LaunchedEffect(isEditing) {
@@ -557,6 +558,8 @@ private fun ListItemRow(
     }
 
     fun submitEdit() {
+        if (submitted) return
+        submitted = true
         val newText = editValue.text.trim()
         onFinishEdit(newText.ifBlank { null })
         keyboardController?.hide()
@@ -567,7 +570,7 @@ private fun ListItemRow(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.Top
+        verticalAlignment = Alignment.CenterVertically
     ) {
         // Checkbox/bullet — always toggles
         when (listType) {
