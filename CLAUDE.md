@@ -80,7 +80,17 @@ This must appear before any code changes are made for that step.
 
 ### Post-step code review
 
-7. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+**After each phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
+1. `./gradlew test` — unit tests must pass
+2. `./gradlew assembleDebug` — build must be clean
+3. `/simplify` — spawn a **Sonnet sub-agent** (`Agent` tool with `model: "sonnet"`) to review changed code for quality and fix issues.
+4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
+5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
+6. `./gradlew test` — unit tests must pass
+7. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
+8. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+
+> **Note:** Do not use `/build` or `/step` skills — implement plans directly with the selected model.
 
 ### Token efficiency
 
