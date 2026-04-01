@@ -55,8 +55,6 @@ class ListRepositoryImpl @Inject constructor(
             try {
                 listSource.observeMyLists(userId).collectLatest { lists ->
                     listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
-                    val activeIds = lists.map { it.id }
-                    if (activeIds.isNotEmpty()) listDao.deleteExcept(activeIds) else listDao.deleteExcept(emptyList())
                 }
             } catch (_: Exception) { }
         }
@@ -108,7 +106,8 @@ class ListRepositoryImpl @Inject constructor(
 
     override fun observeMyLists(): Flow<List<ListData>> {
         ensureListSyncRunning()
-        return listDao.getAll().map { entities -> entities.map { it.toDomain() } }
+        val userId = authSource.currentUserId ?: return kotlinx.coroutines.flow.flowOf(emptyList())
+        return listDao.getListsForUser(userId).map { entities -> entities.map { it.toDomain() } }
     }
 
     override suspend fun createList(title: String, type: ListType, chatId: String?, genericStyle: GenericListStyle): Result<ListData> {
@@ -135,6 +134,7 @@ class ListRepositoryImpl @Inject constructor(
             if (chatId != null) {
                 val chat = chatRepository.get().getChatById(chatId).getOrThrow()
                 listSource.shareList(remoteId, chat.participants, chatId)
+                listDao.updateSharedChatIds(remoteId, org.json.JSONArray(listOf(chatId)).toString(), System.currentTimeMillis())
                 messageRepository.get().sendListMessage(chatId, remoteId, title, com.firestream.chat.domain.model.ListDiff(shared = true))
             }
 

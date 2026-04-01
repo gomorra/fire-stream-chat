@@ -13,6 +13,9 @@ interface ListDao {
     @Query("SELECT * FROM lists ORDER BY updatedAt DESC")
     fun getAll(): Flow<List<ListEntity>>
 
+    @Query("SELECT * FROM lists WHERE participants LIKE '%\"' || :userId || '\"%' ORDER BY updatedAt DESC")
+    fun getListsForUser(userId: String): Flow<List<ListEntity>>
+
     @Query("SELECT * FROM lists WHERE id = :listId")
     fun observeById(listId: String): Flow<ListEntity?>
 

@@ -92,7 +92,10 @@ data class ListDiff(
                 checked = checkedSet,
                 unchecked = uncheckedSet,
                 edited = editedSet,
-                titleChanged = new.titleChanged ?: current.titleChanged
+                titleChanged = new.titleChanged ?: current.titleChanged,
+                deleted = current.deleted || new.deleted,
+                unshared = current.unshared || new.unshared,
+                shared = current.shared || new.shared
             )
         }
     }
