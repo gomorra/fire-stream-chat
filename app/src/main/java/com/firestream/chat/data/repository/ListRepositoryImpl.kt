@@ -131,10 +131,11 @@ class ListRepositoryImpl @Inject constructor(
 
             recordHistory(remoteId, HistoryAction.CREATED)
 
-            // If created from a chat, auto-send a list message and track sharedChatId
+            // If created from a chat, add participants + sharedChatId atomically, then send message
             if (chatId != null) {
+                val chat = chatRepository.get().getChatById(chatId).getOrThrow()
+                listSource.shareList(remoteId, chat.participants, chatId)
                 messageRepository.get().sendListMessage(chatId, remoteId, title, com.firestream.chat.domain.model.ListDiff(shared = true))
-                listSource.updateSharedChatIds(remoteId, chatId)
             }
 
             Result.success(created)

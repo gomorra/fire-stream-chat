@@ -778,6 +778,7 @@ class MessageRepositoryImpl @Inject constructor(
                         && lastMessage.listDiff != null
                         && !lastMessage.listDiff.deleted
                         && !lastMessage.listDiff.unshared
+                        && !lastMessage.listDiff.shared
                         && lastMessage.senderId == senderId
                     ) {
                         val mergedDiff = ListDiff.accumulate(lastMessage.listDiff, listDiff)
