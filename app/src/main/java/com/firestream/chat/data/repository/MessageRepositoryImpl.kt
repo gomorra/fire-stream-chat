@@ -19,6 +19,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val signalManager: SignalManager,
     private val storageSource: FirebaseStorageSource,
     private val chatRepository: dagger.Lazy<ChatRepository>,
+    private val listRepository: dagger.Lazy<ListRepository>,
     private val mediaFileManager: MediaFileManager,
     private val imageCompressor: ImageCompressor,
     private val preferencesDataStore: PreferencesDataStore,
@@ -205,6 +207,13 @@ class MessageRepositoryImpl @Inject constructor(
                                 message.type in AUTO_DOWNLOAD_TYPES
                             ) {
                                 tryAutoDownload(message)
+                            }
+
+                            // Sync shared/unshared list to Room so ListsScreen updates immediately
+                            if (message.type == MessageType.LIST && message.listId != null &&
+                                (message.listDiff?.shared == true || message.listDiff?.unshared == true)
+                            ) {
+                                listRepository.get().fetchAndCacheList(message.listId!!)
                             }
                         }
                     }

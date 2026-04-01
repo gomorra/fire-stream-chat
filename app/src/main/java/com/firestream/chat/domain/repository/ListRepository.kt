@@ -31,4 +31,6 @@ interface ListRepository {
     suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit>
     suspend fun removeParticipant(listId: String, userId: String): Result<Unit>
     suspend fun removeParticipants(listId: String, userIds: List<String>): Result<Unit>
+    /** One-shot fetch from Firestore → Room cache. Used when a shared/unshared message arrives. */
+    suspend fun fetchAndCacheList(listId: String)
 }

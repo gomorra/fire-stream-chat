@@ -66,6 +66,11 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
+    suspend fun getList(listId: String): ListData? {
+        val doc = listsCollection.document(listId).get().await()
+        return doc.data?.let { mapToListData(listId, it) }
+    }
+
     suspend fun createList(list: ListData): String {
         val data = hashMapOf(
             "title" to list.title,

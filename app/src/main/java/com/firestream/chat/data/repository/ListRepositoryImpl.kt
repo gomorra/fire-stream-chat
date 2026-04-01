@@ -397,4 +397,15 @@ class ListRepositoryImpl @Inject constructor(
             Result.failure(e)
         }
     }
+
+    override suspend fun fetchAndCacheList(listId: String) {
+        try {
+            val listData = listSource.getList(listId)
+            if (listData != null) {
+                listDao.insert(ListEntity.fromDomain(listData))
+            } else {
+                listDao.delete(listId)
+            }
+        } catch (_: Exception) { }
+    }
 }
