@@ -85,7 +85,15 @@ class ListRepositoryImpl @Inject constructor(
             try {
                 listSource.observeList(listId).collectLatest { listData ->
                     if (listData != null) {
-                        listDao.insert(ListEntity.fromDomain(listData))
+                        val userId = authSource.currentUserId
+                        if (userId != null && listData.participants.isNotEmpty() && userId !in listData.participants) {
+                            // User is no longer a participant — remove from Room so
+                            // ListsScreen updates instantly (don't wait for the slow
+                            // observeMyLists compound query to propagate).
+                            listDao.delete(listId)
+                        } else {
+                            listDao.insert(ListEntity.fromDomain(listData))
+                        }
                     } else {
                         listDao.delete(listId)
                     }

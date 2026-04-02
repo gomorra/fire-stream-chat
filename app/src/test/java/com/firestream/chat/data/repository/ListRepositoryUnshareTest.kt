@@ -13,6 +13,7 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import io.mockk.Runs
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
@@ -30,7 +31,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -67,34 +67,28 @@ class ListRepositoryUnshareTest {
     )
 
     @Test
-    fun `observeList emits empty sharedChatIds from Firestore without stale fallback`() = runTest {
-        // Simulate: Firestore returns list with empty sharedChatIds (all chats unshared)
+    fun `observeList deletes from Room when user is no longer a participant`() = runTest {
+        // Firestore returns list with receiver removed from participants
         val firestoreList = ListData(
             id = "list1",
             title = "Shopping",
             type = ListType.SHOPPING,
             createdBy = "owner1",
-            participants = listOf("owner1"), // receiver removed
-            sharedChatIds = emptyList() // unshared from all chats
+            participants = listOf("owner1"), // receiver1 removed
+            sharedChatIds = emptyList()
         )
         every { listSource.observeList("list1") } returns flowOf(firestoreList)
 
-        // Room has stale data with the old sharedChatIds
         val staleEntity = ListEntity.fromDomain(
             firestoreList.copy(
                 participants = listOf("owner1", "receiver1"),
-                sharedChatIds = listOf("chat1") // stale
+                sharedChatIds = listOf("chat1")
             )
         )
         every { listDao.observeById("list1") } returns flowOf(staleEntity)
-        coEvery { listDao.getById("list1") } returns staleEntity
-        coEvery { listDao.insert(any()) } just Runs
+        coEvery { listDao.delete("list1") } just Runs
 
         repository = createRepository()
-
-        // Collect the first emission from observeList
-        val insertSlot = slot<ListEntity>()
-        coEvery { listDao.insert(capture(insertSlot)) } just Runs
 
         val job = launch(UnconfinedTestDispatcher(testScheduler)) {
             repository.observeList("list1").first()
@@ -102,17 +96,13 @@ class ListRepositoryUnshareTest {
         advanceUntilIdle()
         job.cancel()
 
-        // The entity inserted into Room should have empty sharedChatIds (from Firestore),
-        // NOT the stale ["chat1"] from Room
-        assertTrue(
-            "sharedChatIds should be empty after unshare, but was: ${insertSlot.captured.sharedChatIds}",
-            insertSlot.captured.sharedChatIds == "[]"
-        )
+        // Should delete, NOT insert — receiver is no longer a participant
+        coVerify { listDao.delete("list1") }
+        coVerify(exactly = 0) { listDao.insert(any()) }
     }
 
     @Test
-    fun `observeList preserves non-empty sharedChatIds from Firestore`() = runTest {
-        // When sharedChatIds has real entries, they must pass through unchanged
+    fun `observeList inserts when user is a participant`() = runTest {
         val firestoreList = ListData(
             id = "list2",
             title = "Shared To Two Chats",
