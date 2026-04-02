@@ -54,7 +54,7 @@ class ListRepositoryImpl @Inject constructor(
         listSyncJob = historyScope.launch {
             try {
                 listSource.observeMyLists(userId).collectLatest { lists ->
-                    listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
+                    listDao.syncForUser(lists.map { ListEntity.fromDomain(it) }, userId)
                 }
             } catch (_: Exception) { }
         }
@@ -84,15 +84,7 @@ class ListRepositoryImpl @Inject constructor(
             try {
                 listSource.observeList(listId).collectLatest { listData ->
                     if (listData != null) {
-                        // Preserve local sharedChatIds if Firestore doc doesn't yet reflect them
-                        // (Firestore propagation delay can cause the snapshot to arrive before
-                        // the arrayUnion update, wiping local sharedChatIds and breaking the debounce flush)
-                        val mergedSharedChatIds = if (listData.sharedChatIds.isEmpty()) {
-                            listDao.getById(listId)?.toDomain()?.sharedChatIds ?: emptyList()
-                        } else {
-                            listData.sharedChatIds
-                        }
-                        listDao.insert(ListEntity.fromDomain(listData.copy(sharedChatIds = mergedSharedChatIds)))
+                        listDao.insert(ListEntity.fromDomain(listData))
                     } else {
                         listDao.delete(listId)
                     }

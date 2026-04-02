@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import com.firestream.chat.data.local.entity.ListEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -45,4 +46,22 @@ interface ListDao {
 
     @Query("UPDATE lists SET sharedChatIds = :sharedChatIdsJson, updatedAt = :updatedAt WHERE id = :listId")
     suspend fun updateSharedChatIds(listId: String, sharedChatIdsJson: String, updatedAt: Long)
+
+    @Query("DELETE FROM lists WHERE id NOT IN (:ids) AND participants LIKE '%\"' || :userId || '\"%'")
+    suspend fun deleteUnlistedForUser(ids: List<String>, userId: String)
+
+    @Query("DELETE FROM lists WHERE participants LIKE '%\"' || :userId || '\"%'")
+    suspend fun deleteAllForUser(userId: String)
+
+    /** Upserts the Firestore set and removes any local records the user is no longer a participant of. */
+    @Transaction
+    suspend fun syncForUser(lists: List<ListEntity>, userId: String) {
+        insertAll(lists)
+        val ids = lists.map { it.id }
+        if (ids.isEmpty()) {
+            deleteAllForUser(userId)
+        } else {
+            deleteUnlistedForUser(ids, userId)
+        }
+    }
 }

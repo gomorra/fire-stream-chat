@@ -13,6 +13,7 @@ import com.firestream.chat.data.remote.firebase.RawFirestoreMessage
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.ChatRepository
+import com.firestream.chat.domain.repository.ListRepository
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -53,6 +54,7 @@ class MessageRepositoryLocalUriTest {
     private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
+    private val listRepository = mockk<dagger.Lazy<ListRepository>>()
 
     private val firestoreFlow = MutableSharedFlow<List<RawFirestoreMessage>>(extraBufferCapacity = 1)
     private val roomFlow = MutableSharedFlow<List<MessageEntity>>(replay = 1)
@@ -74,7 +76,7 @@ class MessageRepositoryLocalUriTest {
 
         repository = MessageRepositoryImpl(
             messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager
+            listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager
         )
     }
 
