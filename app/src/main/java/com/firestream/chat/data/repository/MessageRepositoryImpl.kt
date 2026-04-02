@@ -414,28 +414,27 @@ class MessageRepositoryImpl @Inject constructor(
                 )
             }
 
-            val sentMessage = optimisticMessage.copy(
-                id = remoteId,
-                status = MessageStatus.SENT,
-                mediaUrl = downloadUrl,
-                localUri = localFile?.absolutePath,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight
-            )
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            // Rename local file from tempId to remoteId to prevent orphaned files
+            // Rename local file before replacing message so localUri is correct from the start
             val finalLocalUri: String? = if (localFile != null) {
                 val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
                 if (localFile.renameTo(newFile)) {
-                    messageDao.updateLocalUri(remoteId, newFile.absolutePath)
                     newFile.absolutePath
                 } else {
                     localFile.absolutePath
                 }
             } else null
 
-            Result.success(sentMessage.copy(localUri = finalLocalUri))
+            val sentMessage = optimisticMessage.copy(
+                id = remoteId,
+                status = MessageStatus.SENT,
+                mediaUrl = downloadUrl,
+                localUri = finalLocalUri,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight
+            )
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+
+            Result.success(sentMessage)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -443,14 +442,11 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> {
         return try {
-            val existing = messageDao.getMessageById(messageId)
-            val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
-            updatedReactions[userId] = emoji
+            val updatedReactions = messageSource.addReactionTransactional(chatId, messageId, userId, emoji)
             val reactionsJson = JSONObject().apply {
                 updatedReactions.forEach { (k, v) -> put(k, v) }
             }.toString()
             messageDao.updateReactions(messageId, reactionsJson)
-            messageSource.updateReactions(chatId, messageId, updatedReactions)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -459,14 +455,11 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit> {
         return try {
-            val existing = messageDao.getMessageById(messageId)
-            val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
-            updatedReactions.remove(userId)
+            val updatedReactions = messageSource.removeReactionTransactional(chatId, messageId, userId)
             val reactionsJson = JSONObject().apply {
                 updatedReactions.forEach { (k, v) -> put(k, v) }
             }.toString()
             messageDao.updateReactions(messageId, reactionsJson)
-            messageSource.updateReactions(chatId, messageId, updatedReactions)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

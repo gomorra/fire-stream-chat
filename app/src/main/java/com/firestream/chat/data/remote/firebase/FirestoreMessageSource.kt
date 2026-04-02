@@ -458,6 +458,32 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     @Suppress("UNCHECKED_CAST")
+    suspend fun addReactionTransactional(chatId: String, messageId: String, userId: String, emoji: String): Map<String, String> {
+        val docRef = firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        return firestore.runTransaction { tx ->
+            val snap = tx.get(docRef)
+            val current = (snap.get("reactions") as? Map<String, String>)?.toMutableMap() ?: mutableMapOf()
+            current[userId] = emoji
+            tx.update(docRef, "reactions", current)
+            current.toMap()
+        }.await()
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    suspend fun removeReactionTransactional(chatId: String, messageId: String, userId: String): Map<String, String> {
+        val docRef = firestore.collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        return firestore.runTransaction { tx ->
+            val snap = tx.get(docRef)
+            val current = (snap.get("reactions") as? Map<String, String>)?.toMutableMap() ?: mutableMapOf()
+            current.remove(userId)
+            tx.update(docRef, "reactions", current)
+            current.toMap()
+        }.await()
+    }
+
+    @Suppress("UNCHECKED_CAST")
     private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawFirestoreMessage {
         val rawReactions = (data["reactions"] as? Map<*, *>)
             ?.entries
