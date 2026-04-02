@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -50,10 +51,14 @@ internal fun FullscreenImageViewer(
     onSaveToGallery: (() -> Unit)? = null
 ) {
     // Prefer local file for faster loading, fall back to remote URL.
-    // File.exists() is I/O; memoize per localUri so it only runs once per unique path.
-    val imageModel: Any = remember(localUri) {
-        if (localUri != null && File(localUri).exists()) File(localUri) else imageUrl
+    // File.exists() runs on IO dispatcher to avoid blocking composition.
+    val localFileExists by produceState(initialValue = false, localUri) {
+        value = localUri != null &&
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                File(localUri!!).exists()
+            }
     }
+    val imageModel: Any = if (localFileExists && localUri != null) File(localUri) else imageUrl
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
