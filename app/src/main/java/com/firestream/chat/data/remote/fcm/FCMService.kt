@@ -85,7 +85,8 @@ class FCMService : FirebaseMessagingService() {
                 }
             }
 
-            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType)
+            val messageContent = data["messageContent"]
+            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent)
         }
     }
 
@@ -108,7 +109,8 @@ class FCMService : FirebaseMessagingService() {
         senderName: String,
         chatName: String?,
         isGroup: Boolean,
-        messageType: String = "TEXT"
+        messageType: String = "TEXT",
+        messageContent: String? = null
     ) {
         val channelId = "fire_stream_messages"
         val notifId = chatId.hashCode()
@@ -130,7 +132,7 @@ class FCMService : FirebaseMessagingService() {
         }
         val parsedType = runCatching { MessageType.valueOf(messageType) }.getOrNull()
         val notificationText = when (parsedType) {
-            MessageType.LIST -> "\uD83D\uDCCB Shared a list"
+            MessageType.LIST -> messageContent?.takeIf { it.isNotBlank() } ?: "\uD83D\uDCCB Shared a list"
             MessageType.IMAGE -> "\uD83D\uDCF7 Photo"
             MessageType.VIDEO -> "\uD83C\uDFA5 Video"
             MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"

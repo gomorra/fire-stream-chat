@@ -157,7 +157,8 @@ exports.sendPushNotification = onDocumentCreated(
                             chatType: chatType,
                             chatName: chatData.name || "",
                             mentions: mentionsStr,
-                            messageType: messageData.type || "TEXT"
+                            messageType: messageData.type || "TEXT",
+                            messageContent: messageData.content || ""
                         },
                         android: {
                             priority: "high"

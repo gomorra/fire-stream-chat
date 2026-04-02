@@ -782,7 +782,12 @@ class MessageRepositoryImpl @Inject constructor(
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val timestamp = System.currentTimeMillis()
-            val content = "\uD83D\uDCCB List: $listTitle"
+            val content = when {
+                listDiff?.shared == true -> "\uD83D\uDCCB Shared list: $listTitle"
+                listDiff?.unshared == true -> "\uD83D\uDCCB Removed list: $listTitle"
+                listDiff?.deleted == true -> "\uD83D\uDCCB Deleted list: $listTitle"
+                else -> "\uD83D\uDCCB List updated: $listTitle"
+            }
 
             // Merge into the last message if it's a diff bubble for the same list from this user
             if (listDiff != null && !listDiff.deleted && !listDiff.unshared && !listDiff.shared) {
