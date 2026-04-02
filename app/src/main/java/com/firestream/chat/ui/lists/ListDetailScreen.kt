@@ -116,7 +116,6 @@ fun ListDetailScreen(
 
     LaunchedEffect(uiState.isAccessDenied) {
         if (uiState.isAccessDenied) {
-            snackbarHostState.showSnackbar("This list is no longer shared with you")
             onBackClick()
         }
     }
