@@ -104,7 +104,9 @@ class FirestoreMessageSource @Inject constructor(
             "isForwarded" to isForwarded,
             "duration" to duration,
             "mentions" to mentions,
-            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
+            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() },
+            "deliveredTo" to emptyMap<String, Long>(),
+            "readBy" to emptyMap<String, Long>()
         )
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
@@ -160,7 +162,9 @@ class FirestoreMessageSource @Inject constructor(
             "isForwarded" to isForwarded,
             "duration" to duration,
             "mentions" to mentions,
-            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
+            "emojiSizes" to emojiSizes.mapKeys { it.key.toString() },
+            "deliveredTo" to emptyMap<String, Long>(),
+            "readBy" to emptyMap<String, Long>()
         )
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
@@ -231,23 +235,36 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long) {
-        firestore.collection("chats").document(chatId)
+        val docRef = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .update(mapOf(
-                "deliveredTo.$userId" to timestamp,
-                "status" to MessageStatus.DELIVERED.name
-            ))
-            .await()
+        firestore.runTransaction { tx ->
+            val snap = tx.get(docRef)
+            val currentStatus = snap.getString("status")?.let {
+                runCatching { MessageStatus.valueOf(it) }.getOrNull()
+            } ?: MessageStatus.SENT
+            // Only advance status — never downgrade from READ or DELIVERED
+            val updates = mutableMapOf<String, Any>("deliveredTo.$userId" to timestamp)
+            if (currentStatus.ordinal < MessageStatus.DELIVERED.ordinal) {
+                updates["status"] = MessageStatus.DELIVERED.name
+            }
+            tx.update(docRef, updates)
+        }.await()
     }
 
     suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long) {
-        firestore.collection("chats").document(chatId)
+        val docRef = firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .update(mapOf(
-                "readBy.$userId" to timestamp,
-                "status" to MessageStatus.READ.name
-            ))
-            .await()
+        firestore.runTransaction { tx ->
+            val snap = tx.get(docRef)
+            val currentStatus = snap.getString("status")?.let {
+                runCatching { MessageStatus.valueOf(it) }.getOrNull()
+            } ?: MessageStatus.SENT
+            val updates = mutableMapOf<String, Any>("readBy.$userId" to timestamp)
+            if (currentStatus.ordinal < MessageStatus.READ.ordinal) {
+                updates["status"] = MessageStatus.READ.name
+            }
+            tx.update(docRef, updates)
+        }.await()
     }
 
     suspend fun sendPollMessage(
@@ -264,7 +281,9 @@ class FirestoreMessageSource @Inject constructor(
             "timestamp" to timestamp,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to false,
-            "pollData" to pollData
+            "pollData" to pollData,
+            "deliveredTo" to emptyMap<String, Long>(),
+            "readBy" to emptyMap<String, Long>()
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -332,7 +351,9 @@ class FirestoreMessageSource @Inject constructor(
             "timestamp" to timestamp,
             "duration" to durationSeconds,
             "reactions" to emptyMap<String, String>(),
-            "isForwarded" to false
+            "isForwarded" to false,
+            "deliveredTo" to emptyMap<String, Long>(),
+            "readBy" to emptyMap<String, Long>()
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -366,7 +387,9 @@ class FirestoreMessageSource @Inject constructor(
             "timestamp" to timestamp,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to false,
-            "listId" to listId
+            "listId" to listId,
+            "deliveredTo" to emptyMap<String, Long>(),
+            "readBy" to emptyMap<String, Long>()
         )
         if (listDiff != null) data["listDiff"] = listDiff
         val docRef = firestore
