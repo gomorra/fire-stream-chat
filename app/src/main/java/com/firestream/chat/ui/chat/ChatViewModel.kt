@@ -139,7 +139,7 @@ class ChatViewModel @Inject constructor(
     // ── Message sending ──
     fun onTyping(text: String) = messageSender.onTyping(text)
     fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageSender.sendMessage(content, emojiSizes)
-    fun sendMediaMessage(uri: Uri, mimeType: String) = messageSender.sendMediaMessage(uri, mimeType)
+    fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") = messageSender.sendMediaMessage(uri, mimeType, caption)
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
 
     // ── Message actions ──

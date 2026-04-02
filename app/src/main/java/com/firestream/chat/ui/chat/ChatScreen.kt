@@ -322,13 +322,21 @@ fun ChatScreen(
     }
 
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var pendingImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var pendingImageMimeType by rememberSaveable { mutableStateOf("image/jpeg") }
 
     val galleryLauncher = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
-        uri?.let { viewModel.sendMediaMessage(it, "image/jpeg") }
+        if (uri != null) {
+            pendingImageMimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+            pendingImageUri = uri
+        }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success) cameraUri?.let { viewModel.sendMediaMessage(it, "image/jpeg") }
+        if (success) cameraUri?.let {
+            pendingImageMimeType = "image/jpeg"
+            pendingImageUri = it
+        }
     }
 
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1231,6 +1239,23 @@ fun ChatScreen(
                 onSaveToGallery = {
                     viewModel.saveImageToGallery(msg.localUri, msg.mediaUrl)
                 }
+            )
+        }
+    }
+
+    BackHandler(enabled = pendingImageUri != null) {
+        pendingImageUri = null
+    }
+
+    AnimatedVisibility(visible = pendingImageUri != null, enter = fadeIn(), exit = fadeOut()) {
+        pendingImageUri?.let { uri ->
+            ImagePreviewScreen(
+                imageUri = uri,
+                onSend = { caption ->
+                    viewModel.sendMediaMessage(uri, pendingImageMimeType, caption)
+                    pendingImageUri = null
+                },
+                onDismiss = { pendingImageUri = null }
             )
         }
     }

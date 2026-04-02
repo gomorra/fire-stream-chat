@@ -115,7 +115,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
 
         val lastContent = when (type) {
-            MessageType.IMAGE -> "📷 Photo"
+            MessageType.IMAGE -> if (plainContent.isNotBlank()) "📷 $plainContent" else "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
@@ -171,7 +171,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
 
         val lastContent = when (type) {
-            MessageType.IMAGE -> "📷 Photo"
+            MessageType.IMAGE -> if (content.isNotBlank()) "📷 $content" else "📷 Photo"
             MessageType.DOCUMENT -> "📎 File"
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT

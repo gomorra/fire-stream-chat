@@ -433,7 +433,7 @@ private fun SearchResultItem(
         headlineContent = {
             Text(
                 text = when (message.type) {
-                    MessageType.IMAGE -> "📷 Photo"
+                    MessageType.IMAGE -> if (message.content.isNotBlank()) "📷 ${message.content}" else "📷 Photo"
                     MessageType.VOICE -> "🎤 Voice message"
                     MessageType.DOCUMENT -> "📄 ${message.content}"
                     else -> message.content

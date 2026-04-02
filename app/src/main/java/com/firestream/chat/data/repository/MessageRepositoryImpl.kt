@@ -330,7 +330,7 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String): Result<Message> {
+    override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String, caption: String): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val tempId = UUID.randomUUID().toString()
@@ -372,7 +372,7 @@ class MessageRepositoryImpl @Inject constructor(
                 id = tempId,
                 chatId = chatId,
                 senderId = senderId,
-                content = filename,
+                content = caption,
                 type = messageType,
                 status = MessageStatus.SENDING,
                 timestamp = timestamp,
@@ -395,7 +395,7 @@ class MessageRepositoryImpl @Inject constructor(
             val remoteId: String
             if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
                 signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, filename)
+                val encrypted = signalManager.encrypt(recipientId, caption)
                 remoteId = messageSource.sendMessage(
                     chatId = chatId,
                     senderId = senderId,
@@ -405,6 +405,7 @@ class MessageRepositoryImpl @Inject constructor(
                     replyToId = null,
                     timestamp = timestamp,
                     mediaUrl = downloadUrl,
+                    plainContent = caption,
                     mediaWidth = mediaWidth,
                     mediaHeight = mediaHeight
                 )
@@ -412,7 +413,7 @@ class MessageRepositoryImpl @Inject constructor(
                 remoteId = messageSource.sendPlainMessage(
                     chatId = chatId,
                     senderId = senderId,
-                    content = filename,
+                    content = caption,
                     type = messageType,
                     replyToId = null,
                     timestamp = timestamp,

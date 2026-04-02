@@ -338,6 +338,14 @@ internal fun MessageBubble(
                                     }
                                 }
                             }
+                            if (message.content.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = message.content,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = textColor
+                                )
+                            }
                         }
                         MessageType.VOICE -> {
                             VoiceMessagePlayer(

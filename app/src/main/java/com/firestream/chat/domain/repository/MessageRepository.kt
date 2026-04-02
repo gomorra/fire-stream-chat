@@ -13,7 +13,7 @@ interface MessageRepository {
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit>
     suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit>
-    suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String): Result<Message>
+    suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String, caption: String = ""): Result<Message>
     // Phase 1: reactions
     suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit>
     suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit>

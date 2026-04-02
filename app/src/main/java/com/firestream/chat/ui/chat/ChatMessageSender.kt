@@ -59,10 +59,10 @@ internal class ChatMessageSender(
         }
     }
 
-    fun sendMediaMessage(uri: Uri, mimeType: String) {
+    fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") {
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
-            messageRepository.sendMediaMessage(chatId, uri, mimeType, recipientId)
+            messageRepository.sendMediaMessage(chatId, uri, mimeType, recipientId, caption)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
