@@ -32,6 +32,7 @@ internal class ChatMessageLoader(
     private var readReceiptJob: Job? = null
     private var screenVisible = false
     private val observedListIds = mutableSetOf<String>()
+    private val processedUnshareIds = mutableSetOf<String>()
 
     fun start() {
         loadMessages()
@@ -137,6 +138,22 @@ internal class ChatMessageLoader(
     }
 
     fun observeListMessages(messages: List<Message>) {
+        // Proactively invalidate cache for unshared lists — strip this chatId from
+        // sharedChatIds so the bubble becomes non-clickable immediately, without
+        // waiting for the Firestore listener to fire. Only process each unshare
+        // message once; re-running on every emission is wasteful and idempotent anyway.
+        messages.filter { it.type == MessageType.LIST && it.listDiff?.unshared == true && it.listId != null }
+            .forEach { msg ->
+                val listId = msg.listId ?: return@forEach
+                if (processedUnshareIds.add(msg.id)) {
+                    val cached = _uiState.value.listDataCache[listId]
+                    if (cached != null && chatId in cached.sharedChatIds) {
+                        val updated = cached.copy(sharedChatIds = cached.sharedChatIds - chatId)
+                        _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to updated)) }
+                    }
+                }
+            }
+
         val listIds = messages
             .filter { it.type == MessageType.LIST && it.listId != null }
             .mapNotNull { it.listId }

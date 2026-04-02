@@ -114,6 +114,13 @@ fun ListDetailScreen(
         if (uiState.isDeleted) onBackClick()
     }
 
+    LaunchedEffect(uiState.isAccessDenied) {
+        if (uiState.isAccessDenied) {
+            snackbarHostState.showSnackbar("This list is no longer shared with you")
+            onBackClick()
+        }
+    }
+
     LaunchedEffect(autoFocus, uiState.listData) {
         if (autoFocus && uiState.listData != null) {
             addItemFocusRequester.requestFocus()

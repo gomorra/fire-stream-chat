@@ -35,7 +35,8 @@ data class ListDetailUiState(
     val currentUserId: String = "",
     val isLoading: Boolean = true,
     val error: String? = null,
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val isAccessDenied: Boolean = false
 ) {
     val isOwner get() = listData?.createdBy == currentUserId
     val displayItems get() = listData?.items
@@ -94,10 +95,28 @@ class ListDetailViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
                 .collect { listData ->
-                    if (listData == null && !_uiState.value.isLoading && !isDeletingList) {
-                        _uiState.value = _uiState.value.copy(isDeleted = true, isLoading = false)
+                    val state = _uiState.value
+                    if (listData == null && !state.isLoading && !isDeletingList) {
+                        // If the current user is not the owner of the last-known list,
+                        // a null emission means they lost access (removed from participants),
+                        // not that the list was deleted. Show the appropriate message.
+                        val wasOwner = state.listData?.createdBy == state.currentUserId
+                            || state.listData == null  // no prior data → default to deleted path
+                        if (wasOwner) {
+                            _uiState.value = state.copy(isDeleted = true, isLoading = false)
+                        } else {
+                            _uiState.value = state.copy(isAccessDenied = true, isLoading = false)
+                        }
+                    } else if (listData != null
+                        && listData.participants.isNotEmpty()
+                        && state.currentUserId !in listData.participants
+                        && state.currentUserId != listData.createdBy
+                    ) {
+                        // Firestore delivered the updated doc before Room removed it:
+                        // participant check fires while the document is still visible.
+                        _uiState.value = state.copy(isAccessDenied = true, isLoading = false)
                     } else {
-                        _uiState.value = _uiState.value.copy(
+                        _uiState.value = state.copy(
                             listData = listData,
                             isLoading = false
                         )

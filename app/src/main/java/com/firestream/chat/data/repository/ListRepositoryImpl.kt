@@ -80,6 +80,7 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override fun observeList(listId: String): Flow<ListData?> = channelFlow {
+        ensureListSyncRunning()
         launch {
             try {
                 listSource.observeList(listId).collectLatest { listData ->
@@ -343,28 +344,27 @@ class ListRepositoryImpl @Inject constructor(
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
 
-            // Send notification and fetch chat in parallel (no data dependency between them)
-            val chat = coroutineScope {
-                val msgJob = async {
-                    messageRepository.get().sendListMessage(
-                        chatId, listId, list.title,
-                        com.firestream.chat.domain.model.ListDiff(unshared = true)
-                    )
-                }
-                val chatJob = async {
-                    chatRepository.get().getChatById(chatId).getOrThrow()
-                }
-                msgJob.await()
-                chatJob.await()
-            }
+            // 1. Fetch chat to determine participants to remove
+            val chat = chatRepository.get().getChatById(chatId).getOrThrow()
             val toRemove = chat.participants.filter { it != list.createdBy }
 
+            // 2. Update Firestore FIRST — remove participants + sharedChatIds
+            //    Must complete before sending message so the receiver sees the updated
+            //    document when they open the chat from the FCM notification.
             listSource.unshareList(listId, toRemove, chatId)
 
+            // 3. Update local Room cache
             val now = System.currentTimeMillis()
             val arr = org.json.JSONArray(entity.sharedChatIds)
             val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
             listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
+
+            // 4. Send the notification message LAST — by this point the Firestore doc
+            //    is already updated, so any FCM-triggered navigation sees correct state.
+            messageRepository.get().sendListMessage(
+                chatId, listId, list.title,
+                com.firestream.chat.domain.model.ListDiff(unshared = true)
+            )
 
             Result.success(Unit)
         } catch (e: Exception) {
