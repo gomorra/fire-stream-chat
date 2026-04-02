@@ -51,6 +51,7 @@ data class ChatUiState(
     val searchQuery: String = "",
     val searchResults: List<Message> = emptyList(),
     val isSearchActive: Boolean = false,
+    val isSearching: Boolean = false,
     val readReceiptsAllowed: Boolean = true,
     val isGroupChat: Boolean = false,
     val chatName: String? = null,

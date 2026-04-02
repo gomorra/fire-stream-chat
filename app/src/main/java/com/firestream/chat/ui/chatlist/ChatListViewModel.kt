@@ -167,13 +167,15 @@ class ChatListViewModel @Inject constructor(
         for (chat in chats) {
             val lastMsg = chat.lastMessage ?: continue
             if (lastMsg.senderId == currentUserId) continue
-            // Skip if we already processed this chat for this timestamp
+            // Skip if we already called markChatAsDelivered after this message arrived.
+            // Use message timestamp so new messages always trigger a fresh delivery call.
             val lastProcessed = deliveredTimestamps[chat.id]
             if (lastProcessed != null && lastProcessed >= lastMsg.timestamp) continue
-            deliveredTimestamps[chat.id] = lastMsg.timestamp
             viewModelScope.launch {
                 messageRepository.markChatAsDelivered(chat.id)
             }
+            // Record after launch so a failed call can be retried on next emission
+            deliveredTimestamps[chat.id] = lastMsg.timestamp
         }
     }
 

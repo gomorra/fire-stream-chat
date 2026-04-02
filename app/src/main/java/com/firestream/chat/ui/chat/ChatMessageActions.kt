@@ -21,18 +21,23 @@ internal class ChatMessageActions(
         }
     }
 
+    private var savedReplyToMessage: Message? = null
+
     fun startEdit(message: Message) {
-        _uiState.update { it.copy(editingMessage = message) }
+        savedReplyToMessage = _uiState.value.replyToMessage
+        _uiState.update { it.copy(editingMessage = message, replyToMessage = null) }
     }
 
     fun cancelEdit() {
-        _uiState.update { it.copy(editingMessage = null) }
+        _uiState.update { it.copy(editingMessage = null, replyToMessage = savedReplyToMessage) }
+        savedReplyToMessage = null
     }
 
     fun confirmEdit(newContent: String) {
         val msg = _uiState.value.editingMessage ?: return
         if (newContent.isBlank()) return
-        _uiState.update { it.copy(editingMessage = null) }
+        _uiState.update { it.copy(editingMessage = null, replyToMessage = savedReplyToMessage) }
+        savedReplyToMessage = null
         scope.launch {
             messageRepository.editMessage(chatId, msg.id, newContent)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }

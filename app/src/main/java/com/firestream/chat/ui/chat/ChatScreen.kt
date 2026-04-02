@@ -552,7 +552,19 @@ fun ChatScreen(
 
             // Search results overlay
             if (uiState.isSearchActive && uiState.searchQuery.isNotBlank()) {
-                if (uiState.searchResults.isEmpty()) {
+                if (uiState.isSearching) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp
+                        )
+                    }
+                } else if (uiState.searchResults.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

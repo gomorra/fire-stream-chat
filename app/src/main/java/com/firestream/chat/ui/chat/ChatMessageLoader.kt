@@ -104,21 +104,26 @@ internal class ChatMessageLoader(
         readReceiptJob?.cancel()
         readReceiptJob = scope.launch {
             delay(1500)
-            if (screenVisible) {
-                messageRepository.markMessagesAsRead(chatId, needsRead)
-                NotificationManagerCompat.from(context).cancel(chatId.hashCode())
-            }
+            messageRepository.markMessagesAsRead(chatId, needsRead)
+            NotificationManagerCompat.from(context).cancel(chatId.hashCode())
         }
     }
+
+    private val pendingLinkPreviews = mutableSetOf<String>()
 
     private fun fetchLinkPreviewsFor(messages: List<Message>) {
         messages.forEach { msg ->
             if (msg.type.name == "TEXT") {
                 val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
-                if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
+                if (url in pendingLinkPreviews || _uiState.value.linkPreviews.containsKey(url)) return@forEach
+                pendingLinkPreviews.add(url)
                 scope.launch {
-                    val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
-                    _uiState.update { it.copy(linkPreviews = it.linkPreviews + (url to preview)) }
+                    try {
+                        val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
+                        _uiState.update { it.copy(linkPreviews = it.linkPreviews + (url to preview)) }
+                    } finally {
+                        pendingLinkPreviews.remove(url)
+                    }
                 }
             }
         }

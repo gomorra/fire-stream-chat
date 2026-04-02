@@ -497,6 +497,8 @@ internal fun MessageBubble(
                         }
                         if (isOwnMessage) {
                             Spacer(modifier = Modifier.width(4.dp))
+                            // When read receipts are disabled, show DELIVERED instead of READ
+                            // so the sender doesn't reveal they've seen the read receipt (privacy)
                             val displayStatus = if (!readReceiptsAllowed && message.status == MessageStatus.READ) {
                                 MessageStatus.DELIVERED
                             } else {

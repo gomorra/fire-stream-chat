@@ -2,9 +2,7 @@ package com.firestream.chat.ui.chat
 
 import android.net.Uri
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
@@ -79,7 +77,7 @@ internal class ChatMessageSender(
 
     fun onCleared() {
         typingDebounceJob?.cancel()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+        scope.launch {
             chatRepository.setTyping(chatId, false)
         }
     }

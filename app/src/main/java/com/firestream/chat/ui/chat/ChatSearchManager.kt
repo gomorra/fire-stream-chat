@@ -21,16 +21,17 @@ internal class ChatSearchManager(
         _uiState.update { it.copy(searchQuery = query) }
         searchJob?.cancel()
         if (query.isBlank()) {
-            _uiState.update { it.copy(searchResults = emptyList()) }
+            _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
             return
         }
+        _uiState.update { it.copy(isSearching = true) }
         searchJob = scope.launch {
             delay(300)
             try {
                 val results = searchMessagesUseCase(query, chatId)
-                _uiState.update { it.copy(searchResults = results) }
+                _uiState.update { it.copy(searchResults = results, isSearching = false) }
             } catch (_: Exception) {
-                _uiState.update { it.copy(searchResults = emptyList()) }
+                _uiState.update { it.copy(searchResults = emptyList(), isSearching = false) }
             }
         }
     }
