@@ -171,6 +171,10 @@ class MessageRepositoryImpl @Inject constructor(
                                 }
                             }
 
+                            // Preserve local-only fields that are not stored in Firestore
+                            val preservedLocalUri = existing?.localUri
+                            val preservedIsStarred = existing?.isStarred ?: false
+
                             val message = Message(
                                 id = raw.id,
                                 chatId = raw.chatId,
@@ -179,6 +183,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
                                 mediaUrl = raw.mediaUrl,
                                 mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                                localUri = preservedLocalUri,
+                                isStarred = preservedIsStarred,
                                 status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
                                 replyToId = raw.replyToId,
                                 timestamp = raw.timestamp,
