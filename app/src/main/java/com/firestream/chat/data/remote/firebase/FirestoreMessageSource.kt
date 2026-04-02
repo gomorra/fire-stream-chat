@@ -353,11 +353,10 @@ class FirestoreMessageSource @Inject constructor(
         chatId: String,
         senderId: String,
         listId: String,
-        listTitle: String,
+        content: String,
         timestamp: Long,
         listDiff: Map<String, Any?>? = null
     ): String {
-        val content = "$LIST_CONTENT: $listTitle"
         val data = hashMapOf(
             "senderId" to senderId,
             "content" to content,

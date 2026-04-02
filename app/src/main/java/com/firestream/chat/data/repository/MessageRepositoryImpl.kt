@@ -820,7 +820,7 @@ class MessageRepositoryImpl @Inject constructor(
                 chatId = chatId,
                 senderId = senderId,
                 listId = listId,
-                listTitle = listTitle,
+                content = content,
                 timestamp = timestamp,
                 listDiff = listDiff?.toMap()
             )
