@@ -30,7 +30,9 @@ import org.junit.Test
 class ListsViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
-    private val listRepository = mockk<ListRepository>()
+    private val listRepository = mockk<ListRepository> {
+        every { observeList(any()) } returns flowOf(null)
+    }
     private val chatRepository = mockk<ChatRepository>()
     private val authSource = mockk<FirebaseAuthSource>()
     private val userRepository = mockk<UserRepository>()

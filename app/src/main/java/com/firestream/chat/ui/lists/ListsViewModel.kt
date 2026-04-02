@@ -155,6 +155,10 @@ class ListsViewModel @Inject constructor(
         )
     }
 
+    // Individual document listeners for live unshare detection — direct document
+    // listeners fire much faster than the compound observeMyLists query propagates.
+    private val observedListIds = mutableSetOf<String>()
+
     private fun observeLists() {
         viewModelScope.launch {
             listRepository.observeMyLists()
@@ -168,7 +172,21 @@ class ListsViewModel @Inject constructor(
                         isLoading = false
                     )
                     resolveParticipants(lists)
+                    ensureListDocumentObservers(lists)
                 }
+        }
+    }
+
+    private fun ensureListDocumentObservers(lists: List<ListData>) {
+        lists.forEach { list ->
+            if (list.id !in observedListIds) {
+                observedListIds.add(list.id)
+                viewModelScope.launch {
+                    // Subscribe to the document — observeList's non-participant
+                    // check deletes from Room, which triggers getListsForUser to re-emit.
+                    listRepository.observeList(list.id).catch { }.collect { }
+                }
+            }
         }
     }
 
