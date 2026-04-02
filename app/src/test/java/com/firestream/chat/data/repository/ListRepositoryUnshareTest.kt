@@ -41,7 +41,11 @@ class ListRepositoryUnshareTest {
 
     private val listDao = mockk<ListDao>(relaxed = true)
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val listSource = mockk<FirestoreListSource>()
+    private val listSource = mockk<FirestoreListSource> {
+        // observeMyLists is called by ensureListSyncRunning() inside observeList();
+        // return an empty flow so the retry loop never interferes with test assertions.
+        every { observeMyLists(any()) } returns flowOf(emptyList())
+    }
     private val historySource = mockk<FirestoreListHistorySource>(relaxed = true)
     private val authSource = mockk<FirebaseAuthSource>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()

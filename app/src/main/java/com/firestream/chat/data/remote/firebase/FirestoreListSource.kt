@@ -167,12 +167,6 @@ class FirestoreListSource @Inject constructor(
         listsCollection.document(listId).update(updates).await()
     }
 
-    suspend fun removeSharedChatId(listId: String, chatId: String) {
-        listsCollection.document(listId).update(
-            "sharedChatIds", FieldValue.arrayRemove(chatId)
-        ).await()
-    }
-
     suspend fun updateListType(listId: String, type: ListType) {
         listsCollection.document(listId).update(
             mapOf(

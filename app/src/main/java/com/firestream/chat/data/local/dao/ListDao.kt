@@ -32,9 +32,6 @@ interface ListDao {
     @Query("DELETE FROM lists WHERE id = :listId")
     suspend fun delete(listId: String)
 
-    @Query("DELETE FROM lists WHERE id NOT IN (:ids)")
-    suspend fun deleteExcept(ids: List<String>)
-
     @Query("UPDATE lists SET items = :itemsJson, updatedAt = :updatedAt WHERE id = :listId")
     suspend fun updateItems(listId: String, itemsJson: String, updatedAt: Long)
 

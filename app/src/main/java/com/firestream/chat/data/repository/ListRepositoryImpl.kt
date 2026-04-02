@@ -14,7 +14,6 @@ import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
-
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -23,6 +22,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -320,6 +320,8 @@ class ListRepositoryImpl @Inject constructor(
                 }
             } catch (_: Exception) { }
         }
+        // Keep the channel open so the launched coroutine can keep emitting.
+        awaitClose()
     }
 
     override fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> =

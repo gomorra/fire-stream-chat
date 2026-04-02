@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -135,7 +136,7 @@ class ListDetailViewModelTest {
         viewModel.deleteList()
         runCurrent()
 
-        assert(viewModel.uiState.value.isDeleted)
+        assertTrue(viewModel.uiState.value.isDeleted)
         coVerify(exactly = 1) { listRepository.deleteList("list1") }
     }
 }
