@@ -7,7 +7,7 @@ This document provides a detailed specification and architectural overview of th
 ### Core Messaging
 
 - **1-on-1 Chat**: Text messaging with real-time syncing.
-- **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed. Local-first media pipeline: images are compressed (`ImageCompressor`), stored locally (`MediaFileManager` at `filesDir/media/{chatId}/`), displayed immediately from local files, and uploaded to Firebase Storage with a progress overlay. `MediaBackfillWorker` runs on first launch to download existing media. Full quality opt-in via DataStore preference.
+- **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed. Local-first media pipeline: images are compressed (`ImageCompressor`), stored locally (`MediaFileManager` at `filesDir/media/{chatId}/`), displayed immediately from local files, and uploaded to Firebase Storage with a progress overlay. `MediaBackfillWorker` runs on first launch to download existing media. Full quality opt-in via DataStore preference. **Image Preview with Caption**: Gallery/camera image selection opens a fullscreen preview screen (`ImagePreviewScreen`) with pinch-to-zoom and an optional caption text field before sending (WhatsApp-style). Captions are stored in the message `content` field and displayed below the image in message bubbles. Chat list previews show `📷 caption` for captioned images.
 - **End-to-End Encryption (E2EE)**: All messages are encrypted natively on the client device using the **Signal Protocol** before transmission. Encryption is disabled in debug builds (`BuildConfig.DEBUG` guard) — messages are sent as plaintext to avoid key-loss issues during development.
 - **Read Receipts Status**:
   - **Sent** (Single gray tick): Message reached the server.
@@ -173,7 +173,7 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 23 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
+- **ChatScreen** is split into 24 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -787,7 +787,8 @@ com.firestream.chat/
 │   │                            # ChatPollManager, ChatSearchManager, ChatMessageActions,
 │   │                            # ChatMessageSender, ChatMessageLoader, ChatInfoManager,
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
-│   │                            # FullscreenImageViewer, ForwardChatPicker,
+│   │                            # FullscreenImageViewer, ImagePreviewScreen,
+│   │                            # ForwardChatPicker,
 │   │                            # EmojiHandlerPanel, EmojiSearchData,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
 │   │                            # SharedMediaScreen, SharedMediaViewModel,
