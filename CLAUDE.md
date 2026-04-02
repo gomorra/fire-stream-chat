@@ -80,7 +80,7 @@ This must appear before any code changes are made for that step.
 
 ### Post-step code review
 
-**After each phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
+**After each significant phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
 1. `./gradlew test` — unit tests must pass
 2. `./gradlew assembleDebug` — build must be clean
 3. `/simplify` — spawn a **Sonnet sub-agent** (`Agent` tool with `model: "sonnet"`) to review changed code for quality and fix issues.
