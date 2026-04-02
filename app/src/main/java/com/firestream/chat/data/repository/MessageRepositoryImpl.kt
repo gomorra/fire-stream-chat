@@ -38,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import android.util.Log
 import org.json.JSONObject
 import com.firestream.chat.BuildConfig
 import java.io.File
@@ -533,23 +534,23 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     override suspend fun sendVoiceMessage(chatId: String, uri: Uri, recipientId: String, durationSeconds: Int): Result<Message> {
+        val senderId = authSource.currentUserId ?: return Result.failure(Exception(ERR_NOT_AUTHENTICATED))
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        val optimisticMessage = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = VOICE_MESSAGE_CONTENT,
+            type = MessageType.VOICE,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            duration = durationSeconds
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
         return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
-
-            val optimisticMessage = Message(
-                id = tempId,
-                chatId = chatId,
-                senderId = senderId,
-                content = VOICE_MESSAGE_CONTENT,
-                type = MessageType.VOICE,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                duration = durationSeconds
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
-
             val downloadUrl = storageSource.uploadMedia(chatId, tempId, uri, "audio/aac")
 
             val remoteId: String
@@ -585,6 +586,7 @@ class MessageRepositoryImpl @Inject constructor(
 
             Result.success(sentMessage)
         } catch (e: Exception) {
+            messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name)
             Result.failure(e)
         }
     }
@@ -635,7 +637,9 @@ class MessageRepositoryImpl @Inject constructor(
             for (id in undeliveredIds) {
                 try {
                     messageSource.markDelivered(chatId, id, userId, now)
-                } catch (_: Exception) { }
+                } catch (e: Exception) {
+                    Log.w("MessageRepo", "Failed to mark message $id as delivered in chat $chatId", e)
+                }
             }
             Result.success(Unit)
         } catch (e: Exception) {
@@ -647,13 +651,17 @@ class MessageRepositoryImpl @Inject constructor(
         return try {
             val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val now = System.currentTimeMillis()
+            val succeeded = mutableListOf<String>()
             for (id in messageIds) {
                 try {
                     messageSource.markDelivered(chatId, id, userId, now)
+                    succeeded.add(id)
                 } catch (_: Exception) { }
             }
-            // Batch-update Room in one shot so the DAO flow emits only once
-            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
+            // Batch-update Room only for messages that succeeded in Firebase
+            if (succeeded.isNotEmpty()) {
+                messageDao.updateMessageStatusBatch(succeeded, MessageStatus.DELIVERED.name)
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -664,13 +672,17 @@ class MessageRepositoryImpl @Inject constructor(
         return try {
             val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
             val now = System.currentTimeMillis()
+            val succeeded = mutableListOf<String>()
             for (id in messageIds) {
                 try {
                     messageSource.markRead(chatId, id, userId, now)
+                    succeeded.add(id)
                 } catch (_: Exception) { }
             }
-            // Batch-update Room in one shot so the DAO flow emits only once
-            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
+            // Batch-update Room only for messages that succeeded in Firebase
+            if (succeeded.isNotEmpty()) {
+                messageDao.updateMessageStatusBatch(succeeded, MessageStatus.READ.name)
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
