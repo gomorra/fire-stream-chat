@@ -95,7 +95,12 @@ internal fun ListBubble(
                 )
                 diff != null -> DiffContent(
                     diff = diff,
-                    listTitle = listData?.title ?: message.content.removePrefix("📋 List: "),
+                    listTitle = listData?.title ?: message.content
+                        .removePrefix("📋 Shared list: ")
+                        .removePrefix("📋 Removed list: ")
+                        .removePrefix("📋 Deleted list: ")
+                        .removePrefix("📋 List updated: ")
+                        .removePrefix("📋 List: "),
                     listType = listData?.type ?: ListType.CHECKLIST,
                     textColor = textColor,
                     timestamp = message.timestamp
