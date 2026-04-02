@@ -57,6 +57,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -271,9 +272,12 @@ internal fun MessageBubble(
                             }
 
                             // Determine image source: prefer local file, fall back to remote URL.
-                            // File.exists() is I/O; memoize per localUri so it only runs once per unique path.
-                            val localFileExists = remember(message.localUri) {
-                                message.localUri != null && File(message.localUri).exists()
+                            // File.exists() runs on IO dispatcher to avoid blocking composition.
+                            val localFileExists by produceState(initialValue = false, message.localUri) {
+                                value = message.localUri != null &&
+                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        File(message.localUri!!).exists()
+                                    }
                             }
                             val imageModel: Any? = when {
                                 localFileExists -> File(message.localUri!!)
