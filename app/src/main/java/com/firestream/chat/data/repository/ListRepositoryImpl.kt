@@ -52,11 +52,15 @@ class ListRepositoryImpl @Inject constructor(
         val userId = authSource.currentUserId ?: return
         if (listSyncJob?.isActive == true) return
         listSyncJob = historyScope.launch {
-            try {
-                listSource.observeMyLists(userId).collectLatest { lists ->
-                    listDao.syncForUser(lists.map { ListEntity.fromDomain(it) }, userId)
-                }
-            } catch (_: Exception) { }
+            while (coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
+                try {
+                    listSource.observeMyLists(userId).collectLatest { lists ->
+                        listDao.syncForUser(lists.map { ListEntity.fromDomain(it) }, userId)
+                    }
+                } catch (_: Exception) { }
+                // If the flow completes (Firestore error or disconnect), retry after a short delay
+                kotlinx.coroutines.delay(3000)
+            }
         }
     }
 

@@ -7,7 +7,6 @@ import com.firestream.chat.domain.model.ListType
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
-import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -52,7 +51,6 @@ class FirestoreListSource @Inject constructor(
     fun observeMyLists(userId: String): Flow<List<ListData>> = callbackFlow {
         val listener: ListenerRegistration = listsCollection
             .whereArrayContains("participants", userId)
-            .orderBy("updatedAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
                     close(error)
