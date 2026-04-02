@@ -13,8 +13,8 @@ interface MessageDao {
 
     @Transaction
     suspend fun replaceMessage(oldId: String, newMessage: MessageEntity) {
-        deleteMessage(oldId)
         insertMessage(newMessage)
+        deleteMessage(oldId)
     }
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
     fun getMessagesByChatId(chatId: String): Flow<List<MessageEntity>>
