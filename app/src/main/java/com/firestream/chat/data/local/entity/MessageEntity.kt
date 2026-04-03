@@ -135,6 +135,8 @@ data class MessageEntity(
                 if (diff.edited.isNotEmpty()) put("edited", JSONArray(diff.edited))
                 if (diff.titleChanged != null) put("titleChanged", diff.titleChanged)
                 if (diff.deleted) put("deleted", true)
+                if (diff.unshared) put("unshared", true)
+                if (diff.shared) put("shared", true)
             }.toString()
         }
 
@@ -148,7 +150,9 @@ data class MessageEntity(
                     unchecked = jsonArrayToStringList(obj.optJSONArray("unchecked")),
                     edited = jsonArrayToStringList(obj.optJSONArray("edited")),
                     titleChanged = obj.optString("titleChanged", null).takeIf { it != "null" },
-                    deleted = obj.optBoolean("deleted", false)
+                    deleted = obj.optBoolean("deleted", false),
+                    unshared = obj.optBoolean("unshared", false),
+                    shared = obj.optBoolean("shared", false)
                 )
             } catch (_: Exception) {
                 null
