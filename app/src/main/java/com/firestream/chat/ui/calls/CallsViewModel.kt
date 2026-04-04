@@ -12,7 +12,6 @@ import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -133,7 +132,6 @@ class CallsViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
-            delay(500)
             try {
                 val contacts = contactRepository.getContacts().first()
                 _uiState.value = _uiState.value.copy(

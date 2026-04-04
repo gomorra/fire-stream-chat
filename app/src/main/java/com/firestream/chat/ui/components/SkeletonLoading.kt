@@ -61,6 +61,7 @@ fun Modifier.shimmer(): Modifier = composed {
 
 @Composable
 fun SkeletonChatListItem(modifier: Modifier = Modifier) {
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -71,7 +72,7 @@ fun SkeletonChatListItem(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .size(52.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(skeletonColor)
                 .shimmer()
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -81,7 +82,7 @@ fun SkeletonChatListItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.4f)
                     .height(14.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
             Spacer(modifier = Modifier.height(8.dp))
@@ -90,7 +91,7 @@ fun SkeletonChatListItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.65f)
                     .height(12.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
         }
@@ -100,7 +101,7 @@ fun SkeletonChatListItem(modifier: Modifier = Modifier) {
                 .width(32.dp)
                 .height(10.dp)
                 .clip(RoundedCornerShape(4.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(skeletonColor)
                 .shimmer()
         )
     }
@@ -108,6 +109,7 @@ fun SkeletonChatListItem(modifier: Modifier = Modifier) {
 
 @Composable
 fun SkeletonContactItem(modifier: Modifier = Modifier) {
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -118,7 +120,7 @@ fun SkeletonContactItem(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(skeletonColor)
                 .shimmer()
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -128,7 +130,7 @@ fun SkeletonContactItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.45f)
                     .height(14.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
             Spacer(modifier = Modifier.height(6.dp))
@@ -137,7 +139,7 @@ fun SkeletonContactItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.3f)
                     .height(12.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
         }
@@ -146,6 +148,7 @@ fun SkeletonContactItem(modifier: Modifier = Modifier) {
 
 @Composable
 fun SkeletonCallItem(modifier: Modifier = Modifier) {
+    val skeletonColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -156,7 +159,7 @@ fun SkeletonCallItem(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .size(48.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(skeletonColor)
                 .shimmer()
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -166,7 +169,7 @@ fun SkeletonCallItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.5f)
                     .height(14.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
             Spacer(modifier = Modifier.height(6.dp))
@@ -175,7 +178,7 @@ fun SkeletonCallItem(modifier: Modifier = Modifier) {
                     .fillMaxWidth(0.35f)
                     .height(12.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    .background(skeletonColor)
                     .shimmer()
             )
         }
@@ -184,7 +187,7 @@ fun SkeletonCallItem(modifier: Modifier = Modifier) {
             modifier = Modifier
                 .size(24.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .background(skeletonColor)
                 .shimmer()
         )
     }

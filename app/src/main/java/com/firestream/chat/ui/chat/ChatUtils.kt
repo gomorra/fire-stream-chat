@@ -73,14 +73,10 @@ internal fun formatDateSeparator(timestamp: Long): String {
     val msgCal = Calendar.getInstance().apply { timeInMillis = timestamp }
     val today = Calendar.getInstance()
 
-    fun sameDay(a: Calendar, b: Calendar) =
-        a.get(Calendar.YEAR) == b.get(Calendar.YEAR) &&
-            a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
-
-    if (sameDay(today, msgCal)) return "Today"
+    if (isSameDay(today.timeInMillis, msgCal.timeInMillis)) return "Today"
 
     val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
-    if (sameDay(yesterday, msgCal)) return "Yesterday"
+    if (isSameDay(yesterday.timeInMillis, msgCal.timeInMillis)) return "Yesterday"
 
     val startOfThisWeek = Calendar.getInstance().apply {
         firstDayOfWeek = Calendar.MONDAY

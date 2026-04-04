@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -67,8 +68,10 @@ fun ChatListItem(
         ?: chat.name ?: "Chat"
     val avatarUrl = recipientId?.let { contacts[it]?.avatarUrl } ?: chat.avatarUrl
     val localAvatarPath = recipientId?.let { contacts[it]?.localAvatarPath } ?: chat.localAvatarPath
-    val isMuted = chat.muteUntil == Long.MAX_VALUE ||
+    val isMuted = remember(chat.muteUntil) {
+        chat.muteUntil == Long.MAX_VALUE ||
             (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
+    }
 
     Row(
         modifier = modifier

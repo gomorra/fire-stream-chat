@@ -265,7 +265,6 @@ class ChatListViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
-            delay(500)
             syncContacts()
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }

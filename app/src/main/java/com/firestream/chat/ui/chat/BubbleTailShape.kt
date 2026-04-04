@@ -44,8 +44,8 @@ class BubbleTailShape(
                 quadraticTo(size.width, 0f, size.width, cr)
                 // Right edge down to tail junction
                 lineTo(size.width, bodyBottom - cr)
-                // Bottom-right: instead of a rounded corner, flow into the tail
-                quadraticTo(size.width, bodyBottom, size.width, bodyBottom)
+                // Bottom-right: sharp corner into the tail
+                lineTo(size.width, bodyBottom)
                 // Tail curves outward and down
                 quadraticTo(size.width + tw * 0.3f, bodyBottom + th * 0.4f, size.width + tw, size.height)
                 // Tail curves back inward to the body bottom edge
