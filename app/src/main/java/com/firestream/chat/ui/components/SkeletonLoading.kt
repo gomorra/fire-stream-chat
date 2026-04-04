@@ -43,13 +43,14 @@ fun Modifier.shimmer(): Modifier = composed {
         label = "shimmerTranslate"
     )
 
+    // Allocate colors list once per composition, not on every draw call.
+    val shimmerColors = listOf(
+        Color.Transparent,
+        Color.White.copy(alpha = 0.3f),
+        Color.Transparent
+    )
     this.drawWithContent {
         drawContent()
-        val shimmerColors = listOf(
-            Color.Transparent,
-            Color.White.copy(alpha = 0.3f),
-            Color.Transparent
-        )
         val brush = Brush.linearGradient(
             colors = shimmerColors,
             start = Offset(size.width * translateAnim, 0f),

@@ -27,7 +27,7 @@ import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -172,7 +172,7 @@ fun ChatListItem(
                         if (isMuted) {
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
-                                imageVector = Icons.Default.VolumeOff,
+                                imageVector = Icons.AutoMirrored.Filled.VolumeOff,
                                 contentDescription = "Muted",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(14.dp)
@@ -215,14 +215,18 @@ fun ChatListItem(
     }
 }
 
+private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+private val dayFormat = SimpleDateFormat("EEE", Locale.getDefault())
+private val dateFormat = SimpleDateFormat("dd/MM/yy", Locale.getDefault())
+
 private fun formatTime(timestamp: Long): String {
     val now = System.currentTimeMillis()
     val diff = now - timestamp
     val oneDay = 24 * 60 * 60 * 1000L
 
     return when {
-        diff < oneDay -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
-        diff < 7 * oneDay -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
-        else -> SimpleDateFormat("dd/MM/yy", Locale.getDefault()).format(Date(timestamp))
+        diff < oneDay -> timeFormat.format(Date(timestamp))
+        diff < 7 * oneDay -> dayFormat.format(Date(timestamp))
+        else -> dateFormat.format(Date(timestamp))
     }
 }

@@ -39,7 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
-import androidx.compose.material.icons.filled.CallMissed
+import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
@@ -48,7 +48,7 @@ import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Reply
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
@@ -107,7 +107,7 @@ import kotlin.math.roundToInt
 internal const val EMOJI_INLINE_SCALE = 1.3f  // inline emoji: 30% larger than the text
 internal const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger than the text
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
 @Composable
 internal fun MessageBubble(
     message: Message,
@@ -155,9 +155,11 @@ internal fun MessageBubble(
     var hapticFired by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val groupedReactions = message.reactions.values
-        .groupBy { it }
-        .mapValues { it.value.size }
+    val groupedReactions = remember(message.reactions) {
+        message.reactions.values
+            .groupBy { it }
+            .mapValues { it.value.size }
+    }
 
     Column(
         modifier = Modifier
@@ -392,7 +394,7 @@ internal fun MessageBubble(
                             val isDeclined = !isOwnMessage && endReason == "declined"
                             val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
                             val callIcon = when {
-                                isMissed || isDeclined -> Icons.Default.CallMissed
+                                isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed
                                 else -> Icons.Default.Call
                             }
                             val callLabel = when {
@@ -511,7 +513,7 @@ internal fun MessageBubble(
                         }
                     }
 
-                    if (groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST) {
+                    if (showTail) {
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         if (message.type != MessageType.CALL) {
                             Text(
@@ -573,7 +575,7 @@ internal fun MessageBubble(
                         onClick = { showMenu = false; onReplyClick() },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(Icons.Default.Reply, null, modifier = Modifier.padding(end = 4.dp))
+                        Icon(Icons.AutoMirrored.Filled.Reply, null, modifier = Modifier.padding(end = 4.dp))
                         Text("Reply")
                     }
                     FilledTonalButton(
@@ -643,7 +645,7 @@ internal fun MessageBubble(
                 offset = displayOffset,
                 thresholdStart = 30f,
                 thresholdRange = 50f,
-                icon = Icons.Default.Reply,
+                icon = Icons.AutoMirrored.Filled.Reply,
                 modifier = Modifier
                     .align(Alignment.CenterStart)
                     .offset(x = (-32).dp)
