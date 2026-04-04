@@ -17,6 +17,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -55,6 +58,8 @@ fun ChatListItem(
         ?: chat.name ?: "Chat"
     val avatarUrl = recipientId?.let { contacts[it]?.avatarUrl } ?: chat.avatarUrl
     val localAvatarPath = recipientId?.let { contacts[it]?.localAvatarPath } ?: chat.localAvatarPath
+    val isMuted = chat.muteUntil == Long.MAX_VALUE ||
+            (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
 
     Row(
         modifier = modifier
@@ -96,12 +101,24 @@ fun ChatListItem(
         ) {
             // Name + message preview (takes all remaining space)
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (chat.isPinned) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.PushPin,
+                            contentDescription = "Pinned",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
 
                 val someoneElseTyping = chat.typingUserIds.any { it != currentUserId }
                 if (someoneElseTyping) {
@@ -137,16 +154,28 @@ fun ChatListItem(
                 verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 chat.lastMessage?.timestamp?.let { timestamp ->
-                    Text(
-                        text = formatTime(timestamp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = formatTime(timestamp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        if (isMuted) {
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.VolumeOff,
+                                contentDescription = "Muted",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
                 }
                 if (chat.unreadCount > 0) {
                     Surface(
                         shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = if (isMuted) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
