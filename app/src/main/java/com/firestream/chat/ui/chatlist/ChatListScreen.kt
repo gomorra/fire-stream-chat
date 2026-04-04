@@ -28,6 +28,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -239,41 +240,66 @@ fun ChatListScreen(
                 }
             }
 
-            when {
-                uiState.isLoading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) { CircularProgressIndicator() }
-                }
+            PullToRefreshBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                when {
+                    uiState.isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) { CircularProgressIndicator() }
+                    }
 
-                activeChats.isEmpty() && archivedChats.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = stringResource(R.string.no_chats_yet),
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = stringResource(R.string.start_chatting),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
+                    activeChats.isEmpty() && archivedChats.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = stringResource(R.string.no_chats_yet),
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                Text(
+                                    text = stringResource(R.string.start_chatting),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                         }
                     }
-                }
 
-                else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        if (pinnedChats.isNotEmpty()) {
-                            stickyHeader(key = "header_pinned") {
-                                ChatSectionHeader("Pinned")
+                    else -> {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            if (pinnedChats.isNotEmpty()) {
+                                stickyHeader(key = "header_pinned") {
+                                    ChatSectionHeader("Pinned")
+                                }
+                                items(pinnedChats, key = { "pin_${it.id}" }) { chat ->
+                                    ChatItem(
+                                        chat = chat,
+                                        currentUserId = uiState.currentUserId,
+                                        contacts = uiState.contacts,
+                                        onlineUserIds = uiState.onlineUserIds,
+                                        onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                        onDelete = { viewModel.requestDeleteChat(chat.id) },
+                                        onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
+                                        onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
+                                        onMute = { viewModel.requestMuteChat(chat.id) }
+                                    )
+                                }
                             }
-                            items(pinnedChats, key = { "pin_${it.id}" }) { chat ->
+
+                            if (regularChats.isNotEmpty() && pinnedChats.isNotEmpty()) {
+                                stickyHeader(key = "header_chats") {
+                                    ChatSectionHeader("Chats")
+                                }
+                            }
+                            items(regularChats, key = { it.id }) { chat ->
                                 ChatItem(
                                     chat = chat,
                                     currentUserId = uiState.currentUserId,
@@ -287,26 +313,6 @@ fun ChatListScreen(
                                 )
                             }
                         }
-
-                        if (regularChats.isNotEmpty() && pinnedChats.isNotEmpty()) {
-                            stickyHeader(key = "header_chats") {
-                                ChatSectionHeader("Chats")
-                            }
-                        }
-                        items(regularChats, key = { it.id }) { chat ->
-                            ChatItem(
-                                chat = chat,
-                                currentUserId = uiState.currentUserId,
-                                contacts = uiState.contacts,
-                                onlineUserIds = uiState.onlineUserIds,
-                                onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
-                                onDelete = { viewModel.requestDeleteChat(chat.id) },
-                                onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
-                                onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
-                                onMute = { viewModel.requestMuteChat(chat.id) }
-                            )
-                        }
-
                     }
                 }
             }

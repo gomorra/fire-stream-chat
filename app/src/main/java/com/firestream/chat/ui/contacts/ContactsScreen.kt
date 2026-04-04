@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -100,42 +101,48 @@ fun ContactsScreen(
                 singleLine = true
             )
 
-            when {
-                uiState.isLoading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator()
+            PullToRefreshBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.fillMaxSize()
+            ) {
+                when {
+                    uiState.isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
                     }
-                }
 
-                uiState.filteredContacts.isEmpty() -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = if (uiState.searchQuery.isBlank()) "No contacts found"
-                            else "No results for \"${uiState.searchQuery}\"",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
-                        items(uiState.filteredContacts, key = { it.uid }) { contact ->
-                            ContactItem(
-                                contact = contact,
-                                onClick = {
-                                    viewModel.startChat(contact) { chatId, recipientId ->
-                                        onContactClick(chatId, recipientId)
-                                    }
-                                }
+                    uiState.filteredContacts.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (uiState.searchQuery.isBlank()) "No contacts found"
+                                else "No results for \"${uiState.searchQuery}\"",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                        }
+                    }
+
+                    else -> {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            items(uiState.filteredContacts, key = { it.uid }) { contact ->
+                                ContactItem(
+                                    contact = contact,
+                                    onClick = {
+                                        viewModel.startChat(contact) { chatId, recipientId ->
+                                            onContactClick(chatId, recipientId)
+                                        }
+                                    }
+                                )
+                                HorizontalDivider(modifier = Modifier.padding(start = 72.dp))
+                            }
                         }
                     }
                 }

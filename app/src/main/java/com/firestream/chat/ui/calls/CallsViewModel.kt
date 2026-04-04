@@ -12,18 +12,21 @@ import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class CallsUiState(
     val entries: List<CallLogEntry> = emptyList(),
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val error: String? = null,
     val contacts: Map<String, Contact> = emptyMap()
 )
@@ -124,6 +127,43 @@ class CallsViewModel @Inject constructor(
                         )
                     }
             }
+        }
+    }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            delay(500)
+            try {
+                val contacts = contactRepository.getContacts().first()
+                _uiState.value = _uiState.value.copy(
+                    contacts = contacts.associateBy { it.uid }
+                )
+                val messages = messageRepository.getCallLog().first()
+                val chats = chatRepository.getChats().first()
+                val chatMap = chats.associateBy { it.id }
+                val entries = messages.mapNotNull { message ->
+                    val chat = chatMap[message.chatId] ?: return@mapNotNull null
+                    val otherPartyId = chat.participants.firstOrNull { it != currentUserId }
+                        ?: return@mapNotNull null
+                    val contact = _uiState.value.contacts[otherPartyId]
+                    val displayName = contact?.displayName?.takeIf { it.isNotBlank() } ?: "Unknown"
+                    CallLogEntry(
+                        messageId = message.id,
+                        chatId = message.chatId,
+                        otherPartyId = otherPartyId,
+                        displayName = displayName,
+                        avatarUrl = contact?.avatarUrl,
+                        direction = deriveDirection(message.senderId, message.content),
+                        durationSeconds = message.duration,
+                        timestamp = message.timestamp
+                    )
+                }
+                _uiState.value = _uiState.value.copy(entries = entries)
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(error = e.message)
+            }
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
         }
     }
 

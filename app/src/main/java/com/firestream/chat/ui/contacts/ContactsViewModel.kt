@@ -6,6 +6,7 @@ import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +18,7 @@ data class ContactsUiState(
     val filteredContacts: List<Contact> = emptyList(),
     val searchQuery: String = "",
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val error: String? = null
 )
 
@@ -76,6 +78,28 @@ class ContactsViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(error = e.message)
                 }
+        }
+    }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            delay(500)
+            contactRepository.syncContacts()
+                .onSuccess { contacts ->
+                    _uiState.value = _uiState.value.copy(
+                        contacts = contacts,
+                        filteredContacts = if (_uiState.value.searchQuery.isBlank()) contacts
+                        else contacts.filter { c ->
+                            c.displayName.contains(_uiState.value.searchQuery, ignoreCase = true) ||
+                                c.phoneNumber.contains(_uiState.value.searchQuery)
+                        }
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(error = e.message)
+                }
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
         }
     }
 

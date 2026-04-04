@@ -26,6 +26,7 @@ import javax.inject.Inject
 data class ChatListUiState(
     val chats: List<Chat> = emptyList(),
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val error: String? = null,
     val currentUserId: String = "",
     val pendingDeleteChatId: String? = null,
@@ -259,6 +260,15 @@ class ChatListViewModel @Inject constructor(
             searchResults = emptyList(),
             isSearchActive = false
         )
+    }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            delay(500)
+            syncContacts()
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
+        }
     }
 
     fun clearError() {
