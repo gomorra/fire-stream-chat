@@ -8,8 +8,15 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -520,28 +527,38 @@ internal fun MessageBubble(
                             } else {
                                 message.status
                             }
-                            Icon(
-                                imageVector = when (displayStatus) {
-                                    MessageStatus.SENDING -> Icons.Default.Schedule
-                                    MessageStatus.SENT -> Icons.Default.Check
-                                    MessageStatus.DELIVERED -> Icons.Default.DoneAll
-                                    MessageStatus.READ -> Icons.Default.DoneAll
-                                    MessageStatus.FAILED -> Icons.Default.ErrorOutline
+                            AnimatedContent(
+                                targetState = displayStatus,
+                                transitionSpec = {
+                                    (fadeIn(animationSpec = tween(200)) +
+                                        scaleIn(initialScale = 0.8f, animationSpec = tween(200)))
+                                        .togetherWith(fadeOut(animationSpec = tween(150)))
                                 },
-                                contentDescription = when (displayStatus) {
-                                    MessageStatus.SENDING -> "Sending"
-                                    MessageStatus.SENT -> "Sent"
-                                    MessageStatus.DELIVERED -> "Delivered"
-                                    MessageStatus.READ -> "Read"
-                                    MessageStatus.FAILED -> "Failed"
-                                },
-                                tint = when (displayStatus) {
-                                    MessageStatus.READ -> ReadReceiptBlue
-                                    MessageStatus.FAILED -> MaterialTheme.colorScheme.error
-                                    else -> textColor.copy(alpha = 0.7f)
-                                },
-                                modifier = Modifier.size(16.dp)
-                            )
+                                label = "receiptStatus"
+                            ) { status ->
+                                Icon(
+                                    imageVector = when (status) {
+                                        MessageStatus.SENDING -> Icons.Default.Schedule
+                                        MessageStatus.SENT -> Icons.Default.Check
+                                        MessageStatus.DELIVERED -> Icons.Default.DoneAll
+                                        MessageStatus.READ -> Icons.Default.DoneAll
+                                        MessageStatus.FAILED -> Icons.Default.ErrorOutline
+                                    },
+                                    contentDescription = when (status) {
+                                        MessageStatus.SENDING -> "Sending"
+                                        MessageStatus.SENT -> "Sent"
+                                        MessageStatus.DELIVERED -> "Delivered"
+                                        MessageStatus.READ -> "Read"
+                                        MessageStatus.FAILED -> "Failed"
+                                    },
+                                    tint = when (status) {
+                                        MessageStatus.READ -> ReadReceiptBlue
+                                        MessageStatus.FAILED -> MaterialTheme.colorScheme.error
+                                        else -> textColor.copy(alpha = 0.7f)
+                                    },
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                     }
                     }

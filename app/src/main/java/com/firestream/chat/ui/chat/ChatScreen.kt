@@ -679,7 +679,7 @@ fun ChatScreen(
                                     }?.value
                                 } else null
 
-                                Column(modifier = Modifier.padding(top = topPadding)) {
+                                Column(modifier = Modifier.animateItem().padding(top = topPadding)) {
                                 if (message.type == MessageType.POLL) {
                                     PollBubble(
                                         message = message,
