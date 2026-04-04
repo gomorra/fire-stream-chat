@@ -1,5 +1,14 @@
 package com.firestream.chat.ui.chatlist
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -39,7 +48,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalAnimationApi::class)
 @Composable
 fun ChatListItem(
     chat: Chat,
@@ -171,19 +180,33 @@ fun ChatListItem(
                         }
                     }
                 }
-                if (chat.unreadCount > 0) {
-                    Surface(
-                        shape = CircleShape,
-                        color = if (isMuted) MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Text(
-                                text = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                color = MaterialTheme.colorScheme.onPrimary
+                AnimatedContent(
+                    targetState = chat.unreadCount,
+                    transitionSpec = {
+                        (scaleIn(
+                            initialScale = 0.8f,
+                            animationSpec = spring(
+                                dampingRatio = 0.4f,
+                                stiffness = Spring.StiffnessMedium
                             )
+                        ) + fadeIn()).togetherWith(scaleOut(targetScale = 0.8f) + fadeOut())
+                    },
+                    label = "unreadBadge"
+                ) { count ->
+                    if (count > 0) {
+                        Surface(
+                            shape = CircleShape,
+                            color = if (isMuted) MaterialTheme.colorScheme.onSurfaceVariant
+                                    else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    text = if (count > 99) "99+" else count.toString(),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                    color = MaterialTheme.colorScheme.onPrimary
+                                )
+                            }
                         }
                     }
                 }
