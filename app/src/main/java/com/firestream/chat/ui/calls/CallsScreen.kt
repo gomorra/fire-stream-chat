@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import com.firestream.chat.ui.components.SkeletonCallItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -104,7 +105,7 @@ fun CallsScreen(
         ) {
             when {
                 uiState.isLoading -> {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    Column { repeat(8) { SkeletonCallItem() } }
                 }
                 uiState.entries.isEmpty() -> {
                     EmptyCallsState(modifier = Modifier.align(Alignment.Center))

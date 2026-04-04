@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import com.firestream.chat.ui.components.SkeletonChatListItem
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -247,10 +248,7 @@ fun ChatListScreen(
             ) {
                 when {
                     uiState.isLoading -> {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) { CircularProgressIndicator() }
+                        Column { repeat(8) { SkeletonChatListItem() } }
                     }
 
                     activeChats.isEmpty() && archivedChats.isEmpty() -> {
