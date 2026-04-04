@@ -16,6 +16,7 @@ import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -31,6 +32,7 @@ import javax.inject.Inject
 class FCMService : FirebaseMessagingService() {
 
     @Inject lateinit var authRepository: AuthRepository
+    @Inject lateinit var chatRepository: ChatRepository
     @Inject lateinit var messageRepository: MessageRepository
     @Inject lateinit var preferencesDataStore: PreferencesDataStore
     @Inject lateinit var callStateHolder: CallStateHolder
@@ -82,6 +84,15 @@ class FCMService : FirebaseMessagingService() {
                     val currentUserId = authRepository.currentUserId ?: return@launch
                     val isMentioned = mentions.contains(currentUserId) || mentions.contains("everyone")
                     if (!isMentioned) return@launch
+                }
+            }
+
+            // Suppress notification for muted chats
+            val chat = chatRepository.getChatById(chatId).getOrNull()
+            if (chat != null) {
+                val muteUntil = chat.muteUntil
+                if (muteUntil == Long.MAX_VALUE || (muteUntil > 0 && muteUntil > System.currentTimeMillis())) {
+                    return@launch
                 }
             }
 

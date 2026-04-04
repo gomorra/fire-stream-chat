@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +66,7 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.ui.lists.ListSortOption
 import com.firestream.chat.ui.chat.CreateListSheet
 import com.firestream.chat.ui.chat.ForwardChatPicker
+import com.firestream.chat.ui.components.SkeletonChatListItem
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -179,10 +181,14 @@ internal fun ListsScreen(
                 ) {}
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            PullToRefreshBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = { viewModel.refresh() },
+                modifier = Modifier.fillMaxSize()
+            ) {
                 when {
                     uiState.isLoading -> {
-                        CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                        Column { repeat(8) { SkeletonChatListItem() } }
                     }
                     uiState.lists.isEmpty() && uiState.searchQuery.isNotEmpty() -> {
                         Text(

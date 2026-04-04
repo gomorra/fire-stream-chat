@@ -44,6 +44,7 @@ data class ListsUiState(
     val sortOption: ListSortOption = ListSortOption.MODIFIED,
     val pinnedListIds: Set<String> = emptySet(),
     val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
     val error: String? = null,
     val searchQuery: String = "",
     val isSearchBarVisible: Boolean = false
@@ -74,6 +75,16 @@ class ListsViewModel @Inject constructor(
         observePinnedListIds()
         observeLists()
         observeChats()
+    }
+
+    fun refresh() {
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(isRefreshing = true)
+            kotlinx.coroutines.delay(500)
+            // Re-trigger list observation — the Flow will emit the latest data
+            observeLists()
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
+        }
     }
 
     private fun observePinnedListIds() {

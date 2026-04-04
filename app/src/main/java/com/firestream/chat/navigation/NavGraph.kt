@@ -1,5 +1,6 @@
 package com.firestream.chat.navigation
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -116,27 +117,27 @@ fun FireStreamNavGraph(
         startDestination = Routes.LOGIN,
         enterTransition = {
             slideInHorizontally(
-                initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(300)
-            ) + fadeIn(animationSpec = tween(300))
+                initialOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(350, easing = FastOutSlowInEasing))
         },
         exitTransition = {
             slideOutHorizontally(
-                targetOffsetX = { fullWidth -> -fullWidth / 3 },
-                animationSpec = tween(300)
-            ) + fadeOut(animationSpec = tween(300))
+                targetOffsetX = { fullWidth -> -(fullWidth * 0.08f).toInt() },
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing))
         },
         popEnterTransition = {
             slideInHorizontally(
-                initialOffsetX = { fullWidth -> -fullWidth / 3 },
-                animationSpec = tween(300)
-            ) + fadeIn(animationSpec = tween(300))
+                initialOffsetX = { fullWidth -> -(fullWidth * 0.08f).toInt() },
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
+            ) + fadeIn(animationSpec = tween(350, easing = FastOutSlowInEasing))
         },
         popExitTransition = {
             slideOutHorizontally(
-                targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(300)
-            ) + fadeOut(animationSpec = tween(300))
+                targetOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
+                animationSpec = tween(350, easing = FastOutSlowInEasing)
+            ) + fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing))
         }
     ) {
         composable(Routes.LOGIN) {
