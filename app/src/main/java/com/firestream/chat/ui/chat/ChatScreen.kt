@@ -108,7 +108,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.font.FontStyle
+import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -809,10 +809,8 @@ fun ChatScreen(
 
             // Typing indicator
             if (uiState.typingUserIds.isNotEmpty()) {
-                Text(
-                    text = "typing...",
-                    style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                TypingIndicator(
+                    dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
                 )
             }

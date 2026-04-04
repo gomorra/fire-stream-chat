@@ -36,13 +36,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
+import com.firestream.chat.ui.components.TypingIndicator
 import com.firestream.chat.ui.components.UserAvatar
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -131,12 +131,9 @@ fun ChatListItem(
 
                 val someoneElseTyping = chat.typingUserIds.any { it != currentUserId }
                 if (someoneElseTyping) {
-                    Text(
-                        text = "typing...",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                    TypingIndicator(
+                        dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 4.dp)
                     )
                 } else {
                     val lastMsg = chat.lastMessage
