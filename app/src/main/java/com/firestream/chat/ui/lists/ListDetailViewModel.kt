@@ -26,7 +26,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-private const val DEBOUNCE_MS = 15_000L
+private const val DEBOUNCE_MS = 10_000L
 
 data class ListDetailUiState(
     val listData: ListData? = null,

@@ -19,9 +19,21 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
+        debug {
+            packaging {
+                jniLibs {
+                    // Encryption is disabled in debug (BuildConfig.DEBUG guard) — exclude libsignal native lib (~70 MB)
+                    excludes += "**/libsignal_jni.so"
+                }
+            }
+        }
         release {
             signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
@@ -52,15 +64,6 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
         disable.add("NonNullableMutableLiveData")
-    }
-
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a") // real devices only; drop x86_64 emulator ABI for release
-            isUniversalApk = false
-        }
     }
 
     packaging {
