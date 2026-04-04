@@ -426,13 +426,14 @@ private fun ChatSectionHeader(title: String) {
     )
 }
 
+private val searchResultDateFormat = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
+
 @Composable
 private fun SearchResultItem(
     message: Message,
     onClick: () -> Unit
 ) {
-    val dateStr = SimpleDateFormat("MMM d, h:mm a", Locale.getDefault())
-        .format(Date(message.timestamp))
+    val dateStr = searchResultDateFormat.format(Date(message.timestamp))
     ListItem(
         headlineContent = {
             Text(

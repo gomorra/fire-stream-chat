@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.CallLogEntry
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
@@ -63,28 +64,35 @@ class CallsViewModel @Inject constructor(
         }
     }
 
+    private fun buildEntries(
+        messages: List<Message>,
+        chats: List<Chat>,
+        contacts: Map<String, Contact>
+    ): List<CallLogEntry> {
+        val chatMap = chats.associateBy { it.id }
+        return messages.mapNotNull { message ->
+            val chat = chatMap[message.chatId] ?: return@mapNotNull null
+            val otherPartyId = chat.participants.firstOrNull { it != currentUserId }
+                ?: return@mapNotNull null
+            val contact = contacts[otherPartyId]
+            val displayName = contact?.displayName?.takeIf { it.isNotBlank() } ?: "Unknown"
+            CallLogEntry(
+                messageId = message.id,
+                chatId = message.chatId,
+                otherPartyId = otherPartyId,
+                displayName = displayName,
+                avatarUrl = contact?.avatarUrl,
+                direction = deriveDirection(message.senderId, message.content),
+                durationSeconds = message.duration,
+                timestamp = message.timestamp
+            )
+        }
+    }
+
     private fun loadCallLog() {
         viewModelScope.launch {
             combine(messageRepository.getCallLog(), chatRepository.getChats()) { messages, chats ->
-                val chatMap = chats.associateBy { it.id }
-                messages.mapNotNull { message ->
-                    val chat = chatMap[message.chatId] ?: return@mapNotNull null
-                    val otherPartyId = chat.participants.firstOrNull { it != currentUserId }
-                        ?: return@mapNotNull null
-                    val contact = _uiState.value.contacts[otherPartyId]
-                    val displayName = contact?.displayName?.takeIf { it.isNotBlank() }
-                        ?: "Unknown"
-                    CallLogEntry(
-                        messageId = message.id,
-                        chatId = message.chatId,
-                        otherPartyId = otherPartyId,
-                        displayName = displayName,
-                        avatarUrl = contact?.avatarUrl,
-                        direction = deriveDirection(message.senderId, message.content),
-                        durationSeconds = message.duration,
-                        timestamp = message.timestamp
-                    )
-                }
+                buildEntries(messages, chats, _uiState.value.contacts)
             }
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
@@ -134,29 +142,11 @@ class CallsViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(isRefreshing = true)
             try {
                 val contacts = contactRepository.getContacts().first()
-                _uiState.value = _uiState.value.copy(
-                    contacts = contacts.associateBy { it.uid }
-                )
+                val contactMap = contacts.associateBy { it.uid }
+                _uiState.value = _uiState.value.copy(contacts = contactMap)
                 val messages = messageRepository.getCallLog().first()
                 val chats = chatRepository.getChats().first()
-                val chatMap = chats.associateBy { it.id }
-                val entries = messages.mapNotNull { message ->
-                    val chat = chatMap[message.chatId] ?: return@mapNotNull null
-                    val otherPartyId = chat.participants.firstOrNull { it != currentUserId }
-                        ?: return@mapNotNull null
-                    val contact = _uiState.value.contacts[otherPartyId]
-                    val displayName = contact?.displayName?.takeIf { it.isNotBlank() } ?: "Unknown"
-                    CallLogEntry(
-                        messageId = message.id,
-                        chatId = message.chatId,
-                        otherPartyId = otherPartyId,
-                        displayName = displayName,
-                        avatarUrl = contact?.avatarUrl,
-                        direction = deriveDirection(message.senderId, message.content),
-                        durationSeconds = message.duration,
-                        timestamp = message.timestamp
-                    )
-                }
+                val entries = buildEntries(messages, chats, contactMap)
                 _uiState.value = _uiState.value.copy(entries = entries)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(error = e.message)

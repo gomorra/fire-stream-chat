@@ -86,6 +86,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
@@ -134,6 +135,8 @@ import java.util.Locale
 
 // Max emoji size multiplier shown in the input field — keeps tall emoji from overflowing maxLines.
 private const val INPUT_EMOJI_SIZE_CAP = 2.0f
+
+private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -623,8 +626,7 @@ fun ChatScreen(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
-                                        .format(Date(message.timestamp)),
+                                    text = searchResultDateFormat.format(Date(message.timestamp)),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -644,12 +646,18 @@ fun ChatScreen(
                         }
                     }
                     else -> {
-                        // Scroll-to-bottom: show FAB when more than 2 screens from bottom
-                        val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                        // Scroll-to-bottom: show FAB when more than 2 screens from bottom.
+                        // derivedStateOf prevents recomposition on every scroll frame — the
+                        // boolean only changes when the FAB needs to appear or disappear.
                         val totalItems = uiState.messages.size
-                        val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-                        val showScrollToBottom = totalItems > 0 &&
-                            (totalItems - 1 - lastVisibleIndex) > visibleCount * 2
+                        val showScrollToBottom by remember(totalItems) {
+                            derivedStateOf {
+                                val visInfo = listState.layoutInfo.visibleItemsInfo
+                                val lastIdx = visInfo.lastOrNull()?.index ?: 0
+                                val visible = visInfo.size
+                                totalItems > 0 && (totalItems - 1 - lastIdx) > visible * 2
+                            }
+                        }
 
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         LazyColumn(
