@@ -654,14 +654,20 @@ fun ChatScreen(
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)
                         ) {
                             itemsIndexed(uiState.messages, key = { _, msg -> msg.id }) { index, message ->
                                 val showSeparator = index == 0 ||
                                     !isSameDay(message.timestamp, uiState.messages[index - 1].timestamp)
                                 if (showSeparator) {
                                     DateSeparator(formatDateSeparator(message.timestamp))
+                                }
+                                val prevMessage = if (index > 0) uiState.messages[index - 1] else null
+                                val nextMessage = if (index < uiState.messages.size - 1) uiState.messages[index + 1] else null
+                                val groupPosition = computeGroupPosition(message, prevMessage, nextMessage)
+                                val topPadding = when (groupPosition) {
+                                    GroupPosition.MIDDLE, GroupPosition.LAST -> 2.dp
+                                    else -> 4.dp
                                 }
                                 val isOwn = message.senderId == uiState.currentUserId
                                 val replyToMessage = message.replyToId?.let { id ->
@@ -673,6 +679,7 @@ fun ChatScreen(
                                     }?.value
                                 } else null
 
+                                Column(modifier = Modifier.padding(top = topPadding)) {
                                 if (message.type == MessageType.POLL) {
                                     PollBubble(
                                         message = message,
@@ -704,6 +711,7 @@ fun ChatScreen(
                                         MessageBubble(
                                             message = message,
                                             isOwnMessage = isOwn,
+                                            groupPosition = groupPosition,
                                             replyToMessage = replyToMessage,
                                             linkPreview = linkPreview,
                                             currentUserId = uiState.currentUserId,
@@ -775,6 +783,7 @@ fun ChatScreen(
                                         }
                                     }
                                 }
+                                } // Column with group spacing
                             }
                         }
 

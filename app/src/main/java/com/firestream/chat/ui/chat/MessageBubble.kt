@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
@@ -104,6 +105,7 @@ internal const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger t
 internal fun MessageBubble(
     message: Message,
     isOwnMessage: Boolean,
+    groupPosition: GroupPosition = GroupPosition.ALONE,
     replyToMessage: Message?,
     linkPreview: LinkPreview?,
     currentUserId: String,
@@ -127,6 +129,13 @@ internal fun MessageBubble(
     val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
     else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
+
+    val showTail = remember(groupPosition) {
+        groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST
+    }
+    val bubbleShape: Shape = remember(showTail, isOwnMessage) {
+        if (showTail) BubbleTailShape(isOwnMessage = isOwnMessage) else RoundedCornerShape(16.dp)
+    }
 
     var showMenu by remember { mutableStateOf(false) }
     // Direct state for drag tracking (no coroutine per pixel); Animatable only for spring-back
@@ -194,18 +203,18 @@ internal fun MessageBubble(
                     .widthIn(max = 280.dp)
                     .background(
                         color = bubbleColor,
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                            bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                        )
+                        shape = bubbleShape
                     )
                     .combinedClickable(
                         onClick = { if (message.type == MessageType.CALL) onCallClick?.invoke() },
                         onLongClick = { showMenu = true }
                     )
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(
+                        start = 12.dp,
+                        end = 12.dp,
+                        top = 8.dp,
+                        bottom = if (showTail) 16.dp else 8.dp
+                    )
             ) {
                 Column {
                     if (message.deletedAt != null) {
@@ -495,6 +504,7 @@ internal fun MessageBubble(
                         }
                     }
 
+                    if (groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST) {
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         if (message.type != MessageType.CALL) {
                             Text(
@@ -533,6 +543,7 @@ internal fun MessageBubble(
                                 modifier = Modifier.size(16.dp)
                             )
                         }
+                    }
                     }
 
                     } // end else (not deleted)
