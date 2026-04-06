@@ -65,7 +65,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
-import com.firestream.chat.ui.lists.ListSortOption
 import com.firestream.chat.ui.chat.CreateListSheet
 import com.firestream.chat.ui.chat.ForwardChatPicker
 import com.firestream.chat.ui.components.SkeletonChatListItem
@@ -93,6 +92,14 @@ internal fun ListsScreen(
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(uiState.isSearchBarVisible) {
         if (uiState.isSearchBarVisible) searchFocusRequester.requestFocus()
+    }
+
+    // Error feedback (e.g. Firestore write failures)
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearError()
+        }
     }
 
     // Snackbar from ViewModel (local delete)
@@ -387,6 +394,8 @@ private fun ListRow(
             AvatarStack(users = participants, overflow = overflow)
         }
 
+        val dateFormat = remember { SimpleDateFormat("MMM d", Locale.getDefault()) }
+        Spacer(modifier = Modifier.width(8.dp))
         if (isPinned) {
             Icon(
                 imageVector = Icons.Default.PushPin,
@@ -396,8 +405,6 @@ private fun ListRow(
             )
             Spacer(modifier = Modifier.width(4.dp))
         }
-        val dateFormat = remember { SimpleDateFormat("MMM d", Locale.getDefault()) }
-        Spacer(modifier = Modifier.width(8.dp))
         Text(
             text = dateFormat.format(Date(listData.updatedAt)),
             style = MaterialTheme.typography.labelSmall,
