@@ -133,7 +133,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned,
                                 mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight
+                                mediaHeight = raw.mediaHeight,
+                                latitude = raw.latitude,
+                                longitude = raw.longitude
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -204,7 +206,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned,
                                 mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight
+                                mediaHeight = raw.mediaHeight,
+                                latitude = raw.latitude,
+                                longitude = raw.longitude
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 

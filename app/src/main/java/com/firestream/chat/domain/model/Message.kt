@@ -37,5 +37,8 @@ data class Message(
     val listId: String? = null,
     val listDiff: ListDiff? = null,
     // Generic message pinning
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    // Location sharing
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )

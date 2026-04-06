@@ -46,7 +46,9 @@ data class RawFirestoreMessage(
     val listDiff: Map<String, Any?>? = null,
     val isPinned: Boolean = false,
     val mediaWidth: Int? = null,
-    val mediaHeight: Int? = null
+    val mediaHeight: Int? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 private const val POLL_CONTENT = "📊 Poll"
@@ -472,7 +474,9 @@ class FirestoreMessageSource @Inject constructor(
             listDiff = data["listDiff"] as? Map<String, Any?>,
             isPinned = data["isPinned"] as? Boolean ?: false,
             mediaWidth = (data["mediaWidth"] as? Long)?.toInt(),
-            mediaHeight = (data["mediaHeight"] as? Long)?.toInt()
+            mediaHeight = (data["mediaHeight"] as? Long)?.toInt(),
+            latitude = (data["latitude"] as? Number)?.toDouble(),
+            longitude = (data["longitude"] as? Number)?.toDouble()
         )
     }
 

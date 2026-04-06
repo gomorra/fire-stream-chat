@@ -44,7 +44,9 @@ data class MessageEntity(
     val emojiSizes: Map<Int, Float> = emptyMap(),
     val listId: String? = null,
     val listDiff: String? = null,
-    val isPinned: Boolean = false
+    val isPinned: Boolean = false,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 ) {
     fun toDomain() = Message(
         id = id,
@@ -73,7 +75,9 @@ data class MessageEntity(
         emojiSizes = emojiSizes,
         listId = listId,
         listDiff = listDiff?.let { parseListDiffJson(it) },
-        isPinned = isPinned
+        isPinned = isPinned,
+        latitude = latitude,
+        longitude = longitude
     )
 
     companion object {
@@ -104,7 +108,9 @@ data class MessageEntity(
             emojiSizes = message.emojiSizes,
             listId = message.listId,
             listDiff = message.listDiff?.let { listDiffToJson(it) },
-            isPinned = message.isPinned
+            isPinned = message.isPinned,
+            latitude = message.latitude,
+            longitude = message.longitude
         )
 
         private fun pollToJson(poll: Poll): String {
