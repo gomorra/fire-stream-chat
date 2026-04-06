@@ -116,3 +116,10 @@ internal fun formatDuration(seconds: Int): String {
     val s = seconds % 60
     return "$m:${s.toString().padStart(2, '0')}"
 }
+
+internal const val LOCATION_DEFAULT_CONTENT = "Shared location"
+
+internal fun staticMapUrl(lat: Double, lng: Double): String =
+    "https://staticmap.openstreetmap.de/staticmap.php" +
+        "?center=$lat,$lng&zoom=15&size=600x300&maptype=mapnik" +
+        "&markers=$lat,$lng,red-pushpin"

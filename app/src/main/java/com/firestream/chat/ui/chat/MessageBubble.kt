@@ -452,7 +452,7 @@ internal fun MessageBubble(
                             val lat = message.latitude
                             val lng = message.longitude
                             if (lat != null && lng != null) {
-                                val mapUrl = "https://staticmap.openstreetmap.de/staticmap.php?center=$lat,$lng&zoom=15&size=600x300&maptype=mapnik&markers=$lat,$lng,red-pushpin"
+                                val mapUrl = remember(lat, lng) { staticMapUrl(lat, lng) }
                                 Column(
                                     modifier = Modifier
                                         .clickable {
@@ -474,7 +474,7 @@ internal fun MessageBubble(
                                     )
                                     // Show comment if not empty/default
                                     val comment = message.content
-                                    if (!comment.isNullOrBlank() && comment != "Shared location") {
+                                    if (!comment.isNullOrBlank() && comment != LOCATION_DEFAULT_CONTENT) {
                                         Text(
                                             text = comment,
                                             style = MaterialTheme.typography.bodyMedium,

@@ -51,6 +51,7 @@ private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, Me
 private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
 private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
+private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -902,7 +903,7 @@ class MessageRepositoryImpl @Inject constructor(
             }
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
-            val content = comment.ifBlank { "Shared location" }
+            val content = comment.ifBlank { LOCATION_DEFAULT_CONTENT }
 
             val optimisticMessage = Message(
                 id = tempId,

@@ -123,9 +123,7 @@ internal fun LocationPickerSheet(
                 else -> {
                     val lat = latitude!!
                     val lng = longitude!!
-                    val mapUrl = "https://staticmap.openstreetmap.de/staticmap.php" +
-                        "?center=$lat,$lng&zoom=15&size=600x300&maptype=mapnik" +
-                        "&markers=$lat,$lng,red-pushpin"
+                    val mapUrl = staticMapUrl(lat, lng)
 
                     AsyncImage(
                         model = mapUrl,
