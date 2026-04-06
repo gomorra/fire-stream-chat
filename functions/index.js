@@ -48,10 +48,17 @@ exports.sendCallPushNotification = onDocumentCreated(
         logger.info(`Incoming call ${callId} from ${callerId} to ${calleeId}`);
 
         try {
-            const [callerSnap, calleeSnap] = await Promise.all([
+            const [callerSnap, calleeSnap, blockedSnap] = await Promise.all([
                 admin.firestore().collection("users").doc(callerId).get(),
-                admin.firestore().collection("users").doc(calleeId).get()
+                admin.firestore().collection("users").doc(calleeId).get(),
+                admin.firestore().collection("users").doc(calleeId)
+                    .collection("blockedUsers").doc(callerId).get()
             ]);
+
+            if (blockedSnap.exists) {
+                logger.info(`Callee ${calleeId} has blocked caller ${callerId}, skipping call notification`);
+                return null;
+            }
 
             if (!calleeSnap.exists) {
                 logger.error(`Callee ${calleeId} not found`);
@@ -135,9 +142,17 @@ exports.sendPushNotification = onDocumentCreated(
             const mentionsStr = Array.isArray(mentions) ? mentions.join(",") : "";
             const pushPromise = Promise.all(recipients.map(async (recipientId) => {
                 try {
-                    const receiverSnap = await admin.firestore().collection("users").doc(recipientId).get();
+                    const [receiverSnap, blockedSnap] = await Promise.all([
+                        admin.firestore().collection("users").doc(recipientId).get(),
+                        admin.firestore().collection("users").doc(recipientId)
+                            .collection("blockedUsers").doc(senderId).get()
+                    ]);
                     if (!receiverSnap.exists) {
                         logger.info(`Recipient ${recipientId} not found`);
+                        return;
+                    }
+                    if (blockedSnap.exists) {
+                        logger.info(`Recipient ${recipientId} has blocked sender ${senderId}, skipping notification`);
                         return;
                     }
 

@@ -12,6 +12,7 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.ListDiff
@@ -48,6 +49,7 @@ import javax.inject.Singleton
 
 private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
 private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
+private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 
 @Singleton
@@ -62,7 +64,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val mediaFileManager: MediaFileManager,
     private val imageCompressor: ImageCompressor,
     private val preferencesDataStore: PreferencesDataStore,
-    private val connectivityManager: ConnectivityManager
+    private val connectivityManager: ConnectivityManager,
+    private val userSource: FirestoreUserSource
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -78,7 +81,13 @@ class MessageRepositoryImpl @Inject constructor(
             launch {
                 signalManager.ensureInitialized()
                 messageSource.observeMessages(chatId).collectLatest { rawList ->
+                    val blockedUserIds = try {
+                        if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
+                    } catch (_: Exception) { emptySet() }
                     for (raw in rawList) {
+                        // Skip messages from users the current user has blocked
+                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+
                         val existing = messageDao.getMessageById(raw.id)
 
                         // Handle deletion update for any message (own or incoming)
@@ -243,6 +252,9 @@ class MessageRepositoryImpl @Inject constructor(
     ): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+                throw Exception(ERR_USER_BLOCKED)
+            }
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
@@ -333,6 +345,9 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String, caption: String): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+                throw Exception(ERR_USER_BLOCKED)
+            }
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
             val isImage = mimeType.startsWith("image/")
@@ -485,6 +500,9 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+                throw Exception(ERR_USER_BLOCKED)
+            }
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 
@@ -545,6 +563,9 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendVoiceMessage(chatId: String, uri: Uri, recipientId: String, durationSeconds: Int): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+                throw Exception(ERR_USER_BLOCKED)
+            }
             val tempId = UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
 

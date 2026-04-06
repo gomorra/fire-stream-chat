@@ -72,6 +72,12 @@ class FirestoreUserSource @Inject constructor(
         return doc.exists()
     }
 
+    suspend fun getBlockedUserIds(userId: String): Set<String> {
+        val snapshot = firestore.collection("users").document(userId)
+            .collection("blockedUsers").get().await()
+        return snapshot.documents.mapTo(mutableSetOf()) { it.id }
+    }
+
     private fun mapToUser(data: Map<String, Any?>, documentId: String = ""): User {
         return User(
             uid = (data["uid"] as? String)?.takeIf { it.isNotBlank() } ?: documentId,
