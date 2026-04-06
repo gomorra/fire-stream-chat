@@ -77,6 +77,15 @@ internal class ChatMessageSender(
         }
     }
 
+    fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") {
+        scope.launch {
+            _uiState.update { it.copy(isSending = true, scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
+            messageRepository.sendLocationMessage(chatId, latitude, longitude, recipientId, comment)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onSuccess { _uiState.update { it.copy(isSending = false) } }
+        }
+    }
+
     fun onCleared() {
         typingDebounceJob?.cancel()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {

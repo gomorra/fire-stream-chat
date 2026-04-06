@@ -141,6 +141,7 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageSender.sendMessage(content, emojiSizes)
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") = messageSender.sendMediaMessage(uri, mimeType, caption)
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
+    fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") = messageSender.sendLocationMessage(latitude, longitude, comment)
 
     // ── Message actions ──
     fun deleteMessage(messageId: String) = messageActions.deleteMessage(messageId)
