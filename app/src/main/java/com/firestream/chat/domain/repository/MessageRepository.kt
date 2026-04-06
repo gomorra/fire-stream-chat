@@ -42,4 +42,6 @@ interface MessageRepository {
     suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean): Result<Unit>
     // Call log
     fun getCallLog(): Flow<List<Message>>
+    // Location sharing
+    suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
 }

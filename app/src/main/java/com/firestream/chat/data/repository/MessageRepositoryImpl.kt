@@ -142,7 +142,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned,
                                 mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight
+                                mediaHeight = raw.mediaHeight,
+                                latitude = raw.latitude,
+                                longitude = raw.longitude
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -213,7 +215,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                                 isPinned = raw.isPinned,
                                 mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight
+                                mediaHeight = raw.mediaHeight,
+                                latitude = raw.latitude,
+                                longitude = raw.longitude
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 
@@ -879,6 +883,55 @@ class MessageRepositoryImpl @Inject constructor(
                 messageDao.insertMessage(MessageEntity.fromDomain(updated))
             }
             Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun sendLocationMessage(
+        chatId: String,
+        latitude: Double,
+        longitude: Double,
+        recipientId: String,
+        comment: String
+    ): Result<Message> {
+        return try {
+            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+                throw Exception(ERR_USER_BLOCKED)
+            }
+            val tempId = UUID.randomUUID().toString()
+            val timestamp = System.currentTimeMillis()
+            val content = comment.ifBlank { "Shared location" }
+
+            val optimisticMessage = Message(
+                id = tempId,
+                chatId = chatId,
+                senderId = senderId,
+                content = content,
+                type = MessageType.LOCATION,
+                status = MessageStatus.SENDING,
+                timestamp = timestamp,
+                latitude = latitude,
+                longitude = longitude
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+            val remoteId = messageSource.sendPlainMessage(
+                chatId = chatId,
+                senderId = senderId,
+                content = content,
+                type = MessageType.LOCATION,
+                replyToId = null,
+                timestamp = timestamp,
+                latitude = latitude,
+                longitude = longitude
+            )
+
+            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+
+            Result.success(sentMessage)
         } catch (e: Exception) {
             Result.failure(e)
         }

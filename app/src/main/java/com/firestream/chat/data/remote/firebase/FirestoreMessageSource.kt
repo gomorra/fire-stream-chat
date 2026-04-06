@@ -46,7 +46,9 @@ data class RawFirestoreMessage(
     val listDiff: Map<String, Any?>? = null,
     val isPinned: Boolean = false,
     val mediaWidth: Int? = null,
-    val mediaHeight: Int? = null
+    val mediaHeight: Int? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
 )
 
 private const val POLL_CONTENT = "📊 Poll"
@@ -89,7 +91,9 @@ class FirestoreMessageSource @Inject constructor(
         plainContent: String = "",
         emojiSizes: Map<Int, Float> = emptyMap(),
         mediaWidth: Int? = null,
-        mediaHeight: Int? = null
+        mediaHeight: Int? = null,
+        latitude: Double? = null,
+        longitude: Double? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -108,6 +112,8 @@ class FirestoreMessageSource @Inject constructor(
         )
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
+        if (latitude != null) data["latitude"] = latitude
+        if (longitude != null) data["longitude"] = longitude
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -120,6 +126,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
             MessageType.LIST -> LIST_CONTENT
+            MessageType.LOCATION -> "📍 Location"
             else -> plainContent.ifBlank { "Message" }
         }
         firestore.collection("chats").document(chatId).update(
@@ -146,7 +153,9 @@ class FirestoreMessageSource @Inject constructor(
         mentions: List<String> = emptyList(),
         emojiSizes: Map<Int, Float> = emptyMap(),
         mediaWidth: Int? = null,
-        mediaHeight: Int? = null
+        mediaHeight: Int? = null,
+        latitude: Double? = null,
+        longitude: Double? = null
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -164,6 +173,8 @@ class FirestoreMessageSource @Inject constructor(
         )
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
+        if (latitude != null) data["latitude"] = latitude
+        if (longitude != null) data["longitude"] = longitude
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -176,6 +187,7 @@ class FirestoreMessageSource @Inject constructor(
             MessageType.VOICE -> "🎤 Voice message"
             MessageType.POLL -> POLL_CONTENT
             MessageType.LIST -> LIST_CONTENT
+            MessageType.LOCATION -> "📍 Location"
             else -> content
         }
         firestore.collection("chats").document(chatId).update(
@@ -471,7 +483,9 @@ class FirestoreMessageSource @Inject constructor(
             listDiff = data["listDiff"] as? Map<String, Any?>,
             isPinned = data["isPinned"] as? Boolean ?: false,
             mediaWidth = (data["mediaWidth"] as? Long)?.toInt(),
-            mediaHeight = (data["mediaHeight"] as? Long)?.toInt()
+            mediaHeight = (data["mediaHeight"] as? Long)?.toInt(),
+            latitude = data["latitude"] as? Double,
+            longitude = data["longitude"] as? Double
         )
     }
 
