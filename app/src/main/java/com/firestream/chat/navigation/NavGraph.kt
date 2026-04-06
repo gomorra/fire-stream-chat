@@ -2,6 +2,8 @@ package com.firestream.chat.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -178,6 +180,7 @@ fun FireStreamNavGraph(
             LaunchedEffect(Unit) {
                 preferencesDataStore?.clearLastOpenChat()
             }
+            val deletedListTitle by it.savedStateHandle.getStateFlow<String?>("deletedListTitle", null).collectAsState()
             MainScreen(
                 onChatClick = { chatId, recipientId ->
                     coroutineScope.launch { preferencesDataStore?.setLastOpenChat(chatId, recipientId) }
@@ -205,6 +208,8 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
+                deletedListTitle = deletedListTitle,
+                onDeletedListTitleConsumed = { it.savedStateHandle["deletedListTitle"] = null },
             )
         }
 
@@ -379,6 +384,10 @@ fun FireStreamNavGraph(
             ListDetailScreen(
                 autoFocus = autoFocus,
                 onBackClick = { navController.popBackStack() },
+                onListDeleted = { title ->
+                    navController.previousBackStackEntry?.savedStateHandle?.set("deletedListTitle", title)
+                    navController.popBackStack()
+                },
                 onShareToChat = { chatId, recipientId ->
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
