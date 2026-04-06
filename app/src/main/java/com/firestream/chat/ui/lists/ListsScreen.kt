@@ -43,6 +43,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -74,6 +76,8 @@ import java.util.Locale
 internal fun ListsScreen(
     onListClick: (listId: String) -> Unit,
     onListCreated: (listId: String) -> Unit = {},
+    deletedListTitle: String? = null,
+    onDeletedListTitleConsumed: () -> Unit = {},
     viewModel: ListsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -82,13 +86,31 @@ internal fun ListsScreen(
     var selectedListForAction by remember { mutableStateOf<ListData?>(null) }
     var showSharePicker by remember { mutableStateOf(false) }
     var shareListId by remember { mutableStateOf("") }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val searchFocusRequester = remember { FocusRequester() }
     LaunchedEffect(uiState.isSearchBarVisible) {
         if (uiState.isSearchBarVisible) searchFocusRequester.requestFocus()
     }
 
+    // Snackbar from ViewModel (local delete)
+    LaunchedEffect(uiState.snackbarMessage) {
+        uiState.snackbarMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearSnackbar()
+        }
+    }
+
+    // Snackbar from ListDetailScreen (navigated back after delete)
+    LaunchedEffect(deletedListTitle) {
+        if (deletedListTitle != null) {
+            viewModel.showDeletedSnackbar(deletedListTitle)
+            onDeletedListTitleConsumed()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Lists") },
