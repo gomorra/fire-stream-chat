@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Reply
 import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.MoreVert
@@ -162,6 +163,7 @@ fun ChatScreen(
     var showAttachmentSheet by remember { mutableStateOf(false) }
     var showCreatePollSheet by remember { mutableStateOf(false) }
     var showCreateListSheet by remember { mutableStateOf(false) }
+    var showLocationSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     var fullscreenImageMessage by remember { mutableStateOf<com.firestream.chat.domain.model.Message?>(null) }
@@ -357,6 +359,9 @@ fun ChatScreen(
         galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
     }
 
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) showLocationSheet = true
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -1165,6 +1170,18 @@ fun ChatScreen(
                         }
                     }
                 )
+                AttachmentOption(
+                    icon = Icons.Default.LocationOn,
+                    label = "Location",
+                    onClick = {
+                        showAttachmentSheet = false
+                        if (context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            showLocationSheet = true
+                        } else {
+                            locationPermissionLauncher.launch(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                        }
+                    }
+                )
             }
         }
     }
@@ -1187,6 +1204,16 @@ fun ChatScreen(
             onCreateList = { title, type, _, _ ->
                 viewModel.createAndSendList(title, type)
                 showCreateListSheet = false
+            }
+        )
+    }
+
+    // Location picker bottom sheet
+    if (showLocationSheet) {
+        LocationPickerSheet(
+            onDismiss = { showLocationSheet = false },
+            onSendLocation = { lat, lng, comment ->
+                viewModel.sendLocationMessage(lat, lng, comment)
             }
         )
     }

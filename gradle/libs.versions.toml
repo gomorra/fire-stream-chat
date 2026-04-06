@@ -51,6 +51,9 @@ reorderable = "2.4.3"
 # WebRTC
 webrtc = "1.3.0"
 
+# Play Services Location
+playServicesLocation = "21.3.0"
+
 # Testing
 junit = "4.13.2"
 mockk = "1.13.13"
@@ -127,6 +130,9 @@ reorderable = { group = "sh.calvin.reorderable", name = "reorderable", version.r
 
 # WebRTC
 stream-webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version.ref = "webrtc" }
+
+# Play Services Location
+play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }

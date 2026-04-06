@@ -144,6 +144,9 @@ dependencies {
     // WebRTC
     implementation(libs.stream.webrtc.android)
 
+    // Play Services Location
+    implementation(libs.play.services.location)
+
     // Core Library Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 

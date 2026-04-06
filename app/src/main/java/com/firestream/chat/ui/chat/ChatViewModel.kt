@@ -196,6 +196,11 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // ── Location ──
+    fun sendLocationMessage(latitude: Double, longitude: Double, comment: String) {
+        // TODO: Implement in Step 4 — send LOCATION message type via messageSender
+    }
+
     // ── Error ──
     fun clearError() { _uiState.update { it.copy(error = null) } }
 
