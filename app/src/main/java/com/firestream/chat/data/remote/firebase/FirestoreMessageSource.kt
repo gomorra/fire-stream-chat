@@ -484,8 +484,8 @@ class FirestoreMessageSource @Inject constructor(
             isPinned = data["isPinned"] as? Boolean ?: false,
             mediaWidth = (data["mediaWidth"] as? Long)?.toInt(),
             mediaHeight = (data["mediaHeight"] as? Long)?.toInt(),
-            latitude = data["latitude"] as? Double,
-            longitude = data["longitude"] as? Double
+            latitude = (data["latitude"] as? Number)?.toDouble(),
+            longitude = (data["longitude"] as? Number)?.toDouble()
         )
     }
 

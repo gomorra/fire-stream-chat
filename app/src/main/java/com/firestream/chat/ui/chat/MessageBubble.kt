@@ -36,8 +36,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
@@ -71,6 +74,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
@@ -440,6 +444,64 @@ internal fun MessageBubble(
                                         color = callColor.copy(alpha = 0.6f),
                                         style = MaterialTheme.typography.labelSmall
                                     )
+                                }
+                            }
+                        }
+                        MessageType.LOCATION -> {
+                            val context = LocalContext.current
+                            val lat = message.latitude
+                            val lng = message.longitude
+                            if (lat != null && lng != null) {
+                                val mapUrl = "https://staticmap.openstreetmap.de/staticmap.php?center=$lat,$lng&zoom=15&size=600x300&maptype=mapnik&markers=$lat,$lng,red-pushpin"
+                                Column(
+                                    modifier = Modifier
+                                        .clickable {
+                                            val intent = Intent(
+                                                Intent.ACTION_VIEW,
+                                                Uri.parse("geo:$lat,$lng?q=$lat,$lng")
+                                            )
+                                            context.startActivity(intent)
+                                        }
+                                ) {
+                                    AsyncImage(
+                                        model = mapUrl,
+                                        contentDescription = "Location map",
+                                        modifier = Modifier
+                                            .widthIn(max = 280.dp)
+                                            .height(150.dp)
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                    // Show comment if not empty/default
+                                    val comment = message.content
+                                    if (!comment.isNullOrBlank() && comment != "Shared location") {
+                                        Text(
+                                            text = comment,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
+                                                    else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        )
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(top = 4.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.LocationOn,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(14.dp),
+                                            tint = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                                   else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Shared location",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
