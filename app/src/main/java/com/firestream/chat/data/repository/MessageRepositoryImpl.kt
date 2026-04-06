@@ -80,7 +80,7 @@ class MessageRepositoryImpl @Inject constructor(
         return channelFlow {
             downloadPendingMediaForChat(chatId)
             launch {
-                signalManager.ensureInitialized()
+                try { signalManager.ensureInitialized() } catch (_: Exception) { }
                 messageSource.observeMessages(chatId).collectLatest { rawList ->
                     val blockedUserIds = try {
                         if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
