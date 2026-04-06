@@ -8,7 +8,10 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
+import com.firestream.chat.domain.model.ListDiff
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +26,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 
@@ -37,6 +41,7 @@ class ListsViewModelTest {
     private val authSource = mockk<FirebaseAuthSource>()
     private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
+    private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>()
 
     @Before
     fun setUp() {
@@ -57,7 +62,8 @@ class ListsViewModelTest {
         chatRepository = chatRepository,
         authSource = authSource,
         userRepository = userRepository,
-        preferencesDataStore = preferencesDataStore
+        preferencesDataStore = preferencesDataStore,
+        sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase
     )
 
     @Test
@@ -105,5 +111,68 @@ class ListsViewModelTest {
         runCurrent()
 
         assertEquals("Oops", viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `deleteList shows snackbar and notifies shared users`() = runTest {
+        val lists = listOf(
+            ListData(
+                id = "1", title = "Groceries", type = ListType.SHOPPING,
+                createdBy = "user1", sharedChatIds = listOf("chat1", "chat2")
+            )
+        )
+        every { listRepository.observeMyLists() } returns flowOf(lists)
+        coEvery { listRepository.deleteList("1") } returns Result.success(Unit)
+        coEvery { sendListUpdateToChatsUseCase(any(), any(), any(), any()) } returns Unit
+
+        val viewModel = createViewModel()
+        runCurrent()
+
+        viewModel.deleteList("1")
+        runCurrent()
+
+        assertEquals("\"Groceries\" deleted", viewModel.uiState.value.snackbarMessage)
+        coVerify(exactly = 1) {
+            sendListUpdateToChatsUseCase(
+                "1", "Groceries", listOf("chat1", "chat2"),
+                match { it.deleted }
+            )
+        }
+    }
+
+    @Test
+    fun `deleteList without shared chats skips notification`() = runTest {
+        val lists = listOf(
+            ListData(id = "1", title = "Tasks", type = ListType.CHECKLIST, createdBy = "user1")
+        )
+        every { listRepository.observeMyLists() } returns flowOf(lists)
+        coEvery { listRepository.deleteList("1") } returns Result.success(Unit)
+
+        val viewModel = createViewModel()
+        runCurrent()
+
+        viewModel.deleteList("1")
+        runCurrent()
+
+        assertEquals("\"Tasks\" deleted", viewModel.uiState.value.snackbarMessage)
+        coVerify(exactly = 0) { sendListUpdateToChatsUseCase(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `deleteList failure sets error`() = runTest {
+        val lists = listOf(
+            ListData(id = "1", title = "Tasks", type = ListType.CHECKLIST, createdBy = "user1")
+        )
+        every { listRepository.observeMyLists() } returns flowOf(lists)
+        coEvery { listRepository.deleteList("1") } returns Result.failure(Exception("Network error"))
+
+        val viewModel = createViewModel()
+        runCurrent()
+
+        viewModel.deleteList("1")
+        runCurrent()
+
+        assertEquals("Network error", viewModel.uiState.value.error)
+        assertNull(viewModel.uiState.value.snackbarMessage)
     }
 }

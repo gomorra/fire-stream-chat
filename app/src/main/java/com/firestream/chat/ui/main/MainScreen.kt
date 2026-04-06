@@ -28,6 +28,8 @@ internal fun MainScreen(
     onMessageClick: (chatId: String, recipientId: String) -> Unit,
     onListClick: (listId: String) -> Unit = {},
     onListCreated: (listId: String) -> Unit = {},
+    deletedListTitle: String? = null,
+    onDeletedListTitleConsumed: () -> Unit = {},
 ) {
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
@@ -58,7 +60,12 @@ internal fun MainScreen(
                     onSettingsClick = onSettingsClick,
                 )
                 MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
-                MainTab.LISTS -> ListsScreen(onListClick = onListClick, onListCreated = onListCreated)
+                MainTab.LISTS -> ListsScreen(
+                    onListClick = onListClick,
+                    onListCreated = onListCreated,
+                    deletedListTitle = deletedListTitle,
+                    onDeletedListTitleConsumed = onDeletedListTitleConsumed
+                )
             }
         }
     }

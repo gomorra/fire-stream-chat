@@ -88,6 +88,7 @@ import kotlinx.coroutines.launch
 fun ListDetailScreen(
     autoFocus: Boolean = false,
     onBackClick: () -> Unit,
+    onListDeleted: (title: String) -> Unit = {},
     onShareToChat: (chatId: String, recipientId: String) -> Unit = { _, _ -> },
     viewModel: ListDetailViewModel = hiltViewModel()
 ) {
@@ -111,7 +112,9 @@ fun ListDetailScreen(
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(uiState.isDeleted) {
-        if (uiState.isDeleted) onBackClick()
+        if (uiState.isDeleted) {
+            onListDeleted(uiState.deletedListTitle ?: "List")
+        }
     }
 
     LaunchedEffect(uiState.isAccessDenied) {

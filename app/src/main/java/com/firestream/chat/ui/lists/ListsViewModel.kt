@@ -10,9 +10,11 @@ import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.firestream.chat.ui.chat.resolveChatParticipants
 import kotlinx.coroutines.Job
@@ -46,6 +48,7 @@ data class ListsUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val error: String? = null,
+    val snackbarMessage: String? = null,
     val searchQuery: String = "",
     val isSearchBarVisible: Boolean = false
 ) {
@@ -59,7 +62,8 @@ class ListsViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val authSource: FirebaseAuthSource,
     private val userRepository: UserRepository,
-    private val preferencesDataStore: PreferencesDataStore
+    private val preferencesDataStore: PreferencesDataStore,
+    private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ListsUiState())
@@ -249,10 +253,30 @@ class ListsViewModel @Inject constructor(
     }
 
     fun deleteList(listId: String) {
+        val listData = rawLists.find { it.id == listId } ?: return
         viewModelScope.launch {
             listRepository.deleteList(listId)
+                .onSuccess {
+                    if (listData.sharedChatIds.isNotEmpty()) {
+                        sendListUpdateToChatsUseCase(
+                            listId, listData.title, listData.sharedChatIds,
+                            ListDiff(deleted = true)
+                        )
+                    }
+                    _uiState.value = _uiState.value.copy(
+                        snackbarMessage = "\"${listData.title}\" deleted"
+                    )
+                }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
+    }
+
+    fun showDeletedSnackbar(title: String) {
+        _uiState.value = _uiState.value.copy(snackbarMessage = "\"$title\" deleted")
+    }
+
+    fun clearSnackbar() {
+        _uiState.value = _uiState.value.copy(snackbarMessage = null)
     }
 
     fun renameList(listId: String, title: String) {

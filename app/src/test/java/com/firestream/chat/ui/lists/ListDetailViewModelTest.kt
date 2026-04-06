@@ -126,8 +126,8 @@ class ListDetailViewModelTest {
     }
 
     @Test
-    fun `deleteList calls repository and sets isDeleted`() = runTest {
-        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
+    fun `deleteList calls repository and sets isDeleted with title`() = runTest {
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1", title = "Groceries"))
         coEvery { listRepository.deleteList("list1") } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
@@ -137,6 +137,7 @@ class ListDetailViewModelTest {
         runCurrent()
 
         assertTrue(viewModel.uiState.value.isDeleted)
+        assertEquals("Groceries", viewModel.uiState.value.deletedListTitle)
         coVerify(exactly = 1) { listRepository.deleteList("list1") }
     }
 }

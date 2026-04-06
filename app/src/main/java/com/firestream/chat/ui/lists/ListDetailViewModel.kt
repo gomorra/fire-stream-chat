@@ -36,6 +36,7 @@ data class ListDetailUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
     val isDeleted: Boolean = false,
+    val deletedListTitle: String? = null,
     val isAccessDenied: Boolean = false
 ) {
     val isOwner get() = listData?.createdBy == currentUserId
@@ -303,7 +304,10 @@ class ListDetailViewModel @Inject constructor(
                         )
                     }
                     isDeletingList = false
-                    _uiState.value = _uiState.value.copy(isDeleted = true)
+                    _uiState.value = _uiState.value.copy(
+                        isDeleted = true,
+                        deletedListTitle = listData.title
+                    )
                 }
                 .onFailure { e ->
                     isDeletingList = false
