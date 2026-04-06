@@ -80,6 +80,7 @@ class MessageRepositoryImpl @Inject constructor(
         return channelFlow {
             downloadPendingMediaForChat(chatId)
             launch {
+                try {
                 try { signalManager.ensureInitialized() } catch (_: Exception) { }
                 messageSource.observeMessages(chatId).collectLatest { rawList ->
                     val blockedUserIds = try {
@@ -238,6 +239,7 @@ class MessageRepositoryImpl @Inject constructor(
                         }
                     }
                 }
+            } catch (_: Exception) { }
             }
 
             messageDao.getMessagesByChatId(chatId)
