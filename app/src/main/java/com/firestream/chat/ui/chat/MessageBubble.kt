@@ -448,62 +448,12 @@ internal fun MessageBubble(
                             }
                         }
                         MessageType.LOCATION -> {
-                            val context = LocalContext.current
-                            val lat = message.latitude
-                            val lng = message.longitude
-                            if (lat != null && lng != null) {
-                                val mapUrl = remember(lat, lng) { staticMapUrl(lat, lng) }
-                                Column(
-                                    modifier = Modifier
-                                        .clickable {
-                                            val intent = Intent(
-                                                Intent.ACTION_VIEW,
-                                                Uri.parse("geo:$lat,$lng?q=$lat,$lng")
-                                            )
-                                            context.startActivity(intent)
-                                        }
-                                ) {
-                                    AsyncImage(
-                                        model = mapUrl,
-                                        contentDescription = "Location map",
-                                        modifier = Modifier
-                                            .widthIn(max = 280.dp)
-                                            .height(150.dp)
-                                            .clip(RoundedCornerShape(8.dp)),
-                                        contentScale = ContentScale.Crop
-                                    )
-                                    // Show comment if not empty/default
-                                    val comment = message.content
-                                    if (!comment.isNullOrBlank() && comment != LOCATION_DEFAULT_CONTENT) {
-                                        Text(
-                                            text = comment,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
-                                                    else MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.padding(top = 4.dp)
-                                        )
-                                    }
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(top = 4.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.LocationOn,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(14.dp),
-                                            tint = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                                                   else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Spacer(modifier = Modifier.width(4.dp))
-                                        Text(
-                                            text = "Shared location",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                                                    else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
+                            LocationBubbleContent(
+                                latitude = message.latitude,
+                                longitude = message.longitude,
+                                comment = message.content,
+                                isOwnMessage = isOwnMessage
+                            )
                         }
                         else -> {
                             val isEmojiOnlyMsg = remember(message.content) { isEmojiOnly(message.content) }
@@ -768,6 +718,66 @@ private fun SwipeActionIcon(
                 modifier = Modifier
                     .size(24.dp)
                     .graphicsLayer { scaleX = iconScale; scaleY = iconScale }
+            )
+        }
+    }
+}
+
+@Composable
+private fun LocationBubbleContent(
+    latitude: Double?,
+    longitude: Double?,
+    comment: String,
+    isOwnMessage: Boolean
+) {
+    if (latitude == null || longitude == null) return
+    val context = LocalContext.current
+    val mapUrl = remember(latitude, longitude) { staticMapUrl(latitude, longitude) }
+    Column(
+        modifier = Modifier
+            .clickable {
+                val intent = Intent(
+                    Intent.ACTION_VIEW,
+                    Uri.parse("geo:$latitude,$longitude?q=$latitude,$longitude")
+                )
+                context.startActivity(intent)
+            }
+    ) {
+        AsyncImage(
+            model = mapUrl,
+            contentDescription = "Location map",
+            modifier = Modifier
+                .widthIn(max = 280.dp)
+                .height(150.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+        if (comment.isNotBlank() && comment != LOCATION_DEFAULT_CONTENT) {
+            Text(
+                text = comment,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(top = 4.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                       else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+                text = "Shared location",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                        else MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
