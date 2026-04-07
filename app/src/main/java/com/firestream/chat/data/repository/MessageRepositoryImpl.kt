@@ -963,7 +963,7 @@ class MessageRepositoryImpl @Inject constructor(
                     semaphore.withPermit {
                         try {
                             syncChatMessages(chatId, currentUid, blockedUserIds)
-                        } catch (_: Exception) { }
+                        } catch (_: Throwable) { }
                     }
                 }
             }.awaitAll()
@@ -1039,7 +1039,7 @@ class MessageRepositoryImpl @Inject constructor(
                         )
                         else -> raw.content!!
                     }
-                } catch (_: Exception) {
+                } catch (_: Throwable) {
                     "[Encrypted message — unable to decrypt]"
                 }
             }
