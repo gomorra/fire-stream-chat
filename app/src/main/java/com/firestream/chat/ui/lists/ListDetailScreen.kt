@@ -34,9 +34,10 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -204,58 +205,57 @@ fun ListDetailScreen(
                         expanded = showOverflowMenu,
                         onDismissRequest = { showOverflowMenu = false }
                     ) {
-                        val checkedCount = uiState.listData?.items?.count { it.isChecked } ?: 0
-                        if (checkedCount > 0) {
-                            DropdownMenuItem(
-                                text = { Text("Clear all checked ($checkedCount)") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Check, contentDescription = null)
-                                },
+                        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            val checkedCount = uiState.listData?.items?.count { it.isChecked } ?: 0
+                            FilledTonalButton(
                                 onClick = {
                                     showOverflowMenu = false
                                     viewModel.clearCheckedItems()
-                                }
-                            )
-                        }
-                        if (uiState.isOwner) {
-                            DropdownMenuItem(
-                                text = { Text("Manage sharing") },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Share, contentDescription = null)
                                 },
+                                enabled = checkedCount > 0,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Check, null, modifier = Modifier.padding(end = 4.dp))
+                                Text(if (checkedCount > 0) "Clear checked ($checkedCount)" else "Clear checked")
+                            }
+                            FilledTonalButton(
                                 onClick = {
                                     showOverflowMenu = false
                                     showSharePicker = true
-                                }
-                            )
-                        }
-                        if (uiState.listData?.type == ListType.GENERIC) {
-                            DropdownMenuItem(
-                                text = { Text("List style") },
-                                leadingIcon = {
-                                    Icon(Icons.AutoMirrored.Filled.List, contentDescription = null)
                                 },
-                                onClick = {
-                                    showOverflowMenu = false
-                                    showStyleMenu = true
+                                enabled = uiState.isOwner,
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
+                                Text("Manage sharing")
+                            }
+                            if (uiState.listData?.type == ListType.GENERIC) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        showOverflowMenu = false
+                                        showStyleMenu = true
+                                    },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.List, null, modifier = Modifier.padding(end = 4.dp))
+                                    Text("List style")
                                 }
-                            )
-                        }
-                        if (uiState.isOwner) {
-                            DropdownMenuItem(
-                                text = { Text("Delete list") },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.error
-                                    )
-                                },
+                            }
+                            FilledTonalButton(
                                 onClick = {
                                     showOverflowMenu = false
                                     viewModel.deleteList()
-                                }
-                            )
+                                },
+                                enabled = uiState.isOwner,
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                colors = ButtonDefaults.filledTonalButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            ) {
+                                Icon(Icons.Default.Delete, null, modifier = Modifier.padding(end = 4.dp))
+                                Text("Delete list")
+                            }
                         }
                     }
                 },

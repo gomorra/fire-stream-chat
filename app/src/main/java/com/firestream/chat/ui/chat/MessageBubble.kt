@@ -48,6 +48,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PushPin
@@ -97,7 +98,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.util.MentionParser
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
@@ -298,7 +301,8 @@ internal fun MessageBubble(
                             val localFileExists by produceState(initialValue = false, message.localUri) {
                                 value = message.localUri != null &&
                                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        File(message.localUri!!).exists()
+                                        val f = File(message.localUri!!)
+                                        f.exists() && f.isFile && f.canRead()
                                     }
                             }
                             val imageModel: Any? = when {
@@ -326,7 +330,8 @@ internal fun MessageBubble(
                                         model = imageModel,
                                         contentDescription = "Image",
                                         contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier.fillMaxSize(),
+                                        error = rememberVectorPainter(Icons.Default.BrokenImage)
                                     )
 
                                     // Upload progress overlay
@@ -351,12 +356,16 @@ internal fun MessageBubble(
                                         }
                                     }
                                 } else {
-                                    // No image source available yet — show loading placeholder
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        CircularProgressIndicator(color = textColor, modifier = Modifier.size(24.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.BrokenImage,
+                                            contentDescription = "Image unavailable",
+                                            modifier = Modifier.size(40.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
                                 }
                             }
@@ -743,15 +752,29 @@ private fun LocationBubbleContent(
                 context.startActivity(intent)
             }
     ) {
-        AsyncImage(
-            model = mapUrl,
-            contentDescription = "Location map",
+        Box(
             modifier = Modifier
                 .widthIn(max = 280.dp)
                 .height(150.dp)
                 .clip(RoundedCornerShape(8.dp)),
-            contentScale = ContentScale.Crop
-        )
+            contentAlignment = Alignment.Center
+        ) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(mapUrl)
+                    .addHeader("User-Agent", "FireStreamChat/1.0")
+                    .build(),
+                contentDescription = "Location map",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Icon(
+                imageVector = Icons.Default.LocationOn,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = MaterialTheme.colorScheme.error
+            )
+        }
         if (comment.isNotBlank() && comment != LOCATION_DEFAULT_CONTENT) {
             Text(
                 text = comment,

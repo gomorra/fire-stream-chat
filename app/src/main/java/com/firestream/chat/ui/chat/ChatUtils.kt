@@ -119,7 +119,13 @@ internal fun formatDuration(seconds: Int): String {
 
 internal const val LOCATION_DEFAULT_CONTENT = "Shared location"
 
-internal fun staticMapUrl(lat: Double, lng: Double): String =
-    "https://staticmap.openstreetmap.de/staticmap.php" +
-        "?center=$lat,$lng&zoom=15&size=600x300&maptype=mapnik" +
-        "&markers=$lat,$lng,red-pushpin"
+private const val MAP_ZOOM = 15
+
+/** Returns the OSM tile URL for the tile containing the given coordinates. */
+internal fun staticMapUrl(lat: Double, lng: Double): String {
+    val n = 1 shl MAP_ZOOM
+    val xTile = ((lng + 180.0) / 360.0 * n).toInt()
+    val latRad = Math.toRadians(lat)
+    val yTile = ((1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * n).toInt()
+    return "https://tile.openstreetmap.org/$MAP_ZOOM/$xTile/$yTile.png"
+}

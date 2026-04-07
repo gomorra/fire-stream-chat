@@ -34,8 +34,8 @@ import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -143,19 +143,23 @@ internal fun ListsScreen(
                         expanded = showSortMenu,
                         onDismissRequest = { showSortMenu = false }
                     ) {
-                        ListSortOption.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = { Text(option.displayName) },
-                                leadingIcon = {
+                        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                            ListSortOption.entries.forEachIndexed { index, option ->
+                                FilledTonalButton(
+                                    onClick = {
+                                        viewModel.setSortOption(option)
+                                        showSortMenu = false
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .then(if (index > 0) Modifier.padding(top = 4.dp) else Modifier)
+                                ) {
                                     if (uiState.sortOption == option) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
+                                        Icon(Icons.Default.Check, null, modifier = Modifier.padding(end = 4.dp))
                                     }
-                                },
-                                onClick = {
-                                    viewModel.setSortOption(option)
-                                    showSortMenu = false
+                                    Text(option.displayName)
                                 }
-                            )
+                            }
                         }
                     }
                 },
