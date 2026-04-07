@@ -44,4 +44,6 @@ interface MessageRepository {
     fun getCallLog(): Flow<List<Message>>
     // Location sharing
     suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
+    // Background sync
+    suspend fun syncAllChatMessages()
 }

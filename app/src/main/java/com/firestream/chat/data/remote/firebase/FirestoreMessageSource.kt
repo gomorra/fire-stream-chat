@@ -76,6 +76,18 @@ class FirestoreMessageSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
+    suspend fun fetchMessages(chatId: String): List<RawFirestoreMessage> {
+        val snapshot = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .get()
+            .await()
+        return snapshot.documents.mapNotNull { doc ->
+            doc.data?.let { mapToRaw(doc.id, chatId, it) }
+        }
+    }
+
     suspend fun sendMessage(
         chatId: String,
         senderId: String,

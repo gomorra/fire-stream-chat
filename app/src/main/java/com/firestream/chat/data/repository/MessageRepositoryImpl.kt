@@ -7,6 +7,7 @@ import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -28,6 +29,9 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +59,7 @@ private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
+    private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val messageSource: FirestoreMessageSource,
     private val authSource: FirebaseAuthSource,
@@ -942,6 +947,129 @@ class MessageRepositoryImpl @Inject constructor(
 
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
+
+    override suspend fun syncAllChatMessages() {
+        val currentUid = authSource.currentUserId ?: return
+        val chatIds = chatDao.getAllChatIds()
+        if (chatIds.isEmpty()) return
+
+        try { signalManager.ensureInitialized() } catch (_: Throwable) { }
+
+        val blockedUserIds = try {
+            userSource.getBlockedUserIds(currentUid)
+        } catch (_: Exception) { emptySet() }
+
+        val semaphore = Semaphore(3)
+        coroutineScope {
+            chatIds.map { chatId ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        try {
+                            syncChatMessages(chatId, currentUid, blockedUserIds)
+                        } catch (_: Exception) { }
+                    }
+                }
+            }.awaitAll()
+        }
+    }
+
+    private suspend fun syncChatMessages(
+        chatId: String,
+        currentUid: String,
+        blockedUserIds: Set<String>
+    ) {
+        val rawList = messageSource.fetchMessages(chatId)
+        for (raw in rawList) {
+            if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+
+            val existing = messageDao.getMessageById(raw.id)
+
+            if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
+                messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
+                continue
+            }
+
+            if (existing != null && existing.reactions != raw.reactions) {
+                val reactionsJson = JSONObject().apply {
+                    raw.reactions.forEach { (k, v) -> put(k, v) }
+                }.toString()
+                messageDao.updateReactions(raw.id, reactionsJson)
+            }
+
+            if (raw.senderId == currentUid) {
+                if (existing != null) {
+                    val remoteStatus = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT)
+                    if (existing.status != remoteStatus.name) {
+                        messageDao.updateMessageStatus(raw.id, remoteStatus.name)
+                    }
+                    continue
+                }
+                val content = raw.content ?: "[Sent message]"
+                val message = Message(
+                    id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
+                    content = content,
+                    type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                    mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                    status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                    replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
+                    reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
+                    readBy = raw.readBy, deliveredTo = raw.deliveredTo,
+                    pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                    mentions = raw.mentions, deletedAt = raw.deletedAt,
+                    emojiSizes = raw.emojiSizes, listId = raw.listId,
+                    listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
+                    isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
+                    latitude = raw.latitude, longitude = raw.longitude
+                )
+                messageDao.insertMessage(MessageEntity.fromDomain(message))
+                continue
+            }
+
+            // Incoming messages
+            if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) continue
+
+            val needsDecryption = raw.ciphertext != null && raw.signalType != null
+                    && !(raw.editedAt != null && raw.content != null)
+            if (raw.deletedAt == null && !needsDecryption && raw.content == null) continue
+
+            val content = when {
+                raw.deletedAt != null -> ""
+                else -> try {
+                    when {
+                        raw.editedAt != null && raw.content != null -> raw.content
+                        needsDecryption -> signalManager.decrypt(
+                            raw.senderId, EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                        )
+                        else -> raw.content!!
+                    }
+                } catch (_: Exception) {
+                    "[Encrypted message — unable to decrypt]"
+                }
+            }
+
+            val preservedLocalUri = existing?.localUri
+            val preservedIsStarred = existing?.isStarred ?: false
+
+            val message = Message(
+                id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
+                content = content,
+                type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                localUri = preservedLocalUri, isStarred = preservedIsStarred,
+                status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
+                reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
+                readBy = raw.readBy, deliveredTo = raw.deliveredTo,
+                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                mentions = raw.mentions, deletedAt = raw.deletedAt,
+                emojiSizes = raw.emojiSizes, listId = raw.listId,
+                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
+                isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
+                latitude = raw.latitude, longitude = raw.longitude
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(message))
+        }
+    }
 
     private fun downloadPendingMediaForChat(chatId: String) {
         downloadScope.launch {

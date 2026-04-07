@@ -42,4 +42,7 @@ interface ChatDao {
 
     @Query("UPDATE chats SET cachedAvatarUrl = :cachedUrl, localAvatarPath = :localPath WHERE id = :chatId")
     suspend fun updateAvatarCache(chatId: String, cachedUrl: String?, localPath: String?)
+
+    @Query("SELECT id FROM chats")
+    suspend fun getAllChatIds(): List<String>
 }

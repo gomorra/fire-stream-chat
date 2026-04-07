@@ -63,6 +63,13 @@ class ChatListViewModel @Inject constructor(
         loadChats()
         syncContacts()
         loadContacts()
+        syncMessages()
+    }
+
+    private fun syncMessages() {
+        viewModelScope.launch {
+            try { messageRepository.syncAllChatMessages() } catch (_: Exception) { }
+        }
     }
 
     private fun syncContacts() {
@@ -266,6 +273,7 @@ class ChatListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
             syncContacts()
+            syncMessages()
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }
     }
