@@ -4,7 +4,6 @@ import android.net.ConnectivityManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -46,7 +45,6 @@ class MessageRepositoryLocalUriTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageDao = mockk<MessageDao>()
     private val messageSource = mockk<FirestoreMessageSource>()
     private val authSource = mockk<FirebaseAuthSource>()
@@ -79,7 +77,7 @@ class MessageRepositoryLocalUriTest {
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
 
         repository = MessageRepositoryImpl(
-            chatDao, messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
+            messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
             listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager,
             userSource
         )

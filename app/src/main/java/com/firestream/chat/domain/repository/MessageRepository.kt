@@ -45,5 +45,5 @@ interface MessageRepository {
     // Location sharing
     suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
     // Background sync
-    suspend fun syncAllChatMessages()
+    suspend fun syncAllChatMessages(chatIds: List<String>)
 }

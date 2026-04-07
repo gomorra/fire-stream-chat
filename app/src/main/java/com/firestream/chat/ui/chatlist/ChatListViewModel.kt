@@ -57,19 +57,13 @@ class ChatListViewModel @Inject constructor(
     private var searchJob: Job? = null
     private val recipientObservers = mutableMapOf<String, Job>()
     private var cachedRecipientIds: Set<String> = emptySet()
+    private var hasSyncedMessages = false
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         loadChats()
         syncContacts()
         loadContacts()
-        syncMessages()
-    }
-
-    private fun syncMessages() {
-        viewModelScope.launch {
-            try { messageRepository.syncAllChatMessages() } catch (_: Exception) { }
-        }
     }
 
     private fun syncContacts() {
@@ -108,8 +102,13 @@ class ChatListViewModel @Inject constructor(
                         isLoading = false
                     )
                     observeRecipientAvatars(chats)
-                    // Mark undelivered messages as DELIVERED for all chats
                     markAllChatsAsDelivered(chats)
+                    if (!hasSyncedMessages && chats.isNotEmpty()) {
+                        hasSyncedMessages = true
+                        launch {
+                            try { messageRepository.syncAllChatMessages(chats.map { it.id }) } catch (_: Exception) { }
+                        }
+                    }
                 }
         }
     }
@@ -273,7 +272,8 @@ class ChatListViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
             syncContacts()
-            syncMessages()
+            val chatIds = _uiState.value.chats.map { it.id }
+            try { messageRepository.syncAllChatMessages(chatIds) } catch (_: Exception) { }
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }
     }

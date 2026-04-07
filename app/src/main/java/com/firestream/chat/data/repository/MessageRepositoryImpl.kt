@@ -7,7 +7,6 @@ import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -59,7 +58,6 @@ private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
-    private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val messageSource: FirestoreMessageSource,
     private val authSource: FirebaseAuthSource,
@@ -948,9 +946,8 @@ class MessageRepositoryImpl @Inject constructor(
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
 
-    override suspend fun syncAllChatMessages() {
+    override suspend fun syncAllChatMessages(chatIds: List<String>) {
         val currentUid = authSource.currentUserId ?: return
-        val chatIds = chatDao.getAllChatIds()
         if (chatIds.isEmpty()) return
 
         try { signalManager.ensureInitialized() } catch (_: Throwable) { }

@@ -3,7 +3,6 @@ package com.firestream.chat.data.repository
 import android.net.ConnectivityManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
@@ -27,7 +26,6 @@ import org.junit.Test
 
 class MessageRepositoryDeliveryTest {
 
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageDao = mockk<MessageDao>()
     private val messageSource = mockk<FirestoreMessageSource>()
     private val authSource = mockk<FirebaseAuthSource>()
@@ -48,7 +46,7 @@ class MessageRepositoryDeliveryTest {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageDao.updateMessageStatusBatch(any(), any()) } just Runs
         repository = MessageRepositoryImpl(
-            chatDao, messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
+            messageDao, messageSource, authSource, signalManager, storageSource, chatRepository,
             listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager,
             userSource
         )
