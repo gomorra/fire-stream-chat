@@ -149,7 +149,7 @@ com.firestream.chat/
 
 - **Single Activity** — `MainActivity` with Compose `NavHost` for all navigation.
 - **Bottom navigation** — `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with Chats and Calls tabs. `BottomNavBar` lives in `MainScreen`'s Scaffold; individual tab screens (`ChatListScreen`, `CallsScreen`) do **not** own the nav bar or swipe gesture.
-- **Local-first** — Room database with Firebase sync. `fallbackToDestructiveMigration()` is enabled.
+- **Local-first** — Room database with Firebase sync. `fallbackToDestructiveMigration()` is enabled. **When adding, removing, or renaming columns/entities, always bump the `version` in `AppDatabase.kt`.** Without a version bump, Room's identity hash check crashes at runtime instead of triggering the destructive migration.
 - **DataStore** — All preferences (theme, notifications, privacy). No SharedPreferences.
 - **Signal Protocol** — E2E encryption with `SignalManager` coordinating key exchange via `FirebaseKeySource`. **Encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `MessageRepositoryImpl`) — all messages are sent as plaintext via `sendPlainMessage` to avoid key-loss issues during development. Release builds use full Signal encryption.
 - **Presence** — Online status uses Firebase Realtime Database (`RealtimePresenceSource`). `startPresence()` uses the `.info/connected` pattern to re-register `onDisconnect()` on every reconnect. `observeOnlineStatus()` lets `UserRepositoryImpl.observeUser()` combine RTDB presence directly into the user stream — no Cloud Function dependency for the live indicator. The Cloud Function `syncPresenceToFirestore` still mirrors RTDB to Firestore for abrupt-disconnect cases.
