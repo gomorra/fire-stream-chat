@@ -100,7 +100,7 @@ class ProfileViewModel @Inject constructor(
     fun uploadAvatar(uri: Uri) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isUploading = true, uploadError = null)
-            userRepository.uploadAvatar(uri)
+            userRepository.uploadAvatar(uri.toString())
                 .onSuccess { _uiState.value = _uiState.value.copy(isUploading = false) }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(isUploading = false, uploadError = e.message)

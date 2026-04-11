@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
 import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.HistoryAction
 import com.firestream.chat.domain.model.ListData
@@ -118,104 +119,81 @@ class ListRepositoryImpl @Inject constructor(
         return listDao.getListsForUser(userId).map { entities -> entities.map { it.toDomain() } }
     }
 
-    override suspend fun createList(title: String, type: ListType, chatId: String?, genericStyle: GenericListStyle): Result<ListData> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
-            val now = System.currentTimeMillis()
-            val listData = ListData(
-                title = title,
-                type = type,
-                genericStyle = genericStyle,
-                createdBy = userId,
-                createdAt = now,
-                updatedAt = now,
-                participants = listOf(userId)
-            )
+    override suspend fun createList(title: String, type: ListType, chatId: String?, genericStyle: GenericListStyle): Result<ListData> = resultOf {
+        val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+        val now = System.currentTimeMillis()
+        val listData = ListData(
+            title = title,
+            type = type,
+            genericStyle = genericStyle,
+            createdBy = userId,
+            createdAt = now,
+            updatedAt = now,
+            participants = listOf(userId)
+        )
 
-            val remoteId = listSource.createList(listData)
-            val created = listData.copy(id = remoteId)
-            listDao.insert(ListEntity.fromDomain(created))
+        val remoteId = listSource.createList(listData)
+        val created = listData.copy(id = remoteId)
+        listDao.insert(ListEntity.fromDomain(created))
 
-            recordHistory(remoteId, HistoryAction.CREATED)
+        recordHistory(remoteId, HistoryAction.CREATED)
 
-            // If created from a chat, add participants + sharedChatId atomically, then send message
-            if (chatId != null) {
-                val chat = chatRepository.get().getChatById(chatId).getOrThrow()
-                listSource.shareList(remoteId, chat.participants, chatId)
-                listDao.updateSharedChatIds(remoteId, org.json.JSONArray(listOf(chatId)).toString(), System.currentTimeMillis())
-                messageRepository.get().sendListMessage(chatId, remoteId, title, com.firestream.chat.domain.model.ListDiff(shared = true))
-            }
-
-            Result.success(created)
-        } catch (e: Exception) {
-            Result.failure(e)
+        // If created from a chat, add participants + sharedChatId atomically, then send message
+        if (chatId != null) {
+            val chat = chatRepository.get().getChatById(chatId).getOrThrow()
+            listSource.shareList(remoteId, chat.participants, chatId)
+            listDao.updateSharedChatIds(remoteId, org.json.JSONArray(listOf(chatId)).toString(), System.currentTimeMillis())
+            messageRepository.get().sendListMessage(chatId, remoteId, title, com.firestream.chat.domain.model.ListDiff(shared = true))
         }
+
+        created
     }
 
-    override suspend fun addItem(listId: String, text: String, quantity: String?, unit: String?): Result<Unit> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
-            val item = ListItem(
-                id = UUID.randomUUID().toString(),
-                text = text,
-                quantity = quantity,
-                unit = unit,
-                addedBy = userId
-            )
-            listSource.addItem(listId, item)
-            recordHistory(listId, HistoryAction.ITEM_ADDED, itemId = item.id, itemText = text)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun addItem(listId: String, text: String, quantity: String?, unit: String?): Result<Unit> = resultOf {
+        val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+        val item = ListItem(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            quantity = quantity,
+            unit = unit,
+            addedBy = userId
+        )
+        listSource.addItem(listId, item)
+        recordHistory(listId, HistoryAction.ITEM_ADDED, itemId = item.id, itemText = text)
     }
 
-    override suspend fun removeItem(listId: String, itemId: String): Result<Unit> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
-            val list = entity.toDomain()
-            val item = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
-            listSource.removeItem(listId, item)
-            recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun removeItem(listId: String, itemId: String): Result<Unit> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
+        val item = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
+        listSource.removeItem(listId, item)
+        recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
     }
 
-    override suspend fun clearCheckedItems(listId: String): Result<List<String>> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
-            val list = entity.toDomain()
-            val checkedItems = list.items.filter { it.isChecked }
-            if (checkedItems.isEmpty()) return Result.success(emptyList())
-            val remaining = list.items.filter { !it.isChecked }
-            listSource.updateListItems(listId, remaining)
-            checkedItems.forEach { item ->
-                recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = item.id, itemText = item.text)
-            }
-            Result.success(checkedItems.map { it.text })
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun clearCheckedItems(listId: String): Result<List<String>> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
+        val checkedItems = list.items.filter { it.isChecked }
+        if (checkedItems.isEmpty()) return@resultOf emptyList()
+        val remaining = list.items.filter { !it.isChecked }
+        listSource.updateListItems(listId, remaining)
+        checkedItems.forEach { item ->
+            recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = item.id, itemText = item.text)
         }
+        checkedItems.map { it.text }
     }
 
-    override suspend fun toggleItemChecked(listId: String, itemId: String): Result<Unit> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
-            val list = entity.toDomain()
-            val targetItem = list.items.find { it.id == itemId }
-            val updatedItems = list.items.map { item ->
-                if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
-            }
-            listSource.updateListItems(listId, updatedItems)
-            if (targetItem != null) {
-                val action = if (targetItem.isChecked) HistoryAction.ITEM_UNCHECKED else HistoryAction.ITEM_CHECKED
-                recordHistory(listId, action, itemId = itemId, itemText = targetItem.text)
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun toggleItemChecked(listId: String, itemId: String): Result<Unit> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
+        val targetItem = list.items.find { it.id == itemId }
+        val updatedItems = list.items.map { item ->
+            if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
+        }
+        listSource.updateListItems(listId, updatedItems)
+        if (targetItem != null) {
+            val action = if (targetItem.isChecked) HistoryAction.ITEM_UNCHECKED else HistoryAction.ITEM_CHECKED
+            recordHistory(listId, action, itemId = itemId, itemText = targetItem.text)
         }
     }
 
@@ -225,86 +203,54 @@ class ListRepositoryImpl @Inject constructor(
         text: String,
         quantity: String?,
         unit: String?
-    ): Result<Unit> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
-            val list = entity.toDomain()
-            val updatedItems = list.items.map { item ->
-                if (item.id == itemId) item.copy(text = text, quantity = quantity, unit = unit) else item
-            }
-            listSource.updateListItems(listId, updatedItems)
-            recordHistory(listId, HistoryAction.ITEM_MODIFIED, itemId = itemId, itemText = text)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    ): Result<Unit> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
+        val updatedItems = list.items.map { item ->
+            if (item.id == itemId) item.copy(text = text, quantity = quantity, unit = unit) else item
         }
+        listSource.updateListItems(listId, updatedItems)
+        recordHistory(listId, HistoryAction.ITEM_MODIFIED, itemId = itemId, itemText = text)
     }
 
-    override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> {
-        return try {
-            listSource.updateListItems(listId, items)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> = resultOf {
+        listSource.updateListItems(listId, items)
     }
 
-    override suspend fun updateListTitle(listId: String, title: String): Result<Unit> {
-        return try {
-            listSource.updateListTitle(listId, title)
-            recordHistory(listId, HistoryAction.TITLE_CHANGED, itemText = title)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun updateListTitle(listId: String, title: String): Result<Unit> = resultOf {
+        listSource.updateListTitle(listId, title)
+        recordHistory(listId, HistoryAction.TITLE_CHANGED, itemText = title)
     }
 
-    override suspend fun updateListType(listId: String, type: ListType): Result<Unit> {
-        return try {
-            listSource.updateListType(listId, type)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun updateListType(listId: String, type: ListType): Result<Unit> = resultOf {
+        listSource.updateListType(listId, type)
     }
 
-    override suspend fun updateGenericStyle(listId: String, style: GenericListStyle): Result<Unit> {
-        return try {
-            listSource.updateGenericStyle(listId, style)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun updateGenericStyle(listId: String, style: GenericListStyle): Result<Unit> = resultOf {
+        listSource.updateGenericStyle(listId, style)
     }
 
-    override suspend fun deleteList(listId: String): Result<Unit> {
-        return try {
-            listSource.deleteList(listId)
-            listDao.delete(listId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun deleteList(listId: String): Result<Unit> = resultOf {
+        listSource.deleteList(listId)
+        listDao.delete(listId)
     }
 
-    override suspend fun shareListToChat(listId: String, chatId: String): Result<Message> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
-            val list = entity.toDomain()
+    override suspend fun shareListToChat(listId: String, chatId: String): Result<Message> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
 
-            // Single atomic Firestore write: add all chat participants + sharedChatId
-            val chat = chatRepository.get().getChatById(chatId).getOrThrow()
-            listSource.shareList(listId, chat.participants, chatId)
+        // Single atomic Firestore write: add all chat participants + sharedChatId
+        val chat = chatRepository.get().getChatById(chatId).getOrThrow()
+        listSource.shareList(listId, chat.participants, chatId)
 
-            // Update local Room cache immediately
-            val now = System.currentTimeMillis()
-            val updatedIds = (list.sharedChatIds + chatId).distinct()
-            listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
+        // Update local Room cache immediately
+        val now = System.currentTimeMillis()
+        val updatedIds = (list.sharedChatIds + chatId).distinct()
+        listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
 
-            messageRepository.get().sendListMessage(chatId, listId, list.title, com.firestream.chat.domain.model.ListDiff(shared = true))
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        messageRepository.get()
+            .sendListMessage(chatId, listId, list.title, com.firestream.chat.domain.model.ListDiff(shared = true))
+            .getOrThrow()
     }
 
     override fun getSharedListsForChat(chatId: String): Flow<List<ListData>> = channelFlow {
@@ -327,84 +273,58 @@ class ListRepositoryImpl @Inject constructor(
     override fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> =
         historySource.observeHistory(listId)
 
-    override suspend fun addHistoryEntry(listId: String, entry: ListHistoryEntry): Result<Unit> {
-        return try {
-            historySource.addEntry(listId, entry)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun addHistoryEntry(listId: String, entry: ListHistoryEntry): Result<Unit> = resultOf {
+        historySource.addEntry(listId, entry)
     }
 
-    override suspend fun updateSharedChatIds(listId: String, chatId: String): Result<Unit> {
-        return try {
-            listSource.updateSharedChatIds(listId, chatId)
-            val now = System.currentTimeMillis()
-            val entity = listDao.getById(listId)
-            if (entity != null) {
-                val list = entity.toDomain()
-                val updatedIds = (list.sharedChatIds + chatId).distinct()
-                listDao.updateSharedChatIds(
-                    listId,
-                    org.json.JSONArray(updatedIds).toString(),
-                    now
-                )
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit> {
-        return try {
-            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+    override suspend fun updateSharedChatIds(listId: String, chatId: String): Result<Unit> = resultOf {
+        listSource.updateSharedChatIds(listId, chatId)
+        val now = System.currentTimeMillis()
+        val entity = listDao.getById(listId)
+        if (entity != null) {
             val list = entity.toDomain()
-
-            // 1. Fetch chat to determine participants to remove
-            val chat = chatRepository.get().getChatById(chatId).getOrThrow()
-            val toRemove = chat.participants.filter { it != list.createdBy }
-
-            // 2. Update Firestore FIRST — remove participants + sharedChatIds
-            //    Must complete before sending message so the receiver sees the updated
-            //    document when they open the chat from the FCM notification.
-            listSource.unshareList(listId, toRemove, chatId)
-
-            // 3. Update local Room cache
-            val now = System.currentTimeMillis()
-            val arr = org.json.JSONArray(entity.sharedChatIds)
-            val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
-            listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
-
-            // 4. Send the notification message LAST — by this point the Firestore doc
-            //    is already updated, so any FCM-triggered navigation sees correct state.
-            messageRepository.get().sendListMessage(
-                chatId, listId, list.title,
-                com.firestream.chat.domain.model.ListDiff(unshared = true)
+            val updatedIds = (list.sharedChatIds + chatId).distinct()
+            listDao.updateSharedChatIds(
+                listId,
+                org.json.JSONArray(updatedIds).toString(),
+                now
             )
-
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
 
-    override suspend fun removeParticipant(listId: String, userId: String): Result<Unit> {
-        return try {
-            listSource.removeParticipant(listId, userId)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun unshareListFromChat(listId: String, chatId: String): Result<Unit> = resultOf {
+        val entity = listDao.getById(listId) ?: throw Exception("List not found")
+        val list = entity.toDomain()
+
+        // 1. Fetch chat to determine participants to remove
+        val chat = chatRepository.get().getChatById(chatId).getOrThrow()
+        val toRemove = chat.participants.filter { it != list.createdBy }
+
+        // 2. Update Firestore FIRST — remove participants + sharedChatIds
+        //    Must complete before sending message so the receiver sees the updated
+        //    document when they open the chat from the FCM notification.
+        listSource.unshareList(listId, toRemove, chatId)
+
+        // 3. Update local Room cache
+        val now = System.currentTimeMillis()
+        val arr = org.json.JSONArray(entity.sharedChatIds)
+        val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
+        listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
+
+        // 4. Send the notification message LAST — by this point the Firestore doc
+        //    is already updated, so any FCM-triggered navigation sees correct state.
+        messageRepository.get().sendListMessage(
+            chatId, listId, list.title,
+            com.firestream.chat.domain.model.ListDiff(unshared = true)
+        )
     }
 
-    override suspend fun removeParticipants(listId: String, userIds: List<String>): Result<Unit> {
-        return try {
-            listSource.removeParticipants(listId, userIds)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun removeParticipant(listId: String, userId: String): Result<Unit> = resultOf {
+        listSource.removeParticipant(listId, userId)
+    }
+
+    override suspend fun removeParticipants(listId: String, userIds: List<String>): Result<Unit> = resultOf {
+        listSource.removeParticipants(listId, userIds)
     }
 
     override suspend fun fetchAndCacheList(listId: String) {

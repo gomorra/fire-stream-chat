@@ -1,14 +1,6 @@
 package com.firestream.chat.ui.profile
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -67,21 +59,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.components.cameraCacheUri
+import com.firestream.chat.ui.components.rememberImagePicker
 import com.firestream.chat.ui.components.resolveAvatarModel
 import com.firestream.chat.ui.theme.OnlineGreen
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -93,30 +83,19 @@ fun ProfileScreen(
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
 
     var showBlockDialog by remember { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
     var fullscreenAvatar by remember { mutableStateOf(false) }
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     var editingAbout by remember { mutableStateOf(false) }
     var aboutInput by remember { mutableStateOf("") }
 
-    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { viewModel.uploadAvatar(it) }
-    }
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success) cameraUri?.let { viewModel.uploadAvatar(it) }
-    }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            val uri = createAvatarCameraUri(context)
-            cameraUri = uri
-            cameraLauncher.launch(uri)
-        }
-    }
+    val imagePicker = rememberImagePicker(
+        createCameraUri = { ctx -> cameraCacheUri(ctx, filenamePrefix = "avatar") },
+        onImagePicked = { viewModel.uploadAvatar(it) }
+    )
 
     Scaffold(
         topBar = {
@@ -470,15 +449,7 @@ fun ProfileScreen(
                     TextButton(
                         onClick = {
                             showPhotoSourceDialog = false
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-                                == PackageManager.PERMISSION_GRANTED
-                            ) {
-                                val uri = createAvatarCameraUri(context)
-                                cameraUri = uri
-                                cameraLauncher.launch(uri)
-                            } else {
-                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                            }
+                            imagePicker.captureFromCamera()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Take photo") }
@@ -486,7 +457,7 @@ fun ProfileScreen(
                     TextButton(
                         onClick = {
                             showPhotoSourceDialog = false
-                            galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                            imagePicker.pickFromGallery()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Choose from gallery") }
@@ -629,8 +600,3 @@ private fun SharedMediaGrid(
     }
 }
 
-private fun createAvatarCameraUri(context: Context): Uri {
-    val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
-    val file = File(cacheDir, "avatar_${System.currentTimeMillis()}.jpg")
-    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-}

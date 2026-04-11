@@ -16,6 +16,8 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
+import io.mockk.mockkStatic
+import io.mockk.unmockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -196,48 +198,59 @@ class UserRepositoryImplAvatarCacheTest {
     }
 
     // --- uploadAvatar ---
+    // Note: repository.uploadAvatar now takes a URI string and calls Uri.parse()
+    // internally, so these tests mock Uri.parse to return a mock Uri that is
+    // then handed to the sources (whose signatures still take Uri).
 
     @Test
     fun `uploadAvatar saves local copy before uploading`() = runTest {
-        val uri = mockk<Uri>()
+        val uriString = "content://media/picker/1"
+        val parsedUri = mockk<Uri>()
         val localFile = mockk<File> { every { absolutePath } returns "/local/avatar.jpg" }
 
+        mockkStatic(Uri::class)
+        every { Uri.parse(uriString) } returns parsedUri
         every { authSource.currentUserId } returns "uid1"
-        coEvery { profileImageManager.saveLocalCopy("uid1", uri) } returns localFile
-        coEvery { storageSource.uploadAvatar("uid1", uri) } returns "https://firebase.com/new.jpg"
+        coEvery { profileImageManager.saveLocalCopy("uid1", parsedUri) } returns localFile
+        coEvery { storageSource.uploadAvatar("uid1", parsedUri) } returns "https://firebase.com/new.jpg"
         coEvery { userSource.updateProfile("uid1", any()) } just Runs
         coEvery { userDao.updateAvatarCache("uid1", "https://firebase.com/new.jpg", "/local/avatar.jpg") } just Runs
 
-        val result = repository.uploadAvatar(uri)
+        val result = repository.uploadAvatar(uriString)
 
         assertTrue(result.isSuccess)
         coVerify(ordering = Ordering.ORDERED) {
-            profileImageManager.saveLocalCopy("uid1", uri)
-            storageSource.uploadAvatar("uid1", uri)
+            profileImageManager.saveLocalCopy("uid1", parsedUri)
+            storageSource.uploadAvatar("uid1", parsedUri)
         }
         coVerify { userDao.updateAvatarCache("uid1", "https://firebase.com/new.jpg", "/local/avatar.jpg") }
+        unmockkStatic(Uri::class)
     }
 
     @Test
     fun `uploadAvatar returns failure when not authenticated`() = runTest {
         every { authSource.currentUserId } returns null
 
-        val result = repository.uploadAvatar(mockk())
+        val result = repository.uploadAvatar("content://unused")
 
         assertTrue(result.isFailure)
     }
 
     @Test
     fun `uploadAvatar returns failure when upload throws`() = runTest {
-        val uri = mockk<Uri>()
+        val uriString = "content://media/picker/1"
+        val parsedUri = mockk<Uri>()
         val localFile = mockk<File> { every { absolutePath } returns "/local/avatar.jpg" }
 
+        mockkStatic(Uri::class)
+        every { Uri.parse(uriString) } returns parsedUri
         every { authSource.currentUserId } returns "uid1"
-        coEvery { profileImageManager.saveLocalCopy("uid1", uri) } returns localFile
-        coEvery { storageSource.uploadAvatar("uid1", uri) } throws RuntimeException("Upload failed")
+        coEvery { profileImageManager.saveLocalCopy("uid1", parsedUri) } returns localFile
+        coEvery { storageSource.uploadAvatar("uid1", parsedUri) } throws RuntimeException("Upload failed")
 
-        val result = repository.uploadAvatar(uri)
+        val result = repository.uploadAvatar(uriString)
 
         assertTrue(result.isFailure)
+        unmockkStatic(Uri::class)
     }
 }

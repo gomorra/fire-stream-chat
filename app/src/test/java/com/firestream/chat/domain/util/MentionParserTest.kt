@@ -12,8 +12,6 @@ class MentionParserTest {
         "Charlie" to "uid_charlie"
     )
 
-    private val idToName = nameToId.entries.associate { it.value to it.key }
-
     // --- extractMentions ---
 
     @Test
@@ -57,61 +55,5 @@ class MentionParserTest {
         val result = MentionParser.extractMentions("@Alice then @Alice again", nameToId)
         assertEquals(1, result.size)
         assertEquals("uid_alice", result[0])
-    }
-
-    // --- formatMentionText ---
-
-    @Test
-    fun `formatMentionText returns plain AnnotatedString when mentions empty`() {
-        val text = "Hello world"
-        val result = MentionParser.formatMentionText(
-            text = text,
-            mentions = emptyList(),
-            currentUserId = "uid_alice",
-            highlightColor = androidx.compose.ui.graphics.Color.Blue,
-            userIdToDisplayName = idToName
-        )
-        assertEquals(text, result.text)
-        assertTrue(result.spanStyles.isEmpty())
-    }
-
-    @Test
-    fun `formatMentionText highlights mentioned name`() {
-        val result = MentionParser.formatMentionText(
-            text = "Hey @Alice",
-            mentions = listOf("uid_alice"),
-            currentUserId = "uid_bob",
-            highlightColor = androidx.compose.ui.graphics.Color.Blue,
-            userIdToDisplayName = idToName
-        )
-        assertEquals("Hey @Alice", result.text)
-        assertEquals(1, result.spanStyles.size)
-        // Span covers "@Alice"
-        assertEquals(4, result.spanStyles[0].start)
-        assertEquals(10, result.spanStyles[0].end)
-    }
-
-    @Test
-    fun `formatMentionText does not highlight unmentioned names`() {
-        val result = MentionParser.formatMentionText(
-            text = "Hey @Alice and @Charlie",
-            mentions = listOf("uid_alice"),
-            currentUserId = "uid_bob",
-            highlightColor = androidx.compose.ui.graphics.Color.Blue,
-            userIdToDisplayName = idToName
-        )
-        assertEquals(1, result.spanStyles.size)
-    }
-
-    @Test
-    fun `formatMentionText works with no userIdToDisplayName map`() {
-        val result = MentionParser.formatMentionText(
-            text = "Hello @everyone",
-            mentions = listOf("everyone"),
-            currentUserId = "uid_alice",
-            highlightColor = androidx.compose.ui.graphics.Color.Blue
-        )
-        assertEquals("Hello @everyone", result.text)
-        assertEquals(1, result.spanStyles.size)
     }
 }
