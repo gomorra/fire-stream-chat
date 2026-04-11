@@ -8,6 +8,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.Chat
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
@@ -139,12 +140,21 @@ class SharePickerViewModel @Inject constructor(
             val selectedChats = state.chats.filter { it.id in state.selectedChatIds }
 
             selectedChats.map { chat ->
-                val recipientId = chat.participants.firstOrNull { it != state.currentUserId } ?: ""
                 async {
                     runCatching {
+                        // Only 1-to-1 chats get a real recipientId — groups and
+                        // broadcasts must pass "" so the block check and Signal
+                        // per-peer encryption are skipped. (Broadcasts fan out
+                        // via sendBroadcastMessage instead.)
+                        val recipientId = signalRecipientIdFor(chat, state.currentUserId)
                         when (val content = state.sharedContent) {
                             is SharedContent.Text ->
-                                messageRepository.sendMessage(chat.id, content.text, recipientId)
+                                if (chat.type == ChatType.BROADCAST) {
+                                    val recipients = chat.participants.filter { it != state.currentUserId }
+                                    messageRepository.sendBroadcastMessage(chat.id, content.text, recipients)
+                                } else {
+                                    messageRepository.sendMessage(chat.id, content.text, recipientId)
+                                }
                             is SharedContent.Media ->
                                 content.items.map { item ->
                                     async {
@@ -166,13 +176,19 @@ class SharePickerViewModel @Inject constructor(
 
             if (selectedChats.size == 1) {
                 val chat = selectedChats[0]
-                val recipientId = chat.participants.firstOrNull { it != state.currentUserId } ?: ""
-                onDone(chat.id, recipientId)
+                onDone(chat.id, signalRecipientIdFor(chat, state.currentUserId))
             } else {
                 onDone(null, null)
             }
         }
     }
+
+    private fun signalRecipientIdFor(chat: Chat, currentUserId: String): String =
+        if (chat.type == ChatType.INDIVIDUAL) {
+            chat.participants.firstOrNull { it != currentUserId } ?: ""
+        } else {
+            ""
+        }
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
