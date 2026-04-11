@@ -1,18 +1,11 @@
 package com.firestream.chat.ui.group
 
-import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -81,12 +74,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.components.cameraCacheUri
+import com.firestream.chat.ui.components.rememberImagePicker
 import com.firestream.chat.ui.components.resolveAvatarModel
-import java.io.File
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -116,21 +108,10 @@ fun GroupSettingsScreen(
     var showRemoveDialog by remember { mutableStateOf<String?>(null) }
     var fullscreenGroupAvatar by remember { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
-    var cameraUri by remember { mutableStateOf<Uri?>(null) }
-
-    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-        uri?.let { viewModel.uploadGroupAvatar(it) }
-    }
-    val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
-        if (success) cameraUri?.let { viewModel.uploadGroupAvatar(it) }
-    }
-    val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
-            val uri = createGroupAvatarCameraUri(context)
-            cameraUri = uri
-            cameraLauncher.launch(uri)
-        }
-    }
+    val imagePicker = rememberImagePicker(
+        createCameraUri = { ctx -> cameraCacheUri(ctx, filenamePrefix = "group") },
+        onImagePicked = { viewModel.uploadGroupAvatar(it) }
+    )
 
     LaunchedEffect(uiState.leftGroup) {
         if (uiState.leftGroup) onBackClick()
@@ -567,15 +548,7 @@ fun GroupSettingsScreen(
                     TextButton(
                         onClick = {
                             showPhotoSourceDialog = false
-                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA)
-                                == PackageManager.PERMISSION_GRANTED
-                            ) {
-                                val uri = createGroupAvatarCameraUri(context)
-                                cameraUri = uri
-                                cameraLauncher.launch(uri)
-                            } else {
-                                cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
-                            }
+                            imagePicker.captureFromCamera()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Take photo") }
@@ -583,7 +556,7 @@ fun GroupSettingsScreen(
                     TextButton(
                         onClick = {
                             showPhotoSourceDialog = false
-                            galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                            imagePicker.pickFromGallery()
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text("Choose from gallery") }
@@ -662,11 +635,6 @@ private fun EditableGroupField(
     }
 }
 
-private fun createGroupAvatarCameraUri(context: Context): Uri {
-    val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
-    val file = File(cacheDir, "group_${System.currentTimeMillis()}.jpg")
-    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-}
 
 @Composable
 private fun SectionHeader(title: String, modifier: Modifier = Modifier) {
