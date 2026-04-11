@@ -253,7 +253,7 @@ fun ChatScreen(
         }
     }
 
-    // Forward any snackbarEvent emissions (e.g. "Saved to gallery") to the host.
+    // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the host.
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { message ->
             snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
@@ -1339,8 +1339,8 @@ fun ChatScreen(
                 imageUrl = msg.mediaUrl ?: "",
                 localUri = msg.localUri,
                 onDismiss = { fullscreenImageMessage = null },
-                onSaveToGallery = {
-                    viewModel.saveImageToGallery(msg.localUri, msg.mediaUrl)
+                onSaveToDownloads = {
+                    viewModel.saveImageToDownloads(msg.localUri, msg.mediaUrl)
                 }
             )
         }
