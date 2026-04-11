@@ -1,6 +1,5 @@
 package com.firestream.chat.ui.share
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.remote.LinkPreview
@@ -9,6 +8,7 @@ import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
@@ -26,12 +26,15 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class PreviewState { Loading, Ready, Empty, Error }
+
 data class SharePickerUiState(
     val chats: List<Chat> = emptyList(),
     val filteredChats: List<Chat> = emptyList(),
     val selectedChatIds: Set<String> = emptySet(),
     val sharedContent: SharedContent? = null,
     val linkPreview: LinkPreview? = null,
+    val previewState: PreviewState = PreviewState.Loading,
     val searchQuery: String = "",
     val isSending: Boolean = false,
     val error: String? = null,
@@ -85,18 +88,42 @@ class SharePickerViewModel @Inject constructor(
     }
 
     private fun resolveSharedContent() {
-        val pendingIntent = sharedContentHolder.consumeIntent() ?: return
+        val pendingIntent = sharedContentHolder.consumeIntent()
+        if (pendingIntent == null) {
+            _uiState.value = _uiState.value.copy(previewState = PreviewState.Empty)
+            return
+        }
+        _uiState.value = _uiState.value.copy(previewState = PreviewState.Loading)
         viewModelScope.launch {
-            val content = shareContentResolver.resolve(pendingIntent)
-            _uiState.value = _uiState.value.copy(sharedContent = content)
-
-            if (content is SharedContent.Text) {
-                val url = linkPreviewSource.extractUrl(content.text)
-                if (url != null) {
-                    val preview = linkPreviewSource.fetchPreview(url)
-                    _uiState.value = _uiState.value.copy(linkPreview = preview)
+            val result = runCatching { shareContentResolver.resolve(pendingIntent) }
+            result.fold(
+                onSuccess = { content ->
+                    if (content == null) {
+                        _uiState.value = _uiState.value.copy(
+                            previewState = PreviewState.Empty,
+                            error = "Nothing to share"
+                        )
+                    } else {
+                        _uiState.value = _uiState.value.copy(
+                            sharedContent = content,
+                            previewState = PreviewState.Ready
+                        )
+                        if (content is SharedContent.Text) {
+                            val url = linkPreviewSource.extractUrl(content.text)
+                            if (url != null) {
+                                val preview = linkPreviewSource.fetchPreview(url)
+                                _uiState.value = _uiState.value.copy(linkPreview = preview)
+                            }
+                        }
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.value = _uiState.value.copy(
+                        previewState = PreviewState.Error,
+                        error = e.message ?: "Couldn't read shared content"
+                    )
                 }
-            }
+            )
         }
     }
 
@@ -133,62 +160,92 @@ class SharePickerViewModel @Inject constructor(
     fun send(onDone: (singleChatId: String?, recipientId: String?) -> Unit) {
         val state = _uiState.value
         if (state.selectedChatIds.isEmpty() || state.isSending) return
+        val content = state.sharedContent
+        if (content == null) {
+            _uiState.value = state.copy(error = "Nothing to share")
+            return
+        }
 
-        _uiState.value = state.copy(isSending = true)
+        _uiState.value = state.copy(isSending = true, error = null)
 
         viewModelScope.launch {
             val selectedChats = state.chats.filter { it.id in state.selectedChatIds }
 
-            selectedChats.map { chat ->
-                async {
-                    runCatching {
-                        // Only 1-to-1 chats get a real recipientId — groups and
-                        // broadcasts must pass "" so the block check and Signal
-                        // per-peer encryption are skipped. (Broadcasts fan out
-                        // via sendBroadcastMessage instead.)
-                        val recipientId = signalRecipientIdFor(chat, state.currentUserId)
-                        when (val content = state.sharedContent) {
-                            is SharedContent.Text ->
-                                if (chat.type == ChatType.BROADCAST) {
-                                    val recipients = chat.participants.filter { it != state.currentUserId }
-                                    messageRepository.sendBroadcastMessage(chat.id, content.text, recipients)
-                                } else {
-                                    messageRepository.sendMessage(chat.id, content.text, recipientId)
-                                }
-                            is SharedContent.Media ->
-                                content.items.map { item ->
-                                    async {
-                                        messageRepository.sendMediaMessage(
-                                            chat.id,
-                                            Uri.parse(item.cachedUri),
-                                            item.mimeType,
-                                            recipientId
-                                        )
-                                    }
-                                }.awaitAll()
-                            null -> Unit
-                        }
-                    }
+            val results: List<Result<Unit>> = selectedChats.map { chat ->
+                // Signal sessions are 1:1. Only pass a real recipientId for individual
+                // chats; group/broadcast chats must go through the plaintext branch in
+                // MessageRepositoryImpl so all participants can read the message.
+                val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
+                    chat.participants.firstOrNull { it != state.currentUserId } ?: ""
+                } else {
+                    ""
                 }
+                async { sendToChat(chat.id, recipientId, content) }
             }.awaitAll()
 
-            _uiState.value = _uiState.value.copy(isSending = false)
+            val failures = results.count { it.isFailure }
+            val total = results.size
 
-            if (selectedChats.size == 1) {
-                val chat = selectedChats[0]
-                onDone(chat.id, signalRecipientIdFor(chat, state.currentUserId))
+            if (failures == 0) {
+                _uiState.value = _uiState.value.copy(isSending = false)
+                if (selectedChats.size == 1) {
+                    val chat = selectedChats[0]
+                    val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
+                        chat.participants.firstOrNull { it != state.currentUserId } ?: ""
+                    } else {
+                        ""
+                    }
+                    onDone(chat.id, recipientId)
+                } else {
+                    onDone(null, null)
+                }
             } else {
-                onDone(null, null)
+                val firstError = results.firstOrNull { it.isFailure }
+                    ?.exceptionOrNull()
+                    ?.message
+                val message = when {
+                    total == 1 -> firstError ?: "Couldn't share message"
+                    failures == total -> "Couldn't share to any chat"
+                    else -> "Couldn't share to $failures of $total chats"
+                }
+                _uiState.value = _uiState.value.copy(
+                    isSending = false,
+                    error = message
+                )
             }
         }
     }
 
-    private fun signalRecipientIdFor(chat: Chat, currentUserId: String): String =
-        if (chat.type == ChatType.INDIVIDUAL) {
-            chat.participants.firstOrNull { it != currentUserId } ?: ""
-        } else {
-            ""
+    /**
+     * Send [content] to a single chat. Returns [Result.success] only when every
+     * underlying repository call succeeded, so the caller can decide whether to
+     * navigate away or surface a retry prompt.
+     */
+    private suspend fun sendToChat(
+        chatId: String,
+        recipientId: String,
+        content: SharedContent
+    ): Result<Unit> = runCatching {
+        when (content) {
+            is SharedContent.Text -> {
+                messageRepository.sendMessage(chatId, content.text, recipientId).getOrThrow()
+            }
+            is SharedContent.Media -> coroutineScope {
+                val results: List<Result<Message>> = content.items.map { item ->
+                    async {
+                        messageRepository.sendMediaMessage(
+                            chatId,
+                            item.cachedUri,
+                            item.mimeType,
+                            recipientId
+                        )
+                    }
+                }.awaitAll()
+                val firstFailure = results.firstOrNull { it.isFailure }
+                if (firstFailure != null) throw firstFailure.exceptionOrNull()!!
+            }
         }
+    }
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)

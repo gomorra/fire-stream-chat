@@ -68,25 +68,34 @@ class MediaFileManager @Inject constructor(
             }
         }
 
-    suspend fun saveToGallery(localFile: File, mimeType: String): Uri =
+    suspend fun saveToDownloads(localFile: File, mimeType: String): Uri =
         withContext(Dispatchers.IO) {
-            // Copy to Pictures/ root (not FireStream subfolder) for explicit user save
+            // Copy to the user-visible Downloads folder via MediaStore (API 29+).
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, localFile.name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
 
-            val collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
             val resolver = context.contentResolver
             val uri = resolver.insert(collection, values)
                 ?: throw Exception("Failed to create MediaStore entry")
 
-            resolver.openOutputStream(uri)?.use { output ->
-                localFile.inputStream().use { input ->
-                    input.copyTo(output)
-                }
-            } ?: throw Exception("Failed to open output stream")
+            try {
+                resolver.openOutputStream(uri)?.use { output ->
+                    localFile.inputStream().use { input ->
+                        input.copyTo(output)
+                    }
+                } ?: throw Exception("Failed to open output stream")
+
+                val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+                resolver.update(uri, done, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
 
             uri
         }

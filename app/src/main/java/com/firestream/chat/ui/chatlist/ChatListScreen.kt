@@ -45,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.animation.AnimatedVisibility
@@ -70,6 +71,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.chat.FullscreenImageViewer
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -86,6 +88,19 @@ fun ChatListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    var fullscreenAvatar by remember { mutableStateOf<Pair<String?, String?>?>(null) }
+
+    val openAvatarFullscreen: (Chat) -> Unit = { chat ->
+        val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
+            chat.participants.firstOrNull { it != uiState.currentUserId }
+        } else null
+        val avatarUrl = recipientId?.let { uiState.contacts[it]?.avatarUrl } ?: chat.avatarUrl
+        val localAvatarPath = recipientId?.let { uiState.contacts[it]?.localAvatarPath }
+            ?: chat.localAvatarPath
+        if (avatarUrl != null || localAvatarPath != null) {
+            fullscreenAvatar = avatarUrl to localAvatarPath
+        }
+    }
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
@@ -284,6 +299,7 @@ fun ChatListScreen(
                                         contacts = uiState.contacts,
                                         onlineUserIds = uiState.onlineUserIds,
                                         onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                        onAvatarClick = { openAvatarFullscreen(chat) },
                                         onDelete = { viewModel.requestDeleteChat(chat.id) },
                                         onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
                                         onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
@@ -304,6 +320,7 @@ fun ChatListScreen(
                                     contacts = uiState.contacts,
                                     onlineUserIds = uiState.onlineUserIds,
                                     onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                    onAvatarClick = { openAvatarFullscreen(chat) },
                                     onDelete = { viewModel.requestDeleteChat(chat.id) },
                                     onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
                                     onArchive = { viewModel.toggleArchive(chat.id, chat.isArchived) },
@@ -341,6 +358,22 @@ fun ChatListScreen(
             )
         }
     }
+
+    // Fullscreen avatar viewer
+    BackHandler(enabled = fullscreenAvatar != null) { fullscreenAvatar = null }
+    AnimatedVisibility(
+        visible = fullscreenAvatar != null,
+        enter = fadeIn(),
+        exit = fadeOut()
+    ) {
+        fullscreenAvatar?.let { (avatarUrl, localAvatarPath) ->
+            FullscreenImageViewer(
+                imageUrl = avatarUrl ?: "",
+                localUri = localAvatarPath,
+                onDismiss = { fullscreenAvatar = null }
+            )
+        }
+    }
 }
 
 @Composable
@@ -350,6 +383,7 @@ private fun ChatItem(
     contacts: Map<String, Contact> = emptyMap(),
     onlineUserIds: Set<String> = emptySet(),
     onClick: () -> Unit,
+    onAvatarClick: () -> Unit,
     onDelete: () -> Unit,
     onPin: () -> Unit,
     onArchive: () -> Unit,
@@ -369,7 +403,8 @@ private fun ChatItem(
             isRecipientOnline = chat.type == ChatType.INDIVIDUAL &&
                 chat.participants.firstOrNull { it != currentUserId }?.let { it in onlineUserIds } == true,
             onClick = onClick,
-            onLongClick = { showMenu = true }
+            onLongClick = { showMenu = true },
+            onAvatarClick = onAvatarClick
         )
         DropdownMenu(
             expanded = showMenu,

@@ -62,6 +62,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -89,6 +90,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
@@ -97,7 +99,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.firestream.chat.domain.util.MentionParser
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -113,6 +114,14 @@ import kotlin.math.roundToInt
 // Emoji size factors: emoji are always this multiple of the surrounding text size.
 internal const val EMOJI_INLINE_SCALE = 1.3f  // inline emoji: 30% larger than the text
 internal const val EMOJI_ONLY_SCALE   = 1.5f  // emoji-only bubble: 50% larger than the text
+
+// Vertically centers glyphs within their line box so short bubble text sits in the
+// middle of the line rather than hugging the ascender — gives the bubble a balanced
+// top/bottom whitespace regardless of font metrics.
+private val CenteredLineHeight = LineHeightStyle(
+    alignment = LineHeightStyle.Alignment.Center,
+    trim = LineHeightStyle.Trim.None
+)
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
 @Composable
@@ -236,7 +245,10 @@ internal fun MessageBubble(
                     if (message.deletedAt != null) {
                         Text(
                             text = "This message was deleted",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontStyle = FontStyle.Italic),
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontStyle = FontStyle.Italic,
+                                lineHeightStyle = CenteredLineHeight
+                            ),
                             color = textColor.copy(alpha = 0.6f)
                         )
                         Text(
@@ -278,7 +290,9 @@ internal fun MessageBubble(
                         ) {
                             Text(
                                 text = replyToMessage.content.take(80),
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    lineHeightStyle = CenteredLineHeight
+                                ),
                                 color = textColor.copy(alpha = 0.8f),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis,
@@ -373,7 +387,9 @@ internal fun MessageBubble(
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = message.content,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        lineHeightStyle = CenteredLineHeight
+                                    ),
                                     color = textColor
                                 )
                             }
@@ -397,7 +413,9 @@ internal fun MessageBubble(
                                 Text(
                                     text = message.content,
                                     color = textColor,
-                                    style = MaterialTheme.typography.bodyMedium
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        lineHeightStyle = CenteredLineHeight
+                                    )
                                 )
                             }
                         }
@@ -439,7 +457,9 @@ internal fun MessageBubble(
                                     Text(
                                         text = callLabel,
                                         color = callColor,
-                                        style = MaterialTheme.typography.bodyMedium
+                                        style = MaterialTheme.typography.bodyMedium.copy(
+                                            lineHeightStyle = CenteredLineHeight
+                                        )
                                     )
                                     if (callDetail != null) {
                                         Text(
@@ -476,13 +496,16 @@ internal fun MessageBubble(
                                     text = sized,
                                     fontSize = emojiOnlySize,
                                     lineHeight = emojiOnlySize * 1.2f,
-                                    color = textColor
+                                    color = textColor,
+                                    style = LocalTextStyle.current.copy(
+                                        lineHeightStyle = CenteredLineHeight
+                                    )
                                 )
                             } else {
                             val highlightColor = MaterialTheme.colorScheme.primary
                             val linkUrl = linkPreview?.url
                             val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
-                                val base = MentionParser.formatMentionText(
+                                val base = MentionFormatter.formatMentionText(
                                     text = message.content,
                                     mentions = message.mentions,
                                     currentUserId = currentUserId,
@@ -513,7 +536,9 @@ internal fun MessageBubble(
                             Text(
                                 text = displayTextWithEmojis,
                                 color = textColor,
-                                style = MaterialTheme.typography.bodyMedium
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    lineHeightStyle = CenteredLineHeight
+                                )
                             )
                             } // end non-emoji-only branch
                             if (message.editedAt != null) {

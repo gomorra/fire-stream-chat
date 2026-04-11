@@ -3,6 +3,7 @@ package com.firestream.chat.data.repository
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.util.Log
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -15,6 +16,7 @@ import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
 import com.firestream.chat.data.remote.firebase.FirestoreUserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
@@ -55,6 +57,12 @@ private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
 private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
+private const val TAG = "MessageRepo"
+
+// How long a list-update bubble stays "open" for further merging. Once the gap
+// between the previous list update and the next one exceeds this window, the
+// next update starts a fresh bubble instead of silently extending the old one.
+private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -90,8 +98,12 @@ class MessageRepositoryImpl @Inject constructor(
                         if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
                     } catch (_: Exception) { emptySet() }
                     for (raw in rawList) {
-                        // Skip messages from users the current user has blocked
-                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+                        // Skip messages from users the current user has blocked.
+                        // Log so "message isn't appearing" scenarios are diagnosable via logcat.
+                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
+                            Log.d(TAG, "observeMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
+                            continue
+                        }
 
                         val existing = messageDao.getMessageById(raw.id)
 
@@ -252,6 +264,87 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Routes a send through Signal encryption or the plaintext branch based on the
+     * build flavor and whether a 1:1 recipient is known. Encapsulates the
+     * "encrypt for recipient unless debug/empty-recipient" decision that was
+     * previously duplicated at every send site in this class.
+     *
+     * Callers pass all optional fields (mediaUrl, mentions, etc.) — unused ones
+     * fall through to the underlying `FirestoreMessageSource` defaults.
+     */
+    private suspend fun sendEncryptedOrPlain(
+        chatId: String,
+        senderId: String,
+        recipientId: String,
+        plaintext: String,
+        type: MessageType,
+        timestamp: Long,
+        replyToId: String? = null,
+        mentions: List<String> = emptyList(),
+        emojiSizes: Map<Int, Float> = emptyMap(),
+        mediaUrl: String? = null,
+        mediaWidth: Int? = null,
+        mediaHeight: Int? = null,
+        duration: Int? = null,
+        latitude: Double? = null,
+        longitude: Double? = null,
+        isForwarded: Boolean = false,
+    ): String {
+        return if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
+            signalManager.ensureInitialized()
+            val encrypted = signalManager.encrypt(recipientId, plaintext)
+            messageSource.sendMessage(
+                chatId = chatId,
+                senderId = senderId,
+                ciphertext = encrypted.ciphertext,
+                signalType = encrypted.signalType,
+                type = type,
+                replyToId = replyToId,
+                timestamp = timestamp,
+                mediaUrl = mediaUrl,
+                isForwarded = isForwarded,
+                duration = duration,
+                mentions = mentions,
+                plainContent = plaintext,
+                emojiSizes = emojiSizes,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                latitude = latitude,
+                longitude = longitude,
+            )
+        } else {
+            messageSource.sendPlainMessage(
+                chatId = chatId,
+                senderId = senderId,
+                content = plaintext,
+                type = type,
+                replyToId = replyToId,
+                timestamp = timestamp,
+                mediaUrl = mediaUrl,
+                isForwarded = isForwarded,
+                duration = duration,
+                mentions = mentions,
+                emojiSizes = emojiSizes,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                latitude = latitude,
+                longitude = longitude,
+            )
+        }
+    }
+
+    /**
+     * Send a text message to a chat.
+     *
+     * @param recipientId The 1:1 peer user id for INDIVIDUAL chats, used by the
+     *   block check and Signal encryption. **For GROUP and BROADCAST chats,
+     *   callers must pass an empty string** — Signal sessions are 1:1, so
+     *   group/broadcast messages must travel through the plaintext branch
+     *   below. Passing an arbitrary group member as the recipient will encrypt
+     *   the message for that single member and leave every other participant
+     *   unable to read it.
+     */
     override suspend fun sendMessage(
         chatId: String,
         content: String,
@@ -259,384 +352,270 @@ class MessageRepositoryImpl @Inject constructor(
         replyToId: String?,
         mentions: List<String>,
         emojiSizes: Map<Int, Float>
-    ): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
-                throw Exception(ERR_USER_BLOCKED)
-            }
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
+    ): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
+        }
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
 
-            val optimisticMessage = Message(
-                id = tempId,
-                chatId = chatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.TEXT,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                replyToId = replyToId,
-                mentions = mentions,
-                emojiSizes = emojiSizes
+        val optimisticMessage = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.TEXT,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            replyToId = replyToId,
+            mentions = mentions,
+            emojiSizes = emojiSizes
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+        val remoteId = sendEncryptedOrPlain(
+            chatId = chatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = content,
+            type = MessageType.TEXT,
+            timestamp = timestamp,
+            replyToId = replyToId,
+            mentions = mentions,
+            emojiSizes = emojiSizes,
+        )
+
+        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        sentMessage
+    }
+
+    override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> = resultOf {
+        val deletedAt = System.currentTimeMillis()
+        messageSource.deleteMessage(chatId, messageId)
+        messageDao.softDeleteMessage(messageId, deletedAt)
+    }
+
+    override suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit> = resultOf {
+        messageSource.updateMessageStatus(chatId, messageId, status)
+        messageDao.updateMessageStatus(messageId, status)
+    }
+
+    override suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit> = resultOf {
+        val editedAt = System.currentTimeMillis()
+        messageSource.editMessage(chatId, messageId, newContent, editedAt)
+        messageDao.editMessage(messageId, newContent, editedAt)
+    }
+
+    /**
+     * Send a media (image / video / document) message to a chat.
+     *
+     * @param recipientId See [sendMessage] — must be an empty string for GROUP
+     *   and BROADCAST chats so the plaintext branch is used; Signal sessions
+     *   are 1:1 and cannot address a group.
+     */
+    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
+        }
+        val parsedUri = Uri.parse(uri)
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+        val isImage = mimeType.startsWith("image/")
+        val messageType = if (isImage) MessageType.IMAGE else MessageType.DOCUMENT
+
+        // For images: compress/process and store locally
+        val localFile: File?
+        val mediaWidth: Int?
+        val mediaHeight: Int?
+        val uploadUri: Uri
+        val uploadMimeType: String
+        var tempCompressedFile: File? = null
+
+        if (isImage) {
+            val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
+            val result = imageCompressor.processImage(parsedUri, fullQuality)
+            tempCompressedFile = result.file
+
+            // Copy processed image to permanent local storage
+            localFile = mediaFileManager.copyToLocal(
+                chatId, tempId, Uri.fromFile(result.file), "jpg"
             )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+            mediaWidth = result.width
+            mediaHeight = result.height
+            uploadUri = Uri.fromFile(localFile)
+            uploadMimeType = result.mimeType
+        } else {
+            localFile = null
+            mediaWidth = null
+            mediaHeight = null
+            uploadUri = parsedUri
+            uploadMimeType = mimeType
+        }
 
-            val remoteId: String
-            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
-                signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, content)
-                remoteId = messageSource.sendMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    ciphertext = encrypted.ciphertext,
-                    signalType = encrypted.signalType,
-                    type = MessageType.TEXT,
-                    replyToId = replyToId,
-                    timestamp = timestamp,
-                    mentions = mentions,
-                    plainContent = content,
-                    emojiSizes = emojiSizes
-                )
+        val optimisticMessage = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = caption,
+            type = messageType,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            localUri = localFile?.absolutePath ?: uri,
+            mediaWidth = mediaWidth,
+            mediaHeight = mediaHeight
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+        val downloadUrl = try {
+            storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
+                _uploadProgress.update { map -> map + (tempId to progress) }
+            }
+        } finally {
+            _uploadProgress.update { it - tempId }
+            // Clean up temp compressed file from cacheDir/compressed/
+            tempCompressedFile?.let { if (it.exists()) it.delete() }
+        }
+
+        val remoteId = sendEncryptedOrPlain(
+            chatId = chatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = caption,
+            type = messageType,
+            timestamp = timestamp,
+            mediaUrl = downloadUrl,
+            mediaWidth = mediaWidth,
+            mediaHeight = mediaHeight,
+        )
+
+        val sentMessage = optimisticMessage.copy(
+            id = remoteId,
+            status = MessageStatus.SENT,
+            mediaUrl = downloadUrl,
+            localUri = localFile?.absolutePath,
+            mediaWidth = mediaWidth,
+            mediaHeight = mediaHeight
+        )
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+
+        // Rename local file from tempId to remoteId to prevent orphaned files
+        val finalLocalUri: String? = if (localFile != null) {
+            val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
+            if (localFile.renameTo(newFile)) {
+                messageDao.updateLocalUri(remoteId, newFile.absolutePath)
+                newFile.absolutePath
             } else {
-                remoteId = messageSource.sendPlainMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    content = content,
-                    type = MessageType.TEXT,
-                    replyToId = replyToId,
-                    timestamp = timestamp,
-                    mentions = mentions,
-                    emojiSizes = emojiSizes
-                )
+                localFile.absolutePath
             }
+        } else null
 
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            Result.success(sentMessage)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+        sentMessage.copy(localUri = finalLocalUri)
     }
 
-    override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> {
-        return try {
-            val deletedAt = System.currentTimeMillis()
-            messageSource.deleteMessage(chatId, messageId)
-            messageDao.softDeleteMessage(messageId, deletedAt)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> = resultOf {
+        val existing = messageDao.getMessageById(messageId)
+        val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
+        updatedReactions[userId] = emoji
+        val reactionsJson = JSONObject().apply {
+            updatedReactions.forEach { (k, v) -> put(k, v) }
+        }.toString()
+        messageDao.updateReactions(messageId, reactionsJson)
+        messageSource.updateReactions(chatId, messageId, updatedReactions)
     }
 
-    override suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit> {
-        return try {
-            messageSource.updateMessageStatus(chatId, messageId, status)
-            messageDao.updateMessageStatus(messageId, status)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit> = resultOf {
+        val existing = messageDao.getMessageById(messageId)
+        val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
+        updatedReactions.remove(userId)
+        val reactionsJson = JSONObject().apply {
+            updatedReactions.forEach { (k, v) -> put(k, v) }
+        }.toString()
+        messageDao.updateReactions(messageId, reactionsJson)
+        messageSource.updateReactions(chatId, messageId, updatedReactions)
     }
 
-    override suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit> {
-        return try {
-            val editedAt = System.currentTimeMillis()
-            messageSource.editMessage(chatId, messageId, newContent, editedAt)
-            messageDao.editMessage(messageId, newContent, editedAt)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
         }
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        val optimisticMessage = message.copy(
+            id = tempId,
+            chatId = targetChatId,
+            senderId = senderId,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            isForwarded = true,
+            replyToId = null,
+            reactions = emptyMap()
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+        val remoteId = sendEncryptedOrPlain(
+            chatId = targetChatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = message.content,
+            type = message.type,
+            timestamp = timestamp,
+            mediaUrl = message.mediaUrl,
+            mediaWidth = message.mediaWidth,
+            mediaHeight = message.mediaHeight,
+            isForwarded = true,
+        )
+
+        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        sentMessage
     }
 
-    override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String, caption: String): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
-                throw Exception(ERR_USER_BLOCKED)
-            }
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
-            val isImage = mimeType.startsWith("image/")
-            val messageType = if (isImage) MessageType.IMAGE else MessageType.DOCUMENT
-            val filename = uri.lastPathSegment ?: "file"
-
-            // For images: compress/process and store locally
-            val localFile: File?
-            val mediaWidth: Int?
-            val mediaHeight: Int?
-            val uploadUri: Uri
-            val uploadMimeType: String
-            var tempCompressedFile: File? = null
-
-            if (isImage) {
-                val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
-                val result = imageCompressor.processImage(uri, fullQuality)
-                tempCompressedFile = result.file
-
-                // Copy processed image to permanent local storage
-                localFile = mediaFileManager.copyToLocal(
-                    chatId, tempId, Uri.fromFile(result.file), "jpg"
-                )
-                mediaWidth = result.width
-                mediaHeight = result.height
-                uploadUri = Uri.fromFile(localFile)
-                uploadMimeType = result.mimeType
-            } else {
-                localFile = null
-                mediaWidth = null
-                mediaHeight = null
-                uploadUri = uri
-                uploadMimeType = mimeType
-            }
-
-            val optimisticMessage = Message(
-                id = tempId,
-                chatId = chatId,
-                senderId = senderId,
-                content = caption,
-                type = messageType,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                localUri = localFile?.absolutePath ?: uri.toString(),
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
-
-            val downloadUrl = try {
-                storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
-                    _uploadProgress.update { map -> map + (tempId to progress) }
-                }
-            } finally {
-                _uploadProgress.update { it - tempId }
-                // Clean up temp compressed file from cacheDir/compressed/
-                tempCompressedFile?.let { if (it.exists()) it.delete() }
-            }
-
-            val remoteId: String
-            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
-                signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, caption)
-                remoteId = messageSource.sendMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    ciphertext = encrypted.ciphertext,
-                    signalType = encrypted.signalType,
-                    type = messageType,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = downloadUrl,
-                    plainContent = caption,
-                    mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight
-                )
-            } else {
-                remoteId = messageSource.sendPlainMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    content = caption,
-                    type = messageType,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = downloadUrl,
-                    mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight
-                )
-            }
-
-            val sentMessage = optimisticMessage.copy(
-                id = remoteId,
-                status = MessageStatus.SENT,
-                mediaUrl = downloadUrl,
-                localUri = localFile?.absolutePath,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight
-            )
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            // Rename local file from tempId to remoteId to prevent orphaned files
-            val finalLocalUri: String? = if (localFile != null) {
-                val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
-                if (localFile.renameTo(newFile)) {
-                    messageDao.updateLocalUri(remoteId, newFile.absolutePath)
-                    newFile.absolutePath
-                } else {
-                    localFile.absolutePath
-                }
-            } else null
-
-            Result.success(sentMessage.copy(localUri = finalLocalUri))
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
         }
+        val parsedUri = Uri.parse(uri)
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+
+        val optimisticMessage = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = VOICE_MESSAGE_CONTENT,
+            type = MessageType.VOICE,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            duration = durationSeconds
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+        val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
+
+        val remoteId = sendEncryptedOrPlain(
+            chatId = chatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = VOICE_MESSAGE_CONTENT,
+            type = MessageType.VOICE,
+            timestamp = timestamp,
+            mediaUrl = downloadUrl,
+            duration = durationSeconds,
+        )
+
+        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        sentMessage
     }
 
-    override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> {
-        return try {
-            val existing = messageDao.getMessageById(messageId)
-            val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
-            updatedReactions[userId] = emoji
-            val reactionsJson = JSONObject().apply {
-                updatedReactions.forEach { (k, v) -> put(k, v) }
-            }.toString()
-            messageDao.updateReactions(messageId, reactionsJson)
-            messageSource.updateReactions(chatId, messageId, updatedReactions)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit> {
-        return try {
-            val existing = messageDao.getMessageById(messageId)
-            val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
-            updatedReactions.remove(userId)
-            val reactionsJson = JSONObject().apply {
-                updatedReactions.forEach { (k, v) -> put(k, v) }
-            }.toString()
-            messageDao.updateReactions(messageId, reactionsJson)
-            messageSource.updateReactions(chatId, messageId, updatedReactions)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
-                throw Exception(ERR_USER_BLOCKED)
-            }
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
-
-            val optimisticMessage = message.copy(
-                id = tempId,
-                chatId = targetChatId,
-                senderId = senderId,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                isForwarded = true,
-                replyToId = null,
-                reactions = emptyMap()
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
-
-            val remoteId: String
-            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
-                signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, message.content)
-                remoteId = messageSource.sendMessage(
-                    chatId = targetChatId,
-                    senderId = senderId,
-                    ciphertext = encrypted.ciphertext,
-                    signalType = encrypted.signalType,
-                    type = message.type,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = message.mediaUrl,
-                    isForwarded = true,
-                    plainContent = message.content,
-                    mediaWidth = message.mediaWidth,
-                    mediaHeight = message.mediaHeight
-                )
-            } else {
-                remoteId = messageSource.sendPlainMessage(
-                    chatId = targetChatId,
-                    senderId = senderId,
-                    content = message.content,
-                    type = message.type,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = message.mediaUrl,
-                    isForwarded = true,
-                    mediaWidth = message.mediaWidth,
-                    mediaHeight = message.mediaHeight
-                )
-            }
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            Result.success(sentMessage)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun sendVoiceMessage(chatId: String, uri: Uri, recipientId: String, durationSeconds: Int): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
-                throw Exception(ERR_USER_BLOCKED)
-            }
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
-
-            val optimisticMessage = Message(
-                id = tempId,
-                chatId = chatId,
-                senderId = senderId,
-                content = VOICE_MESSAGE_CONTENT,
-                type = MessageType.VOICE,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                duration = durationSeconds
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
-
-            val downloadUrl = storageSource.uploadMedia(chatId, tempId, uri, "audio/aac")
-
-            val remoteId: String
-            if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
-                signalManager.ensureInitialized()
-                val encrypted = signalManager.encrypt(recipientId, VOICE_MESSAGE_CONTENT)
-                remoteId = messageSource.sendMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    ciphertext = encrypted.ciphertext,
-                    signalType = encrypted.signalType,
-                    type = MessageType.VOICE,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = downloadUrl,
-                    duration = durationSeconds
-                )
-            } else {
-                remoteId = messageSource.sendPlainMessage(
-                    chatId = chatId,
-                    senderId = senderId,
-                    content = VOICE_MESSAGE_CONTENT,
-                    type = MessageType.VOICE,
-                    replyToId = null,
-                    timestamp = timestamp,
-                    mediaUrl = downloadUrl,
-                    duration = durationSeconds
-                )
-            }
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            Result.success(sentMessage)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
-    }
-
-    override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> {
-        return try {
-            messageDao.setStarred(messageId, starred)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+    override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> = resultOf {
+        messageDao.setStarred(messageId, starred)
     }
 
     override fun getStarredMessages(): Flow<List<Message>> {
@@ -668,54 +647,39 @@ class MessageRepositoryImpl @Inject constructor(
     private fun wordBoundaryRegex(query: String) =
         Regex("\\b${Regex.escape(query)}\\b", RegexOption.IGNORE_CASE)
 
-    override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val now = System.currentTimeMillis()
-            val undeliveredIds = messageSource.getUndeliveredMessageIds(chatId, userId)
-            for (id in undeliveredIds) {
-                try {
-                    messageSource.markDelivered(chatId, id, userId, now)
-                } catch (_: Exception) { }
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun markChatAsDelivered(chatId: String): Result<Unit> = resultOf {
+        val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val now = System.currentTimeMillis()
+        val undeliveredIds = messageSource.getUndeliveredMessageIds(chatId, userId)
+        for (id in undeliveredIds) {
+            try {
+                messageSource.markDelivered(chatId, id, userId, now)
+            } catch (_: Exception) { }
         }
     }
 
-    override suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val now = System.currentTimeMillis()
-            for (id in messageIds) {
-                try {
-                    messageSource.markDelivered(chatId, id, userId, now)
-                } catch (_: Exception) { }
-            }
-            // Batch-update Room in one shot so the DAO flow emits only once
-            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit> = resultOf {
+        val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val now = System.currentTimeMillis()
+        for (id in messageIds) {
+            try {
+                messageSource.markDelivered(chatId, id, userId, now)
+            } catch (_: Exception) { }
         }
+        // Batch-update Room in one shot so the DAO flow emits only once
+        messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
     }
 
-    override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> {
-        return try {
-            val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val now = System.currentTimeMillis()
-            for (id in messageIds) {
-                try {
-                    messageSource.markRead(chatId, id, userId, now)
-                } catch (_: Exception) { }
-            }
-            // Batch-update Room in one shot so the DAO flow emits only once
-            messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> = resultOf {
+        val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val now = System.currentTimeMillis()
+        for (id in messageIds) {
+            try {
+                messageSource.markRead(chatId, id, userId, now)
+            } catch (_: Exception) { }
         }
+        // Batch-update Room in one shot so the DAO flow emits only once
+        messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
     }
 
     override fun getSharedMedia(chatId: String): Flow<List<Message>> {
@@ -730,78 +694,59 @@ class MessageRepositoryImpl @Inject constructor(
         broadcastChatId: String,
         content: String,
         recipientIds: List<String>
-    ): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val timestamp = System.currentTimeMillis()
+    ): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val timestamp = System.currentTimeMillis()
 
-            // 1. Save message to broadcast chat (sender's record)
-            val broadcastRemoteId = messageSource.sendPlainMessage(
-                chatId = broadcastChatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.TEXT,
-                replyToId = null,
-                timestamp = timestamp
-            )
-            val broadcastMessage = Message(
-                id = broadcastRemoteId,
-                chatId = broadcastChatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.TEXT,
-                status = MessageStatus.SENT,
-                timestamp = timestamp
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(broadcastMessage))
+        // 1. Save message to broadcast chat (sender's record)
+        val broadcastRemoteId = messageSource.sendPlainMessage(
+            chatId = broadcastChatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.TEXT,
+            replyToId = null,
+            timestamp = timestamp
+        )
+        val broadcastMessage = Message(
+            id = broadcastRemoteId,
+            chatId = broadcastChatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.TEXT,
+            status = MessageStatus.SENT,
+            timestamp = timestamp
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(broadcastMessage))
 
-            // 2. Fan out to each recipient's individual chat
-            val semaphore = kotlinx.coroutines.sync.Semaphore(5)
-            kotlinx.coroutines.coroutineScope {
-                recipientIds.map { recipientId ->
-                    async {
-                        semaphore.acquire()
-                        try {
-                            // Get or create the 1:1 chat with each recipient
-                            val chatResult = chatRepository.get().getOrCreateChat(recipientId)
-                            val individualChat = chatResult.getOrThrow()
-                            // Send as 1:1 message (encrypted in release, plain in debug)
-                            if (!BuildConfig.DEBUG) {
-                                signalManager.ensureInitialized()
-                                val encrypted = signalManager.encrypt(recipientId, content)
-                                messageSource.sendMessage(
-                                    chatId = individualChat.id,
-                                    senderId = senderId,
-                                    ciphertext = encrypted.ciphertext,
-                                    signalType = encrypted.signalType,
-                                    type = MessageType.TEXT,
-                                    replyToId = null,
-                                    timestamp = timestamp,
-                                    plainContent = content
-                                )
-                            } else {
-                                messageSource.sendPlainMessage(
-                                    chatId = individualChat.id,
-                                    senderId = senderId,
-                                    content = content,
-                                    type = MessageType.TEXT,
-                                    replyToId = null,
-                                    timestamp = timestamp
-                                )
-                            }
-                        } catch (_: Exception) {
-                            // Best-effort delivery to each recipient
-                        } finally {
-                            semaphore.release()
-                        }
+        // 2. Fan out to each recipient's individual chat
+        val semaphore = kotlinx.coroutines.sync.Semaphore(5)
+        kotlinx.coroutines.coroutineScope {
+            recipientIds.map { recipientId ->
+                async {
+                    semaphore.acquire()
+                    try {
+                        // Get or create the 1:1 chat with each recipient
+                        val chatResult = chatRepository.get().getOrCreateChat(recipientId)
+                        val individualChat = chatResult.getOrThrow()
+                        // Send as 1:1 message (encrypted in release, plain in debug)
+                        sendEncryptedOrPlain(
+                            chatId = individualChat.id,
+                            senderId = senderId,
+                            recipientId = recipientId,
+                            plaintext = content,
+                            type = MessageType.TEXT,
+                            timestamp = timestamp,
+                        )
+                    } catch (_: Exception) {
+                        // Best-effort delivery to each recipient
+                    } finally {
+                        semaphore.release()
                     }
-                }.awaitAll()
-            }
-
-            Result.success(broadcastMessage)
-        } catch (e: Exception) {
-            Result.failure(e)
+                }
+            }.awaitAll()
         }
+
+        broadcastMessage
     }
 
     override suspend fun sendListMessage(
@@ -809,88 +754,82 @@ class MessageRepositoryImpl @Inject constructor(
         listId: String,
         listTitle: String,
         listDiff: ListDiff?
-    ): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            val timestamp = System.currentTimeMillis()
-            val content = when {
-                listDiff?.shared == true -> "\uD83D\uDCCB Shared list: $listTitle"
-                listDiff?.unshared == true -> "\uD83D\uDCCB Removed list: $listTitle"
-                listDiff?.deleted == true -> "\uD83D\uDCCB Deleted list: $listTitle"
-                else -> "\uD83D\uDCCB List updated: $listTitle"
-            }
+    ): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val timestamp = System.currentTimeMillis()
+        val content = when {
+            listDiff?.shared == true -> "\uD83D\uDCCB Shared list: $listTitle"
+            listDiff?.unshared == true -> "\uD83D\uDCCB Removed list: $listTitle"
+            listDiff?.deleted == true -> "\uD83D\uDCCB Deleted list: $listTitle"
+            else -> "\uD83D\uDCCB List updated: $listTitle"
+        }
 
-            // Merge into the last message if it's a diff bubble for the same list from this user
-            if (listDiff != null && !listDiff.deleted && !listDiff.unshared && !listDiff.shared) {
-                val lastEntity = messageDao.getLastMessageByChatId(chatId)
-                if (lastEntity != null) {
-                    val lastMessage = lastEntity.toDomain()
-                    if (lastMessage.type == MessageType.LIST
-                        && lastMessage.listId == listId
-                        && lastMessage.listDiff != null
-                        && !lastMessage.listDiff.deleted
-                        && !lastMessage.listDiff.unshared
-                        && !lastMessage.listDiff.shared
-                        && lastMessage.senderId == senderId
-                    ) {
-                        val mergedDiff = ListDiff.accumulate(lastMessage.listDiff, listDiff)
-                        messageSource.updateListMessageDiff(chatId, lastMessage.id, content, mergedDiff.toMap(), timestamp)
-                        val updatedMessage = lastMessage.copy(
-                            content = content,
-                            listDiff = mergedDiff,
-                            timestamp = timestamp,
-                            editedAt = timestamp
-                        )
-                        messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
-                        return Result.success(updatedMessage)
-                    }
+        // Merge into the last message if it's a diff bubble for the same list from this user,
+        // but only while the previous update is still within the merge window. Once the gap
+        // exceeds LIST_MESSAGE_MERGE_WINDOW_MS, a new bubble is started so later activity is
+        // visible instead of silently extending a stale bubble.
+        if (listDiff != null && !listDiff.deleted && !listDiff.unshared && !listDiff.shared) {
+            val lastEntity = messageDao.getLastMessageByChatId(chatId)
+            if (lastEntity != null) {
+                val lastMessage = lastEntity.toDomain()
+                if (lastMessage.type == MessageType.LIST
+                    && lastMessage.listId == listId
+                    && lastMessage.listDiff != null
+                    && !lastMessage.listDiff.deleted
+                    && !lastMessage.listDiff.unshared
+                    && !lastMessage.listDiff.shared
+                    && lastMessage.senderId == senderId
+                    && (timestamp - lastMessage.timestamp) < LIST_MESSAGE_MERGE_WINDOW_MS
+                ) {
+                    val mergedDiff = ListDiff.accumulate(lastMessage.listDiff, listDiff)
+                    messageSource.updateListMessageDiff(chatId, lastMessage.id, content, mergedDiff.toMap(), timestamp)
+                    val updatedMessage = lastMessage.copy(
+                        content = content,
+                        listDiff = mergedDiff,
+                        timestamp = timestamp,
+                        editedAt = timestamp
+                    )
+                    messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+                    return@resultOf updatedMessage
                 }
             }
-
-            val remoteId = messageSource.sendListMessage(
-                chatId = chatId,
-                senderId = senderId,
-                listId = listId,
-                content = content,
-                timestamp = timestamp,
-                listDiff = listDiff?.toMap()
-            )
-
-            val message = Message(
-                id = remoteId,
-                chatId = chatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.LIST,
-                status = MessageStatus.SENT,
-                timestamp = timestamp,
-                listId = listId,
-                listDiff = listDiff
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
-
-            Result.success(message)
-        } catch (e: Exception) {
-            Result.failure(e)
         }
+
+        val remoteId = messageSource.sendListMessage(
+            chatId = chatId,
+            senderId = senderId,
+            listId = listId,
+            content = content,
+            timestamp = timestamp,
+            listDiff = listDiff?.toMap()
+        )
+
+        val message = Message(
+            id = remoteId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.LIST,
+            status = MessageStatus.SENT,
+            timestamp = timestamp,
+            listId = listId,
+            listDiff = listDiff
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(message))
+        message
     }
 
     override suspend fun pinMessage(
         chatId: String,
         messageId: String,
         pinned: Boolean
-    ): Result<Unit> {
-        return try {
-            messageSource.pinMessage(chatId, messageId, pinned)
-            // Update local cache
-            val entity = messageDao.getMessageById(messageId)
-            if (entity != null) {
-                val updated = entity.toDomain().copy(isPinned = pinned)
-                messageDao.insertMessage(MessageEntity.fromDomain(updated))
-            }
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+    ): Result<Unit> = resultOf {
+        messageSource.pinMessage(chatId, messageId, pinned)
+        // Update local cache
+        val entity = messageDao.getMessageById(messageId)
+        if (entity != null) {
+            val updated = entity.toDomain().copy(isPinned = pinned)
+            messageDao.insertMessage(MessageEntity.fromDomain(updated))
         }
     }
 
@@ -900,47 +839,42 @@ class MessageRepositoryImpl @Inject constructor(
         longitude: Double,
         recipientId: String,
         comment: String
-    ): Result<Message> {
-        return try {
-            val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-            if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
-                throw Exception(ERR_USER_BLOCKED)
-            }
-            val tempId = UUID.randomUUID().toString()
-            val timestamp = System.currentTimeMillis()
-            val content = comment.ifBlank { LOCATION_DEFAULT_CONTENT }
-
-            val optimisticMessage = Message(
-                id = tempId,
-                chatId = chatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.LOCATION,
-                status = MessageStatus.SENDING,
-                timestamp = timestamp,
-                latitude = latitude,
-                longitude = longitude
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
-
-            val remoteId = messageSource.sendPlainMessage(
-                chatId = chatId,
-                senderId = senderId,
-                content = content,
-                type = MessageType.LOCATION,
-                replyToId = null,
-                timestamp = timestamp,
-                latitude = latitude,
-                longitude = longitude
-            )
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-
-            Result.success(sentMessage)
-        } catch (e: Exception) {
-            Result.failure(e)
+    ): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
         }
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+        val content = comment.ifBlank { LOCATION_DEFAULT_CONTENT }
+
+        val optimisticMessage = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.LOCATION,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            latitude = latitude,
+            longitude = longitude
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+
+        val remoteId = messageSource.sendPlainMessage(
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.LOCATION,
+            replyToId = null,
+            timestamp = timestamp,
+            latitude = latitude,
+            longitude = longitude
+        )
+
+        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        sentMessage
     }
 
     override fun getCallLog(): Flow<List<Message>> =
@@ -977,7 +911,10 @@ class MessageRepositoryImpl @Inject constructor(
     ) {
         val rawList = messageSource.fetchMessages(chatId)
         for (raw in rawList) {
-            if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+            if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
+                Log.d(TAG, "syncChatMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
+                continue
+            }
 
             val existing = messageDao.getMessageById(raw.id)
 

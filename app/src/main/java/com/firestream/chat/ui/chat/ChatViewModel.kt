@@ -69,7 +69,11 @@ data class ChatUiState(
     val chatLocalAvatarPath: String? = null,
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val pinnedMessages: List<Message> = emptyList(),
-    val scrollToBottomTrigger: Int = 0
+    val scrollToBottomTrigger: Int = 0,
+    // True when the current user has blocked the 1:1 recipient. Used to replace
+    // the composer with an "Unblock to send" banner so the user sees the state
+    // before they try to send.
+    val isRecipientBlocked: Boolean = false
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
@@ -143,6 +147,9 @@ class ChatViewModel @Inject constructor(
     }
     fun setAtBottom(atBottom: Boolean) = messageLoader.setAtBottom(atBottom)
 
+    // ── Block state ──
+    fun refreshBlockState() = infoManager.refreshBlockState()
+
     // ── Message sending ──
     fun onTyping(text: String) = messageSender.onTyping(text)
     fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageSender.sendMessage(content, emojiSizes)
@@ -187,17 +194,17 @@ class ChatViewModel @Inject constructor(
     // ── Emoji ──
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
 
-    // ── Save to gallery ──
-    fun saveImageToGallery(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+    // ── Save to downloads ──
+    fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = when {
                     localUri != null && File(localUri).exists() -> File(localUri)
-                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "gallery_${System.currentTimeMillis()}", mediaUrl)
+                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
                     else -> throw Exception("No image source available")
                 }
-                mediaFileManager.saveToGallery(file, mimeType)
-                _snackbarEvent.emit("Saved to gallery")
+                mediaFileManager.saveToDownloads(file, mimeType)
+                _snackbarEvent.emit("Saved to Downloads")
             } catch (e: Exception) {
                 _snackbarEvent.emit("Failed to save: ${e.message}")
             }

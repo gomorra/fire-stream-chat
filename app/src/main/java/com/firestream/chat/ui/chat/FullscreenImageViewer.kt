@@ -48,7 +48,7 @@ internal fun FullscreenImageViewer(
     imageUrl: String,
     localUri: String? = null,
     onDismiss: () -> Unit,
-    onSaveToGallery: (() -> Unit)? = null
+    onSaveToDownloads: (() -> Unit)? = null
 ) {
     // Prefer local file for faster loading, fall back to remote URL.
     // File.exists() runs on IO dispatcher to avoid blocking composition.
@@ -113,17 +113,17 @@ internal fun FullscreenImageViewer(
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(12.dp)
         ) {
-            if (onSaveToGallery != null) {
+            if (onSaveToDownloads != null) {
                 Box(
                     modifier = Modifier
                         .size(36.dp)
                         .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                        .clickable(onClick = onSaveToGallery),
+                        .clickable(onClick = onSaveToDownloads),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Download,
-                        contentDescription = "Save to gallery",
+                        contentDescription = "Save to Downloads",
                         tint = Color.White,
                         modifier = Modifier.size(20.dp)
                     )

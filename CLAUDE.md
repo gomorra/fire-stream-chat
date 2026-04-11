@@ -157,7 +157,7 @@ com.firestream.chat/
 
 ## Key Conventions
 
-- **Use cases** live in `domain/usecase/<feature>/` and encapsulate a single operation.
+- **Use cases** live in `domain/usecase/<feature>/` and are reserved for **non-trivial cross-repository orchestration or pure logic that benefits from isolated unit tests** (e.g. `SearchMessagesUseCase`, `SendListUpdateToChatsUseCase`, `CheckGroupPermissionUseCase`). Simple single-repository calls go directly from the ViewModel to the repository — do not wrap every repo method in a use case. Multi-step flows that currently live in `ui/chat/Chat*Manager.kt` are the pragmatic escape hatch for "ViewModel-scoped orchestration that isn't pure enough to be a use case".
 - **ViewModels** live alongside their screens in `ui/<feature>/`.
 - **Repository interfaces** are in `domain/repository/`; implementations in `data/repository/`.
 - **Room entities** are in `data/local/entity/`; DAOs in `data/local/dao/`.

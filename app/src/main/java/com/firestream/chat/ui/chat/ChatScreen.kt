@@ -53,6 +53,7 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
@@ -221,12 +222,17 @@ fun ChatScreen(
         }
     }
 
-    // Track screen visibility for read receipts — only mark READ when chat is in foreground
+    // Track screen visibility for read receipts — only mark READ when chat is in foreground.
+    // Also re-check block state on resume so the composer flips to the banner immediately
+    // after the user toggles block/unblock from the profile screen and navigates back.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> viewModel.setScreenVisible(true)
+                Lifecycle.Event.ON_RESUME -> {
+                    viewModel.setScreenVisible(true)
+                    viewModel.refreshBlockState()
+                }
                 Lifecycle.Event.ON_PAUSE -> viewModel.setScreenVisible(false)
                 else -> {}
             }
@@ -235,6 +241,23 @@ fun ChatScreen(
         onDispose {
             viewModel.setScreenVisible(false)
             lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Surface send errors as a snackbar. ChatMessageSender writes failures (block,
+    // network, Signal, Storage upload, …) into uiState.error; without this the error
+    // is silently dropped on the next state update.
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { message ->
+            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+            viewModel.clearError()
+        }
+    }
+
+    // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the host.
+    LaunchedEffect(Unit) {
+        viewModel.snackbarEvent.collect { message ->
+            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
         }
     }
 
@@ -955,6 +978,34 @@ fun ChatScreen(
                 }
             }
 
+            // Blocked-recipient banner (replaces the composer for 1:1 chats where
+            // the current user has blocked the peer). Tap opens the user profile
+            // where Unblock lives — same destination as the header avatar tap.
+            if (uiState.isRecipientBlocked && !uiState.isGroupChat && !uiState.isBroadcast) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { onProfileClick(viewModel.recipientId) }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Block,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "You blocked this contact. Tap to unblock.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Mention autocomplete picker
             if (uiState.mentionCandidates.isNotEmpty()) {
                 LazyColumn(
@@ -977,8 +1028,9 @@ fun ChatScreen(
                 }
             }
 
-            // Input row
-            if (uiState.canSendMessages) Row(
+            // Input row — hidden when the user has blocked the recipient; the
+            // "You blocked this contact" banner above replaces it.
+            if (uiState.canSendMessages && !uiState.isRecipientBlocked) Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1301,8 +1353,8 @@ fun ChatScreen(
                 imageUrl = msg.mediaUrl ?: "",
                 localUri = msg.localUri,
                 onDismiss = { fullscreenImageMessage = null },
-                onSaveToGallery = {
-                    viewModel.saveImageToGallery(msg.localUri, msg.mediaUrl)
+                onSaveToDownloads = {
+                    viewModel.saveImageToDownloads(msg.localUri, msg.mediaUrl)
                 }
             )
         }

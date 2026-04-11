@@ -39,7 +39,24 @@ internal class ChatInfoManager(
         observeReadReceiptsAllowed()
         loadChatInfo()
         observeRecentEmojis()
-        if (recipientId.isNotBlank()) observeRecipient()
+        if (recipientId.isNotBlank()) {
+            observeRecipient()
+            refreshBlockState()
+        }
+    }
+
+    /**
+     * Re-check whether the current user has blocked the 1:1 recipient. Called
+     * on [start] and whenever the chat screen resumes — the user may have
+     * toggled the block state in the profile screen and navigated back.
+     */
+    fun refreshBlockState() {
+        if (recipientId.isBlank()) return
+        scope.launch {
+            val blocked = runCatching { userRepository.isUserBlocked(recipientId) }
+                .getOrDefault(false)
+            _uiState.update { it.copy(isRecipientBlocked = blocked) }
+        }
     }
 
     private fun loadChatInfo() {
