@@ -141,7 +141,13 @@ internal data class MessageBubbleCallbacks(
     val onPin: () -> Unit = {},
     val onInfo: (() -> Unit)?,
     val onSwipeReact: () -> Unit = {},
+    // Tapping the IMAGE/VIDEO/DOCUMENT bubble itself. The String is the local
+    // or remote URL, but ChatScreen uses the captured `message` for full info
+    // (mediaUrl + localUri + save-to-downloads), so the lambda may ignore it.
     val onImageClick: (String) -> Unit = {},
+    // Tapping a thumbnail inside a LinkPreviewCard. This MUST use the URL
+    // parameter — the enclosing message has no media of its own.
+    val onPreviewImageClick: (String) -> Unit = {},
     val onCall: (() -> Unit)? = null,
 )
 
@@ -564,7 +570,7 @@ internal fun MessageBubble(
                                 LinkPreviewCard(
                                     preview = linkPreview,
                                     textColor = textColor,
-                                    onImageClick = callbacks.onImageClick.takeIf { linkPreview.imageUrl != null }
+                                    onImageClick = callbacks.onPreviewImageClick.takeIf { linkPreview.imageUrl != null }
                                 )
                             }
                         }

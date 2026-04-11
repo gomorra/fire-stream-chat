@@ -117,6 +117,11 @@ fun ChatListScreen(
         .sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
     val archivedChats = allChats.filter { it.isArchived }
 
+    // Wrap the screen in a Box so the fullscreen avatar viewer (composed at
+    // the bottom of this function) reliably overlays the Scaffold rather than
+    // ending up as a sibling inside the HorizontalPager page slot, which
+    // would clip it or render it below the chat list.
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         contentWindowInsets = WindowInsets(0),
         topBar = {
@@ -359,12 +364,15 @@ fun ChatListScreen(
         }
     }
 
-    // Fullscreen avatar viewer
+    // Fullscreen avatar viewer — sits on top of the Scaffold inside the Box
+    // wrapper so it overlays the chat list (and the bottom nav bar via the
+    // matchParentSize fillMaxSize on FullscreenImageViewer's root Box).
     BackHandler(enabled = fullscreenAvatar != null) { fullscreenAvatar = null }
     AnimatedVisibility(
         visible = fullscreenAvatar != null,
         enter = fadeIn(),
-        exit = fadeOut()
+        exit = fadeOut(),
+        modifier = Modifier.fillMaxSize()
     ) {
         fullscreenAvatar?.let { (avatarUrl, localAvatarPath) ->
             FullscreenImageViewer(
@@ -374,6 +382,7 @@ fun ChatListScreen(
             )
         }
     }
+    } // end Box wrapper
 }
 
 @Composable

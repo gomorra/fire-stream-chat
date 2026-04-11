@@ -91,6 +91,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -142,6 +143,20 @@ private const val INPUT_EMOJI_SIZE_CAP = 2.0f
 
 private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
+// Holder for the currently-shown fullscreen image. Both message images and
+// link-preview thumbnails feed into the same FullscreenImageViewer overlay,
+// but they carry different data: a tapped message image has localUri +
+// save-to-downloads support, while a link-preview thumbnail only has a remote
+// URL. Encoding it as one nullable holder keeps the viewer block dispatch
+// trivial and lets us add more fullscreen sources later (group avatars in
+// settings, etc.) without growing the state surface.
+@Immutable
+private data class FullscreenImage(
+    val imageUrl: String,
+    val localUri: String? = null,
+    val onSaveToDownloads: (() -> Unit)? = null,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
@@ -172,7 +187,7 @@ fun ChatScreen(
     var showLocationSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    var fullscreenImageMessage by remember { mutableStateOf<com.firestream.chat.domain.model.Message?>(null) }
+    var fullscreenImage by remember { mutableStateOf<FullscreenImage?>(null) }
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
@@ -799,7 +814,18 @@ fun ChatScreen(
                                                     }
                                                 } else null,
                                                 onSwipeReact = { swipeReactMessage = message },
-                                                onImageClick = { _ -> fullscreenImageMessage = message },
+                                                onImageClick = { _ ->
+                                                    fullscreenImage = FullscreenImage(
+                                                        imageUrl = message.mediaUrl ?: "",
+                                                        localUri = message.localUri,
+                                                        onSaveToDownloads = {
+                                                            viewModel.saveImageToDownloads(message.localUri, message.mediaUrl)
+                                                        },
+                                                    )
+                                                },
+                                                onPreviewImageClick = { url ->
+                                                    fullscreenImage = FullscreenImage(imageUrl = url)
+                                                },
                                                 onCall = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
                                                     {
                                                         val callIntent = Intent(context, CallActivity::class.java).apply {
@@ -1345,19 +1371,17 @@ fun ChatScreen(
         )
     }
 
-    BackHandler(enabled = fullscreenImageMessage != null) {
-        fullscreenImageMessage = null
+    BackHandler(enabled = fullscreenImage != null) {
+        fullscreenImage = null
     }
 
-    AnimatedVisibility(visible = fullscreenImageMessage != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenImageMessage?.let { msg ->
+    AnimatedVisibility(visible = fullscreenImage != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenImage?.let { req ->
             FullscreenImageViewer(
-                imageUrl = msg.mediaUrl ?: "",
-                localUri = msg.localUri,
-                onDismiss = { fullscreenImageMessage = null },
-                onSaveToDownloads = {
-                    viewModel.saveImageToDownloads(msg.localUri, msg.mediaUrl)
-                }
+                imageUrl = req.imageUrl,
+                localUri = req.localUri,
+                onDismiss = { fullscreenImage = null },
+                onSaveToDownloads = req.onSaveToDownloads,
             )
         }
     }

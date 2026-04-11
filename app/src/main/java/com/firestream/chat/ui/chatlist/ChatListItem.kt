@@ -75,19 +75,30 @@ fun ChatListItem(
             (chat.muteUntil > 0 && chat.muteUntil > System.currentTimeMillis())
     }
 
+    // The avatar is a SIBLING of the row's clickable area, not a descendant.
+    // Nesting Box.clickable inside Row.combinedClickable causes both handlers
+    // to fire on the same tap (Compose's nested-clickable hit testing isn't
+    // reliable for this combination), so a tap on the avatar would open the
+    // chat AND set fullscreenAvatar simultaneously, masking the viewer behind
+    // the navigation transition.
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Avatar with optional online dot overlay
+        // Avatar with optional online dot overlay — owns its own clickable.
+        // Group + broadcast chats have recipientId == null, so the avatar
+        // resolution above falls through to chat.avatarUrl/localAvatarPath
+        // and `hasAvatarImage` is true for any group with a custom picture.
+        // Image avatar → open fullscreen viewer.
+        // Icon avatar (no image) → fall through to the row click and open
+        // the chat, so the avatar slot isn't a dead zone.
         val hasAvatarImage = avatarUrl != null || localAvatarPath != null
         val avatarModifier = if (hasAvatarImage && onAvatarClick != null) {
             Modifier.clickable(onClick = onAvatarClick)
         } else {
-            Modifier
+            Modifier.clickable(onClick = onClick)
         }
         Box(
             contentAlignment = Alignment.BottomEnd,
@@ -118,8 +129,12 @@ fun ChatListItem(
 
         Spacer(modifier = Modifier.width(12.dp))
 
+        // Row body (name, preview, time, badge) owns the chat-open tap and
+        // long-press menu. Avatar taps never reach this region.
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .weight(1f)
+                .combinedClickable(onClick = onClick, onLongClick = onLongClick),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Name + message preview (takes all remaining space)
