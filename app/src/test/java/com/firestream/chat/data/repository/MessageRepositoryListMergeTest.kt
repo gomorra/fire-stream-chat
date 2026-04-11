@@ -152,7 +152,10 @@ class MessageRepositoryListMergeTest {
         val stale = ListDiff(added = listOf("Milk", "Bread"), checked = listOf("Sugar"))
         coEvery { messageDao.getLastMessageByChatId("chat1") } returns
             existingListBubble(timestamp = now - 20L * 60_000L, diff = stale)
-        val capturedDiff = slot<Map<String, Any?>?>()
+        // Non-null slot: the production code always passes a non-null diff for
+        // the case exercised here, so capture() (which requires T : Any in
+        // MockK 1.13.x) works fine against the nullable parameter type.
+        val capturedDiff = slot<Map<String, Any?>>()
         coEvery {
             messageSource.sendListMessage(any(), any(), any(), any(), any(), capture(capturedDiff))
         } returns "new-msg-id"
