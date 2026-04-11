@@ -4,6 +4,7 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreviewSource
+import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
@@ -61,6 +62,7 @@ class ChatViewModelReadReceiptTest {
     private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
+    private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
     private val context = mockk<android.content.Context>(relaxed = true)
 
     private lateinit var viewModel: ChatViewModel
@@ -229,6 +231,7 @@ class ChatViewModelReadReceiptTest {
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
+        activeChatTracker = activeChatTracker,
         context = context
     )
 }

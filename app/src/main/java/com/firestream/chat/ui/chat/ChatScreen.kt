@@ -129,6 +129,7 @@ import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.io.File
 import java.text.SimpleDateFormat
@@ -296,6 +297,19 @@ fun ChatScreen(
             .collect { scrolling -> if (scrolling) swipeReactMessage = null }
     }
 
+    // Report "at bottom" state to the ViewModel so it can reset the unread counter
+    // while the user is actively reading new messages at the tail of the list.
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val total = layoutInfo.totalItemsCount
+            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            total > 0 && lastVisibleIndex >= total - 1
+        }
+            .distinctUntilChanged()
+            .collect { viewModel.setAtBottom(it) }
+    }
+
     // Always scroll to bottom when the user sends a message
     LaunchedEffect(uiState.scrollToBottomTrigger) {
         if (uiState.scrollToBottomTrigger > 0 && uiState.messages.isNotEmpty()) {
@@ -391,7 +405,7 @@ fun ChatScreen(
                         Column {
                             Text(
                                 text = uiState.chatName ?: "Chat",
-                                style = MaterialTheme.typography.titleMedium,
+                                style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )

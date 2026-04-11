@@ -36,6 +36,7 @@ class FCMService : FirebaseMessagingService() {
     @Inject lateinit var messageRepository: MessageRepository
     @Inject lateinit var preferencesDataStore: PreferencesDataStore
     @Inject lateinit var callStateHolder: CallStateHolder
+    @Inject lateinit var activeChatTracker: ActiveChatTracker
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -63,6 +64,18 @@ class FCMService : FirebaseMessagingService() {
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
         val messageId = data["messageId"]
+
+        // Suppress notification if the user is already viewing this chat
+        // in the foreground — they are actively reading messages, so an
+        // alert would be redundant noise.
+        if (activeChatTracker.isActive(chatId)) {
+            if (messageId != null) {
+                serviceScope.launch {
+                    messageRepository.markMessagesAsDelivered(chatId, listOf(messageId))
+                }
+            }
+            return
+        }
         val chatType = data["chatType"] ?: "INDIVIDUAL"
         val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
         val mentions = data["mentions"]?.split(",")?.filter { it.isNotBlank() } ?: emptyList()

@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
+import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
@@ -90,6 +91,7 @@ class ChatViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val mediaFileManager: MediaFileManager,
+    private val activeChatTracker: ActiveChatTracker,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -134,7 +136,12 @@ class ChatViewModel @Inject constructor(
     }
 
     // ── Message loading & visibility ──
-    fun setScreenVisible(visible: Boolean) = messageLoader.setScreenVisible(visible)
+    fun setScreenVisible(visible: Boolean) {
+        if (visible) activeChatTracker.setActive(chatId)
+        else activeChatTracker.clearActive(chatId)
+        messageLoader.setScreenVisible(visible)
+    }
+    fun setAtBottom(atBottom: Boolean) = messageLoader.setAtBottom(atBottom)
 
     // ── Message sending ──
     fun onTyping(text: String) = messageSender.onTyping(text)
@@ -203,5 +210,6 @@ class ChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         messageSender.onCleared()
+        activeChatTracker.clearActive(chatId)
     }
 }

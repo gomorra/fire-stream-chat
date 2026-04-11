@@ -30,7 +30,10 @@ internal class ChatMessageLoader(
 ) {
 
     private var readReceiptJob: Job? = null
+    private var pendingUnreadResetJob: Job? = null
     private var screenVisible = false
+    private var atBottom: Boolean = true
+    private var lastResetIncomingId: String? = null
     private val observedListIds = mutableSetOf<String>()
     private val processedUnshareIds = mutableSetOf<String>()
 
@@ -43,13 +46,43 @@ internal class ChatMessageLoader(
         val wasVisible = screenVisible
         screenVisible = visible
         if (visible && !wasVisible) {
-            scope.launch { chatRepository.resetUnreadCount(chatId) }
+            maybeResetUnread(force = true)
             val messages = _uiState.value.messages
             if (messages.isNotEmpty()) {
                 markIncomingMessagesAsRead(messages)
             }
-        } else {
+        } else if (!visible) {
             readReceiptJob?.cancel()
+            pendingUnreadResetJob?.cancel()
+        }
+    }
+
+    fun setAtBottom(value: Boolean) {
+        val wasAtBottom = atBottom
+        atBottom = value
+        if (value && !wasAtBottom && screenVisible) {
+            maybeResetUnread(force = true)
+        }
+    }
+
+    // Resets the chat's per-user unread count to 0 when the user is visibly
+    // reading new messages (screen visible + scrolled to the bottom). We trigger
+    // a second reset ~2s later because the Cloud Function `sendPushNotification`
+    // writes `FieldValue.increment(1)` asynchronously — it can land AFTER our
+    // immediate reset, leaving a stale badge in the chat list.
+    private fun maybeResetUnread(force: Boolean = false) {
+        if (!screenVisible || !atBottom) return
+        val currentUserId = _uiState.value.currentUserId
+        val tail = _uiState.value.messages.lastOrNull { it.senderId != currentUserId }?.id
+        if (!force && tail == lastResetIncomingId) return
+        lastResetIncomingId = tail
+        scope.launch { chatRepository.resetUnreadCount(chatId) }
+        pendingUnreadResetJob?.cancel()
+        pendingUnreadResetJob = scope.launch {
+            delay(2000)
+            if (screenVisible && atBottom) {
+                chatRepository.resetUnreadCount(chatId)
+            }
         }
     }
 
@@ -67,6 +100,7 @@ internal class ChatMessageLoader(
                             pinnedMessages = messages.filter { msg -> msg.isPinned }
                         )
                     }
+                    maybeResetUnread()
                     markIncomingMessagesAsRead(messages)
                     fetchLinkPreviewsFor(messages)
                     observeListMessages(messages)
@@ -114,7 +148,7 @@ internal class ChatMessageLoader(
 
     private fun fetchLinkPreviewsFor(messages: List<Message>) {
         messages.forEach { msg ->
-            if (msg.type.name == "TEXT") {
+            if (msg.type == MessageType.TEXT) {
                 val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
                 if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
                 scope.launch {
