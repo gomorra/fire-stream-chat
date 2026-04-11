@@ -77,10 +77,13 @@ class LinkPreviewSource @Inject constructor(
             ?: TWITTER_DESC.find(html)?.groupValues?.getOrNull(1)?.trim()
             ?: META_DESC.find(html)?.groupValues?.getOrNull(1)?.trim()
 
+        // We deliberately skip <link rel="icon"> — it's typically a 16–32 px
+        // favicon, which Coil upscales into a blurry square that users
+        // perceive as an empty preview. Better to fall through to the
+        // WebView screenshot fallback, which produces a real page thumbnail.
         val rawImage = OG_IMAGE.find(html)?.groupValues?.getOrNull(1)?.trim()
             ?: TWITTER_IMAGE.find(html)?.groupValues?.getOrNull(1)?.trim()
             ?: APPLE_TOUCH_ICON.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: LINK_ICON.find(html)?.groupValues?.getOrNull(1)?.trim()
 
         val imageUrl = rawImage?.let { resolveUrl(pageUrl, it) }
         return ParsedMeta(title = title, description = description, imageUrl = imageUrl)
@@ -124,11 +127,6 @@ class LinkPreviewSource @Inject constructor(
         // Grabs the href of the first <link rel="apple-touch-icon"> (any size).
         private val APPLE_TOUCH_ICON = Regex(
             """<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*href=["']([^"']+)["']""",
-            RegexOption.IGNORE_CASE
-        )
-        // Fallback to <link rel="icon"> (favicons). Large ones (>= 128px) look OK.
-        private val LINK_ICON = Regex(
-            """<link[^>]+rel=["'](?:shortcut )?icon["'][^>]*href=["']([^"']+)["']""",
             RegexOption.IGNORE_CASE
         )
 

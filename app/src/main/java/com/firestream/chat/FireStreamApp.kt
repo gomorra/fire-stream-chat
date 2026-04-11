@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
 import androidx.work.WorkManager
+import com.firestream.chat.data.util.CurrentActivityHolder
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
 import java.util.concurrent.Executors
@@ -20,6 +21,9 @@ class FireStreamApp : Application(), Configuration.Provider {
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    @Inject
+    lateinit var currentActivityHolder: CurrentActivityHolder
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -30,6 +34,7 @@ class FireStreamApp : Application(), Configuration.Provider {
         // Register process-level lifecycle observer for online/offline presence.
         // Must happen after super.onCreate() so Hilt completes injection.
         ProcessLifecycleOwner.get().lifecycle.addObserver(appLifecycleObserver)
+        currentActivityHolder.register(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
     }
 
