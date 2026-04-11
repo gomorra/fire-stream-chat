@@ -99,7 +99,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import com.firestream.chat.domain.util.MentionParser
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -506,7 +505,7 @@ internal fun MessageBubble(
                             val highlightColor = MaterialTheme.colorScheme.primary
                             val linkUrl = linkPreview?.url
                             val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
-                                val base = MentionParser.formatMentionText(
+                                val base = MentionFormatter.formatMentionText(
                                     text = message.content,
                                     mentions = message.mentions,
                                     currentUserId = currentUserId,
