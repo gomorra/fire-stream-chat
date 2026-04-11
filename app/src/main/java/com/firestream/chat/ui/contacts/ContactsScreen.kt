@@ -41,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.domain.model.Contact
@@ -170,7 +171,7 @@ private fun ContactItem(contact: Contact, onClick: () -> Unit) {
         Column {
             Text(
                 text = contact.displayName.ifBlank { contact.phoneNumber },
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.5.sp)
             )
             Text(
                 text = contact.phoneNumber,

@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.CallLogEntry
@@ -204,7 +205,7 @@ private fun CallLogRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = entry.displayName,
-                style = MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.5.sp),
                 color = if (isMissed) missedColor else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
