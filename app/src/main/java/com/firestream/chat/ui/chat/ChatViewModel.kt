@@ -68,7 +68,11 @@ data class ChatUiState(
     val chatLocalAvatarPath: String? = null,
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val pinnedMessages: List<Message> = emptyList(),
-    val scrollToBottomTrigger: Int = 0
+    val scrollToBottomTrigger: Int = 0,
+    // True when the current user has blocked the 1:1 recipient. Used to replace
+    // the composer with an "Unblock to send" banner so the user sees the state
+    // before they try to send.
+    val isRecipientBlocked: Boolean = false
 ) {
     val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
     val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
@@ -135,6 +139,9 @@ class ChatViewModel @Inject constructor(
 
     // ── Message loading & visibility ──
     fun setScreenVisible(visible: Boolean) = messageLoader.setScreenVisible(visible)
+
+    // ── Block state ──
+    fun refreshBlockState() = infoManager.refreshBlockState()
 
     // ── Message sending ──
     fun onTyping(text: String) = messageSender.onTyping(text)
