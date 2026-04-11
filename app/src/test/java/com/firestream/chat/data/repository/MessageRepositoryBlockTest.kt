@@ -116,7 +116,7 @@ class MessageRepositoryBlockTest {
     fun `sendVoiceMessage fails when recipient is blocked by sender`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
 
-        val result = repository.sendVoiceMessage("chat1", mockk(), "recipient1", 5)
+        val result = repository.sendVoiceMessage("chat1", "file:///tmp/v.aac", "recipient1", 5)
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
@@ -129,7 +129,7 @@ class MessageRepositoryBlockTest {
     fun `sendMediaMessage fails when recipient is blocked by sender`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
 
-        val result = repository.sendMediaMessage("chat1", mockk(), "image/jpeg", "recipient1", "caption")
+        val result = repository.sendMediaMessage("chat1", "file:///tmp/img.jpg", "image/jpeg", "recipient1", "caption")
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)

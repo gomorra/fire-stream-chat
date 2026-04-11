@@ -1,6 +1,5 @@
 package com.firestream.chat.ui.share
 
-import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.remote.LinkPreview
@@ -236,7 +235,7 @@ class SharePickerViewModel @Inject constructor(
                     async {
                         messageRepository.sendMediaMessage(
                             chatId,
-                            Uri.parse(item.cachedUri),
+                            item.cachedUri,
                             item.mimeType,
                             recipientId
                         )

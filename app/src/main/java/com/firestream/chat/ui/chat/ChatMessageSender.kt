@@ -62,7 +62,7 @@ internal class ChatMessageSender(
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") {
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
-            messageRepository.sendMediaMessage(chatId, uri, mimeType, recipientId, caption)
+            messageRepository.sendMediaMessage(chatId, uri.toString(), mimeType, recipientId, caption)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
@@ -71,7 +71,7 @@ internal class ChatMessageSender(
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
-            messageRepository.sendVoiceMessage(chatId, uri, recipientId, durationSeconds)
+            messageRepository.sendVoiceMessage(chatId, uri.toString(), recipientId, durationSeconds)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }

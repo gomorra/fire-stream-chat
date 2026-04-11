@@ -90,12 +90,13 @@ class UserRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun uploadAvatar(uri: Uri): Result<String> {
+    override suspend fun uploadAvatar(uri: String): Result<String> {
         return try {
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
+            val parsedUri = Uri.parse(uri)
             // Save local copy before uploading to avoid re-download
-            val localFile = profileImageManager.saveLocalCopy(uid, uri)
-            val url = storageSource.uploadAvatar(uid, uri)
+            val localFile = profileImageManager.saveLocalCopy(uid, parsedUri)
+            val url = storageSource.uploadAvatar(uid, parsedUri)
             userSource.updateProfile(uid, mapOf("avatarUrl" to url))
             // Update cache immediately
             userDao.updateAvatarCache(uid, url, localFile.absolutePath)

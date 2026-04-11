@@ -128,7 +128,7 @@ class GroupSettingsViewModel @Inject constructor(
     fun uploadGroupAvatar(uri: Uri) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isUploading = true, uploadError = null)
-            chatRepository.uploadGroupAvatar(chatId, uri)
+            chatRepository.uploadGroupAvatar(chatId, uri.toString())
                 .onSuccess { url ->
                     _uiState.value = _uiState.value.copy(
                         isUploading = false,
