@@ -321,6 +321,14 @@ fun ListDetailScreen(
                 // Server update: sync local state (skip while dragging or reorder in flight)
                 LaunchedEffect(uiState.displayItems) {
                     if (draggedItemId != null) return@LaunchedEffect
+                    // A size change means items were added/removed (e.g. clear checked),
+                    // not just reordered. Always sync those through and clear the reorder
+                    // guard so we don't swallow a later update.
+                    if (uiState.displayItems.size != localItems.size) {
+                        awaitingReorderSync = false
+                        localItems = uiState.displayItems
+                        return@LaunchedEffect
+                    }
                     if (awaitingReorderSync) {
                         awaitingReorderSync = false
                         return@LaunchedEffect
