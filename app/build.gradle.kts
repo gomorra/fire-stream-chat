@@ -27,6 +27,14 @@ android {
 
     buildTypes {
         debug {
+            // Include x86_64 in debug so the app runs natively on x86_64 emulators.
+            // Without this, only arm64-v8a ships and the emulator falls back to
+            // Berberis (ARM→x86 translator), which produces spurious VerifyError /
+            // "Failure to verify dex" crashes on Compose-heavy classes like
+            // MessageBubbleKt. Release builds keep arm64-only via defaultConfig.
+            ndk {
+                abiFilters += "x86_64"
+            }
             packaging {
                 jniLibs {
                     // Encryption is disabled in debug (BuildConfig.DEBUG guard) — exclude libsignal native lib (~70 MB)
