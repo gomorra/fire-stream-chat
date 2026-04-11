@@ -776,42 +776,44 @@ fun ChatScreen(
                                             currentUserId = uiState.currentUserId,
                                             readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
                                             userIdToDisplayName = uiState.participantNameMap,
-                                            onDeleteClick = if (isOwn) {
-                                                { viewModel.deleteMessage(message.id) }
-                                            } else null,
-                                            onEditClick = if (isOwn && message.type == MessageType.TEXT) {
-                                                { viewModel.startEdit(message) }
-                                            } else null,
-                                            onReplyClick = { viewModel.setReplyTo(message) },
-                                            onReactionClick = { reactionTargetMessage = message },
-                                            onSwipeReact = { swipeReactMessage = message },
-                                            onForwardClick = { forwardTargetMessage = message },
-                                            onStarClick = { viewModel.toggleStar(message) },
-                                            onPinClick = {
-                                                viewModel.togglePin(message.id, !message.isPinned)
-                                            },
-                                            onInfoClick = if (isOwn) {
-                                                {
-                                                    val chatParticipants = uiState.availableChats
-                                                        .find { it.id == message.chatId }
-                                                        ?.participants ?: emptyList()
-                                                    onMessageInfoClick(message, chatParticipants)
-                                                }
-                                            } else null,
-                                            uploadProgress = uploadProgressMap[message.id],
-                                            onImageClick = { _ -> fullscreenImageMessage = message },
-                                            onCallClick = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
-                                                {
-                                                    val callIntent = Intent(context, CallActivity::class.java).apply {
-                                                        putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                                        putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
-                                                        putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
-                                                        putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
-                                                        putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
+                                            callbacks = MessageBubbleCallbacks(
+                                                onDelete = if (isOwn) {
+                                                    { viewModel.deleteMessage(message.id) }
+                                                } else null,
+                                                onEdit = if (isOwn && message.type == MessageType.TEXT) {
+                                                    { viewModel.startEdit(message) }
+                                                } else null,
+                                                onReply = { viewModel.setReplyTo(message) },
+                                                onReaction = { reactionTargetMessage = message },
+                                                onForward = { forwardTargetMessage = message },
+                                                onStar = { viewModel.toggleStar(message) },
+                                                onPin = {
+                                                    viewModel.togglePin(message.id, !message.isPinned)
+                                                },
+                                                onInfo = if (isOwn) {
+                                                    {
+                                                        val chatParticipants = uiState.availableChats
+                                                            .find { it.id == message.chatId }
+                                                            ?.participants ?: emptyList()
+                                                        onMessageInfoClick(message, chatParticipants)
                                                     }
-                                                    context.startActivity(callIntent)
-                                                }
-                                            } else null
+                                                } else null,
+                                                onSwipeReact = { swipeReactMessage = message },
+                                                onImageClick = { _ -> fullscreenImageMessage = message },
+                                                onCall = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
+                                                    {
+                                                        val callIntent = Intent(context, CallActivity::class.java).apply {
+                                                            putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
+                                                            putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                                            putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
+                                                            putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                                            putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
+                                                        }
+                                                        context.startActivity(callIntent)
+                                                    }
+                                                } else null,
+                                            ),
+                                            uploadProgress = uploadProgressMap[message.id],
                                         )
 
                                         // Swipe-to-react panel popup

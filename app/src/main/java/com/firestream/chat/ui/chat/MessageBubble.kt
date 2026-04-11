@@ -66,6 +66,7 @@ import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -123,6 +124,27 @@ private val CenteredLineHeight = LineHeightStyle(
     trim = LineHeightStyle.Trim.None
 )
 
+// Holder for the 11 message-bubble callbacks. Collapsing them into one parameter
+// keeps MessageBubble's explicit-parameter count at 10 (vs. 20 if inlined), which
+// is below the register-allocation threshold where the Kotlin/Compose compiler
+// emits `copy-cat1` moves over `Alignment.Horizontal` slots that ART's class
+// verifier rejects on both arm64 and x86_64 — the "Verifier rejected class
+// MessageBubbleKt" crash on chat open.
+@Immutable
+internal data class MessageBubbleCallbacks(
+    val onDelete: (() -> Unit)?,
+    val onEdit: (() -> Unit)?,
+    val onReply: () -> Unit,
+    val onReaction: () -> Unit,
+    val onForward: () -> Unit,
+    val onStar: () -> Unit = {},
+    val onPin: () -> Unit = {},
+    val onInfo: (() -> Unit)?,
+    val onSwipeReact: () -> Unit = {},
+    val onImageClick: (String) -> Unit = {},
+    val onCall: (() -> Unit)? = null,
+)
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
 @Composable
 internal fun MessageBubble(
@@ -134,24 +156,13 @@ internal fun MessageBubble(
     currentUserId: String,
     readReceiptsAllowed: Boolean = true,
     userIdToDisplayName: Map<String, String> = emptyMap(),
-    onDeleteClick: (() -> Unit)?,
-    onEditClick: (() -> Unit)?,
-    onReplyClick: () -> Unit,
-    onReactionClick: () -> Unit,
-    onForwardClick: () -> Unit,
-    onStarClick: () -> Unit = {},
-    onPinClick: () -> Unit = {},
-    onInfoClick: (() -> Unit)?,
-    onSwipeReact: () -> Unit = {},
-    onImageClick: (String) -> Unit = {},
-    onCallClick: (() -> Unit)? = null,
-    uploadProgress: Float? = null
+    callbacks: MessageBubbleCallbacks,
+    uploadProgress: Float? = null,
 ) {
     val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
     val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
     else MaterialTheme.colorScheme.onSurfaceVariant
-    val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     val showTail = remember(groupPosition) {
         groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST
@@ -184,8 +195,8 @@ internal fun MessageBubble(
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragEnd = {
-                        if (swipeOffset > 80f) onReplyClick()
-                        if (swipeOffset < -50f && message.deletedAt == null) onSwipeReact()
+                        if (swipeOffset > 80f) callbacks.onReply()
+                        if (swipeOffset < -50f && message.deletedAt == null) callbacks.onSwipeReact()
                         swipeDirection = 0
                         hapticFired = false
                         isAnimatingBack = true
@@ -220,7 +231,7 @@ internal fun MessageBubble(
                     }
                 )
             },
-        horizontalAlignment = alignment
+        horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
     ) {
         Box {
             Box(
@@ -231,7 +242,7 @@ internal fun MessageBubble(
                         shape = bubbleShape
                     )
                     .combinedClickable(
-                        onClick = { if (message.type == MessageType.CALL) onCallClick?.invoke() },
+                        onClick = { if (message.type == MessageType.CALL) callbacks.onCall?.invoke() },
                         onLongClick = { showMenu = true }
                     )
                     .padding(
@@ -336,7 +347,7 @@ internal fun MessageBubble(
                                     .clip(RoundedCornerShape(8.dp))
                                     .clickable {
                                         val clickUrl = message.localUri ?: message.mediaUrl
-                                        clickUrl?.let { onImageClick(it) }
+                                        clickUrl?.let { callbacks.onImageClick(it) }
                                     }
                             ) {
                                 if (imageModel != null) {
@@ -553,7 +564,7 @@ internal fun MessageBubble(
                                 LinkPreviewCard(
                                     preview = linkPreview,
                                     textColor = textColor,
-                                    onImageClick = onImageClick.takeIf { linkPreview.imageUrl != null }
+                                    onImageClick = callbacks.onImageClick.takeIf { linkPreview.imageUrl != null }
                                 )
                             }
                         }
@@ -618,41 +629,41 @@ internal fun MessageBubble(
             DropdownMenu(expanded = showMenu && message.deletedAt == null, onDismissRequest = { showMenu = false }) {
                 Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
                     FilledTonalButton(
-                        onClick = { showMenu = false; onReplyClick() },
+                        onClick = { showMenu = false; callbacks.onReply() },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.AutoMirrored.Filled.Reply, null, modifier = Modifier.padding(end = 4.dp))
                         Text("Reply")
                     }
                     FilledTonalButton(
-                        onClick = { showMenu = false; onReactionClick() },
+                        onClick = { showMenu = false; callbacks.onReaction() },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Icon(Icons.Default.EmojiEmotions, null, modifier = Modifier.padding(end = 4.dp))
                         Text("React")
                     }
                     FilledTonalButton(
-                        onClick = { showMenu = false; onForwardClick() },
+                        onClick = { showMenu = false; callbacks.onForward() },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
                         Text("Forward")
                     }
                     FilledTonalButton(
-                        onClick = { showMenu = false; onStarClick() },
+                        onClick = { showMenu = false; callbacks.onStar() },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Icon(Icons.Default.Star, null, modifier = Modifier.padding(end = 4.dp))
                         Text(if (message.isStarred) "Unstar" else "Star")
                     }
                     FilledTonalButton(
-                        onClick = { showMenu = false; onPinClick() },
+                        onClick = { showMenu = false; callbacks.onPin() },
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
                         Text(if (message.isPinned) "Unpin" else "Pin")
                     }
-                    onEditClick?.let {
+                    callbacks.onEdit?.let {
                         FilledTonalButton(
                             onClick = { showMenu = false; it() },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
@@ -661,7 +672,7 @@ internal fun MessageBubble(
                             Text("Edit")
                         }
                     }
-                    onInfoClick?.let {
+                    callbacks.onInfo?.let {
                         FilledTonalButton(
                             onClick = { showMenu = false; it() },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
@@ -670,7 +681,7 @@ internal fun MessageBubble(
                             Text("Message Info")
                         }
                     }
-                    onDeleteClick?.let {
+                    callbacks.onDelete?.let {
                         FilledTonalButton(
                             onClick = { showMenu = false; it() },
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
