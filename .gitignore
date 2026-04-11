@@ -30,3 +30,6 @@ replay_pid*.log
 login_script.py
 firebase_login.log
 firebase.log
+
+# Claude Code session state (scheduled_tasks.lock, plans, tool outputs)
+.claude/
