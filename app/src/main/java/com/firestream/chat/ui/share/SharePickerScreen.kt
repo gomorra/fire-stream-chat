@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
@@ -155,8 +156,10 @@ fun SharePickerScreen(
         ) {
             // Content preview — fills all space above the chat picker
             ContentPreview(
+                state = uiState.previewState,
                 content = uiState.sharedContent,
                 linkPreview = uiState.linkPreview,
+                errorMessage = uiState.error,
                 modifier = Modifier.weight(1f),
                 onImageClick = { url -> fullscreenImageUrl = url }
             )
@@ -221,25 +224,62 @@ fun SharePickerScreen(
 
 @Composable
 private fun ContentPreview(
+    state: PreviewState,
     content: SharedContent?,
     linkPreview: LinkPreview?,
+    errorMessage: String?,
     modifier: Modifier = Modifier,
     onImageClick: (String) -> Unit
 ) {
-    Box(modifier = modifier.fillMaxWidth()) {
-        when (content) {
-            is SharedContent.Text -> TextPreview(
-                text = content.text,
-                linkPreview = linkPreview,
-                onImageClick = onImageClick
-            )
-
-            is SharedContent.Media -> when (content.items.size) {
-                1 -> SingleMediaPreview(content.items[0])
-                else -> MultiMediaPreview(content.items)
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        when (state) {
+            PreviewState.Loading -> {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 3.dp
+                )
             }
-
-            null -> Unit
+            PreviewState.Ready -> when (content) {
+                is SharedContent.Text -> TextPreview(
+                    text = content.text,
+                    linkPreview = linkPreview,
+                    onImageClick = onImageClick
+                )
+                is SharedContent.Media -> when (content.items.size) {
+                    1 -> SingleMediaPreview(content.items[0], onImageClick)
+                    else -> MultiMediaPreview(content.items)
+                }
+                null -> Unit
+            }
+            PreviewState.Empty -> {
+                Text(
+                    text = "Nothing to share",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            PreviewState.Error -> {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(16.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(40.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = errorMessage ?: "Couldn't read shared content",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         }
     }
 }
@@ -374,13 +414,18 @@ private fun LinkPreviewSection(
 }
 
 @Composable
-private fun SingleMediaPreview(item: SharedContent.Media.MediaItem) {
+private fun SingleMediaPreview(
+    item: SharedContent.Media.MediaItem,
+    onImageClick: (String) -> Unit
+) {
     if (item.mimeType.startsWith("image") || item.mimeType.startsWith("video")) {
         AsyncImage(
             model = item.cachedUri,
             contentDescription = item.fileName,
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable { onImageClick(item.cachedUri) }
         )
     } else {
         // Document — show icon + filename centered

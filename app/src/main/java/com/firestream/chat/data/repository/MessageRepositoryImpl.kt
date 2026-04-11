@@ -3,6 +3,7 @@ package com.firestream.chat.data.repository
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.util.Log
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -55,6 +56,7 @@ private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
 private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
+private const val TAG = "MessageRepo"
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -90,8 +92,12 @@ class MessageRepositoryImpl @Inject constructor(
                         if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
                     } catch (_: Exception) { emptySet() }
                     for (raw in rawList) {
-                        // Skip messages from users the current user has blocked
-                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+                        // Skip messages from users the current user has blocked.
+                        // Log so "message isn't appearing" scenarios are diagnosable via logcat.
+                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
+                            Log.d(TAG, "observeMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
+                            continue
+                        }
 
                         val existing = messageDao.getMessageById(raw.id)
 
@@ -252,6 +258,17 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Send a text message to a chat.
+     *
+     * @param recipientId The 1:1 peer user id for INDIVIDUAL chats, used by the
+     *   block check and Signal encryption. **For GROUP and BROADCAST chats,
+     *   callers must pass an empty string** — Signal sessions are 1:1, so
+     *   group/broadcast messages must travel through the plaintext branch
+     *   below. Passing an arbitrary group member as the recipient will encrypt
+     *   the message for that single member and leave every other participant
+     *   unable to read it.
+     */
     override suspend fun sendMessage(
         chatId: String,
         content: String,
@@ -352,6 +369,13 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * Send a media (image / video / document) message to a chat.
+     *
+     * @param recipientId See [sendMessage] — must be an empty string for GROUP
+     *   and BROADCAST chats so the plaintext branch is used; Signal sessions
+     *   are 1:1 and cannot address a group.
+     */
     override suspend fun sendMediaMessage(chatId: String, uri: Uri, mimeType: String, recipientId: String, caption: String): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
@@ -977,7 +1001,10 @@ class MessageRepositoryImpl @Inject constructor(
     ) {
         val rawList = messageSource.fetchMessages(chatId)
         for (raw in rawList) {
-            if (raw.senderId != currentUid && raw.senderId in blockedUserIds) continue
+            if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
+                Log.d(TAG, "syncChatMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
+                continue
+            }
 
             val existing = messageDao.getMessageById(raw.id)
 
