@@ -58,6 +58,11 @@ private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 private const val TAG = "MessageRepo"
 
+// How long a list-update bubble stays "open" for further merging. Once the gap
+// between the previous list update and the next one exceeds this window, the
+// next update starts a fresh bubble instead of silently extending the old one.
+private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
+
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
@@ -844,7 +849,10 @@ class MessageRepositoryImpl @Inject constructor(
                 else -> "\uD83D\uDCCB List updated: $listTitle"
             }
 
-            // Merge into the last message if it's a diff bubble for the same list from this user
+            // Merge into the last message if it's a diff bubble for the same list from this user,
+            // but only while the previous update is still within the merge window. Once the gap
+            // exceeds LIST_MESSAGE_MERGE_WINDOW_MS, a new bubble is started so later activity is
+            // visible instead of silently extending a stale bubble.
             if (listDiff != null && !listDiff.deleted && !listDiff.unshared && !listDiff.shared) {
                 val lastEntity = messageDao.getLastMessageByChatId(chatId)
                 if (lastEntity != null) {
@@ -856,6 +864,7 @@ class MessageRepositoryImpl @Inject constructor(
                         && !lastMessage.listDiff.unshared
                         && !lastMessage.listDiff.shared
                         && lastMessage.senderId == senderId
+                        && (timestamp - lastMessage.timestamp) < LIST_MESSAGE_MERGE_WINDOW_MS
                     ) {
                         val mergedDiff = ListDiff.accumulate(lastMessage.listDiff, listDiff)
                         messageSource.updateListMessageDiff(chatId, lastMessage.id, content, mergedDiff.toMap(), timestamp)
