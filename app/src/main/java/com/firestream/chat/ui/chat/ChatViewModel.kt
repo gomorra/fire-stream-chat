@@ -187,17 +187,17 @@ class ChatViewModel @Inject constructor(
     // ── Emoji ──
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
 
-    // ── Save to gallery ──
-    fun saveImageToGallery(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+    // ── Save to downloads ──
+    fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val file = when {
                     localUri != null && File(localUri).exists() -> File(localUri)
-                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "gallery_${System.currentTimeMillis()}", mediaUrl)
+                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
                     else -> throw Exception("No image source available")
                 }
-                mediaFileManager.saveToGallery(file, mimeType)
-                _snackbarEvent.emit("Saved to gallery")
+                mediaFileManager.saveToDownloads(file, mimeType)
+                _snackbarEvent.emit("Saved to Downloads")
             } catch (e: Exception) {
                 _snackbarEvent.emit("Failed to save: ${e.message}")
             }

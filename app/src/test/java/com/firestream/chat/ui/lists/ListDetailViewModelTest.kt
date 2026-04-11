@@ -126,6 +126,77 @@ class ListDetailViewModelTest {
     }
 
     @Test
+    fun `clearCheckedItems optimistically removes checked items before repository call`() = runTest {
+        val listData = ListData(
+            id = "list1",
+            items = listOf(
+                ListItem(id = "i1", text = "Milk", isChecked = true),
+                ListItem(id = "i2", text = "Eggs"),
+                ListItem(id = "i3", text = "Bread", isChecked = true)
+            )
+        )
+        every { listRepository.observeList("list1") } returns flowOf(listData)
+        coEvery { listRepository.clearCheckedItems("list1") } returns Result.success(listOf("Milk", "Bread"))
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.clearCheckedItems()
+
+        // Before the coroutine runs, the optimistic update should already be visible
+        val stateAfterCall = viewModel.uiState.value
+        assertEquals(1, stateAfterCall.listData?.items?.size)
+        assertEquals("Eggs", stateAfterCall.listData?.items?.firstOrNull()?.text)
+
+        runCurrent()
+
+        coVerify(exactly = 1) { listRepository.clearCheckedItems("list1") }
+        // Final state still has only the unchecked item
+        assertEquals(1, viewModel.uiState.value.listData?.items?.size)
+    }
+
+    @Test
+    fun `clearCheckedItems reverts state on repository failure`() = runTest {
+        val listData = ListData(
+            id = "list1",
+            items = listOf(
+                ListItem(id = "i1", text = "Milk", isChecked = true),
+                ListItem(id = "i2", text = "Eggs")
+            )
+        )
+        every { listRepository.observeList("list1") } returns flowOf(listData)
+        coEvery { listRepository.clearCheckedItems("list1") } returns Result.failure(Exception("boom"))
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.clearCheckedItems()
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertEquals(2, state.listData?.items?.size)
+        assertEquals("boom", state.error)
+    }
+
+    @Test
+    fun `clearCheckedItems is a no-op when nothing is checked`() = runTest {
+        val listData = ListData(
+            id = "list1",
+            items = listOf(ListItem(id = "i1", text = "Eggs"))
+        )
+        every { listRepository.observeList("list1") } returns flowOf(listData)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.clearCheckedItems()
+        runCurrent()
+
+        coVerify(exactly = 0) { listRepository.clearCheckedItems(any()) }
+        assertEquals(1, viewModel.uiState.value.listData?.items?.size)
+    }
+
+    @Test
     fun `deleteList calls repository and sets isDeleted with title`() = runTest {
         every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1", title = "Groceries"))
         coEvery { listRepository.deleteList("list1") } returns Result.success(Unit)

@@ -11,6 +11,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +59,7 @@ fun ChatListItem(
     isRecipientOnline: Boolean = false,
     onClick: () -> Unit,
     onLongClick: () -> Unit = {},
+    onAvatarClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
@@ -81,7 +83,16 @@ fun ChatListItem(
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Avatar with optional online dot overlay
-        Box(contentAlignment = Alignment.BottomEnd) {
+        val hasAvatarImage = avatarUrl != null || localAvatarPath != null
+        val avatarModifier = if (hasAvatarImage && onAvatarClick != null) {
+            Modifier.clickable(onClick = onAvatarClick)
+        } else {
+            Modifier
+        }
+        Box(
+            contentAlignment = Alignment.BottomEnd,
+            modifier = avatarModifier
+        ) {
             UserAvatar(
                 avatarUrl = avatarUrl,
                 contentDescription = displayName,

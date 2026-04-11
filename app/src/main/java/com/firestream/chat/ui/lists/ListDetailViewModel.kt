@@ -170,15 +170,32 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun clearCheckedItems() {
-        if (_uiState.value.listData?.items?.none { it.isChecked } == true) return
+        val currentList = _uiState.value.listData ?: return
+        val checkedItems = currentList.items.filter { it.isChecked }
+        if (checkedItems.isEmpty()) return
+
+        // Optimistic update: drop checked items locally before Firestore round-trip
+        // so the UI reflects the change immediately.
+        val remaining = currentList.items.filter { !it.isChecked }
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(items = remaining)
+        )
+
         viewModelScope.launch {
             listRepository.clearCheckedItems(listId)
                 .onSuccess { clearedTexts ->
-                    if (clearedTexts.isNotEmpty()) {
-                        accumulateAndDebounce(ListDiff(removed = clearedTexts))
+                    val texts = clearedTexts.ifEmpty { checkedItems.map { it.text } }
+                    if (texts.isNotEmpty()) {
+                        accumulateAndDebounce(ListDiff(removed = texts))
                     }
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    // Revert on failure
+                    _uiState.value = _uiState.value.copy(
+                        listData = currentList,
+                        error = e.message
+                    )
+                }
         }
     }
 
