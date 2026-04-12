@@ -24,7 +24,8 @@ This document provides a detailed specification and architectural overview of th
 - **Star**: Bookmark messages.
 - **Edit/Delete**: Edit a previously sent message or delete it entirely for both parties (soft-delete with `deletedAt` timestamp).
 - **Message Info**: View exact delivery and read timestamps for participants.
-- **Link Previews**: Automatic rich preview card generation for URLs included in messages.
+- **Link Previews**: Automatic rich preview card generation for URLs included in messages. `LinkPreviewSource` parses Open Graph and Twitter Card meta tags; falls back to `WebPagePreviewCapture` (off-screen WebView screenshot) when no image metadata is available. Results are LRU-cached.
+- **Location Sharing**: Send a location pin as a `LOCATION` message with `latitude`/`longitude` coordinates via `LocationPickerSheet`. Rendered as a map preview in the message bubble.
 - **Polls**: Create and vote on polls within group or individual chats. Supports multiple-choice, anonymous voting, and manual close.
 - **Mentions**: `@username` and `@everyone` support in group chats. Mentioned users receive targeted notifications.
 
@@ -465,7 +466,98 @@ _The seven Signal tables (`signal_identities`, `signal_sessions`, `signal_prekey
 
 ---
 
-## 9. Domain Models
+## 9. Firestore & Realtime Database Schema
+
+The backend data model lives in Firebase. Room (Section 8) caches a subset locally; Firestore is the authoritative remote store.
+
+### Firestore Collections
+
+```
+users/{userId}
+├── uid, phoneNumber, displayName, avatarUrl, statusText
+├── lastSeen, isOnline                          # mirrored from RTDB by Cloud Function
+├── publicIdentityKey                           # Signal Protocol identity key
+├── readReceiptsEnabled                         # privacy control
+├── fcmToken                                    # push notification token
+└── blockedUsers/{targetUserId}                 # subcollection
+    └── blockedAt
+
+keyBundles/{userId}                             # Signal Protocol pre-key bundles
+├── registrationId, identityKey
+├── signedPreKeyId, signedPreKeyPublic, signedPreKeySig
+├── preKeyId, preKeyPublic
+└── kyberPreKeyId, kyberPreKeyPublic, kyberPreKeySig
+
+chats/{chatId}
+├── type                                        # "INDIVIDUAL" | "GROUP" | "BROADCAST"
+├── name, avatarUrl, description                # group metadata
+├── participants[]                              # array of user IDs
+├── admins[], owner, createdBy, createdAt
+├── inviteLink, requireApproval, pendingMembers[]
+├── typingUsers: { userId → timestamp }         # per-key atomic updates
+├── unreadCounts: { userId → count }            # incremented by Cloud Function
+├── lastMessageContent, lastMessageTimestamp, lastMessageSenderId
+├── permissions                                 # embedded GroupPermissions object
+│   ├── sendMessages, editGroupInfo, addMembers, createPolls
+│   └── isAnnouncementMode
+└── messages/{messageId}                        # subcollection
+    ├── senderId, content, type, status, timestamp
+    ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
+    ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight
+    ├── localUri                                # NOT synced to Firestore — Room only
+    ├── replyToId, isForwarded, isPinned, duration
+    ├── editedAt, deletedAt
+    ├── reactions: { emoji → ? }
+    ├── mentions[]
+    ├── readBy: { userId → timestamp }
+    ├── deliveredTo: { userId → timestamp }
+    ├── emojiSizes: { charIndex → multiplier }
+    ├── pollData: { options[], isMultipleChoice, isClosed }
+    ├── listId, listDiff: { added[], removed[], checked[], ... }
+    └── latitude, longitude                     # LOCATION messages
+
+calls/{callId}
+├── callerId, calleeId, status, createdAt, endedAt, endReason
+├── offer: { sdp, type }                       # WebRTC SDP offer
+├── answer: { sdp, type }                      # WebRTC SDP answer
+├── callerCandidates/{id}                      # subcollection — ICE candidates
+│   └── sdpMid, sdpMLineIndex, sdp
+└── calleeCandidates/{id}                      # subcollection — ICE candidates
+    └── sdpMid, sdpMLineIndex, sdp
+
+lists/{listId}
+├── title, type, genericStyle
+├── createdBy, createdAt, updatedAt
+├── participants[]
+├── sharedChatIds[]                            # which chats this list is shared into
+├── items[]: { id, text, isChecked, quantity, unit, order, addedBy }
+└── history/{entryId}                          # subcollection — audit trail
+    └── action, itemId, itemText, userId, userName, timestamp
+
+inviteLinks/{token}
+└── chatId, createdAt, createdBy               # maps invite token → chat
+```
+
+### Realtime Database
+
+```
+/presence/{userId}
+├── isOnline: Boolean
+└── lastSeen: Long                             # ServerValue.TIMESTAMP via onDisconnect()
+```
+
+The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOnline = true`; register `onDisconnect()` to set `isOnline = false` and `lastSeen = ServerValue.TIMESTAMP`. The `syncPresenceToFirestore` Cloud Function mirrors RTDB writes to Firestore `users/{userId}` with a `lastSeen` transaction guard to reject out-of-order invocations.
+
+### Key Patterns
+
+- **Array mutations** (`participants`, `admins`, `pendingMembers`, `sharedChatIds`): Use `FieldValue.arrayUnion()` / `arrayRemove()` for atomic updates.
+- **Per-key maps** (`typingUsers`, `unreadCounts`, `readBy`, `deliveredTo`): Updated via `FieldValue` dot-notation paths (e.g., `"unreadCounts.$userId"`).
+- **Encryption duality**: Messages store either `content` (plaintext, debug builds) or `ciphertext` + `signalType` (encrypted, release builds). Never both.
+- **Subcollection isolation**: `blockedUsers`, `messages`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
+
+---
+
+## 10. Domain Models
 
 ### Chat
 
@@ -505,7 +597,7 @@ data class Message(
     val chatId: String,
     val senderId: String,
     val content: String,
-    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST
+    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
     val localUri: String?,                   // local file path for media (offline-first)
@@ -527,7 +619,9 @@ data class Message(
     val emojiSizes: Map<Int, Float>,       // character index → size multiplier (0.8–2.5)
     val listId: String?,                   // associated shared list ID
     val listDiff: ListDiff?,               // list mutation summary for LIST messages
-    val isPinned: Boolean
+    val isPinned: Boolean,
+    val latitude: Double?,                // location sharing
+    val longitude: Double?                // location sharing
 )
 ```
 
@@ -638,11 +732,24 @@ sealed interface CallState {
 }
 
 enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
+
+// In-call UI controls (exposed by CallStateHolder)
+data class CallUiControls(val isMuted: Boolean, val isSpeakerOn: Boolean)
+```
+
+### SdpData / IceCandidateData / CallSignalingData
+
+Defined in `domain/model/CallSignalingData.kt`:
+
+```kotlin
+data class SdpData(val sdp: String, val type: String)
+data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp: String)
+data class CallSignalingData(val callId: String, val callerId: String, val calleeId: String, val status: String)
 ```
 
 ---
 
-## 10. Screen Navigation Architecture
+## 11. Screen Navigation Architecture
 
 The application uses a single `NavHost` in `MainActivity` for all routes except `CallActivity`, which is launched via Intent for lock-screen support. The `CHAT_LIST` route renders `MainScreen`, which hosts a `HorizontalPager` with Chats, Calls, and Lists tabs — the Calls and Lists tabs are internal pager state, not NavHost routes.
 
@@ -724,7 +831,7 @@ graph TD
 
 ---
 
-## 11. Package Layout
+## 12. Package Layout
 
 ```
 com.firestream.chat/
@@ -745,16 +852,21 @@ com.firestream.chat/
 │   │   └── PreferencesDataStore.kt
 │   ├── util/
 │   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
-│   │   └── MediaFileManager.kt  # Local media storage & gallery export
+│   │   ├── MediaFileManager.kt  # Local media storage & gallery export
+│   │   ├── ProfileImageManager.kt # Avatar download/cache management
+│   │   ├── ResultExt.kt         # Result extension helpers
+│   │   └── CurrentActivityHolder.kt
 │   ├── worker/
 │   │   └── MediaBackfillWorker.kt # WorkManager job to backfill local media
 │   ├── remote/
-│   │   ├── fcm/FCMService.kt
-│   │   └── firebase/            # FirebaseAuthSource, FirestoreCallSource,
-│   │                            # FirestoreListSource, FirestoreListHistorySource,
-│   │                            # FirestoreMessageSource, FirestoreUserSource,
-│   │                            # FirebaseKeySource, FirebaseStorageSource,
-│   │                            # RealtimePresenceSource, LinkPreviewSource
+│   │   ├── fcm/                 # FCMService, ActiveChatTracker
+│   │   ├── firebase/            # FirebaseAuthSource, FirestoreChatSource,
+│   │   │                        # FirestoreCallSource, FirestoreListSource,
+│   │   │                        # FirestoreListHistorySource, FirestoreMessageSource,
+│   │   │                        # FirestoreUserSource, FirebaseKeySource,
+│   │   │                        # FirebaseStorageSource, RealtimePresenceSource,
+│   │   │                        # LinkPreviewSource
+│   │   └── WebPagePreviewCapture.kt # Off-screen WebView screenshot fallback
 │   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
 │   │                            # ChatRepositoryImpl, ContactRepositoryImpl,
 │   │                            # ListRepositoryImpl, MessageRepositoryImpl,
@@ -763,11 +875,12 @@ com.firestream.chat/
 │   └── share/
 │       ├── SharedContentHolder.kt
 │       └── ShareContentResolver.kt
-├── di/                          # AppModule, DatabaseModule, CryptoModule, NetworkModule
+├── di/                          # AppModule, DatabaseModule, CryptoModule, NetworkModule, SystemModule
 ├── domain/
 │   ├── model/                   # Chat, Message, User, Contact, Poll, PollOption,
-│   │                            # CallState, CallLogEntry, CallSignalingData, IceCandidateData,
-│   │                            # GroupPermissions, GroupRole, ListData, ListItem, ListDiff,
+│   │                            # CallState, CallLogEntry, CallSignalingData, SdpData,
+│   │                            # IceCandidateData, GroupPermissions, GroupRole,
+│   │                            # ListData, ListItem, ListDiff, ListType, GenericListStyle,
 │   │                            # ListHistoryEntry, HistoryAction, MediaAttachment,
 │   │                            # SharedContent, MessageStatus, MessageType, ChatType
 │   ├── repository/              # AuthRepository, CallRepository, ChatRepository, ContactRepository,
@@ -788,14 +901,15 @@ com.firestream.chat/
 │   │                            # ChatMessageSender, ChatMessageLoader, ChatInfoManager,
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
 │   │                            # FullscreenImageViewer, ImagePreviewScreen,
-│   │                            # ForwardChatPicker,
-│   │                            # EmojiHandlerPanel, EmojiSearchData,
+│   │                            # ForwardChatPicker, LocationPickerSheet,
+│   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
 │   │                            # SharedMediaScreen, SharedMediaViewModel,
-│   │                            # MessageInfoScreen, ChatUtils
+│   │                            # MessageInfoScreen, ChatUtils, BubbleTailShape,
+│   │                            # MentionFormatter, MessageGrouping
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,
 │   │                            # ArchivedChatsScreen
-│   ├── components/UserAvatar.kt
+│   ├── components/              # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator
 │   ├── contacts/                # ContactsScreen, ContactsViewModel
 │   ├── group/                   # CreateGroupScreen, CreateGroupViewModel,
 │   │                            # GroupSettingsScreen, GroupSettingsViewModel,
@@ -818,7 +932,7 @@ com.firestream.chat/
 
 ---
 
-## 12. Firebase Cloud Functions
+## 13. Firebase Cloud Functions
 
 Three functions in `functions/index.js` (Node.js 20 runtime):
 

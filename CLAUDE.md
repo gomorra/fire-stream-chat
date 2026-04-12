@@ -107,40 +107,53 @@ Clean Architecture with three layers:
 
 ### Package Layout
 
+See `docs/ARCHITECTURE.md` for the full package layout with every file, Firestore schema, data flow diagrams, and domain model definitions.
+
 ```
 com.firestream.chat/
 ├── data/
+│   ├── call/            # CallService, CallStateHolder, CallNotificationManager, WebRtcPeerConnectionFactory
 │   ├── crypto/          # SignalManager, SignalProtocolStoreImpl
 │   ├── local/
-│   │   ├── dao/         # Room DAOs (Chat, Contact, Message, Signal, User)
-│   │   ├── entity/      # Room entities (11 tables including 7 Signal tables)
+│   │   ├── dao/         # Room DAOs (Chat, Contact, List, Message, Signal, User)
+│   │   ├── entity/      # Room entities (12 tables including 7 Signal tables)
 │   │   ├── AppDatabase.kt
 │   │   ├── Converters.kt
 │   │   └── PreferencesDataStore.kt
+│   ├── util/            # ImageCompressor, MediaFileManager, ProfileImageManager
+│   ├── worker/          # MediaBackfillWorker
 │   ├── remote/
-│   │   ├── fcm/         # FCMService
-│   │   └── firebase/    # FirebaseAuthSource, FirestoreMessageSource, etc.
-│   └── repository/      # *Impl classes
-├── di/                  # Hilt modules (App, Database, Crypto, Network)
+│   │   ├── fcm/         # FCMService, ActiveChatTracker
+│   │   └── firebase/    # FirebaseAuthSource, FirestoreChatSource, FirestoreMessageSource, etc.
+│   ├── repository/      # *Impl classes (8 repositories + PollMapper)
+│   └── share/           # SharedContentHolder, ShareContentResolver
+├── di/                  # Hilt modules (App, Database, Crypto, Network, System)
 ├── domain/
-│   ├── model/           # Chat, Contact, Message, MediaAttachment, MessageStatus, User
-│   ├── repository/      # Interfaces (Auth, Chat, Contact, Message, User)
-│   └── usecase/         # Organized by feature (auth, chat, contact, message)
-├── navigation/          # NavGraph.kt with Routes object
+│   ├── model/           # Chat, Message, User, Contact, Poll, CallState, CallLogEntry,
+│   │                    # GroupPermissions, GroupRole, ListData, ListItem, ListDiff,
+│   │                    # MediaAttachment, SharedContent, MessageStatus, MessageType, ChatType
+│   ├── repository/      # Interfaces (Auth, Call, Chat, Contact, List, Message, Poll, User)
+│   ├── usecase/         # Organized by feature (chat, list, message)
+│   └── util/            # MentionParser
+├── navigation/          # NavGraph.kt with Routes object (18 routes)
 ├── ui/                  # Feature packages, organized by screen
-│   ├── auth/            # LoginScreen, OtpScreen, ProfileSetupScreen
-│   ├── calls/           # CallsScreen, CallsViewModel (call log + WebRTC entry points)
-│   ├── chat/            # ChatScreen, ChatViewModel, MessageBubble, VoiceMessagePlayer, etc.
-│   ├── chatlist/        # ChatListScreen, ChatListViewModel, ArchivedChatsScreen
-│   ├── contacts/        # ContactsScreen
-│   ├── group/           # GroupSettingsScreen, CreateGroupScreen, GroupSettingsViewModel
+│   ├── auth/            # LoginScreen, OtpScreen, ProfileSetupScreen, AuthViewModel
 │   ├── broadcast/       # CreateBroadcastScreen, CreateBroadcastViewModel
-│   ├── main/            # MainScreen (HorizontalPager host), BottomNavBar, TabSwipeModifier
-│   ├── profile/         # ProfileScreen
+│   ├── call/            # CallActivity, CallScreen, CallViewModel (WebRTC UI)
+│   ├── calls/           # CallsScreen, CallsViewModel (call log tab)
+│   ├── chat/            # ChatScreen, ChatViewModel + 6 managers, MessageBubble, etc.
+│   ├── chatlist/        # ChatListScreen, ChatListViewModel, ArchivedChatsScreen
+│   ├── components/      # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator
+│   ├── contacts/        # ContactsScreen, ContactsViewModel
+│   ├── group/           # GroupSettingsScreen, CreateGroupScreen, QrCodeGenerator
+│   ├── lists/           # ListsScreen, ListDetailScreen, SharedListsScreen + ViewModels
+│   ├── main/            # MainScreen (HorizontalPager host), BottomNavBar
+│   ├── profile/         # ProfileScreen, ProfileViewModel
 │   ├── settings/        # SettingsScreen, SettingsViewModel
-│   ├── share/           # SharePickerScreen
-│   ├── starred/         # StarredMessagesScreen
+│   ├── share/           # SharePickerScreen, SharePickerViewModel
+│   ├── starred/         # StarredMessagesScreen, StarredMessagesViewModel
 │   └── theme/           # Color, Shape, Theme, Type
+├── AppLifecycleObserver.kt # Process-level lifecycle — drives RTDB presence
 ├── FireStreamApp.kt     # @HiltAndroidApp
 └── MainActivity.kt      # Single activity entry point
 ```
@@ -148,7 +161,7 @@ com.firestream.chat/
 ### Key Architectural Decisions
 
 - **Single Activity** — `MainActivity` with Compose `NavHost` for all navigation.
-- **Bottom navigation** — `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with Chats and Calls tabs. `BottomNavBar` lives in `MainScreen`'s Scaffold; individual tab screens (`ChatListScreen`, `CallsScreen`) do **not** own the nav bar or swipe gesture.
+- **Bottom navigation** — `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with Chats, Calls, and Lists tabs. `BottomNavBar` lives in `MainScreen`'s Scaffold; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar or swipe gesture.
 - **Local-first** — Room database with Firebase sync. `fallbackToDestructiveMigration()` is enabled. **When adding, removing, or renaming columns/entities, always bump the `version` in `AppDatabase.kt`.** Without a version bump, Room's identity hash check crashes at runtime instead of triggering the destructive migration.
 - **DataStore** — All preferences (theme, notifications, privacy). No SharedPreferences.
 - **Signal Protocol** — E2E encryption with `SignalManager` coordinating key exchange via `FirebaseKeySource`. **Encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `MessageRepositoryImpl`) — all messages are sent as plaintext via `sendPlainMessage` to avoid key-loss issues during development. Release builds use full Signal encryption.
