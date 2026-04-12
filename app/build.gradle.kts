@@ -5,6 +5,7 @@ plugins {
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
+    alias(libs.plugins.roborazzi)
 }
 
 android {
@@ -84,6 +85,12 @@ android {
             // libsignal_jni_testing.so is a test-only artifact (~316 MB across 4 ABIs)
             excludes += "**/libsignal_jni_testing.so"
         }
+    }
+
+    testOptions {
+        // Required for Robolectric to access Android resources (res/values, fonts, etc.)
+        // when running Compose UI tests on the JVM.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -166,6 +173,14 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.org.json)
+    testImplementation(libs.turbine)
+    testImplementation(libs.robolectric)
+    // Compose UI test on JVM (Robolectric); the BOM aligns versions across artifacts.
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(libs.roborazzi.rule)
     androidTestImplementation(libs.test.ext.junit)
     androidTestImplementation(libs.espresso.core)
     androidTestImplementation(platform(libs.compose.bom))
