@@ -91,6 +91,11 @@ android {
         // Required for Robolectric to access Android resources (res/values, fonts, etc.)
         // when running Compose UI tests on the JVM.
         unitTests.isIncludeAndroidResources = true
+        // Non-Robolectric tests rely on the Android Mock SDK returning null / 0
+        // for unmocked methods (e.g. android.util.Log.d). Without this, the
+        // existing RealtimePresenceSourceTest crashes on its first Log call.
+        // Robolectric tests bypass this and use Robolectric shadows instead.
+        unitTests.isReturnDefaultValues = true
     }
 }
 
