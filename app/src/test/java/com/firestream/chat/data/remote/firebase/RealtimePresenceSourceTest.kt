@@ -110,6 +110,18 @@ class RealtimePresenceSourceTest {
         verify(exactly = 0) { mockOnDisconnect.cancel() }
     }
 
+    // ── Bug 3 fix: goOffline tears down .info/connected listener ─────────────
+
+    @Test
+    fun `goOffline removes the connected listener so reconnect cannot flip back to online`() = runTest {
+        source.startPresence("uid1")
+        simulateConnected()
+
+        source.goOffline("uid1")
+
+        verify { connectedRef.removeEventListener(any<ValueEventListener>()) }
+    }
+
     // ── Cleanup ──────────────────────────────────────────────────────────────
 
     @Test
