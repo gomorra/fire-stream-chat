@@ -11,6 +11,12 @@
 # alone so interactive builds aren't slowed down.
 set -euo pipefail
 
+# Kill switch: set SKIP_GRADLE_PREWARM=1 in your Claude Code env to bypass.
+if [ "${SKIP_GRADLE_PREWARM:-}" = "1" ]; then
+    echo "[session-start] SKIP_GRADLE_PREWARM=1 — skipping."
+    exit 0
+fi
+
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
     exit 0
 fi
