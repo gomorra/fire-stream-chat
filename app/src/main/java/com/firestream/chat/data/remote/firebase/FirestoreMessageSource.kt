@@ -53,11 +53,29 @@ data class RawFirestoreMessage(
 
 private const val POLL_CONTENT = "📊 Poll"
 private const val LIST_CONTENT = "📋 List"
+private const val CALL_CONTENT = "📞 Voice call"
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
 ) {
+    /**
+     * The preview string written to `chats/{id}.lastMessageContent` for a given
+     * [type]. [plain] is the raw user content (text body, image caption, etc.);
+     * it only matters for TEXT and IMAGE. Exposed so repositories can mirror
+     * the same string into Room for optimistic local updates, avoiding a
+     * preview flicker when the Firestore echo lands.
+     */
+    fun lastContentFor(type: MessageType, plain: String = ""): String = when (type) {
+        MessageType.IMAGE -> if (plain.isNotBlank()) "📷 $plain" else "📷 Photo"
+        MessageType.DOCUMENT -> "📎 File"
+        MessageType.VOICE -> "🎤 Voice message"
+        MessageType.POLL -> POLL_CONTENT
+        MessageType.LIST -> LIST_CONTENT.takeIf { plain.isBlank() } ?: plain
+        MessageType.LOCATION -> "📍 Location"
+        MessageType.CALL -> CALL_CONTENT
+        else -> plain.ifBlank { "Message" }
+    }
     fun observeMessages(chatId: String): Flow<List<RawFirestoreMessage>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection("chats").document(chatId)
@@ -132,18 +150,9 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        val lastContent = when (type) {
-            MessageType.IMAGE -> if (plainContent.isNotBlank()) "📷 $plainContent" else "📷 Photo"
-            MessageType.DOCUMENT -> "📎 File"
-            MessageType.VOICE -> "🎤 Voice message"
-            MessageType.POLL -> POLL_CONTENT
-            MessageType.LIST -> LIST_CONTENT
-            MessageType.LOCATION -> "📍 Location"
-            else -> plainContent.ifBlank { "Message" }
-        }
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to lastContent,
+                "lastMessageContent" to lastContentFor(type, plainContent),
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )
@@ -193,18 +202,9 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        val lastContent = when (type) {
-            MessageType.IMAGE -> if (content.isNotBlank()) "📷 $content" else "📷 Photo"
-            MessageType.DOCUMENT -> "📎 File"
-            MessageType.VOICE -> "🎤 Voice message"
-            MessageType.POLL -> POLL_CONTENT
-            MessageType.LIST -> LIST_CONTENT
-            MessageType.LOCATION -> "📍 Location"
-            else -> content
-        }
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to lastContent,
+                "lastMessageContent" to lastContentFor(type, content),
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )
@@ -365,7 +365,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
         firestore.collection("chats").document(chatId).update(
             mapOf(
-                "lastMessageContent" to "📞 Voice call",
+                "lastMessageContent" to lastContentFor(MessageType.CALL),
                 "lastMessageTimestamp" to timestamp,
                 "lastMessageSenderId" to senderId
             )

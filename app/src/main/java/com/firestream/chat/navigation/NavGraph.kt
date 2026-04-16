@@ -240,6 +240,7 @@ fun FireStreamNavGraph(
                 },
                 deletedListTitle = deletedListTitle,
                 onDeletedListTitleConsumed = { it.savedStateHandle["deletedListTitle"] = null },
+                preferencesDataStore = preferencesDataStore,
             )
         }
 

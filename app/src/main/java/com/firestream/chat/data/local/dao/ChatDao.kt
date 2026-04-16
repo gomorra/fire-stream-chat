@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatDao {
-    @Query("SELECT * FROM chats ORDER BY lastMessageTimestamp DESC")
+    @Query("SELECT * FROM chats ORDER BY COALESCE(lastMessageTimestamp, createdAt) DESC")
     fun getAllChats(): Flow<List<ChatEntity>>
 
     @Query("SELECT * FROM chats WHERE id = :chatId")
@@ -29,6 +29,9 @@ interface ChatDao {
 
     @Query("UPDATE chats SET unreadCount = :count WHERE id = :chatId")
     suspend fun updateUnreadCount(chatId: String, count: Int)
+
+    @Query("UPDATE chats SET lastMessageId = :id, lastMessageContent = :content, lastMessageTimestamp = :timestamp WHERE id = :chatId")
+    suspend fun updateLastMessage(chatId: String, id: String?, content: String?, timestamp: Long?)
 
     // Phase 2: chat organisation
     @Query("UPDATE chats SET isPinned = :pinned WHERE id = :chatId")

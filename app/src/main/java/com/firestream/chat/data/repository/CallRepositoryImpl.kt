@@ -1,10 +1,12 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.data.remote.firebase.FirestoreCallSource
 import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.SdpData
 import com.firestream.chat.domain.repository.CallRepository
 import kotlinx.coroutines.flow.Flow
@@ -15,7 +17,8 @@ import javax.inject.Singleton
 class CallRepositoryImpl @Inject constructor(
     private val callSource: FirestoreCallSource,
     private val authSource: FirebaseAuthSource,
-    private val messageSource: FirestoreMessageSource
+    private val messageSource: FirestoreMessageSource,
+    private val chatDao: ChatDao
 ) : CallRepository {
 
     override suspend fun createCall(calleeId: String): Result<String> {
@@ -119,7 +122,9 @@ class CallRepositoryImpl @Inject constructor(
         return try {
             val callerId = authSource.currentUserId
                 ?: return Result.failure(Exception("Not authenticated"))
-            messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, System.currentTimeMillis())
+            val timestamp = System.currentTimeMillis()
+            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, timestamp)
+            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
