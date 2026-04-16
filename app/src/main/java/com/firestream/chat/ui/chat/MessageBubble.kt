@@ -3,6 +3,7 @@ package com.firestream.chat.ui.chat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -149,6 +151,8 @@ internal data class MessageBubbleCallbacks(
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
     val onCall: (() -> Unit)? = null,
+    // Tapping the quoted-reply preview inside the bubble — jumps to the source.
+    val onReplyPreviewClick: () -> Unit = {},
 )
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
@@ -164,6 +168,7 @@ internal fun MessageBubble(
     userIdToDisplayName: Map<String, String> = emptyMap(),
     callbacks: MessageBubbleCallbacks,
     uploadProgress: Float? = null,
+    isHighlighted: Boolean = false,
 ) {
     val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.surfaceVariant
@@ -239,6 +244,11 @@ internal fun MessageBubble(
             },
         horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
     ) {
+        val highlightColor by animateColorAsState(
+            targetValue = if (isHighlighted) MaterialTheme.colorScheme.tertiary else Color.Transparent,
+            animationSpec = tween(durationMillis = if (isHighlighted) 200 else 600),
+            label = "jumpToSourceHighlight"
+        )
         Box {
             Box(
                 modifier = Modifier
@@ -247,6 +257,7 @@ internal fun MessageBubble(
                         color = bubbleColor,
                         shape = bubbleShape
                     )
+                    .border(width = 2.dp, color = highlightColor, shape = bubbleShape)
                     .combinedClickable(
                         onClick = { if (message.type == MessageType.CALL) callbacks.onCall?.invoke() },
                         onLongClick = { showMenu = true }
@@ -299,10 +310,9 @@ internal fun MessageBubble(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(
-                                    color = textColor.copy(alpha = 0.1f),
-                                    shape = RoundedCornerShape(8.dp)
-                                )
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(color = textColor.copy(alpha = 0.1f))
+                                .clickable { callbacks.onReplyPreviewClick() }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
                             Text(
