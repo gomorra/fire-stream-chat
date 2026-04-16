@@ -214,6 +214,32 @@ fun ChatScreen(
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
 
+    // Highlight the source message when the user taps a reply preview.
+    // Cleared after the animation window so the border fades out.
+    var highlightedMessageId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(highlightedMessageId) {
+        if (highlightedMessageId != null) {
+            delay(1500)
+            highlightedMessageId = null
+        }
+    }
+
+    fun jumpToSourceMessage(sourceId: String) {
+        val idx = uiState.messages.indexOfFirst { it.id == sourceId }
+        if (idx < 0) return
+        highlightedMessageId = sourceId
+        scope.launch {
+            listState.scrollToItem(idx)
+            delay(16)
+            val viewportHeight = listState.layoutInfo.viewportSize.height
+            val itemInfo = listState.layoutInfo.visibleItemsInfo
+                .firstOrNull { it.index == idx }
+            if (itemInfo != null && viewportHeight > 0) {
+                listState.animateScrollBy(-(viewportHeight - itemInfo.size) / 2f)
+            }
+        }
+    }
+
     // Save scroll position when leaving so it can be restored on re-entry
     DisposableEffect(Unit) {
         onDispose {
@@ -791,6 +817,7 @@ fun ChatScreen(
                                             currentUserId = uiState.currentUserId,
                                             readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
                                             userIdToDisplayName = uiState.participantNameMap,
+                                            isHighlighted = highlightedMessageId == message.id,
                                             callbacks = MessageBubbleCallbacks(
                                                 onDelete = if (isOwn) {
                                                     { viewModel.deleteMessage(message.id) }
@@ -825,6 +852,9 @@ fun ChatScreen(
                                                 },
                                                 onPreviewImageClick = { url ->
                                                     fullscreenImage = FullscreenImage(imageUrl = url)
+                                                },
+                                                onReplyPreviewClick = {
+                                                    replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
                                                 onCall = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
                                                     {
