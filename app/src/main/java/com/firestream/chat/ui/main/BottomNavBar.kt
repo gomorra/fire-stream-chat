@@ -40,8 +40,8 @@ internal fun BottomNavBar(
 ) {
     NavigationBar(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.surface,
-        tonalElevation = 3.dp
+        containerColor = MaterialTheme.colorScheme.background,
+        tonalElevation = 0.dp
     ) {
         NavItem(
             selected = selectedTab == MainTab.CHATS,

@@ -477,12 +477,12 @@ fun ChatScreen(
                                 uiState.isRecipientOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.8f)
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                                 )
                                 uiState.isBroadcast && uiState.broadcastRecipientCount > 0 -> Text(
                                     text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                                 )
                             }
                         }
@@ -508,7 +508,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.Phone,
                                 contentDescription = "Voice call",
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onBackground
                             )
                         }
                     }
@@ -516,7 +516,7 @@ fun ChatScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = "Search messages",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
                     Box {
@@ -524,7 +524,7 @@ fun ChatScreen(
                             Icon(
                                 imageVector = Icons.Default.MoreVert,
                                 contentDescription = "More options",
-                                tint = MaterialTheme.colorScheme.onPrimary
+                                tint = MaterialTheme.colorScheme.onBackground
                             )
                         }
                         DropdownMenu(
@@ -557,9 +557,9 @@ fun ChatScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         }

@@ -31,20 +31,20 @@ private val LightColorScheme = lightColorScheme(
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = FireOrange,
+    primary = FsAccent,
     onPrimary = TextOnPrimary,
-    primaryContainer = FireOrangeDark,
-    onPrimaryContainer = TextOnPrimary,
-    secondary = CharcoalLight,
-    onSecondary = TextOnPrimary,
-    secondaryContainer = Charcoal,
-    onSecondaryContainer = TextPrimaryDark,
-    background = BackgroundDark,
-    onBackground = TextPrimaryDark,
-    surface = SurfaceDark,
-    onSurface = TextPrimaryDark,
-    surfaceVariant = ReceivedBubbleDark,
-    onSurfaceVariant = TextSecondaryDark,
+    primaryContainer = FsAccentSoft,      // accent-soft: used by nav indicator pill
+    onPrimaryContainer = FsAccent,
+    secondary = FsTextDim,
+    onSecondary = FsBg,
+    secondaryContainer = FsSurface3,
+    onSecondaryContainer = FsText,
+    background = FsBg,
+    onBackground = FsText,
+    surface = FsSurface,
+    onSurface = FsText,
+    surfaceVariant = FsSurface,            // incoming bubble / card bg
+    onSurfaceVariant = FsTextDim,
     error = ErrorRed,
     onError = TextOnPrimary,
 )

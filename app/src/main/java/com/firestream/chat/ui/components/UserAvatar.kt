@@ -52,13 +52,13 @@ fun UserAvatar(
         Surface(
             modifier = modifier,
             shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer
+            color = MaterialTheme.colorScheme.secondaryContainer
         ) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.padding(size / 4.5f),
-                tint = MaterialTheme.colorScheme.onPrimaryContainer
+                tint = MaterialTheme.colorScheme.onSecondaryContainer
             )
         }
     }

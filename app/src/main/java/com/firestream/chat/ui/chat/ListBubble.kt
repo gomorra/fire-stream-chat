@@ -46,9 +46,12 @@ internal fun ListBubble(
     onClick: () -> Unit,
     onUnsharedListClick: () -> Unit = {}
 ) {
-    val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val bubbleColor = if (isOwnMessage) {
+        if (isDark) com.firestream.chat.ui.theme.SentBubbleDark
+        else com.firestream.chat.ui.theme.SentBubble
+    } else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onSurface
     else MaterialTheme.colorScheme.onSurfaceVariant
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 

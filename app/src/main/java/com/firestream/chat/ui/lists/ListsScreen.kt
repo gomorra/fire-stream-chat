@@ -129,14 +129,14 @@ internal fun ListsScreen(
                         Icon(
                             Icons.Default.Search,
                             contentDescription = "Search",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
                     IconButton(onClick = { showSortMenu = true }) {
                         Icon(
                             Icons.AutoMirrored.Filled.Sort,
                             contentDescription = "Sort",
-                            tint = MaterialTheme.colorScheme.onPrimary
+                            tint = MaterialTheme.colorScheme.onBackground
                         )
                     }
                     DropdownMenu(
@@ -164,8 +164,8 @@ internal fun ListsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },

@@ -105,7 +105,7 @@ fun SharePickerScreen(
                             Text(
                                 text = "${uiState.selectedChatIds.size} chat(s) selected",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                             )
                         }
                     }
@@ -119,9 +119,9 @@ fun SharePickerScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },

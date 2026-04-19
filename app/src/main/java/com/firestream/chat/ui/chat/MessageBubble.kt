@@ -110,7 +110,9 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import androidx.compose.ui.graphics.Color
-import com.firestream.chat.ui.theme.ReadReceiptBlue
+import com.firestream.chat.ui.theme.SentBubble
+import com.firestream.chat.ui.theme.SentBubbleDark
+import androidx.compose.foundation.isSystemInDarkTheme
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -170,9 +172,11 @@ internal fun MessageBubble(
     uploadProgress: Float? = null,
     isHighlighted: Boolean = false,
 ) {
-    val bubbleColor = if (isOwnMessage) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
+    val isDark = isSystemInDarkTheme()
+    val bubbleColor = if (isOwnMessage) {
+        if (isDark) SentBubbleDark else SentBubble
+    } else MaterialTheme.colorScheme.surfaceVariant
+    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onSurface
     else MaterialTheme.colorScheme.onSurfaceVariant
 
     val showTail = remember(groupPosition) {
@@ -627,7 +631,7 @@ internal fun MessageBubble(
                                         MessageStatus.FAILED -> "Failed"
                                     },
                                     tint = when (status) {
-                                        MessageStatus.READ -> ReadReceiptBlue
+                                        MessageStatus.READ -> MaterialTheme.colorScheme.primary
                                         MessageStatus.FAILED -> MaterialTheme.colorScheme.error
                                         else -> textColor.copy(alpha = 0.7f)
                                     },
@@ -831,8 +835,7 @@ private fun LocationBubbleContent(
             Text(
                 text = comment,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
@@ -844,15 +847,13 @@ private fun LocationBubbleContent(
                 imageVector = Icons.Default.LocationOn,
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
-                tint = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                       else MaterialTheme.colorScheme.onSurfaceVariant
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
                 text = "Shared location",
                 style = MaterialTheme.typography.labelSmall,
-                color = if (isOwnMessage) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

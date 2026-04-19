@@ -75,7 +75,7 @@ fun CreateBroadcastScreen(
                             Text(
                                 text = "${uiState.selectedIds.size} recipient(s) selected",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
                             )
                         }
                     }
@@ -89,9 +89,9 @@ fun CreateBroadcastScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.onBackground,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onBackground
                 )
             )
         },

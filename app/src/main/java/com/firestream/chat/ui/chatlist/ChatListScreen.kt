@@ -129,14 +129,17 @@ fun ChatListScreen(
                 title = {
                     Text(
                         text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.primary
                     )
                 },
                 windowInsets = WindowInsets(0),
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.background,
+                    titleContentColor = MaterialTheme.colorScheme.primary,
+                    actionIconContentColor = MaterialTheme.colorScheme.onBackground
                 ),
                 actions = {
                     IconButton(onClick = { viewModel.toggleSearchBar() }) {
@@ -462,10 +465,10 @@ private fun ChatSectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 16.dp, vertical = 6.dp)
     )
 }
