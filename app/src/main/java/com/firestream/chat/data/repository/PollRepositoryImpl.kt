@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -13,11 +14,10 @@ import com.firestream.chat.domain.repository.PollRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val POLL_CONTENT = "📊 Poll"
-
 @Singleton
 class PollRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
+    private val chatDao: ChatDao,
     private val messageSource: FirestoreMessageSource,
     private val authSource: FirebaseAuthSource
 ) : PollRepository {
@@ -52,17 +52,19 @@ class PollRepositoryImpl @Inject constructor(
                 timestamp = timestamp
             )
 
+            val pollPreview = messageSource.lastContentFor(MessageType.POLL)
             val message = Message(
                 id = remoteId,
                 chatId = chatId,
                 senderId = senderId,
-                content = POLL_CONTENT,
+                content = pollPreview,
                 type = MessageType.POLL,
                 status = MessageStatus.SENT,
                 timestamp = timestamp,
                 pollData = poll
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
+            chatDao.updateLastMessage(chatId, remoteId, pollPreview, timestamp)
 
             Result.success(message)
         } catch (e: Exception) {

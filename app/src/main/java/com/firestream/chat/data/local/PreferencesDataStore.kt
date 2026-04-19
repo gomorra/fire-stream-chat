@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -58,6 +59,9 @@ class PreferencesDataStore @Inject constructor(
     // Last open chat (restore on launch)
     private val lastChatIdKey = stringPreferencesKey("last_chat_id")
     private val lastRecipientIdKey = stringPreferencesKey("last_recipient_id")
+
+    // Last bottom-nav tab (restore across relaunches)
+    private val lastTabIndexKey = intPreferencesKey("last_tab_index")
 
     // --- Theme ---
 
@@ -191,6 +195,16 @@ class PreferencesDataStore @Inject constructor(
             prefs.remove(lastChatIdKey)
             prefs.remove(lastRecipientIdKey)
         }
+    }
+
+    // --- Last bottom-nav tab ---
+
+    val lastTabIndexFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        (prefs[lastTabIndexKey] ?: 0).coerceIn(0, 2)
+    }
+
+    suspend fun setLastTabIndex(index: Int) {
+        context.dataStore.edit { prefs -> prefs[lastTabIndexKey] = index.coerceIn(0, 2) }
     }
 
     // --- Lists sort ---

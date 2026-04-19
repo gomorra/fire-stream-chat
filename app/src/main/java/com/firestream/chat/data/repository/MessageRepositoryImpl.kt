@@ -8,6 +8,7 @@ import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
@@ -67,6 +68,7 @@ private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
+    private val chatDao: ChatDao,
     private val messageSource: FirestoreMessageSource,
     private val authSource: FirebaseAuthSource,
     private val signalManager: SignalManager,
@@ -388,6 +390,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
         sentMessage
     }
 
@@ -500,6 +503,7 @@ class MessageRepositoryImpl @Inject constructor(
             mediaHeight = mediaHeight
         )
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
 
         // Rename local file from tempId to remoteId to prevent orphaned files
         val finalLocalUri: String? = if (localFile != null) {
@@ -572,6 +576,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        chatDao.updateLastMessage(targetChatId, remoteId, messageSource.lastContentFor(message.type, message.content), timestamp)
         sentMessage
     }
 
@@ -611,6 +616,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.VOICE), timestamp)
         sentMessage
     }
 
@@ -717,6 +723,7 @@ class MessageRepositoryImpl @Inject constructor(
             timestamp = timestamp
         )
         messageDao.insertMessage(MessageEntity.fromDomain(broadcastMessage))
+        chatDao.updateLastMessage(broadcastChatId, broadcastRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
 
         // 2. Fan out to each recipient's individual chat
         val semaphore = kotlinx.coroutines.sync.Semaphore(5)
@@ -729,7 +736,7 @@ class MessageRepositoryImpl @Inject constructor(
                         val chatResult = chatRepository.get().getOrCreateChat(recipientId)
                         val individualChat = chatResult.getOrThrow()
                         // Send as 1:1 message (encrypted in release, plain in debug)
-                        sendEncryptedOrPlain(
+                        val fanOutRemoteId = sendEncryptedOrPlain(
                             chatId = individualChat.id,
                             senderId = senderId,
                             recipientId = recipientId,
@@ -737,6 +744,7 @@ class MessageRepositoryImpl @Inject constructor(
                             type = MessageType.TEXT,
                             timestamp = timestamp,
                         )
+                        chatDao.updateLastMessage(individualChat.id, fanOutRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
                     } catch (_: Exception) {
                         // Best-effort delivery to each recipient
                     } finally {
@@ -790,6 +798,7 @@ class MessageRepositoryImpl @Inject constructor(
                         editedAt = timestamp
                     )
                     messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+                    chatDao.updateLastMessage(chatId, lastMessage.id, messageSource.lastContentFor(MessageType.LIST, content), timestamp)
                     return@resultOf updatedMessage
                 }
             }
@@ -816,6 +825,7 @@ class MessageRepositoryImpl @Inject constructor(
             listDiff = listDiff
         )
         messageDao.insertMessage(MessageEntity.fromDomain(message))
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LIST, content), timestamp)
         message
     }
 
@@ -874,6 +884,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LOCATION), timestamp)
         sentMessage
     }
 
