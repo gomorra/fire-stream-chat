@@ -15,8 +15,10 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,7 +54,8 @@ class ListDetailViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
     private val authSource: FirebaseAuthSource,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    @ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
 
     val listId: String = checkNotNull(savedStateHandle["listId"])
@@ -339,6 +342,12 @@ class ListDetailViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        // Cancel the in-flight debounce — its viewModelScope dies with us anyway —
+        // and re-dispatch the pending flush on the application scope so a user
+        // who navigates back within the debounce window still gets their chat
+        // bubble update delivered instead of silently dropped.
         debounceJob?.cancel()
+        if (pendingDiff.isEmpty) return
+        applicationScope.launch { flushPendingDiff() }
     }
 }

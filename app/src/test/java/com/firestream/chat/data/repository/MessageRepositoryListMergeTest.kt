@@ -61,6 +61,7 @@ class MessageRepositoryListMergeTest {
     @Before
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
+        every { messageSource.lastContentFor(any(), any()) } answers { secondArg() }
         repository = MessageRepositoryImpl(
             messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
             listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager,

@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -57,7 +58,8 @@ class ListDetailViewModelTest {
             chatRepository = chatRepository,
             listRepository = listRepository,
             authSource = authSource,
-            userRepository = userRepository
+            userRepository = userRepository,
+            applicationScope = TestScope(testDispatcher),
         )
     }
 
