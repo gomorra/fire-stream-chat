@@ -92,11 +92,27 @@ class RealtimePresenceSource @Inject constructor(
     }
 
     /**
-     * Writes offline status to RTDB. Does NOT cancel onDisconnect() — worst case
-     * is a redundant offline write from the server, which is harmless. This avoids
-     * the race where the process dies between cancel() and setValue().
+     * Writes offline status to RTDB and tears down the `.info/connected` listener.
+     *
+     * Removing the listener is essential: otherwise, after the user has
+     * intentionally gone offline, a later RTDB socket reconnect (e.g. triggered
+     * when the device wakes to process an incoming FCM push) would fire
+     * `.info/connected = true` again and the handler would write
+     * `isOnline: true` — making the user briefly appear online to observers.
+     *
+     * Does NOT cancel the server-side `onDisconnect()` registration — worst case
+     * is a redundant offline write from the server, which is harmless. This
+     * avoids the race where the process dies between cancel() and setValue().
      */
     suspend fun goOffline(userId: String) {
+        Log.d(TAG, "goOffline called for userId=$userId")
+        synchronized(this) {
+            connectedListener?.let { listener ->
+                database.getReference(".info/connected").removeEventListener(listener)
+            }
+            connectedListener = null
+            currentUserId = null
+        }
         val presenceRef = database.getReference("presence/$userId")
         presenceRef.setValue(
             mapOf("isOnline" to false, "lastSeen" to ServerValue.TIMESTAMP)
