@@ -3,6 +3,7 @@ package com.firestream.chat.ui.lists
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
@@ -47,7 +48,7 @@ data class ListsUiState(
     val pinnedListIds: Set<String> = emptySet(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val error: String? = null,
+    val error: AppError? = null,
     val snackbarMessage: String? = null,
     val searchQuery: String = "",
     val isSearchBarVisible: Boolean = false
@@ -178,7 +179,7 @@ class ListsViewModel @Inject constructor(
         viewModelScope.launch {
             listRepository.observeMyLists()
                 .catch { e ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = AppError.from(e))
                 }
                 .collect { lists ->
                     rawLists = lists
@@ -241,14 +242,14 @@ class ListsViewModel @Inject constructor(
         viewModelScope.launch {
             listRepository.createList(title, type, genericStyle = genericStyle)
                 .onSuccess { listData -> onCreated(listData.id) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
     fun shareListToChat(listId: String, chatId: String) {
         viewModelScope.launch {
             listRepository.shareListToChat(listId, chatId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -267,7 +268,7 @@ class ListsViewModel @Inject constructor(
                         snackbarMessage = "\"${listData.title}\" deleted"
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -282,7 +283,7 @@ class ListsViewModel @Inject constructor(
     fun renameList(listId: String, title: String) {
         viewModelScope.launch {
             listRepository.updateListTitle(listId, title)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 

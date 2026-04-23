@@ -3,6 +3,7 @@ package com.firestream.chat.ui.lists
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
@@ -38,7 +39,7 @@ data class ListDetailUiState(
     val chatParticipants: Map<String, User> = emptyMap(),
     val currentUserId: String = "",
     val isLoading: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     val isDeleted: Boolean = false,
     val deletedListTitle: String? = null,
     val isAccessDenied: Boolean = false
@@ -98,7 +99,7 @@ class ListDetailViewModel @Inject constructor(
             var hasSeenData = false
             listRepository.observeList(listId)
                 .catch { e ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = AppError.from(e))
                 }
                 .collect { listData ->
                     val state = _uiState.value
@@ -176,7 +177,7 @@ class ListDetailViewModel @Inject constructor(
             listRepository.addItem(listId, itemId, text, quantity, unit)
                 .onSuccess { sendListUpdateThrottled(ListDiff(added = listOf(text))) }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = AppError.from(e))
                 }
         }
     }
@@ -196,7 +197,7 @@ class ListDetailViewModel @Inject constructor(
             listRepository.removeItem(listId, itemId)
                 .onSuccess { sendListUpdateThrottled(ListDiff(removed = listOf(item.text))) }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = AppError.from(e))
                 }
         }
     }
@@ -229,7 +230,7 @@ class ListDetailViewModel @Inject constructor(
                     // Revert on failure
                     _uiState.value = _uiState.value.copy(
                         listData = currentList,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }
@@ -264,7 +265,7 @@ class ListDetailViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         listData = currentList,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }
@@ -282,7 +283,7 @@ class ListDetailViewModel @Inject constructor(
             listRepository.updateItem(listId, itemId, text, quantity, unit)
                 .onSuccess { sendListUpdateThrottled(ListDiff(edited = listOf(text))) }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = AppError.from(e))
                 }
         }
     }
@@ -295,7 +296,7 @@ class ListDetailViewModel @Inject constructor(
         viewModelScope.launch {
             listRepository.reorderItems(listId, reorderedItems)
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = AppError.from(e))
                 }
         }
     }
@@ -304,21 +305,21 @@ class ListDetailViewModel @Inject constructor(
         viewModelScope.launch {
             listRepository.updateListTitle(listId, title)
                 .onSuccess { sendListUpdateThrottled(ListDiff(titleChanged = title)) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
     fun updateType(type: ListType) {
         viewModelScope.launch {
             listRepository.updateListType(listId, type)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
     fun updateGenericStyle(style: GenericListStyle) {
         viewModelScope.launch {
             listRepository.updateGenericStyle(listId, style)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -335,7 +336,7 @@ class ListDetailViewModel @Inject constructor(
                     if (_uiState.value.listData?.sharedChatIds == optimisticIds) {
                         _uiState.value = _uiState.value.copy(listData = currentList)
                     }
-                    _uiState.value = _uiState.value.copy(error = e.message)
+                    _uiState.value = _uiState.value.copy(error = AppError.from(e))
                 }
         }
     }
@@ -353,7 +354,7 @@ class ListDetailViewModel @Inject constructor(
                     if (_uiState.value.listData?.sharedChatIds == optimisticIds) {
                         _uiState.value = _uiState.value.copy(listData = currentList)
                     }
-                    _uiState.value = _uiState.value.copy(error = e.message)
+                    _uiState.value = _uiState.value.copy(error = AppError.from(e))
                 }
         }
     }
@@ -381,7 +382,7 @@ class ListDetailViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     isDeletingList = false
-                    _uiState.value = _uiState.value.copy(error = e.message)
+                    _uiState.value = _uiState.value.copy(error = AppError.from(e))
                 }
         }
     }

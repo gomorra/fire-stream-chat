@@ -136,7 +136,7 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         val state = vm.uiState.value
-        assertEquals("network error", state.error)
+        assertEquals("network error", state.error?.message)
         assertFalse(state.isLoading)
     }
 

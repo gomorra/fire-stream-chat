@@ -417,7 +417,7 @@ fun ProfileScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = uiState.error ?: "Error loading profile",
+                        text = uiState.error?.message ?: "Error loading profile",
                         color = MaterialTheme.colorScheme.error
                     )
                 }

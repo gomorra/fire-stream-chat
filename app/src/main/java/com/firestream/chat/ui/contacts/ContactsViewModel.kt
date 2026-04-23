@@ -2,6 +2,7 @@ package com.firestream.chat.ui.contacts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
@@ -18,7 +19,7 @@ data class ContactsUiState(
     val searchQuery: String = "",
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val error: String? = null
+    val error: AppError? = null
 )
 
 @HiltViewModel
@@ -47,7 +48,7 @@ class ContactsViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }
@@ -75,7 +76,7 @@ class ContactsViewModel @Inject constructor(
                     onChatReady(chat.id, contact.uid)
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(error = e.message)
+                    _uiState.value = _uiState.value.copy(error = AppError.from(e))
                 }
         }
     }
@@ -95,7 +96,7 @@ class ContactsViewModel @Inject constructor(
                     )
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(error = e.message)
+                    _uiState.value = _uiState.value.copy(error = AppError.from(e))
                 }
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }

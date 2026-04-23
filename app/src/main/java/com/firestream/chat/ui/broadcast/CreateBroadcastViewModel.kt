@@ -2,6 +2,7 @@ package com.firestream.chat.ui.broadcast
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
@@ -21,7 +22,7 @@ data class CreateBroadcastUiState(
     val searchQuery: String = "",
     val isLoading: Boolean = true,
     val isCreating: Boolean = false,
-    val error: String? = null
+    val error: AppError? = null
 )
 
 @HiltViewModel
@@ -51,7 +52,7 @@ class CreateBroadcastViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }
@@ -86,7 +87,7 @@ class CreateBroadcastViewModel @Inject constructor(
     fun createBroadcast(onCreated: (chatId: String) -> Unit) {
         val state = _uiState.value
         if (state.selectedIds.isEmpty()) {
-            _uiState.value = state.copy(error = "Select at least one recipient")
+            _uiState.value = state.copy(error = AppError.Validation("Select at least one recipient"))
             return
         }
         val name = state.name.ifBlank { "Broadcast list" }
@@ -100,7 +101,7 @@ class CreateBroadcastViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         isCreating = false,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }

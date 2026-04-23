@@ -179,7 +179,7 @@ class ListDetailViewModelTest {
 
         val state = viewModel.uiState.value
         assertEquals(2, state.listData?.items?.size)
-        assertEquals("boom", state.error)
+        assertEquals("boom", state.error?.message)
     }
 
     @Test
@@ -238,7 +238,7 @@ class ListDetailViewModelTest {
         val state = viewModel.uiState.value
         assertTrue("items should revert", state.listData?.items?.isEmpty() == true)
         assertEquals(0, state.listData?.itemCount)
-        assertEquals("boom", state.error)
+        assertEquals("boom", state.error?.message)
     }
 
     @Test

@@ -336,8 +336,8 @@ fun ChatScreen(
     // network, Signal, Storage upload, …) into uiState.error; without this the error
     // is silently dropped on the next state update.
     LaunchedEffect(uiState.error) {
-        uiState.error?.let { message ->
-            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+        uiState.error?.let { error ->
+            snackbarHostState.showSnackbar(error.message, duration = SnackbarDuration.Short)
             viewModel.clearError()
         }
     }

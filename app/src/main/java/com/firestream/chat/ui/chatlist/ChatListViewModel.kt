@@ -2,6 +2,7 @@ package com.firestream.chat.ui.chatlist
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
@@ -27,7 +28,7 @@ data class ChatListUiState(
     val chats: List<Chat> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val error: String? = null,
+    val error: AppError? = null,
     val currentUserId: String = "",
     val pendingDeleteChatId: String? = null,
     val searchQuery: String = "",
@@ -93,7 +94,7 @@ class ChatListViewModel @Inject constructor(
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
                 .collect { chats ->
@@ -205,7 +206,7 @@ class ChatListViewModel @Inject constructor(
     fun togglePin(chatId: String, currentlyPinned: Boolean) {
         val pinnedCount = _uiState.value.chats.count { it.isPinned && !it.isArchived }
         if (!currentlyPinned && pinnedCount >= 3) {
-            _uiState.value = _uiState.value.copy(error = "You can pin up to 3 chats")
+            _uiState.value = _uiState.value.copy(error = AppError.Validation("You can pin up to 3 chats"))
             return
         }
         viewModelScope.launch {

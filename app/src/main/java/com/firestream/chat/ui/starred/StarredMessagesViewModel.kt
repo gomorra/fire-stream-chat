@@ -2,6 +2,7 @@ package com.firestream.chat.ui.starred
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.MessageRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -15,7 +16,7 @@ import javax.inject.Inject
 data class StarredMessagesUiState(
     val messages: List<Message> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: AppError? = null
 )
 
 @HiltViewModel
@@ -29,7 +30,7 @@ class StarredMessagesViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             messageRepository.getStarredMessages()
-                .catch { e -> _uiState.value = _uiState.value.copy(error = e.message, isLoading = false) }
+                .catch { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e), isLoading = false) }
                 .collect { messages ->
                     _uiState.value = _uiState.value.copy(messages = messages, isLoading = false)
                 }

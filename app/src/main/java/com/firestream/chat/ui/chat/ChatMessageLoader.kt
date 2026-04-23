@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.data.remote.LinkPreviewSource
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -90,7 +91,7 @@ internal class ChatMessageLoader(
         scope.launch {
             messageRepository.getMessages(chatId)
                 .catch { e ->
-                    _uiState.update { it.copy(isLoading = false, error = e.message) }
+                    _uiState.update { it.copy(isLoading = false, error = AppError.from(e)) }
                 }
                 .collectLatest { messages ->
                     _uiState.update {

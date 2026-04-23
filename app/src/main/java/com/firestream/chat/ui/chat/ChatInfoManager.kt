@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.User
@@ -200,7 +201,7 @@ internal class ChatInfoManager(
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
             listRepository.createList(title, type, chatId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
             _uiState.update { it.copy(isSending = false) }
         }
     }

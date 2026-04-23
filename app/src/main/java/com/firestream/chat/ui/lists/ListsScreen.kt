@@ -96,8 +96,8 @@ internal fun ListsScreen(
 
     // Error feedback (e.g. Firestore write failures)
     LaunchedEffect(uiState.error) {
-        uiState.error?.let { message ->
-            snackbarHostState.showSnackbar(message)
+        uiState.error?.let { error ->
+            snackbarHostState.showSnackbar(error.message)
             viewModel.clearError()
         }
     }

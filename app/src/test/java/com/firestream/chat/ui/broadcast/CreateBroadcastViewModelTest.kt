@@ -104,7 +104,7 @@ class CreateBroadcastViewModelTest {
 
         viewModel.createBroadcast {}
 
-        assertEquals("Select at least one recipient", viewModel.uiState.value.error)
+        assertEquals("Select at least one recipient", viewModel.uiState.value.error?.message)
     }
 
     @Test
@@ -145,7 +145,7 @@ class CreateBroadcastViewModelTest {
 
         viewModel.createBroadcast {}
 
-        assertEquals("Network error", viewModel.uiState.value.error)
+        assertEquals("Network error", viewModel.uiState.value.error?.message)
     }
 
     @Test
@@ -165,6 +165,6 @@ class CreateBroadcastViewModelTest {
         val viewModel = createViewModel()
 
         assertFalse(viewModel.uiState.value.isLoading)
-        assertEquals("Load failed", viewModel.uiState.value.error)
+        assertEquals("Load failed", viewModel.uiState.value.error?.message)
     }
 }

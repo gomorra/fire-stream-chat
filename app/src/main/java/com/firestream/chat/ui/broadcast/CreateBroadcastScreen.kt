@@ -60,7 +60,7 @@ fun CreateBroadcastScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short)
+            snackbarHostState.showSnackbar(it.message, duration = SnackbarDuration.Short)
             viewModel.clearError()
         }
     }

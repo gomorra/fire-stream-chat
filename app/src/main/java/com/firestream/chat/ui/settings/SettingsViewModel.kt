@@ -16,6 +16,7 @@ import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.UserRepository
@@ -33,7 +34,7 @@ data class SettingsUiState(
     val currentUser: User? = null,
     val appTheme: AppTheme = AppTheme.SYSTEM,
     val isLoading: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     // Privacy
     val readReceipts: Boolean = true,
     val lastSeenVisible: Boolean = true,
@@ -80,7 +81,7 @@ class SettingsViewModel @Inject constructor(
         val uid = authRepository.currentUserId ?: return
         viewModelScope.launch {
             userRepository.observeUser(uid)
-                .catch { e -> _uiState.value = _uiState.value.copy(error = e.message, isLoading = false) }
+                .catch { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e), isLoading = false) }
                 .collect { user ->
                     _uiState.value = _uiState.value.copy(currentUser = user, isLoading = false)
                 }

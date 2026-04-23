@@ -2,6 +2,7 @@ package com.firestream.chat.ui.group
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
@@ -20,7 +21,7 @@ data class CreateGroupUiState(
     val searchQuery: String = "",
     val isLoading: Boolean = true,
     val isCreating: Boolean = false,
-    val error: String? = null
+    val error: AppError? = null
 )
 
 @HiltViewModel
@@ -47,7 +48,7 @@ class CreateGroupViewModel @Inject constructor(
                     )
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = AppError.from(e))
                 }
         }
     }
@@ -78,7 +79,7 @@ class CreateGroupViewModel @Inject constructor(
     fun createGroup(onCreated: (chatId: String) -> Unit) {
         val state = _uiState.value
         if (state.selectedIds.isEmpty()) {
-            _uiState.value = state.copy(error = "Select at least one member")
+            _uiState.value = state.copy(error = AppError.Validation("Select at least one member"))
             return
         }
         val name = state.name.ifBlank { "New Group" }
@@ -90,7 +91,7 @@ class CreateGroupViewModel @Inject constructor(
                     onCreated(chat.id)
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(isCreating = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isCreating = false, error = AppError.from(e))
                 }
         }
     }

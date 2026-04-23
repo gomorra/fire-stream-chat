@@ -6,6 +6,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
@@ -37,7 +38,7 @@ data class SharePickerUiState(
     val previewState: PreviewState = PreviewState.Loading,
     val searchQuery: String = "",
     val isSending: Boolean = false,
-    val error: String? = null,
+    val error: AppError? = null,
     val currentUserId: String = "",
     val participantProfiles: Map<String, User> = emptyMap()
 )
@@ -101,7 +102,7 @@ class SharePickerViewModel @Inject constructor(
                     if (content == null) {
                         _uiState.value = _uiState.value.copy(
                             previewState = PreviewState.Empty,
-                            error = "Nothing to share"
+                            error = AppError.Validation("Nothing to share")
                         )
                     } else {
                         _uiState.value = _uiState.value.copy(
@@ -120,7 +121,7 @@ class SharePickerViewModel @Inject constructor(
                 onFailure = { e ->
                     _uiState.value = _uiState.value.copy(
                         previewState = PreviewState.Error,
-                        error = e.message ?: "Couldn't read shared content"
+                        error = AppError.from(e)
                     )
                 }
             )
@@ -162,7 +163,7 @@ class SharePickerViewModel @Inject constructor(
         if (state.selectedChatIds.isEmpty() || state.isSending) return
         val content = state.sharedContent
         if (content == null) {
-            _uiState.value = state.copy(error = "Nothing to share")
+            _uiState.value = state.copy(error = AppError.Validation("Nothing to share"))
             return
         }
 
@@ -210,7 +211,7 @@ class SharePickerViewModel @Inject constructor(
                 }
                 _uiState.value = _uiState.value.copy(
                     isSending = false,
-                    error = message
+                    error = AppError.Validation(message)
                 )
             }
         }

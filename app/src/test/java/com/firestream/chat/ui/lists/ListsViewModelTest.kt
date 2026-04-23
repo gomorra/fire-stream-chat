@@ -110,7 +110,7 @@ class ListsViewModelTest {
         viewModel.createList("Fail", ListType.CHECKLIST) {}
         runCurrent()
 
-        assertEquals("Oops", viewModel.uiState.value.error)
+        assertEquals("Oops", viewModel.uiState.value.error?.message)
     }
 
     @Test
@@ -172,7 +172,7 @@ class ListsViewModelTest {
         viewModel.deleteList("1")
         runCurrent()
 
-        assertEquals("Network error", viewModel.uiState.value.error)
+        assertEquals("Network error", viewModel.uiState.value.error?.message)
         assertNull(viewModel.uiState.value.snackbarMessage)
     }
 }

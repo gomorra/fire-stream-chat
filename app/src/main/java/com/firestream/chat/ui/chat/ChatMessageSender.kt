@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.MentionParser
@@ -47,13 +48,13 @@ internal class ChatMessageSender(
             _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList(), scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
             if (state.isBroadcast) {
                 messageRepository.sendBroadcastMessage(chatId, content, state.broadcastRecipientIds)
-                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                    .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                     .onSuccess { _uiState.update { it.copy(isSending = false) } }
             } else {
                 val replyToId = state.replyToMessage?.id
                 val mentions = if (state.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
                 messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
-                    .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                    .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                     .onSuccess { _uiState.update { it.copy(isSending = false) } }
             }
         }
@@ -63,7 +64,7 @@ internal class ChatMessageSender(
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
             messageRepository.sendMediaMessage(chatId, uri.toString(), mimeType, recipientId, caption)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
@@ -72,7 +73,7 @@ internal class ChatMessageSender(
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
             messageRepository.sendVoiceMessage(chatId, uri.toString(), recipientId, durationSeconds)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
@@ -81,7 +82,7 @@ internal class ChatMessageSender(
         scope.launch {
             _uiState.update { it.copy(isSending = true, scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
             messageRepository.sendLocationMessage(chatId, latitude, longitude, recipientId, comment)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }

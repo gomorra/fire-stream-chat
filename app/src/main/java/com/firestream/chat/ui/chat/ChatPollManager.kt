@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.repository.PollRepository
 
 internal class ChatPollManager(
@@ -17,7 +18,7 @@ internal class ChatPollManager(
         scope.launch {
             _uiState.update { it.copy(isSending = true) }
             pollRepository.sendPoll(chatId, question, options, isMultipleChoice, isAnonymous)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message, isSending = false) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
                 .onSuccess { _uiState.update { it.copy(isSending = false) } }
         }
     }
@@ -25,14 +26,14 @@ internal class ChatPollManager(
     fun votePoll(messageId: String, optionIds: List<String>) {
         scope.launch {
             pollRepository.votePoll(chatId, messageId, optionIds)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
         }
     }
 
     fun closePoll(messageId: String) {
         scope.launch {
             pollRepository.closePoll(chatId, messageId)
-                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
         }
     }
 }

@@ -2,6 +2,7 @@ package com.firestream.chat.ui.calls
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.CallLogEntry
 import com.firestream.chat.domain.model.Chat
@@ -27,7 +28,7 @@ data class CallsUiState(
     val entries: List<CallLogEntry> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val error: String? = null,
+    val error: AppError? = null,
     val contacts: Map<String, Contact> = emptyMap()
 )
 
@@ -95,7 +96,7 @@ class CallsViewModel @Inject constructor(
                 buildEntries(messages, chats, _uiState.value.contacts)
             }
                 .catch { e ->
-                    _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = AppError.from(e))
                 }
                 .collect { entries ->
                     _uiState.value = _uiState.value.copy(entries = entries, isLoading = false)
@@ -149,7 +150,7 @@ class CallsViewModel @Inject constructor(
                 val entries = buildEntries(messages, chats, contactMap)
                 _uiState.value = _uiState.value.copy(entries = entries)
             } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(error = e.message)
+                _uiState.value = _uiState.value.copy(error = AppError.from(e))
             }
             _uiState.value = _uiState.value.copy(isRefreshing = false)
         }

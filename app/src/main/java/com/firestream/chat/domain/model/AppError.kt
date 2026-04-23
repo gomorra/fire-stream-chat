@@ -32,6 +32,9 @@ sealed interface AppError {
         override val message: String = "$entity not found"
     }
 
+    /** User-input validation failure — carries the display message verbatim. */
+    data class Validation(override val message: String) : AppError
+
     /**
      * Fallback for anything we haven't explicitly classified. Carries the
      * original throwable so logs and bug reports keep their stack trace.

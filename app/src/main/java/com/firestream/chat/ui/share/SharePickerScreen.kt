@@ -90,7 +90,7 @@ fun SharePickerScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short)
+            snackbarHostState.showSnackbar(it.message, duration = SnackbarDuration.Short)
             viewModel.clearError()
         }
     }
@@ -159,7 +159,7 @@ fun SharePickerScreen(
                 state = uiState.previewState,
                 content = uiState.sharedContent,
                 linkPreview = uiState.linkPreview,
-                errorMessage = uiState.error,
+                errorMessage = uiState.error?.message,
                 modifier = Modifier.weight(1f),
                 onImageClick = { url -> fullscreenImageUrl = url }
             )

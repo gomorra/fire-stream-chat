@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GroupRole
 import com.firestream.chat.domain.model.User
@@ -26,7 +27,7 @@ data class GroupSettingsUiState(
     val pendingMembers: List<MemberInfo> = emptyList(),
     val currentUserRole: GroupRole = GroupRole.MEMBER,
     val isLoading: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     val inviteLinkGenerated: Boolean = false,
     val leftGroup: Boolean = false,
     val isUploading: Boolean = false,
@@ -80,7 +81,7 @@ class GroupSettingsViewModel @Inject constructor(
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = e.message
+                        error = AppError.from(e)
                     )
                 }
         }
@@ -152,7 +153,7 @@ class GroupSettingsViewModel @Inject constructor(
                     )
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(isSavingName = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isSavingName = false, error = AppError.from(e))
                 }
         }
     }
@@ -168,7 +169,7 @@ class GroupSettingsViewModel @Inject constructor(
                     )
                 }
                 .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(isSavingDescription = false, error = e.message)
+                    _uiState.value = _uiState.value.copy(isSavingDescription = false, error = AppError.from(e))
                 }
         }
     }
@@ -182,7 +183,7 @@ class GroupSettingsViewModel @Inject constructor(
                         inviteLinkGenerated = true
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -195,7 +196,7 @@ class GroupSettingsViewModel @Inject constructor(
                         inviteLinkGenerated = false
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -207,7 +208,7 @@ class GroupSettingsViewModel @Inject constructor(
                         chat = _uiState.value.chat?.copy(requireApproval = enabled)
                     )
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -215,7 +216,7 @@ class GroupSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.approveMember(chatId, userId)
                 .onSuccess { loadGroupDetails() }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -223,7 +224,7 @@ class GroupSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.rejectMember(chatId, userId)
                 .onSuccess { loadGroupDetails() }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -231,7 +232,7 @@ class GroupSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.removeGroupMember(chatId, userId)
                 .onSuccess { loadGroupDetails() }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 
@@ -241,7 +242,7 @@ class GroupSettingsViewModel @Inject constructor(
                 .onSuccess {
                     _uiState.value = _uiState.value.copy(leftGroup = true)
                 }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
         }
     }
 

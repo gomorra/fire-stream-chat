@@ -3,6 +3,7 @@ package com.firestream.chat.ui.auth
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.auth.FirebaseAuth
@@ -22,7 +23,7 @@ data class AuthUiState(
     val isLoading: Boolean = false,
     val isLoggedIn: Boolean = false,
     val isCheckingAuth: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     val verificationId: String? = null,
     val isNewUser: Boolean = false,
     val user: User? = null
@@ -71,7 +72,7 @@ class AuthViewModel @Inject constructor(
             override fun onVerificationFailed(e: com.google.firebase.FirebaseException) {
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
-                    error = e.message ?: "Verification failed"
+                    error = AppError.from(e)
                 )
             }
 
@@ -113,7 +114,7 @@ class AuthViewModel @Inject constructor(
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = error.message ?: "Verification failed"
+                        error = AppError.from(error)
                     )
                 }
         }
@@ -134,7 +135,7 @@ class AuthViewModel @Inject constructor(
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
-                        error = error.message ?: "Profile creation failed"
+                        error = AppError.from(error)
                     )
                 }
         }

@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
@@ -20,7 +21,7 @@ import javax.inject.Inject
 data class ProfileUiState(
     val user: User? = null,
     val isLoading: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     val isCurrentUser: Boolean = false,
     val isBlocked: Boolean = false,
     val isBlockLoading: Boolean = false,
@@ -57,7 +58,7 @@ class ProfileViewModel @Inject constructor(
     private fun loadUser() {
         viewModelScope.launch {
             userRepository.observeUser(userId)
-                .catch { e -> _uiState.value = _uiState.value.copy(error = e.message, isLoading = false) }
+                .catch { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e), isLoading = false) }
                 .collect { user ->
                     _uiState.value = _uiState.value.copy(user = user, isLoading = false)
                 }
@@ -90,7 +91,7 @@ class ProfileViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
-                        error = e.message ?: "Failed to block user",
+                        error = AppError.from(e),
                         isBlockLoading = false
                     )
                 }
@@ -149,7 +150,7 @@ class ProfileViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
-                        error = e.message ?: "Failed to unblock user",
+                        error = AppError.from(e),
                         isBlockLoading = false
                     )
                 }

@@ -11,6 +11,7 @@ import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
@@ -44,7 +45,7 @@ import javax.inject.Inject
 data class ChatUiState(
     val messages: List<Message> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null,
+    val error: AppError? = null,
     val currentUserId: String = "",
     val isSending: Boolean = false,
     val typingUserIds: List<String> = emptyList(),

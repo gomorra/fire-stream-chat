@@ -170,6 +170,6 @@ class GroupSettingsViewModelTest {
 
         viewModel.updateDescription("desc")
 
-        assertEquals("Network error", viewModel.uiState.value.error)
+        assertEquals("Network error", viewModel.uiState.value.error?.message)
     }
 }

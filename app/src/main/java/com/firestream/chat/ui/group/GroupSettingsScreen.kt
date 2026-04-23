@@ -119,7 +119,7 @@ fun GroupSettingsScreen(
 
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
-            scope.launch { snackbarHostState.showSnackbar(it, duration = SnackbarDuration.Short) }
+            snackbarHostState.showSnackbar(it.message, duration = SnackbarDuration.Short)
             viewModel.clearError()
         }
     }
