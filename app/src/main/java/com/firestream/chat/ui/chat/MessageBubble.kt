@@ -38,8 +38,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
@@ -51,6 +56,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PushPin
@@ -186,6 +192,15 @@ internal fun MessageBubble(
     }
 
     var showMenu by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val copyableText: String? = remember(message.type, message.content) {
+        when (message.type) {
+            MessageType.CALL, MessageType.VOICE -> null
+            MessageType.LOCATION -> message.content
+                .takeIf { it.isNotBlank() && it != LOCATION_DEFAULT_CONTENT }
+            else -> message.content.takeIf { it.isNotBlank() }
+        }
+    }
     // Direct state for drag tracking (no coroutine per pixel); Animatable only for spring-back
     var swipeOffset by remember { mutableFloatStateOf(0f) }
     val springAnimatable = remember { Animatable(0f) }
@@ -667,6 +682,23 @@ internal fun MessageBubble(
                     ) {
                         Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
                         Text("Forward")
+                    }
+                    if (copyableText != null) {
+                        FilledTonalButton(
+                            onClick = {
+                                showMenu = false
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Message", copyableText))
+                                // API 33+ shows a system clipboard confirmation; avoid the duplicate toast.
+                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Copy text")
+                        }
                     }
                     FilledTonalButton(
                         onClick = { showMenu = false; callbacks.onStar() },
