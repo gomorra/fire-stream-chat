@@ -313,6 +313,49 @@ class ListDetailViewModelTest {
     }
 
     @Test
+    fun `initial null emissions do not flag the list as deleted`() = runTest {
+        // Freshly shared list: Room is empty on first open and the Firestore listener's
+        // first snapshot may also write null. The ViewModel must stay on loading until
+        // real data arrives — if it flips isDeleted, ListDetailScreen pops back to the
+        // chat and tapping a shared-list bubble appears to do nothing.
+        every { listRepository.observeList("list1") } returns flowOf(null, null)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertFalse(state.isDeleted)
+        assertFalse(state.isAccessDenied)
+    }
+
+    @Test
+    fun `list vanishing after being loaded flags it deleted for the owner`() = runTest {
+        val listData = ListData(id = "list1", title = "Groceries", createdBy = "user1")
+        every { listRepository.observeList("list1") } returns flowOf(listData, null)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.isDeleted)
+    }
+
+    @Test
+    fun `list vanishing after being loaded flags access denied for non-owner`() = runTest {
+        val listData = ListData(
+            id = "list1",
+            title = "Groceries",
+            createdBy = "other",
+            participants = listOf("other", "user1")
+        )
+        every { listRepository.observeList("list1") } returns flowOf(listData, null)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.isAccessDenied)
+    }
+
+    @Test
     fun `deleteList calls repository and sets isDeleted with title`() = runTest {
         every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1", title = "Groceries"))
         coEvery { listRepository.deleteList("list1") } returns Result.success(Unit)
