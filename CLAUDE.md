@@ -217,6 +217,10 @@ Three functions in `functions/index.js`. Runtime: Node.js 20.
 - **Bug fixes require a regression test.** Before fixing a bug, write (or extend) a test that reproduces the failure, then verify the fix makes it green. This prevents the same defect from recurring.
 - **Modifications to tested code must keep tests in sync.** When changing logic that has existing test coverage, update the corresponding tests to reflect the new behavior.
 
+## Tech Debt
+
+Deferred and declined refactors are catalogued in `TECH_DEBT.md` at the repo root. Before proposing a larger cleanup or interface split, check if it's already been evaluated there — each entry records the reason and the trigger condition for revisiting. Add a new entry when you consciously decide not to fix something you noticed.
+
 ## Sensitive Files
 
 These are gitignored and must not be committed:
