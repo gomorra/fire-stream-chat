@@ -379,10 +379,13 @@ internal fun MessageBubble(
                                     )
                                     .heightIn(min = 100.dp, max = 400.dp)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        val clickUrl = message.localUri ?: message.mediaUrl
-                                        clickUrl?.let { callbacks.onImageClick(it) }
-                                    }
+                                    .combinedClickable(
+                                        onClick = {
+                                            val clickUrl = message.localUri ?: message.mediaUrl
+                                            clickUrl?.let { callbacks.onImageClick(it) }
+                                        },
+                                        onLongClick = { showMenu = true }
+                                    )
                             ) {
                                 if (imageModel != null) {
                                     AsyncImage(
