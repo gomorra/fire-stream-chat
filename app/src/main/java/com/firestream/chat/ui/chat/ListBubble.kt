@@ -33,6 +33,9 @@ import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.theme.LocalIsDarkTheme
+import com.firestream.chat.ui.theme.SentBubble
+import com.firestream.chat.ui.theme.SentBubbleDark
 
 private val DiffGreen = Color(0xFF388E3C)
 private val DiffRed = Color(0xFFD32F2F)
@@ -46,10 +49,9 @@ internal fun ListBubble(
     onClick: () -> Unit,
     onUnsharedListClick: () -> Unit = {}
 ) {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
-        if (isDark) com.firestream.chat.ui.theme.SentBubbleDark
-        else com.firestream.chat.ui.theme.SentBubble
+        if (isDark) SentBubbleDark else SentBubble
     } else MaterialTheme.colorScheme.surfaceVariant
     val textColor = MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start

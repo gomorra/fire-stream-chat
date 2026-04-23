@@ -37,7 +37,7 @@ fun PollBubble(
     onClose: () -> Unit
 ) {
     val poll = message.pollData ?: return
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = com.firestream.chat.ui.theme.LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
         if (isDark) com.firestream.chat.ui.theme.SentBubbleDark
         else com.firestream.chat.ui.theme.SentBubble

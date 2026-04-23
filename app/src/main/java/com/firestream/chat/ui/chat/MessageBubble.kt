@@ -116,9 +116,9 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import androidx.compose.ui.graphics.Color
+import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
 import com.firestream.chat.ui.theme.SentBubbleDark
-import androidx.compose.foundation.isSystemInDarkTheme
 import java.io.File
 import kotlin.math.roundToInt
 
@@ -178,7 +178,7 @@ internal fun MessageBubble(
     uploadProgress: Float? = null,
     isHighlighted: Boolean = false,
 ) {
-    val isDark = isSystemInDarkTheme()
+    val isDark = LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
         if (isDark) SentBubbleDark else SentBubble
     } else MaterialTheme.colorScheme.surfaceVariant
