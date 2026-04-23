@@ -77,11 +77,22 @@ class ListRepositoryImpl @Inject constructor(
             while (coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
                 try {
                     listSource.observeMyLists(userId).collectLatest { lists ->
-                        // Preserve each list's cached items blob: observeMyLists returns
-                        // metadata-only after migration, so we'd otherwise wipe the
-                        // detail-screen cache on every metadata edit.
-                        val entities = lists.map { ListEntity.fromDomain(mergeWithCachedItems(it)) }
-                        listDao.syncForUser(entities, userId)
+                        // Per-list mutex: the read-merge-write must be atomic w.r.t.
+                        // observeList's items listener. Otherwise a fresh item write from
+                        // that listener can be stomped here by stale cached items, and
+                        // the receiver never sees the new item.
+                        lists.forEach { list ->
+                            mutexFor(list.id).withLock {
+                                val merged = mergeWithCachedItems(list)
+                                listDao.insert(ListEntity.fromDomain(merged))
+                            }
+                        }
+                        val ids = lists.map { it.id }
+                        if (ids.isEmpty()) {
+                            listDao.deleteAllForUser(userId)
+                        } else {
+                            listDao.deleteUnlistedForUser(ids, userId)
+                        }
                     }
                 } catch (_: Exception) { }
                 kotlinx.coroutines.delay(3000)
@@ -145,11 +156,14 @@ class ListRepositoryImpl @Inject constructor(
                         listDao.delete(listId)
                         return@collectLatest
                     }
-                    // Metadata alone lacks items — preserve whatever the items listener
-                    // has already written so we don't flash an empty list.
-                    val cachedItems = listDao.getById(listId)?.toDomain()?.items.orEmpty()
-                    val itemsToStore = listData.items.ifEmpty { cachedItems }
-                    listDao.insert(ListEntity.fromDomain(listData.copy(items = itemsToStore)))
+                    // Per-list mutex: read cached items + write full entity must be atomic
+                    // w.r.t. the items listener. Without it, a fresh items write can be
+                    // stomped by this metadata write carrying stale cached items.
+                    mutexFor(listId).withLock {
+                        val cachedItems = listDao.getById(listId)?.toDomain()?.items.orEmpty()
+                        val itemsToStore = listData.items.ifEmpty { cachedItems }
+                        listDao.insert(ListEntity.fromDomain(listData.copy(items = itemsToStore)))
+                    }
                 }
             } catch (_: Exception) { }
         }
@@ -160,10 +174,12 @@ class ListRepositoryImpl @Inject constructor(
         launch {
             try {
                 listSource.observeItems(listId).collectLatest { items ->
-                    val existing = listDao.getById(listId) ?: return@collectLatest
-                    val current = existing.toDomain()
-                    if (current.items == items) return@collectLatest
-                    listDao.insert(ListEntity.fromDomain(current.copy(items = items)))
+                    mutexFor(listId).withLock {
+                        val existing = listDao.getById(listId) ?: return@withLock
+                        val current = existing.toDomain()
+                        if (current.items == items) return@withLock
+                        listDao.insert(ListEntity.fromDomain(current.copy(items = items)))
+                    }
                 }
             } catch (_: Exception) { }
         }
