@@ -8,6 +8,7 @@ import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.ui.chat.resolveChatParticipants
 import com.firestream.chat.domain.model.ListDiff
@@ -15,7 +16,6 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -55,7 +55,7 @@ class ListDetailViewModel @Inject constructor(
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase,
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
-    private val authSource: FirebaseAuthSource,
+    private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     @ApplicationScope private val applicationScope: CoroutineScope,
@@ -71,7 +71,7 @@ class ListDetailViewModel @Inject constructor(
     private var isDeletingList = false
 
     init {
-        _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
+        _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         observeList()
         loadChats()
     }

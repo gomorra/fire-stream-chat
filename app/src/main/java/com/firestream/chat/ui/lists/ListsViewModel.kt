@@ -3,7 +3,6 @@ package com.firestream.chat.ui.lists
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
@@ -11,6 +10,7 @@ import com.firestream.chat.domain.model.ListHistoryEntry
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.model.ListDiff
+import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
@@ -60,7 +60,7 @@ data class ListsUiState(
 class ListsViewModel @Inject constructor(
     private val listRepository: ListRepository,
     private val chatRepository: ChatRepository,
-    private val authSource: FirebaseAuthSource,
+    private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val sendListUpdateToChatsUseCase: SendListUpdateToChatsUseCase
@@ -74,7 +74,7 @@ class ListsViewModel @Inject constructor(
     private var rawLists: List<ListData> = emptyList()
 
     init {
-        _uiState.value = _uiState.value.copy(currentUserId = authSource.currentUserId ?: "")
+        _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
         observeSortOption()
         observePinnedListIds()
         observeLists()

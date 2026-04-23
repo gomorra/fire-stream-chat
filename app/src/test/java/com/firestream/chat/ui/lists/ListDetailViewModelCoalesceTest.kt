@@ -2,9 +2,9 @@ package com.firestream.chat.ui.lists
 
 import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListDiff
+import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
@@ -42,13 +42,13 @@ class ListDetailViewModelCoalesceTest {
     private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>(relaxed = true)
     private val chatRepository = mockk<ChatRepository>()
     private val listRepository = mockk<ListRepository>(relaxed = true)
-    private val authSource = mockk<FirebaseAuthSource>()
+    private val authRepository = mockk<AuthRepository>()
     private val userRepository = mockk<UserRepository>()
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { authSource.currentUserId } returns "user1"
+        every { authRepository.currentUserId } returns "user1"
         every { chatRepository.getChats() } returns flowOf(emptyList())
     }
 
@@ -62,7 +62,7 @@ class ListDetailViewModelCoalesceTest {
         sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase,
         chatRepository = chatRepository,
         listRepository = listRepository,
-        authSource = authSource,
+        authRepository = authRepository,
         userRepository = userRepository,
         preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true),
         applicationScope = TestScope(testDispatcher),

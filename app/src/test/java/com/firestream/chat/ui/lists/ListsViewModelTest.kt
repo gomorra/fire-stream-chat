@@ -1,10 +1,10 @@
 package com.firestream.chat.ui.lists
 
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
@@ -38,7 +38,7 @@ class ListsViewModelTest {
         every { observeList(any()) } returns flowOf(null)
     }
     private val chatRepository = mockk<ChatRepository>()
-    private val authSource = mockk<FirebaseAuthSource>()
+    private val authRepository = mockk<AuthRepository>()
     private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val sendListUpdateToChatsUseCase = mockk<SendListUpdateToChatsUseCase>()
@@ -46,7 +46,7 @@ class ListsViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        every { authSource.currentUserId } returns "user1"
+        every { authRepository.currentUserId } returns "user1"
         every { chatRepository.getChats() } returns flowOf(emptyList())
         every { preferencesDataStore.listSortOptionFlow } returns MutableStateFlow("MODIFIED")
         every { preferencesDataStore.pinnedListIdsFlow } returns MutableStateFlow(emptySet())
@@ -60,7 +60,7 @@ class ListsViewModelTest {
     private fun createViewModel(): ListsViewModel = ListsViewModel(
         listRepository = listRepository,
         chatRepository = chatRepository,
-        authSource = authSource,
+        authRepository = authRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
         sendListUpdateToChatsUseCase = sendListUpdateToChatsUseCase
