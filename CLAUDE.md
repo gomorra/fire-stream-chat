@@ -83,7 +83,7 @@ This must appear before any code changes are made for that step.
 **After each significant phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
 1. `./gradlew test` — unit tests must pass
 2. `./gradlew assembleDebug` — build must be clean
-3. `/simplify` — invoke via the `Skill` tool (`Skill(skill: "simplify")`). **Must run on Sonnet.** Do **not** reimplement via `Agent` + custom prompt. If `/simplify` does not enforce Sonnet internally, fall back to `/simplify-review` which guarantees `Sonnet + medium effort`.
+3. `/simplify` — spawn a sub-agent via the `Agent` tool with `model: "sonnet"` and effort `medium`. The sub-agent invokes the skill (`Skill(skill: "simplify")`); it must **not** reimplement the review with a custom prompt. Never substitute `/simplify-review` here — that skill is manual-invocation only.
 4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
 6. `./gradlew test` — unit tests must pass
