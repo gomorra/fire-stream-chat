@@ -309,10 +309,50 @@ class ListRepositoryImplRaceTest {
     }
 
     @Test
+    fun `toggleItemChecked waits for in-flight migration before hitting Firestore`() = runTest(testDispatcher) {
+        // Simulate the pre-refactor case where migration is still running when the user
+        // taps. Without the gate, setItemChecked would fire a batch.update on a
+        // subcollection doc that hasn't been created yet → Firestore NOT_FOUND.
+        val migrationStarted = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val migrationCanComplete = kotlinx.coroutines.CompletableDeferred<Unit>()
+        coEvery { listSource.migrateEmbeddedItemsIfNeeded(LIST_ID) } coAnswers {
+            migrationStarted.complete(Unit)
+            migrationCanComplete.await()
+        }
+
+        val seed = listOf(ListItem(id = "i1", text = "milk"))
+        items.value = seed
+        metadata.value = metadata.value.copy(itemCount = 1)
+        daoStorage[LIST_ID] = ListEntity.fromDomain(metadata.value.copy(items = seed))
+        flowFor(LIST_ID).value = daoStorage[LIST_ID]
+
+        // Open observeList to kick off migration (as the detail screen would).
+        val observeJob = launch { repository.observeList(LIST_ID).collect { } }
+        advanceUntilIdle()
+        // Migration is blocked at the suspension point — mutation should not proceed.
+        assertTrue("migration should have started", migrationStarted.isCompleted)
+
+        val toggle = async { repository.toggleItemChecked(LIST_ID, "i1", true) }
+        advanceUntilIdle()
+        assertTrue(
+            "toggle must not reach Firestore while migration is in flight",
+            items.value.single { it.id == "i1" }.isChecked.not()
+        )
+
+        // Release migration, then the toggle can drain through.
+        migrationCanComplete.complete(Unit)
+        toggle.await()
+        advanceUntilIdle()
+
+        assertEquals(true, items.value.single { it.id == "i1" }.isChecked)
+        observeJob.cancel()
+    }
+
+    @Test
     fun `observeList triggers embedded-items migration exactly once per list`() = runTest(testDispatcher) {
-        // Subscribe twice in a row — the repository's migratedLists guard should fire
-        // the migration only on the first subscription, so one-shot work (batch writes
-        // to Firestore) isn't replayed on every screen re-open.
+        // Subscribe twice in a row — the repository's ensureMigrated Deferred cache
+        // should fire the migration only on the first subscription, so one-shot work
+        // (batch writes to Firestore) isn't replayed on every screen re-open.
         val job1 = launch { repository.observeList(LIST_ID).collect { /* drain */ } }
         advanceUntilIdle()
         job1.cancel()

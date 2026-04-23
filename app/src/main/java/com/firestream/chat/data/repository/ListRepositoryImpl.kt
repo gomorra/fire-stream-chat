@@ -20,7 +20,9 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
@@ -54,8 +56,18 @@ class ListRepositoryImpl @Inject constructor(
     private val listMutexes = ConcurrentHashMap<String, Mutex>()
     private fun mutexFor(listId: String): Mutex = listMutexes.getOrPut(listId) { Mutex() }
 
-    // Lists we've already attempted to migrate from the embedded-items layout in this process.
-    private val migratedLists = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+    // One-shot migration per list id. Mutations gate on this so a tap that lands before
+    // the embedded→subcollection split finishes can't `batch.update` a not-yet-existing
+    // item doc (which Firestore rejects with NOT_FOUND).
+    private val migrationJobs = ConcurrentHashMap<String, Deferred<Unit>>()
+    private fun ensureMigrated(listId: String): Deferred<Unit> =
+        migrationJobs.getOrPut(listId) {
+            historyScope.async {
+                runCatching { listSource.migrateEmbeddedItemsIfNeeded(listId) }
+                    .onFailure { Log.w("ListRepo", "migrateEmbeddedItemsIfNeeded failed for $listId", it) }
+                Unit
+            }
+        }
 
     /** Keeps Room in sync with Firestore regardless of which screen is active. */
     private fun ensureListSyncRunning() {
@@ -109,15 +121,9 @@ class ListRepositoryImpl @Inject constructor(
     override fun observeList(listId: String): Flow<ListData?> = channelFlow {
         ensureListSyncRunning()
 
-        // One-shot migration: pre-refactor lists carry an embedded `items` array on the
-        // metadata doc; migrate it to the subcollection before opening the listeners so
-        // the combined flow below sees a consistent snapshot.
-        if (migratedLists.add(listId)) {
-            launch {
-                runCatching { listSource.migrateEmbeddedItemsIfNeeded(listId) }
-                    .onFailure { Log.w("ListRepo", "migrateEmbeddedItemsIfNeeded failed for $listId", it) }
-            }
-        }
+        // Kick off the one-shot migration (idempotent — subsequent calls return the
+        // cached Deferred). Mutations await the same job so they can't race ahead of it.
+        ensureMigrated(listId)
 
         // Metadata → Room. Two independent listeners (metadata + items) write into Room
         // instead of one combined listener so that each source can land in Room without
@@ -204,6 +210,7 @@ class ListRepositoryImpl @Inject constructor(
 
     override suspend fun addItem(listId: String, itemId: String, text: String, quantity: String?, unit: String?): Result<Unit> = resultOf {
         val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId)
             val existing = entity?.toDomain()?.items.orEmpty()
@@ -230,6 +237,7 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override suspend fun removeItem(listId: String, itemId: String): Result<Unit> = resultOf {
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
@@ -247,6 +255,7 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override suspend fun clearCheckedItems(listId: String): Result<List<String>> = resultOf {
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
@@ -268,6 +277,7 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override suspend fun toggleItemChecked(listId: String, itemId: String, checked: Boolean): Result<Unit> = resultOf {
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
@@ -300,6 +310,7 @@ class ListRepositoryImpl @Inject constructor(
         quantity: String?,
         unit: String?
     ): Result<Unit> = resultOf {
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId) ?: throw Exception("List not found")
             val list = entity.toDomain()
@@ -316,6 +327,7 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> = resultOf {
+        ensureMigrated(listId).await()
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId)
             if (entity != null) {
