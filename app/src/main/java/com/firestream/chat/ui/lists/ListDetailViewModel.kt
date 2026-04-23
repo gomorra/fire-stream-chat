@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-private const val DEBOUNCE_MS = 10_000L
+private const val COOLDOWN_MS = 10_000L
 
 data class ListDetailUiState(
     val listData: ListData? = null,
@@ -64,9 +64,7 @@ class ListDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ListDetailUiState())
     val uiState: StateFlow<ListDetailUiState> = _uiState.asStateFlow()
 
-    private var pendingDiff = ListDiff()
-    private var pendingSharedChatIds: List<String> = emptyList()
-    private var debounceJob: Job? = null
+    private var cooldownJob: Job? = null
     // Prevents the Firestore observer from triggering navigation while we send the delete notification
     private var isDeletingList = false
 
@@ -130,29 +128,25 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
-    private fun accumulateAndDebounce(diff: ListDiff) {
-        pendingDiff = ListDiff.accumulate(pendingDiff, diff)
-        // Capture sharedChatIds now — don't rely on UI state at flush time (Firestore race)
-        val currentIds = _uiState.value.listData?.sharedChatIds ?: emptyList()
-        if (currentIds.isNotEmpty()) pendingSharedChatIds = currentIds
-        debounceJob?.cancel()
-        debounceJob = viewModelScope.launch {
-            delay(DEBOUNCE_MS)
-            flushPendingDiff()
-        }
-    }
-
-    private suspend fun flushPendingDiff() {
-        val diff = pendingDiff
-        if (diff.isEmpty) return
-        pendingDiff = ListDiff()
-
+    private fun sendListUpdateThrottled(diff: ListDiff) {
         val listData = _uiState.value.listData ?: return
-        val chatIds = pendingSharedChatIds.ifEmpty { listData.sharedChatIds }
-        pendingSharedChatIds = emptyList()
+        val chatIds = listData.sharedChatIds
         if (chatIds.isEmpty()) return
 
-        sendListUpdateToChatsUseCase(listId, listData.title, chatIds, diff)
+        val inCooldown = cooldownJob?.isActive == true
+
+        // Reset the cooldown on every update — the next bubble only fires
+        // after the user has been quiet for a full window.
+        cooldownJob?.cancel()
+        cooldownJob = viewModelScope.launch { delay(COOLDOWN_MS) }
+
+        if (inCooldown) return
+
+        // Leading edge: send immediately on the application scope so the
+        // write survives if the user navigates away before it completes.
+        applicationScope.launch {
+            sendListUpdateToChatsUseCase(listId, listData.title, chatIds, diff)
+        }
     }
 
     fun addItem(text: String, quantity: String? = null, unit: String? = null) {
@@ -177,7 +171,7 @@ class ListDetailViewModel @Inject constructor(
         )
         viewModelScope.launch {
             listRepository.addItem(listId, itemId, text, quantity, unit)
-                .onSuccess { accumulateAndDebounce(ListDiff(added = listOf(text))) }
+                .onSuccess { sendListUpdateThrottled(ListDiff(added = listOf(text))) }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
                 }
@@ -197,7 +191,7 @@ class ListDetailViewModel @Inject constructor(
         )
         viewModelScope.launch {
             listRepository.removeItem(listId, itemId)
-                .onSuccess { accumulateAndDebounce(ListDiff(removed = listOf(item.text))) }
+                .onSuccess { sendListUpdateThrottled(ListDiff(removed = listOf(item.text))) }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
                 }
@@ -225,7 +219,7 @@ class ListDetailViewModel @Inject constructor(
                 .onSuccess { clearedTexts ->
                     val texts = clearedTexts.ifEmpty { checkedItems.map { it.text } }
                     if (texts.isNotEmpty()) {
-                        accumulateAndDebounce(ListDiff(removed = texts))
+                        sendListUpdateThrottled(ListDiff(removed = texts))
                     }
                 }
                 .onFailure { e ->
@@ -262,7 +256,7 @@ class ListDetailViewModel @Inject constructor(
                     } else {
                         ListDiff(unchecked = listOf(item.text))
                     }
-                    accumulateAndDebounce(diff)
+                    sendListUpdateThrottled(diff)
                 }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(
@@ -283,7 +277,7 @@ class ListDetailViewModel @Inject constructor(
         )
         viewModelScope.launch {
             listRepository.updateItem(listId, itemId, text, quantity, unit)
-                .onSuccess { accumulateAndDebounce(ListDiff(edited = listOf(text))) }
+                .onSuccess { sendListUpdateThrottled(ListDiff(edited = listOf(text))) }
                 .onFailure { e ->
                     _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
                 }
@@ -306,7 +300,7 @@ class ListDetailViewModel @Inject constructor(
     fun updateTitle(title: String) {
         viewModelScope.launch {
             listRepository.updateListTitle(listId, title)
-                .onSuccess { accumulateAndDebounce(ListDiff(titleChanged = title)) }
+                .onSuccess { sendListUpdateThrottled(ListDiff(titleChanged = title)) }
                 .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
         }
     }
@@ -365,8 +359,7 @@ class ListDetailViewModel @Inject constructor(
         val listData = _uiState.value.listData ?: return
         isDeletingList = true
         viewModelScope.launch {
-            debounceJob?.cancel()
-            flushPendingDiff()
+            cooldownJob?.cancel()
 
             listRepository.deleteList(listId)
                 .onSuccess {
@@ -394,14 +387,4 @@ class ListDetailViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(error = null)
     }
 
-    override fun onCleared() {
-        super.onCleared()
-        // Cancel the in-flight debounce — its viewModelScope dies with us anyway —
-        // and re-dispatch the pending flush on the application scope so a user
-        // who navigates back within the debounce window still gets their chat
-        // bubble update delivered instead of silently dropped.
-        debounceJob?.cancel()
-        if (pendingDiff.isEmpty) return
-        applicationScope.launch { flushPendingDiff() }
-    }
 }
