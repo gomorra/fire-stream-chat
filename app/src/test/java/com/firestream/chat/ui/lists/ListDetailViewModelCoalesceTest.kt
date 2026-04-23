@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.lists
 
 import androidx.lifecycle.SavedStateHandle
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListDiff
@@ -63,6 +64,7 @@ class ListDetailViewModelCoalesceTest {
         listRepository = listRepository,
         authSource = authSource,
         userRepository = userRepository,
+        preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true),
         applicationScope = TestScope(testDispatcher),
     )
 

@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -232,6 +233,7 @@ class ChatViewModelReadReceiptTest {
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
         activeChatTracker = activeChatTracker,
+        appScope = TestScope(testDispatcher),
         context = context
     )
 }

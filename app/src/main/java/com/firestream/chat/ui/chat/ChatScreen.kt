@@ -131,6 +131,7 @@ import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -158,7 +159,7 @@ private data class FullscreenImage(
     val onSaveToDownloads: (() -> Unit)? = null,
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun ChatScreen(
     onBackClick: () -> Unit,
@@ -242,27 +243,53 @@ fun ChatScreen(
         }
     }
 
-    // Save scroll position when leaving so it can be restored on re-entry
+    // Save scroll position when leaving so it can be restored on re-entry.
+    // SavedStateHandle survives config changes (fast path); DataStore survives
+    // process death (slow path). See ChatViewModel.persistScrollPosition.
     DisposableEffect(Unit) {
         onDispose {
-            viewModel.saveScrollPosition(
-                listState.firstVisibleItemIndex,
-                listState.firstVisibleItemScrollOffset
-            )
+            val index = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            viewModel.saveScrollPosition(index, offset)
+            viewModel.persistScrollPosition(index, offset)
         }
+    }
+
+    // Catch background/kill mid-scroll — the DisposableEffect's onDispose fires
+    // when the composable leaves composition, but if the process is killed before
+    // navigation the onDispose never runs. A debounced snapshotFlow writes the
+    // position while the user is still in the chat.
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
+            .distinctUntilChanged()
+            .debounce(500)
+            .collect { (index, offset) ->
+                viewModel.persistScrollPosition(index, offset)
+            }
     }
 
     // Restore saved scroll position once messages are first available.
     // When opened from a notification, always land on the newest message —
     // the saved index would point to wherever the user last scrolled.
+    // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
     LaunchedEffect(uiState.messages.isNotEmpty()) {
         if (uiState.messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
-            val savedIndex = viewModel.savedScrollIndex
-            if (!fromNotification && savedIndex in 0 until uiState.messages.size) {
-                listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
-            } else {
+            if (fromNotification) {
                 listState.scrollToItem(uiState.messages.size - 1)
+                return@LaunchedEffect
+            }
+            val size = uiState.messages.size
+            val savedIndex = viewModel.savedScrollIndex
+            if (savedIndex in 0 until size) {
+                listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
+                return@LaunchedEffect
+            }
+            val persisted = viewModel.readPersistedScroll()
+            if (persisted != null && persisted.index in 0 until size) {
+                listState.scrollToItem(persisted.index, persisted.offset)
+            } else {
+                listState.scrollToItem(size - 1)
             }
         }
     }

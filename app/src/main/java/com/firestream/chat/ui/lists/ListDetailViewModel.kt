@@ -14,6 +14,7 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
@@ -56,6 +57,7 @@ class ListDetailViewModel @Inject constructor(
     private val listRepository: ListRepository,
     private val authSource: FirebaseAuthSource,
     private val userRepository: UserRepository,
+    private val preferencesDataStore: PreferencesDataStore,
     @ApplicationScope private val applicationScope: CoroutineScope,
 ) : ViewModel() {
 
@@ -386,6 +388,16 @@ class ListDetailViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
+    }
+
+    // Persist on @ApplicationScope so the write lands even if the user navigates
+    // away before viewModelScope would complete.
+    fun persistOpen() {
+        applicationScope.launch { preferencesDataStore.setLastOpenListId(listId) }
+    }
+
+    fun clearOpen() {
+        applicationScope.launch { preferencesDataStore.clearLastOpenListId() }
     }
 
 }

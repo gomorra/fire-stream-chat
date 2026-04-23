@@ -10,31 +10,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.auth.LoginScreen
 import com.firestream.chat.ui.auth.OtpScreen
 import com.firestream.chat.ui.auth.ProfileSetupScreen
+import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
 import com.firestream.chat.ui.chat.SharedMediaScreen
 import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
-import com.firestream.chat.ui.profile.ProfileScreen
-import com.firestream.chat.ui.settings.SettingsScreen
-import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
-import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
+import com.firestream.chat.ui.group.GroupSettingsScreen
 import com.firestream.chat.ui.lists.ListDetailScreen
+import com.firestream.chat.ui.lists.ListDetailViewModel
 import com.firestream.chat.ui.lists.SharedListsScreen
 import com.firestream.chat.ui.main.MainScreen
+import com.firestream.chat.ui.profile.ProfileScreen
+import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
-import com.firestream.chat.data.local.PreferencesDataStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -102,17 +104,22 @@ fun FireStreamNavGraph(
     // Only true when the chat route originates from a notification tap (MainActivity
     // intent extras), not from the last-open-chat restore path. Consumed once and reset.
     val pendingFromNotification = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId != null) }
+    val pendingListId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
 
-    // Restore last open chat when no deep link or share intent is pending
-    val restoredLastChat = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    // Restore last open chat when no deep link or share intent is pending. If no
+    // chat was persisted, fall back to restoring the last open list detail — chat
+    // wins because it was the more recent foreground screen.
+    val restoredLastState = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!restoredLastChat.value && initialChatId == null && !isShareIntent && preferencesDataStore != null) {
-            restoredLastChat.value = true
+        if (!restoredLastState.value && initialChatId == null && !isShareIntent && preferencesDataStore != null) {
+            restoredLastState.value = true
             val lastChatId = preferencesDataStore.lastChatIdFlow.first()
             val lastRecipientId = preferencesDataStore.lastRecipientIdFlow.first()
             if (lastChatId != null && lastRecipientId != null) {
                 pendingChatId.value = lastChatId
                 pendingSenderId.value = lastRecipientId
+            } else {
+                pendingListId.value = preferencesDataStore.lastOpenListIdFlow.first()
             }
         }
     }
@@ -195,7 +202,7 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value) {
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value) {
                 if (pendingShare.value) {
                     pendingShare.value = false
                     navController.navigate(Routes.SHARE_PICKER)
@@ -208,6 +215,14 @@ fun FireStreamNavGraph(
                         pendingSenderId.value = null
                         pendingFromNotification.value = false
                         navController.navigate(Routes.chat(chatId, senderId, fromNotification))
+                    } else {
+                        val listId = pendingListId.value
+                        if (listId != null) {
+                            pendingListId.value = null
+                            navController.navigate(Routes.listDetail(listId)) {
+                                launchSingleTop = true
+                            }
+                        }
                     }
                 }
             }
@@ -423,9 +438,14 @@ fun FireStreamNavGraph(
             )
         ) { backStackEntry ->
             val autoFocus = backStackEntry.arguments?.getBoolean("autoFocus") ?: false
+            val viewModel: ListDetailViewModel = hiltViewModel()
             ListDetailScreen(
                 autoFocus = autoFocus,
-                onBackClick = { navController.popBackStack() },
+                viewModel = viewModel,
+                onBackClick = {
+                    viewModel.clearOpen()
+                    navController.popBackStack()
+                },
                 onListDeleted = { title ->
                     navController.previousBackStackEntry?.savedStateHandle?.set("deletedListTitle", title)
                     navController.popBackStack()

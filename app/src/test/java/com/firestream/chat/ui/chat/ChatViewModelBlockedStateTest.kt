@@ -26,6 +26,7 @@ import io.mockk.unmockkAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -89,6 +90,7 @@ class ChatViewModelBlockedStateTest {
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
         activeChatTracker = activeChatTracker,
+        appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,
     )
 

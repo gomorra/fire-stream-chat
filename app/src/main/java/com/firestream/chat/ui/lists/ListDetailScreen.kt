@@ -112,14 +112,22 @@ fun ListDetailScreen(
     val keyboardController = LocalSoftwareKeyboardController.current
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
+    // Persist which list is open so it can be restored after process death.
+    // Cleared when the list is deleted, access is revoked, or the user backs out.
+    LaunchedEffect(uiState.listData?.id) {
+        if (uiState.listData?.id != null) viewModel.persistOpen()
+    }
+
     LaunchedEffect(uiState.isDeleted) {
         if (uiState.isDeleted) {
+            viewModel.clearOpen()
             onListDeleted(uiState.deletedListTitle ?: "List")
         }
     }
 
     LaunchedEffect(uiState.isAccessDenied) {
         if (uiState.isAccessDenied) {
+            viewModel.clearOpen()
             onBackClick()
         }
     }

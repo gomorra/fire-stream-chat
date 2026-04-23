@@ -6,6 +6,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.ScrollPos
+import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
@@ -25,6 +27,7 @@ import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +35,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -96,6 +100,7 @@ class ChatViewModel @Inject constructor(
     private val preferencesDataStore: PreferencesDataStore,
     private val mediaFileManager: MediaFileManager,
     private val activeChatTracker: ActiveChatTracker,
+    @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
@@ -109,6 +114,18 @@ class ChatViewModel @Inject constructor(
         savedStateHandle["scrollIndex"] = index
         savedStateHandle["scrollOffset"] = offset
     }
+
+    // Persist cross-process. @ApplicationScope (not viewModelScope) because writes
+    // need to outlive onDispose when the user navigates away — viewModelScope is
+    // cancelled before the DataStore edit lands.
+    fun persistScrollPosition(index: Int, offset: Int) {
+        appScope.launch {
+            preferencesDataStore.setLastChatScroll(chatId, index, offset)
+        }
+    }
+
+    suspend fun readPersistedScroll(): ScrollPos? =
+        preferencesDataStore.lastChatScrollFlow.first()?.takeIf { it.chatId == chatId }
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()

@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
+data class ScrollPos(val chatId: String, val index: Int, val offset: Int)
+
 enum class AppTheme { SYSTEM, LIGHT, DARK }
 
 enum class AutoDownloadOption { WIFI_ONLY, ALWAYS, NEVER }
@@ -62,6 +64,14 @@ class PreferencesDataStore @Inject constructor(
 
     // Last bottom-nav tab (restore across relaunches)
     private val lastTabIndexKey = intPreferencesKey("last_tab_index")
+
+    // Last chat scroll position (restore across process death)
+    private val lastChatScrollChatIdKey = stringPreferencesKey("last_chat_scroll_chatid")
+    private val lastChatScrollIndexKey = intPreferencesKey("last_chat_scroll_index")
+    private val lastChatScrollOffsetKey = intPreferencesKey("last_chat_scroll_offset")
+
+    // Last open list detail
+    private val lastOpenListIdKey = stringPreferencesKey("last_open_list_id")
 
     // --- Theme ---
 
@@ -194,7 +204,43 @@ class PreferencesDataStore @Inject constructor(
         context.dataStore.edit { prefs ->
             prefs.remove(lastChatIdKey)
             prefs.remove(lastRecipientIdKey)
+            prefs.remove(lastChatScrollChatIdKey)
+            prefs.remove(lastChatScrollIndexKey)
+            prefs.remove(lastChatScrollOffsetKey)
         }
+    }
+
+    // --- Last chat scroll position ---
+    // The chatId fence guards against restoring a stale offset into the wrong chat
+    // if the user switches chats before the offset write for the previous chat lands.
+
+    val lastChatScrollFlow: Flow<ScrollPos?> = context.dataStore.data.map { prefs ->
+        val chatId = prefs[lastChatScrollChatIdKey] ?: return@map null
+        val index = prefs[lastChatScrollIndexKey] ?: return@map null
+        val offset = prefs[lastChatScrollOffsetKey] ?: 0
+        ScrollPos(chatId, index, offset)
+    }
+
+    suspend fun setLastChatScroll(chatId: String, index: Int, offset: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[lastChatScrollChatIdKey] = chatId
+            prefs[lastChatScrollIndexKey] = index
+            prefs[lastChatScrollOffsetKey] = offset
+        }
+    }
+
+    // --- Last open list detail ---
+
+    val lastOpenListIdFlow: Flow<String?> = context.dataStore.data.map { prefs ->
+        prefs[lastOpenListIdKey]
+    }
+
+    suspend fun setLastOpenListId(id: String) {
+        context.dataStore.edit { prefs -> prefs[lastOpenListIdKey] = id }
+    }
+
+    suspend fun clearLastOpenListId() {
+        context.dataStore.edit { prefs -> prefs.remove(lastOpenListIdKey) }
     }
 
     // --- Last bottom-nav tab ---
