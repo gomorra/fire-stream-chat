@@ -127,6 +127,11 @@ class ChatViewModel @Inject constructor(
     suspend fun readPersistedScroll(): ScrollPos? =
         preferencesDataStore.lastChatScrollFlow.first()?.takeIf { it.chatId == chatId }
 
+    // Shared mutable state. Handed to every Chat*Manager below — each manager owns a
+    // conceptual slice of ChatUiState (messages, composer, overlays, session) and
+    // mutates its own slice via `_uiState.update {}`. Managers never read or write
+    // each other's slices and never call each other directly; coordination happens
+    // only through this one StateFlow.
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
