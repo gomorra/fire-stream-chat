@@ -107,7 +107,13 @@ Clean Architecture with three layers:
 
 ### Package Layout
 
-See `docs/ARCHITECTURE.md` for the full package layout with every file, Firestore schema, data flow diagrams, and domain model definitions.
+Reference docs in `docs/`:
+- `ARCHITECTURE.md` — clean-architecture overview, feature flows, navigation, package layout
+- `SPEC.md` — product feature list
+- `SCHEMA-ROOM.md` — Room entities and DAOs
+- `SCHEMA-FIRESTORE.md` — Firestore collections and RTDB paths
+- `DOMAIN-MODELS.md` — domain model shapes
+- `CLOUD-FUNCTIONS.md` — Firebase Cloud Functions
 
 ```
 com.firestream.chat/
