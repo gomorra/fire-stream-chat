@@ -114,6 +114,21 @@ class ListsViewModelTest {
     }
 
     @Test
+    fun `IOException from repo surfaces as AppError_Network`() = runTest {
+        every { listRepository.observeMyLists() } returns flowOf(emptyList())
+        coEvery { listRepository.createList(any(), any(), any(), any()) } returns
+            Result.failure(java.io.IOException("offline"))
+
+        val viewModel = createViewModel()
+        runCurrent()
+
+        viewModel.createList("Fail", ListType.CHECKLIST) {}
+        runCurrent()
+
+        assertEquals(com.firestream.chat.domain.model.AppError.Network, viewModel.uiState.value.error)
+    }
+
+    @Test
     fun `deleteList shows snackbar and notifies shared users`() = runTest {
         val lists = listOf(
             ListData(

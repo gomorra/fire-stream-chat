@@ -137,6 +137,7 @@ class ChatListViewModelTest {
         vm.togglePin("new_chat", currentlyPinned = false)
 
         assertTrue(vm.uiState.value.error?.message?.contains("pin up to 3") == true)
+        assertTrue(vm.uiState.value.error is com.firestream.chat.domain.model.AppError.Validation)
     }
 
     @Test

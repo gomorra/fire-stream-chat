@@ -372,4 +372,19 @@ class ListDetailViewModelTest {
         assertEquals("Groceries", viewModel.uiState.value.deletedListTitle)
         coVerify(exactly = 1) { listRepository.deleteList("list1") }
     }
+
+    @Test
+    fun `Flow IOException surfaces as AppError_Network`() = runTest {
+        every { listRepository.observeList("list1") } returns kotlinx.coroutines.flow.flow {
+            throw java.io.IOException("offline")
+        }
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        assertEquals(
+            com.firestream.chat.domain.model.AppError.Network,
+            viewModel.uiState.value.error
+        )
+    }
 }
