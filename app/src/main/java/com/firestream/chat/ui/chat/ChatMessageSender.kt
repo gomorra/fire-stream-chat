@@ -45,45 +45,94 @@ internal class ChatMessageSender(
         val state = _uiState.value
         scope.launch {
             chatRepository.setTyping(chatId, false)
-            _uiState.update { it.copy(isSending = true, replyToMessage = null, mentionCandidates = emptyList(), scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
-            if (state.isBroadcast) {
-                messageRepository.sendBroadcastMessage(chatId, content, state.broadcastRecipientIds)
-                    .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
+            _uiState.update {
+                it.copy(
+                    composer = it.composer.copy(
+                        isSending = true,
+                        replyToMessage = null,
+                        mentionCandidates = emptyList()
+                    ),
+                    messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1)
+                )
+            }
+            if (state.session.isBroadcast) {
+                messageRepository.sendBroadcastMessage(chatId, content, state.session.broadcastRecipientIds)
+                    .onFailure { e ->
+                        _uiState.update {
+                            it.copy(
+                                composer = it.composer.copy(isSending = false),
+                                session = it.session.copy(error = AppError.from(e))
+                            )
+                        }
+                    }
+                    .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
             } else {
-                val replyToId = state.replyToMessage?.id
-                val mentions = if (state.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
+                val replyToId = state.composer.replyToMessage?.id
+                val mentions = if (state.session.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
                 messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
-                    .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                    .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                    .onFailure { e ->
+                        _uiState.update {
+                            it.copy(
+                                composer = it.composer.copy(isSending = false),
+                                session = it.session.copy(error = AppError.from(e))
+                            )
+                        }
+                    }
+                    .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
             }
         }
     }
 
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") {
         scope.launch {
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
             messageRepository.sendMediaMessage(chatId, uri.toString(), mimeType, recipientId, caption)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
         }
     }
 
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
         scope.launch {
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
             messageRepository.sendVoiceMessage(chatId, uri.toString(), recipientId, durationSeconds)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
         }
     }
 
     fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") {
         scope.launch {
-            _uiState.update { it.copy(isSending = true, scrollToBottomTrigger = it.scrollToBottomTrigger + 1) }
+            _uiState.update {
+                it.copy(
+                    composer = it.composer.copy(isSending = true),
+                    messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1)
+                )
+            }
             messageRepository.sendLocationMessage(chatId, latitude, longitude, recipientId, comment)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
         }
     }
 

@@ -104,7 +104,7 @@ class ChatViewModelBlockedStateTest {
 
         // ChatInfoManager.start() launches refreshBlockState() into viewModelScope
         // backed by Dispatchers.Main (UnconfinedTestDispatcher) → already complete.
-        assertTrue(vm.uiState.value.isRecipientBlocked)
+        assertTrue(vm.uiState.value.session.isRecipientBlocked)
     }
 
     @Test
@@ -113,19 +113,19 @@ class ChatViewModelBlockedStateTest {
 
         val vm = buildViewModel()
 
-        assertFalse(vm.uiState.value.isRecipientBlocked)
+        assertFalse(vm.uiState.value.session.isRecipientBlocked)
     }
 
     @Test
     fun `refreshBlockState picks up unblock toggled from elsewhere`() = runTest {
         userRepository.setBlocked("recipient1", true)
         val vm = buildViewModel()
-        assertTrue(vm.uiState.value.isRecipientBlocked)
+        assertTrue(vm.uiState.value.session.isRecipientBlocked)
 
         userRepository.setBlocked("recipient1", false)
         vm.refreshBlockState()
 
-        assertFalse(vm.uiState.value.isRecipientBlocked)
+        assertFalse(vm.uiState.value.session.isRecipientBlocked)
     }
 
     // ── clearError ────────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ class ChatViewModelBlockedStateTest {
     fun `clearError resets uiState error to null`() = runTest {
         val vm = buildViewModel()
         vm.clearError()
-        assertNull(vm.uiState.value.error)
+        assertNull(vm.uiState.value.session.error)
     }
 
     // ── saveImageToDownloads snackbar (TC-28) ─────────────────────────────

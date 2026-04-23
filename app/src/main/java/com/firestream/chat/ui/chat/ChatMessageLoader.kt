@@ -48,7 +48,7 @@ internal class ChatMessageLoader(
         screenVisible = visible
         if (visible && !wasVisible) {
             maybeResetUnread(force = true)
-            val messages = _uiState.value.messages
+            val messages = _uiState.value.messages.messages
             if (messages.isNotEmpty()) {
                 markIncomingMessagesAsRead(messages)
             }
@@ -73,8 +73,8 @@ internal class ChatMessageLoader(
     // immediate reset, leaving a stale badge in the chat list.
     private fun maybeResetUnread(force: Boolean = false) {
         if (!screenVisible || !atBottom) return
-        val currentUserId = _uiState.value.currentUserId
-        val tail = _uiState.value.messages.lastOrNull { it.senderId != currentUserId }?.id
+        val currentUserId = _uiState.value.session.currentUserId
+        val tail = _uiState.value.messages.messages.lastOrNull { it.senderId != currentUserId }?.id
         if (!force && tail == lastResetIncomingId) return
         lastResetIncomingId = tail
         scope.launch { chatRepository.resetUnreadCount(chatId) }
@@ -91,14 +91,18 @@ internal class ChatMessageLoader(
         scope.launch {
             messageRepository.getMessages(chatId)
                 .catch { e ->
-                    _uiState.update { it.copy(isLoading = false, error = AppError.from(e)) }
+                    _uiState.update {
+                        it.copy(session = it.session.copy(isLoading = false, error = AppError.from(e)))
+                    }
                 }
                 .collectLatest { messages ->
                     _uiState.update {
                         it.copy(
-                            messages = messages,
-                            isLoading = false,
-                            pinnedMessages = messages.filter { msg -> msg.isPinned }
+                            messages = it.messages.copy(
+                                messages = messages,
+                                pinnedMessages = messages.filter { msg -> msg.isPinned }
+                            ),
+                            session = it.session.copy(isLoading = false)
                         )
                     }
                     maybeResetUnread()
@@ -111,7 +115,7 @@ internal class ChatMessageLoader(
 
     private fun markIncomingMessagesAsRead(messages: List<Message>) {
         if (!screenVisible) return
-        val currentUserId = _uiState.value.currentUserId
+        val currentUserId = _uiState.value.session.currentUserId
         if (currentUserId.isEmpty()) return
 
         // Step 1: Any SENT messages need to be marked DELIVERED first
@@ -129,7 +133,7 @@ internal class ChatMessageLoader(
         }
 
         // Step 2: Skip READ marking if either user has disabled read receipts
-        if (!_uiState.value.readReceiptsAllowed) return
+        if (!_uiState.value.session.readReceiptsAllowed) return
 
         // Step 3: Mark DELIVERED messages as READ after a short delay
         val needsRead = messages
@@ -151,10 +155,12 @@ internal class ChatMessageLoader(
         messages.forEach { msg ->
             if (msg.type == MessageType.TEXT) {
                 val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
-                if (_uiState.value.linkPreviews.containsKey(url)) return@forEach
+                if (_uiState.value.overlays.linkPreviews.containsKey(url)) return@forEach
                 scope.launch {
                     val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
-                    _uiState.update { it.copy(linkPreviews = it.linkPreviews + (url to preview)) }
+                    _uiState.update {
+                        it.copy(overlays = it.overlays.copy(linkPreviews = it.overlays.linkPreviews + (url to preview)))
+                    }
                 }
             }
         }
@@ -166,7 +172,7 @@ internal class ChatMessageLoader(
                 .catch { /* ignore typing errors */ }
                 .collect { typingIds ->
                     _uiState.update { state ->
-                        state.copy(typingUserIds = typingIds.filter { it != state.currentUserId })
+                        state.copy(session = state.session.copy(typingUserIds = typingIds.filter { it != state.session.currentUserId }))
                     }
                 }
         }
@@ -181,10 +187,12 @@ internal class ChatMessageLoader(
             .forEach { msg ->
                 val listId = msg.listId ?: return@forEach
                 if (processedUnshareIds.add(msg.id)) {
-                    val cached = _uiState.value.listDataCache[listId]
+                    val cached = _uiState.value.overlays.listDataCache[listId]
                     if (cached != null && chatId in cached.sharedChatIds) {
                         val updated = cached.copy(sharedChatIds = cached.sharedChatIds - chatId)
-                        _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to updated)) }
+                        _uiState.update {
+                            it.copy(overlays = it.overlays.copy(listDataCache = it.overlays.listDataCache + (listId to updated)))
+                        }
                     }
                 }
             }
@@ -202,7 +210,9 @@ internal class ChatMessageLoader(
                     listRepository.observeList(listId)
                         .catch { /* non-fatal */ }
                         .collect { listData ->
-                            _uiState.update { it.copy(listDataCache = it.listDataCache + (listId to listData)) }
+                            _uiState.update {
+                                it.copy(overlays = it.overlays.copy(listDataCache = it.overlays.listDataCache + (listId to listData)))
+                            }
                         }
                 }
             }

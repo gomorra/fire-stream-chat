@@ -228,7 +228,7 @@ fun ChatScreen(
     }
 
     fun jumpToSourceMessage(sourceId: String) {
-        val idx = uiState.messages.indexOfFirst { it.id == sourceId }
+        val idx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
         if (idx < 0) return
         highlightedMessageId = sourceId
         scope.launch {
@@ -272,14 +272,14 @@ fun ChatScreen(
     // When opened from a notification, always land on the newest message —
     // the saved index would point to wherever the user last scrolled.
     // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
-    LaunchedEffect(uiState.messages.isNotEmpty()) {
-        if (uiState.messages.isNotEmpty() && !initialScrollDone) {
+    LaunchedEffect(uiState.messages.messages.isNotEmpty()) {
+        if (uiState.messages.messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
             if (fromNotification) {
-                listState.scrollToItem(uiState.messages.size - 1)
+                listState.scrollToItem(uiState.messages.messages.size - 1)
                 return@LaunchedEffect
             }
-            val size = uiState.messages.size
+            val size = uiState.messages.messages.size
             val savedIndex = viewModel.savedScrollIndex
             if (savedIndex in 0 until size) {
                 listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
@@ -303,7 +303,7 @@ fun ChatScreen(
     LaunchedEffect(fromNotification) {
         if (!fromNotification) return@LaunchedEffect
         withTimeoutOrNull(1500L) {
-            snapshotFlow { uiState.messages.size }
+            snapshotFlow { uiState.messages.messages.size }
                 .collect { size ->
                     if (size > 0) listState.scrollToItem(size - 1)
                 }
@@ -333,10 +333,10 @@ fun ChatScreen(
     }
 
     // Surface send errors as a snackbar. ChatMessageSender writes failures (block,
-    // network, Signal, Storage upload, …) into uiState.error; without this the error
+    // network, Signal, Storage upload, …) into uiState.session.error; without this the error
     // is silently dropped on the next state update.
-    LaunchedEffect(uiState.error) {
-        uiState.error?.let { error ->
+    LaunchedEffect(uiState.session.error) {
+        uiState.session.error?.let { error ->
             snackbarHostState.showSnackbar(error.message, duration = SnackbarDuration.Short)
             viewModel.clearError()
         }
@@ -349,8 +349,8 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(uiState.editingMessage) {
-        val editing = uiState.editingMessage
+    LaunchedEffect(uiState.composer.editingMessage) {
+        val editing = uiState.composer.editingMessage
         if (editing != null) {
             messageText = editing.content
             inputCursor = TextRange(editing.content.length)
@@ -359,14 +359,14 @@ fun ChatScreen(
 
     // Auto-scroll only when near the bottom (within ~1 screen of the end)
     // Skip until the initial scroll restore has run to avoid racing with it.
-    LaunchedEffect(uiState.messages.size) {
+    LaunchedEffect(uiState.messages.messages.size) {
         if (!initialScrollDone) return@LaunchedEffect
-        if (uiState.messages.isNotEmpty()) {
+        if (uiState.messages.messages.isNotEmpty()) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-            val nearBottom = (uiState.messages.size - 1 - lastVisible) <= visibleCount
+            val nearBottom = (uiState.messages.messages.size - 1 - lastVisible) <= visibleCount
             if (nearBottom) {
-                listState.animateScrollToItem(uiState.messages.size - 1)
+                listState.animateScrollToItem(uiState.messages.messages.size - 1)
                 // For tall items (e.g. images), the bottom edge may still be clipped after
                 // scrollToItem positions the item's top. Wait one frame for layout then nudge.
                 delay(50)
@@ -422,16 +422,16 @@ fun ChatScreen(
     }
 
     // Always scroll to bottom when the user sends a message
-    LaunchedEffect(uiState.scrollToBottomTrigger) {
-        if (uiState.scrollToBottomTrigger > 0 && uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+    LaunchedEffect(uiState.messages.scrollToBottomTrigger) {
+        if (uiState.messages.scrollToBottomTrigger > 0 && uiState.messages.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.messages.size - 1)
         }
     }
 
     // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
     LaunchedEffect(reactionScrollTarget) {
         val target = reactionScrollTarget ?: return@LaunchedEffect
-        val idx = uiState.messages.indexOfFirst { it.id == target }
+        val idx = uiState.messages.messages.indexOfFirst { it.id == target }
         if (idx < 0) { reactionScrollTarget = null; return@LaunchedEffect }
 
         // Wait for the reaction row to render (Firestore round-trip + recomposition)
@@ -499,15 +499,15 @@ fun ChatScreen(
                 title = {
                     Row(
                         modifier = Modifier.clickable {
-                            if (uiState.isGroupChat) onGroupSettingsClick()
-                            else if (!uiState.isBroadcast) onProfileClick(viewModel.recipientId)
+                            if (uiState.session.isGroupChat) onGroupSettingsClick()
+                            else if (!uiState.session.isBroadcast) onProfileClick(viewModel.recipientId)
                         },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         UserAvatar(
                             avatarUrl = uiState.avatarUrl,
                             contentDescription = null,
-                            icon = if (uiState.isGroupChat) Icons.Default.Group else Icons.Default.Person,
+                            icon = if (uiState.session.isGroupChat) Icons.Default.Group else Icons.Default.Person,
                             size = 36.dp,
                             modifier = Modifier.size(36.dp),
                             localAvatarPath = uiState.localAvatarPath
@@ -515,18 +515,18 @@ fun ChatScreen(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = uiState.chatName ?: "Chat",
+                                text = uiState.session.chatName ?: "Chat",
                                 style = MaterialTheme.typography.titleLarge,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             when {
-                                uiState.isRecipientOnline -> Text(
+                                uiState.session.isRecipientOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
                                 )
-                                uiState.isBroadcast && uiState.broadcastRecipientCount > 0 -> Text(
+                                uiState.session.isBroadcast && uiState.broadcastRecipientCount > 0 -> Text(
                                     text = "${uiState.broadcastRecipientCount} ${if (uiState.broadcastRecipientCount == 1) "recipient" else "recipients"}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
@@ -541,13 +541,13 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (!uiState.isGroupChat && !uiState.isBroadcast) {
+                    if (!uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                         IconButton(onClick = {
                             val callIntent = Intent(context, CallActivity::class.java).apply {
                                 putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
                                 putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
-                                putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
-                                putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
+                                putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
                                 putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
                             }
                             context.startActivity(callIntent)
@@ -618,14 +618,14 @@ fun ChatScreen(
                 .imePadding()
         ) {
             // Pinned message banner
-            if (uiState.pinnedMessages.isNotEmpty()) {
-                val pinned = uiState.pinnedMessages.last()
+            if (uiState.messages.pinnedMessages.isNotEmpty()) {
+                val pinned = uiState.messages.pinnedMessages.last()
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.secondaryContainer)
                         .clickable {
-                            val index = uiState.messages.indexOfFirst { it.id == pinned.id }
+                            val index = uiState.messages.messages.indexOfFirst { it.id == pinned.id }
                             if (index >= 0) {
                                 scope.launch { listState.animateScrollToItem(index) }
                             }
@@ -664,7 +664,7 @@ fun ChatScreen(
 
             // In-chat search bar
             AnimatedVisibility(
-                visible = uiState.isSearchActive,
+                visible = uiState.overlays.isSearchActive,
                 enter = slideInVertically() + fadeIn(),
                 exit = slideOutVertically() + fadeOut()
             ) {
@@ -683,7 +683,7 @@ fun ChatScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     OutlinedTextField(
-                        value = uiState.searchQuery,
+                        value = uiState.overlays.searchQuery,
                         onValueChange = { viewModel.onSearchQueryChange(it) },
                         modifier = Modifier.weight(1f),
                         placeholder = { Text("Search in conversation...") },
@@ -702,8 +702,8 @@ fun ChatScreen(
             }
 
             // Search results overlay
-            if (uiState.isSearchActive && uiState.searchQuery.isNotBlank()) {
-                if (uiState.searchResults.isEmpty()) {
+            if (uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank()) {
+                if (uiState.overlays.searchResults.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -718,7 +718,7 @@ fun ChatScreen(
                     }
                 } else {
                     Text(
-                        text = "${uiState.searchResults.size} ${if (uiState.searchResults.size == 1) "result" else "results"}",
+                        text = "${uiState.overlays.searchResults.size} ${if (uiState.overlays.searchResults.size == 1) "result" else "results"}",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
@@ -729,12 +729,12 @@ fun ChatScreen(
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surface)
                     ) {
-                        items(uiState.searchResults, key = { "search_${it.id}" }) { message ->
+                        items(uiState.overlays.searchResults, key = { "search_${it.id}" }) { message ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val idx = uiState.messages.indexOfFirst { it.id == message.id }
+                                        val idx = uiState.messages.messages.indexOfFirst { it.id == message.id }
                                         if (idx >= 0) {
                                             scope.launch {
                                                 listState.scrollToItem(idx)
@@ -776,10 +776,10 @@ fun ChatScreen(
                 }
             }
 
-            val showingSearchResults = uiState.isSearchActive && uiState.searchQuery.isNotBlank() && uiState.searchResults.isNotEmpty()
+            val showingSearchResults = uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank() && uiState.overlays.searchResults.isNotEmpty()
             if (!showingSearchResults) {
                 when {
-                    uiState.isLoading -> {
+                    uiState.session.isLoading -> {
                         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
                         }
@@ -788,7 +788,7 @@ fun ChatScreen(
                         // Scroll-to-bottom: show FAB when more than 2 screens from bottom.
                         // derivedStateOf prevents recomposition on every scroll frame — the
                         // boolean only changes when the FAB needs to appear or disappear.
-                        val totalItems = uiState.messages.size
+                        val totalItems = uiState.messages.messages.size
                         val showScrollToBottom by remember(totalItems) {
                             derivedStateOf {
                                 val visInfo = listState.layoutInfo.visibleItemsInfo
@@ -803,25 +803,25 @@ fun ChatScreen(
                             state = listState,
                             modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)
                         ) {
-                            itemsIndexed(uiState.messages, key = { _, msg -> msg.id }) { index, message ->
+                            itemsIndexed(uiState.messages.messages, key = { _, msg -> msg.id }) { index, message ->
                                 val showSeparator = index == 0 ||
-                                    !isSameDay(message.timestamp, uiState.messages[index - 1].timestamp)
+                                    !isSameDay(message.timestamp, uiState.messages.messages[index - 1].timestamp)
                                 if (showSeparator) {
                                     DateSeparator(formatDateSeparator(message.timestamp))
                                 }
-                                val prevMessage = if (index > 0) uiState.messages[index - 1] else null
-                                val nextMessage = if (index < uiState.messages.size - 1) uiState.messages[index + 1] else null
+                                val prevMessage = if (index > 0) uiState.messages.messages[index - 1] else null
+                                val nextMessage = if (index < uiState.messages.messages.size - 1) uiState.messages.messages[index + 1] else null
                                 val groupPosition = computeGroupPosition(message, prevMessage, nextMessage)
                                 val topPadding = when (groupPosition) {
                                     GroupPosition.MIDDLE, GroupPosition.LAST -> 2.dp
                                     else -> 4.dp
                                 }
-                                val isOwn = message.senderId == uiState.currentUserId
+                                val isOwn = message.senderId == uiState.session.currentUserId
                                 val replyToMessage = message.replyToId?.let { id ->
-                                    uiState.messages.find { it.id == id }
+                                    uiState.messages.messages.find { it.id == id }
                                 }
                                 val linkPreview = if (message.type == MessageType.TEXT) {
-                                    uiState.linkPreviews.entries.firstOrNull { (url, _) ->
+                                    uiState.overlays.linkPreviews.entries.firstOrNull { (url, _) ->
                                         message.content.contains(url)
                                     }?.value
                                 } else null
@@ -831,14 +831,14 @@ fun ChatScreen(
                                     PollBubble(
                                         message = message,
                                         isOwnMessage = isOwn,
-                                        currentUserId = uiState.currentUserId,
+                                        currentUserId = uiState.session.currentUserId,
                                         onVote = { optionIds -> viewModel.votePoll(message.id, optionIds) },
                                         onClose = { viewModel.closePoll(message.id) }
                                     )
                                 } else if (message.type == MessageType.LIST) {
                                     ListBubble(
                                         message = message,
-                                        listData = uiState.listDataCache[message.listId],
+                                        listData = uiState.overlays.listDataCache[message.listId],
                                         isOwnMessage = isOwn,
                                         chatId = viewModel.chatId,
                                         onClick = {
@@ -861,9 +861,9 @@ fun ChatScreen(
                                             groupPosition = groupPosition,
                                             replyToMessage = replyToMessage,
                                             linkPreview = linkPreview,
-                                            currentUserId = uiState.currentUserId,
-                                            readReceiptsAllowed = uiState.readReceiptsAllowed && !uiState.isBroadcast,
-                                            userIdToDisplayName = uiState.participantNameMap,
+                                            currentUserId = uiState.session.currentUserId,
+                                            readReceiptsAllowed = uiState.session.readReceiptsAllowed && !uiState.session.isBroadcast,
+                                            userIdToDisplayName = uiState.session.participantNameMap,
                                             isHighlighted = highlightedMessageId == message.id,
                                             callbacks = MessageBubbleCallbacks(
                                                 onDelete = if (isOwn) {
@@ -881,7 +881,7 @@ fun ChatScreen(
                                                 },
                                                 onInfo = if (isOwn) {
                                                     {
-                                                        val chatParticipants = uiState.availableChats
+                                                        val chatParticipants = uiState.session.availableChats
                                                             .find { it.id == message.chatId }
                                                             ?.participants ?: emptyList()
                                                         onMessageInfoClick(message, chatParticipants)
@@ -903,13 +903,13 @@ fun ChatScreen(
                                                 onReplyPreviewClick = {
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
-                                                onCall = if (message.type == MessageType.CALL && !uiState.isGroupChat && !uiState.isBroadcast) {
+                                                onCall = if (message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                                                     {
                                                         val callIntent = Intent(context, CallActivity::class.java).apply {
                                                             putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
                                                             putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
-                                                            putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.chatName ?: "")
-                                                            putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.recipientAvatarUrl)
+                                                            putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
+                                                            putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
                                                             putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
                                                         }
                                                         context.startActivity(callIntent)
@@ -929,10 +929,10 @@ fun ChatScreen(
                                                 onDismissRequest = { swipeReactMessage = null }
                                             ) {
                                                 SwipeReactionPanel(
-                                                    recentEmojis = uiState.recentEmojis,
-                                                    currentReaction = message.reactions[uiState.currentUserId],
+                                                    recentEmojis = uiState.overlays.recentEmojis,
+                                                    currentReaction = message.reactions[uiState.session.currentUserId],
                                                     onEmojiSelected = { emoji ->
-                                                        val isAdding = message.reactions[uiState.currentUserId] != emoji
+                                                        val isAdding = message.reactions[uiState.session.currentUserId] != emoji
                                                         if (isAdding) reactionScrollTarget = message.id
                                                         viewModel.toggleReaction(message.id, emoji)
                                                         viewModel.addRecentEmoji(emoji)
@@ -963,7 +963,7 @@ fun ChatScreen(
                             SmallFloatingActionButton(
                                 onClick = {
                                     scope.launch {
-                                        listState.animateScrollToItem(uiState.messages.size - 1)
+                                        listState.animateScrollToItem(uiState.messages.messages.size - 1)
                                     }
                                 },
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
@@ -981,7 +981,7 @@ fun ChatScreen(
             }
 
             // Typing indicator
-            if (uiState.typingUserIds.isNotEmpty()) {
+            if (uiState.session.typingUserIds.isNotEmpty()) {
                 TypingIndicator(
                     dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
@@ -989,7 +989,7 @@ fun ChatScreen(
             }
 
             // Edit mode banner
-            if (uiState.editingMessage != null) {
+            if (uiState.composer.editingMessage != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1019,7 +1019,7 @@ fun ChatScreen(
             }
 
             // Reply-to banner
-            if (uiState.replyToMessage != null) {
+            if (uiState.composer.replyToMessage != null) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1041,7 +1041,7 @@ fun ChatScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                         Text(
-                            text = uiState.replyToMessage!!.content.take(60),
+                            text = uiState.composer.replyToMessage!!.content.take(60),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1059,7 +1059,7 @@ fun ChatScreen(
             }
 
             // Announcement mode banner (when user can't send)
-            if (!uiState.canSendMessages && uiState.isAnnouncementMode) {
+            if (!uiState.composer.canSendMessages && uiState.composer.isAnnouncementMode) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1086,7 +1086,7 @@ fun ChatScreen(
             // Blocked-recipient banner (replaces the composer for 1:1 chats where
             // the current user has blocked the peer). Tap opens the user profile
             // where Unblock lives — same destination as the header avatar tap.
-            if (uiState.isRecipientBlocked && !uiState.isGroupChat && !uiState.isBroadcast) {
+            if (uiState.session.isRecipientBlocked && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1112,14 +1112,14 @@ fun ChatScreen(
             }
 
             // Mention autocomplete picker
-            if (uiState.mentionCandidates.isNotEmpty()) {
+            if (uiState.composer.mentionCandidates.isNotEmpty()) {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 180.dp)
                         .background(MaterialTheme.colorScheme.surface)
                 ) {
-                    items(uiState.mentionCandidates, key = { it.uid }) { user ->
+                    items(uiState.composer.mentionCandidates, key = { it.uid }) { user ->
                         ListItem(
                             headlineContent = { Text(user.displayName) },
                             modifier = Modifier.clickable {
@@ -1135,7 +1135,7 @@ fun ChatScreen(
 
             // Input row — hidden when the user has blocked the recipient; the
             // "You blocked this contact" banner above replaces it.
-            if (uiState.canSendMessages && !uiState.isRecipientBlocked) Row(
+            if (uiState.composer.canSendMessages && !uiState.session.isRecipientBlocked) Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1185,14 +1185,14 @@ fun ChatScreen(
                             if (newText != messageText) {
                                 pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
                                 messageText = newText
-                                if (uiState.editingMessage == null) viewModel.onTypingWithMentions(newText)
+                                if (uiState.composer.editingMessage == null) viewModel.onTypingWithMentions(newText)
                             }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(
                                 start = 16.dp,
-                                end = if (uiState.editingMessage == null) 48.dp else 16.dp,
+                                end = if (uiState.composer.editingMessage == null) 48.dp else 16.dp,
                             ),
                         textStyle = MaterialTheme.typography.bodyMedium.copy(
                             color = MaterialTheme.colorScheme.onSurface,
@@ -1219,7 +1219,7 @@ fun ChatScreen(
                             ) {
                                 if (messageText.isEmpty()) {
                                     Text(
-                                        text = if (uiState.editingMessage != null) "Edit message..."
+                                        text = if (uiState.composer.editingMessage != null) "Edit message..."
                                                else stringResource(R.string.type_message),
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1229,7 +1229,7 @@ fun ChatScreen(
                             }
                         }
                     )
-                    if (uiState.editingMessage == null) {
+                    if (uiState.composer.editingMessage == null) {
                         IconButton(
                             onClick = { showAttachmentSheet = true },
                             modifier = Modifier.align(Alignment.CenterEnd)
@@ -1249,7 +1249,7 @@ fun ChatScreen(
                         handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
                         clearInput()
                     },
-                    enabled = messageText.isNotBlank() && !uiState.isSending
+                    enabled = messageText.isNotBlank() && !uiState.composer.isSending
                 ) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.Send,
@@ -1268,7 +1268,7 @@ fun ChatScreen(
             ) {
                 EmojiHandlerPanel(
                     mode = EmojiMode.TEXT_INPUT,
-                    recentEmojis = uiState.recentEmojis,
+                    recentEmojis = uiState.overlays.recentEmojis,
                     onEmojiSelected = { emoji, size ->
                         val insertIdx = messageText.length
                         messageText += emoji
@@ -1420,10 +1420,10 @@ fun ChatScreen(
         ) {
             EmojiHandlerPanel(
                 mode = EmojiMode.REACTION,
-                currentReaction = targetMsg.reactions[uiState.currentUserId],
-                recentEmojis = uiState.recentEmojis,
+                currentReaction = targetMsg.reactions[uiState.session.currentUserId],
+                recentEmojis = uiState.overlays.recentEmojis,
                 onEmojiSelected = { emoji, _ ->
-                    val isAdding = targetMsg.reactions[uiState.currentUserId] != emoji
+                    val isAdding = targetMsg.reactions[uiState.session.currentUserId] != emoji
                     if (isAdding) reactionScrollTarget = targetMsg.id
                     viewModel.toggleReaction(targetMsg.id, emoji)
                     reactionTargetMessage = null
@@ -1437,14 +1437,14 @@ fun ChatScreen(
     // Forward picker
     forwardTargetMessage?.let { targetMsg ->
         ForwardChatPicker(
-            chats = uiState.availableChats,
-            currentUserId = uiState.currentUserId,
+            chats = uiState.session.availableChats,
+            currentUserId = uiState.session.currentUserId,
             onDismiss = { forwardTargetMessage = null },
             onForward = { chatId, recipientId ->
                 viewModel.forwardMessage(targetMsg, chatId, recipientId)
                 forwardTargetMessage = null
             },
-            users = uiState.chatParticipants
+            users = uiState.session.chatParticipants
         )
     }
 
@@ -1501,7 +1501,7 @@ private fun DateSeparator(label: String) {
 }
 
 private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: String, emojiSizes: Map<Int, Float> = emptyMap()) {
-    if (uiState.editingMessage != null) {
+    if (uiState.composer.editingMessage != null) {
         viewModel.confirmEdit(text)
     } else {
         viewModel.sendMessage(text, emojiSizes)

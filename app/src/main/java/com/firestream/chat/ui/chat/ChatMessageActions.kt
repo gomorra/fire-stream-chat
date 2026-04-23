@@ -18,39 +18,39 @@ internal class ChatMessageActions(
     fun deleteMessage(messageId: String) {
         scope.launch {
             messageRepository.deleteMessage(chatId, messageId)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 
     fun startEdit(message: Message) {
-        _uiState.update { it.copy(editingMessage = message) }
+        _uiState.update { it.copy(composer = it.composer.copy(editingMessage = message)) }
     }
 
     fun cancelEdit() {
-        _uiState.update { it.copy(editingMessage = null) }
+        _uiState.update { it.copy(composer = it.composer.copy(editingMessage = null)) }
     }
 
     fun confirmEdit(newContent: String) {
-        val msg = _uiState.value.editingMessage ?: return
+        val msg = _uiState.value.composer.editingMessage ?: return
         if (newContent.isBlank()) return
-        _uiState.update { it.copy(editingMessage = null) }
+        _uiState.update { it.copy(composer = it.composer.copy(editingMessage = null)) }
         scope.launch {
             messageRepository.editMessage(chatId, msg.id, newContent)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 
     fun setReplyTo(message: Message) {
-        _uiState.update { it.copy(replyToMessage = message) }
+        _uiState.update { it.copy(composer = it.composer.copy(replyToMessage = message)) }
     }
 
     fun clearReplyTo() {
-        _uiState.update { it.copy(replyToMessage = null) }
+        _uiState.update { it.copy(composer = it.composer.copy(replyToMessage = null)) }
     }
 
     fun toggleReaction(messageId: String, emoji: String) {
-        val currentUserId = _uiState.value.currentUserId
-        val message = _uiState.value.messages.find { it.id == messageId } ?: return
+        val currentUserId = _uiState.value.session.currentUserId
+        val message = _uiState.value.messages.messages.find { it.id == messageId } ?: return
         scope.launch {
             if (message.reactions[currentUserId] == emoji) {
                 messageRepository.removeReaction(chatId, messageId, currentUserId)
@@ -63,21 +63,21 @@ internal class ChatMessageActions(
     fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) {
         scope.launch {
             messageRepository.forwardMessage(message, targetChatId, targetRecipientId)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 
     fun toggleStar(message: Message) {
         scope.launch {
             messageRepository.starMessage(message.id, !message.isStarred)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 
     fun togglePin(messageId: String, pinned: Boolean) {
         scope.launch {
             messageRepository.pinMessage(chatId, messageId, pinned)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 }

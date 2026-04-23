@@ -8,12 +8,8 @@ import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.ScrollPos
 import com.firestream.chat.di.ApplicationScope
-import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
-import com.firestream.chat.domain.model.AppError
-import com.firestream.chat.domain.model.Chat
-import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.User
@@ -42,48 +38,16 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
-data class ChatUiState(
-    val messages: List<Message> = emptyList(),
-    val isLoading: Boolean = true,
-    val error: AppError? = null,
-    val currentUserId: String = "",
-    val isSending: Boolean = false,
-    val typingUserIds: List<String> = emptyList(),
-    val editingMessage: Message? = null,
-    val replyToMessage: Message? = null,
-    val linkPreviews: Map<String, LinkPreview> = emptyMap(),
-    val availableChats: List<Chat> = emptyList(),
-    val chatParticipants: Map<String, User> = emptyMap(),
-    val searchQuery: String = "",
-    val searchResults: List<Message> = emptyList(),
-    val isSearchActive: Boolean = false,
-    val readReceiptsAllowed: Boolean = true,
-    val isGroupChat: Boolean = false,
-    val chatName: String? = null,
-    val canSendMessages: Boolean = true,
-    val isAnnouncementMode: Boolean = false,
-    val mentionCandidates: List<User> = emptyList(),
-    val participantNameMap: Map<String, String> = emptyMap(),
-    val isBroadcast: Boolean = false,
-    val broadcastRecipientIds: List<String> = emptyList(),
-    val recentEmojis: List<String> = emptyList(),
-    val recipientAvatarUrl: String? = null,
-    val recipientLocalAvatarPath: String? = null,
-    val isRecipientOnline: Boolean = false,
-    val chatAvatarUrl: String? = null,
-    val chatLocalAvatarPath: String? = null,
-    val listDataCache: Map<String, ListData?> = emptyMap(),
-    val pinnedMessages: List<Message> = emptyList(),
-    val scrollToBottomTrigger: Int = 0,
-    // True when the current user has blocked the 1:1 recipient. Used to replace
-    // the composer with an "Unblock to send" banner so the user sees the state
-    // before they try to send.
-    val isRecipientBlocked: Boolean = false
+internal data class ChatUiState(
+    val messages: MessagesState = MessagesState(),
+    val composer: ComposerState = ComposerState(),
+    val overlays: OverlaysState = OverlaysState(),
+    val session: SessionState = SessionState(),
 ) {
-    val broadcastRecipientCount: Int get() = broadcastRecipientIds.size
-    val avatarUrl: String? get() = recipientAvatarUrl ?: chatAvatarUrl
-    val localAvatarPath: String? get() = recipientLocalAvatarPath ?: chatLocalAvatarPath
-    val displayNameToUserId: Map<String, String> get() = participantNameMap.entries.associate { (k, v) -> v to k }
+    val broadcastRecipientCount: Int get() = session.broadcastRecipientIds.size
+    val avatarUrl: String? get() = session.recipientAvatarUrl ?: session.chatAvatarUrl
+    val localAvatarPath: String? get() = session.recipientLocalAvatarPath ?: session.chatLocalAvatarPath
+    val displayNameToUserId: Map<String, String> get() = session.participantNameMap.entries.associate { (k, v) -> v to k }
 }
 
 @HiltViewModel
@@ -134,7 +98,7 @@ class ChatViewModel @Inject constructor(
     // each other's slices and never call each other directly; coordination happens
     // only through this one StateFlow.
     private val _uiState = MutableStateFlow(ChatUiState())
-    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+    internal val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     val uploadProgress: StateFlow<Map<String, Float>> = messageRepository.uploadProgress
 
@@ -157,7 +121,7 @@ class ChatViewModel @Inject constructor(
     )
 
     init {
-        _uiState.update { it.copy(currentUserId = authRepository.currentUserId ?: "") }
+        _uiState.update { it.copy(session = it.session.copy(currentUserId = authRepository.currentUserId ?: "")) }
         messageLoader.start()
         infoManager.start()
     }
@@ -235,7 +199,7 @@ class ChatViewModel @Inject constructor(
     }
 
     // ── Error ──
-    fun clearError() { _uiState.update { it.copy(error = null) } }
+    fun clearError() { _uiState.update { it.copy(session = it.session.copy(error = null)) } }
 
     override fun onCleared() {
         super.onCleared()

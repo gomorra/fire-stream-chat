@@ -56,7 +56,7 @@ internal class ChatInfoManager(
         scope.launch {
             val blocked = runCatching { userRepository.isUserBlocked(recipientId) }
                 .getOrDefault(false)
-            _uiState.update { it.copy(isRecipientBlocked = blocked) }
+            _uiState.update { it.copy(session = it.session.copy(isRecipientBlocked = blocked)) }
         }
     }
 
@@ -64,20 +64,24 @@ internal class ChatInfoManager(
         scope.launch {
             chatRepository.getChatById(chatId)
                 .onSuccess { chat ->
-                    val uid = _uiState.value.currentUserId
+                    val uid = _uiState.value.session.currentUserId
                     val isGroup = chat.type == ChatType.GROUP
                     val isBroadcast = chat.type == ChatType.BROADCAST
                     val broadcastRecipientIds = if (isBroadcast) chat.participants.filter { it != uid } else emptyList()
                     _uiState.update {
                         it.copy(
-                            isGroupChat = isGroup,
-                            chatName = if (isGroup || isBroadcast) chat.name else it.chatName,
-                            chatAvatarUrl = chat.avatarUrl,
-                            chatLocalAvatarPath = chat.localAvatarPath,
-                            canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
-                            isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode,
-                            isBroadcast = isBroadcast,
-                            broadcastRecipientIds = broadcastRecipientIds
+                            composer = it.composer.copy(
+                                canSendMessages = if (isGroup) checkGroupPermissionUseCase.canSendMessages(chat, uid) else true,
+                                isAnnouncementMode = isGroup && chat.permissions.isAnnouncementMode
+                            ),
+                            session = it.session.copy(
+                                isGroupChat = isGroup,
+                                chatName = if (isGroup || isBroadcast) chat.name else it.session.chatName,
+                                chatAvatarUrl = chat.avatarUrl,
+                                chatLocalAvatarPath = chat.localAvatarPath,
+                                isBroadcast = isBroadcast,
+                                broadcastRecipientIds = broadcastRecipientIds
+                            )
                         )
                     }
                     if (isGroup) loadGroupParticipants(chat.participants)
@@ -93,7 +97,7 @@ internal class ChatInfoManager(
                 .filterNotNull()
             val nameMap = users.associate { it.uid to it.displayName }
             allGroupParticipants = users
-            _uiState.update { it.copy(participantNameMap = nameMap) }
+            _uiState.update { it.copy(session = it.session.copy(participantNameMap = nameMap)) }
         }
     }
 
@@ -104,10 +108,12 @@ internal class ChatInfoManager(
                 .collect { user ->
                     _uiState.update {
                         it.copy(
-                            chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.chatName,
-                            recipientAvatarUrl = user.avatarUrl,
-                            recipientLocalAvatarPath = user.localAvatarPath,
-                            isRecipientOnline = user.isOnline
+                            session = it.session.copy(
+                                chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.session.chatName,
+                                recipientAvatarUrl = user.avatarUrl,
+                                recipientLocalAvatarPath = user.localAvatarPath,
+                                isRecipientOnline = user.isOnline
+                            )
                         )
                     }
                     updateReadReceiptsAllowed(recipientEnabled = user.readReceiptsEnabled)
@@ -135,15 +141,17 @@ internal class ChatInfoManager(
         localReadReceipts = localEnabled
         recipientReadReceipts = recipientEnabled
         val allowed = localEnabled && recipientEnabled
-        _uiState.update { it.copy(readReceiptsAllowed = allowed) }
+        _uiState.update { it.copy(session = it.session.copy(readReceiptsAllowed = allowed)) }
     }
 
     private fun loadAvailableChats() {
         scope.launch {
             try {
                 val chats = chatRepository.getChats().first()
-                val participants = chats.resolveChatParticipants(_uiState.value.currentUserId, userRepository)
-                _uiState.update { it.copy(availableChats = chats, chatParticipants = participants) }
+                val participants = chats.resolveChatParticipants(_uiState.value.session.currentUserId, userRepository)
+                _uiState.update {
+                    it.copy(session = it.session.copy(availableChats = chats, chatParticipants = participants))
+                }
             } catch (_: Exception) {
                 // Non-critical — forward picker will show empty
             }
@@ -155,7 +163,7 @@ internal class ChatInfoManager(
             preferencesDataStore.recentEmojisFlow
                 .distinctUntilChanged()
                 .collect { recents ->
-                    _uiState.update { it.copy(recentEmojis = recents) }
+                    _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
                 }
         }
     }
@@ -167,15 +175,15 @@ internal class ChatInfoManager(
     }
 
     fun updateMentionCandidates(text: String) {
-        if (!_uiState.value.isGroupChat) return
+        if (!_uiState.value.session.isGroupChat) return
         val query = extractMentionQuery(text)
         if (query != null) {
             val candidates = allGroupParticipants.filter {
                 query.isEmpty() || it.displayName.contains(query, ignoreCase = true)
             }.take(8)
-            _uiState.update { it.copy(mentionCandidates = candidates) }
+            _uiState.update { it.copy(composer = it.composer.copy(mentionCandidates = candidates)) }
         } else {
-            _uiState.update { it.copy(mentionCandidates = emptyList()) }
+            _uiState.update { it.copy(composer = it.composer.copy(mentionCandidates = emptyList())) }
         }
     }
 
@@ -186,7 +194,7 @@ internal class ChatInfoManager(
         } else {
             currentText
         }
-        _uiState.update { it.copy(mentionCandidates = emptyList()) }
+        _uiState.update { it.copy(composer = it.composer.copy(mentionCandidates = emptyList())) }
         return newText
     }
 
@@ -199,10 +207,17 @@ internal class ChatInfoManager(
 
     fun createAndSendList(title: String, type: ListType) {
         scope.launch {
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
             listRepository.createList(title, type, chatId)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
-            _uiState.update { it.copy(isSending = false) }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
         }
     }
 }

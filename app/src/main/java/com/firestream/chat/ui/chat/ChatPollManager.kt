@@ -16,24 +16,31 @@ internal class ChatPollManager(
 
     fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) {
         scope.launch {
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
             pollRepository.sendPoll(chatId, question, options, isMultipleChoice, isAnonymous)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e), isSending = false) } }
-                .onSuccess { _uiState.update { it.copy(isSending = false) } }
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
         }
     }
 
     fun votePoll(messageId: String, optionIds: List<String>) {
         scope.launch {
             pollRepository.votePoll(chatId, messageId, optionIds)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 
     fun closePoll(messageId: String) {
         scope.launch {
             pollRepository.closePoll(chatId, messageId)
-                .onFailure { e -> _uiState.update { it.copy(error = AppError.from(e)) } }
+                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
 }

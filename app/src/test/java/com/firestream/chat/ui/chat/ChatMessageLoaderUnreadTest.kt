@@ -32,7 +32,7 @@ class ChatMessageLoaderUnreadTest {
     private val linkPreviewSource = mockk<LinkPreviewSource>(relaxed = true)
     private val context = mockk<Context>(relaxed = true)
 
-    private val uiState = MutableStateFlow(ChatUiState(currentUserId = "uid1"))
+    private val uiState = MutableStateFlow(ChatUiState(session = SessionState(currentUserId = "uid1")))
 
     private fun loader(scope: CoroutineScope): ChatMessageLoader = ChatMessageLoader(
         chatId = "chat1",

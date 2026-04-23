@@ -27,7 +27,7 @@ class ChatInfoManagerTest {
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>(relaxed = true)
 
-    private val uiState = MutableStateFlow(ChatUiState(currentUserId = "uid1"))
+    private val uiState = MutableStateFlow(ChatUiState(session = SessionState(currentUserId = "uid1")))
 
     private fun manager(recipientId: String = "recipient1") = ChatInfoManager(
         chatId = "chat1",
@@ -47,7 +47,7 @@ class ChatInfoManagerTest {
 
         manager().refreshBlockState()
 
-        assertTrue(uiState.value.isRecipientBlocked)
+        assertTrue(uiState.value.session.isRecipientBlocked)
     }
 
     @Test
@@ -56,7 +56,7 @@ class ChatInfoManagerTest {
 
         manager().refreshBlockState()
 
-        assertFalse(uiState.value.isRecipientBlocked)
+        assertFalse(uiState.value.session.isRecipientBlocked)
     }
 
     @Test
@@ -66,7 +66,7 @@ class ChatInfoManagerTest {
 
         manager().refreshBlockState()
 
-        assertFalse(uiState.value.isRecipientBlocked)
+        assertFalse(uiState.value.session.isRecipientBlocked)
     }
 
     @Test
@@ -85,11 +85,11 @@ class ChatInfoManagerTest {
         userRepository.setBlocked("recipient1", true)
         val mgr = manager()
         mgr.refreshBlockState()
-        assertTrue(uiState.value.isRecipientBlocked)
+        assertTrue(uiState.value.session.isRecipientBlocked)
 
         userRepository.setBlocked("recipient1", false)
         mgr.refreshBlockState()
 
-        assertFalse(uiState.value.isRecipientBlocked)
+        assertFalse(uiState.value.session.isRecipientBlocked)
     }
 }
