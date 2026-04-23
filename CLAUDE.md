@@ -84,6 +84,7 @@ This must appear before any code changes are made for that step.
 1. `./gradlew test` — unit tests must pass
 2. `./gradlew assembleDebug` — build must be clean
 3. `/simplify` — spawn a sub-agent via the `Agent` tool with `model: "sonnet"` and effort `medium`. The sub-agent invokes the skill (`Skill(skill: "simplify")`); it must **not** reimplement the review with a custom prompt. Never substitute `/simplify-review` here — that skill is manual-invocation only.
+   - **Escalate to `model: "opus"` / effort `medium`** when the diff is any of: (a) concurrency- or state-machine-heavy (coroutine scoping, flow operator chains, cancellation, lock ordering), (b) security-adjacent (Signal/crypto, permission checks, auth), (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers in one change), or (d) large (>~600 changed lines). Default stays Sonnet/medium; prefer bumping the model over bumping effort.
 4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
 6. `./gradlew test` — unit tests must pass
