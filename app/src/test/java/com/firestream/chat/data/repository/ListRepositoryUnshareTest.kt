@@ -39,12 +39,21 @@ class ListRepositoryUnshareTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private val listDao = mockk<ListDao>(relaxed = true)
+    private val listDao = mockk<ListDao>(relaxed = true) {
+        // Relaxed mocks return a mock (not null) for nullable types by default, which
+        // would make the items-listener guard in ListRepositoryImpl.observeList fall
+        // through. Tests that need a non-null entity override this locally.
+        coEvery { getById(any()) } returns null
+    }
     private val messageDao = mockk<MessageDao>(relaxed = true)
     private val listSource = mockk<FirestoreListSource> {
         // observeMyLists is called by ensureListSyncRunning() inside observeList();
         // return an empty flow so the retry loop never interferes with test assertions.
         every { observeMyLists(any()) } returns flowOf(emptyList())
+        // observeList combines metadata with the items subcollection; items subcollection
+        // is irrelevant to these unshare tests so return empty.
+        every { observeItems(any()) } returns flowOf(emptyList())
+        coEvery { migrateEmbeddedItemsIfNeeded(any()) } just Runs
     }
     private val historySource = mockk<FirestoreListHistorySource>(relaxed = true)
     private val authSource = mockk<FirebaseAuthSource>()

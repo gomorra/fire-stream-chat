@@ -376,8 +376,8 @@ private fun ListRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val itemCount = listData.items.size
-            val checkedCount = listData.items.count { it.isChecked }
+            val itemCount = listData.itemCount
+            val checkedCount = listData.checkedCount
             val subtitle = when (listData.type) {
                 ListType.CHECKLIST, ListType.SHOPPING ->
                     "$checkedCount/$itemCount checked"

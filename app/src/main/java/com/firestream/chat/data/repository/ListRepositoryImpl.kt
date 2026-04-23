@@ -21,15 +21,16 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -48,6 +49,14 @@ class ListRepositoryImpl @Inject constructor(
     private val historyScope = CoroutineScope(SupervisorJob())
     private var listSyncJob: kotlinx.coroutines.Job? = null
 
+    // One mutex per list id — serialises intra-device read-modify-write sequences and
+    // keeps history recording ordered with respect to the mutation it describes.
+    private val listMutexes = ConcurrentHashMap<String, Mutex>()
+    private fun mutexFor(listId: String): Mutex = listMutexes.getOrPut(listId) { Mutex() }
+
+    // Lists we've already attempted to migrate from the embedded-items layout in this process.
+    private val migratedLists = java.util.Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+
     /** Keeps Room in sync with Firestore regardless of which screen is active. */
     private fun ensureListSyncRunning() {
         val userId = authSource.currentUserId ?: return
@@ -56,13 +65,26 @@ class ListRepositoryImpl @Inject constructor(
             while (coroutineContext[kotlinx.coroutines.Job]?.isActive == true) {
                 try {
                     listSource.observeMyLists(userId).collectLatest { lists ->
-                        listDao.syncForUser(lists.map { ListEntity.fromDomain(it) }, userId)
+                        // Preserve each list's cached items blob: observeMyLists returns
+                        // metadata-only after migration, so we'd otherwise wipe the
+                        // detail-screen cache on every metadata edit.
+                        val entities = lists.map { ListEntity.fromDomain(mergeWithCachedItems(it)) }
+                        listDao.syncForUser(entities, userId)
                     }
                 } catch (_: Exception) { }
-                // If the flow completes (Firestore error or disconnect), retry after a short delay
                 kotlinx.coroutines.delay(3000)
             }
         }
+    }
+
+    /**
+     * When metadata-only [ListData] comes from `observeMyLists` (post-migration), keep any
+     * items already cached in Room so the detail screen can still show them offline.
+     */
+    private suspend fun mergeWithCachedItems(fresh: ListData): ListData {
+        if (fresh.items.isNotEmpty()) return fresh
+        val cached = listDao.getById(fresh.id)?.toDomain() ?: return fresh
+        return fresh.copy(items = cached.items)
     }
 
     private fun recordHistory(listId: String, action: HistoryAction, itemId: String? = null, itemText: String? = null) {
@@ -86,28 +108,60 @@ class ListRepositoryImpl @Inject constructor(
 
     override fun observeList(listId: String): Flow<ListData?> = channelFlow {
         ensureListSyncRunning()
+
+        // One-shot migration: pre-refactor lists carry an embedded `items` array on the
+        // metadata doc; migrate it to the subcollection before opening the listeners so
+        // the combined flow below sees a consistent snapshot.
+        if (migratedLists.add(listId)) {
+            launch {
+                runCatching { listSource.migrateEmbeddedItemsIfNeeded(listId) }
+                    .onFailure { Log.w("ListRepo", "migrateEmbeddedItemsIfNeeded failed for $listId", it) }
+            }
+        }
+
+        // Metadata → Room. Two independent listeners (metadata + items) write into Room
+        // instead of one combined listener so that each source can land in Room without
+        // waiting on the other — matches how the rest of the codebase treats Room as the
+        // single source of truth that the UI observes.
         launch {
             try {
                 listSource.observeList(listId).collectLatest { listData ->
-                    if (listData != null) {
-                        val userId = authSource.currentUserId
-                        if (userId != null
-                            && listData.participants.isNotEmpty()
-                            && userId !in listData.participants
-                            && userId != listData.createdBy
-                        ) {
-                            // User is no longer a participant (and not the owner) —
-                            // remove from Room so ListsScreen updates instantly.
-                            listDao.delete(listId)
-                        } else {
-                            listDao.insert(ListEntity.fromDomain(listData))
-                        }
-                    } else {
+                    if (listData == null) {
                         listDao.delete(listId)
+                        return@collectLatest
                     }
+                    val userId = authSource.currentUserId
+                    if (userId != null
+                        && listData.participants.isNotEmpty()
+                        && userId !in listData.participants
+                        && userId != listData.createdBy
+                    ) {
+                        listDao.delete(listId)
+                        return@collectLatest
+                    }
+                    // Metadata alone lacks items — preserve whatever the items listener
+                    // has already written so we don't flash an empty list.
+                    val cachedItems = listDao.getById(listId)?.toDomain()?.items.orEmpty()
+                    val itemsToStore = listData.items.ifEmpty { cachedItems }
+                    listDao.insert(ListEntity.fromDomain(listData.copy(items = itemsToStore)))
                 }
             } catch (_: Exception) { }
         }
+
+        // Items subcollection → patch Room's items blob in place. Only runs once the
+        // metadata listener has written an entity for this list; otherwise we'd create a
+        // phantom entity with empty metadata.
+        launch {
+            try {
+                listSource.observeItems(listId).collectLatest { items ->
+                    val existing = listDao.getById(listId) ?: return@collectLatest
+                    val current = existing.toDomain()
+                    if (current.items == items) return@collectLatest
+                    listDao.insert(ListEntity.fromDomain(current.copy(items = items)))
+                }
+            } catch (_: Exception) { }
+        }
+
         listDao.observeById(listId)
             .map { it?.toDomain() }
             .collect { send(it) }
@@ -138,7 +192,6 @@ class ListRepositoryImpl @Inject constructor(
 
         recordHistory(remoteId, HistoryAction.CREATED)
 
-        // If created from a chat, add participants + sharedChatId atomically, then send message
         if (chatId != null) {
             val chat = chatRepository.get().getChatById(chatId).getOrThrow()
             listSource.shareList(remoteId, chat.participants, chatId)
@@ -149,50 +202,93 @@ class ListRepositoryImpl @Inject constructor(
         created
     }
 
-    override suspend fun addItem(listId: String, text: String, quantity: String?, unit: String?): Result<Unit> = resultOf {
+    override suspend fun addItem(listId: String, itemId: String, text: String, quantity: String?, unit: String?): Result<Unit> = resultOf {
         val userId = authSource.currentUserId ?: throw Exception("Not authenticated")
-        val item = ListItem(
-            id = UUID.randomUUID().toString(),
-            text = text,
-            quantity = quantity,
-            unit = unit,
-            addedBy = userId
-        )
-        listSource.addItem(listId, item)
-        recordHistory(listId, HistoryAction.ITEM_ADDED, itemId = item.id, itemText = text)
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId)
+            val existing = entity?.toDomain()?.items.orEmpty()
+            val item = ListItem(
+                id = itemId,
+                text = text,
+                quantity = quantity,
+                unit = unit,
+                order = existing.size,
+                addedBy = userId
+            )
+            // Room-first: subsequent same-client reads see the new item.
+            entity?.let {
+                val list = it.toDomain()
+                listDao.insert(ListEntity.fromDomain(list.copy(
+                    items = list.items + item,
+                    itemCount = list.itemCount + 1,
+                    updatedAt = System.currentTimeMillis()
+                )))
+            }
+            listSource.addItem(listId, item)
+            recordHistory(listId, HistoryAction.ITEM_ADDED, itemId = item.id, itemText = text)
+        }
     }
 
     override suspend fun removeItem(listId: String, itemId: String): Result<Unit> = resultOf {
-        val entity = listDao.getById(listId) ?: throw Exception("List not found")
-        val list = entity.toDomain()
-        val item = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
-        listSource.removeItem(listId, item)
-        recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+            val item = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
+            val remaining = list.items.filter { it.id != itemId }
+            listDao.insert(ListEntity.fromDomain(list.copy(
+                items = remaining,
+                itemCount = (list.itemCount - 1).coerceAtLeast(0),
+                checkedCount = (list.checkedCount - if (item.isChecked) 1 else 0).coerceAtLeast(0),
+                updatedAt = System.currentTimeMillis()
+            )))
+            listSource.deleteItem(listId, itemId, wasChecked = item.isChecked)
+            recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = itemId, itemText = item.text)
+        }
     }
 
     override suspend fun clearCheckedItems(listId: String): Result<List<String>> = resultOf {
-        val entity = listDao.getById(listId) ?: throw Exception("List not found")
-        val list = entity.toDomain()
-        val checkedItems = list.items.filter { it.isChecked }
-        if (checkedItems.isEmpty()) return@resultOf emptyList()
-        val remaining = list.items.filter { !it.isChecked }
-        listSource.updateListItems(listId, remaining)
-        checkedItems.forEach { item ->
-            recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = item.id, itemText = item.text)
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+            val checkedItems = list.items.filter { it.isChecked }
+            if (checkedItems.isEmpty()) return@withLock emptyList()
+            val remaining = list.items.filter { !it.isChecked }
+            listDao.insert(ListEntity.fromDomain(list.copy(
+                items = remaining,
+                itemCount = (list.itemCount - checkedItems.size).coerceAtLeast(0),
+                checkedCount = 0,
+                updatedAt = System.currentTimeMillis()
+            )))
+            listSource.clearCheckedItems(listId, checkedItems.map { it.id })
+            checkedItems.forEach { item ->
+                recordHistory(listId, HistoryAction.ITEM_REMOVED, itemId = item.id, itemText = item.text)
+            }
+            checkedItems.map { it.text }
         }
-        checkedItems.map { it.text }
     }
 
-    override suspend fun toggleItemChecked(listId: String, itemId: String): Result<Unit> = resultOf {
-        val entity = listDao.getById(listId) ?: throw Exception("List not found")
-        val list = entity.toDomain()
-        val targetItem = list.items.find { it.id == itemId }
-        val updatedItems = list.items.map { item ->
-            if (item.id == itemId) item.copy(isChecked = !item.isChecked) else item
-        }
-        listSource.updateListItems(listId, updatedItems)
-        if (targetItem != null) {
-            val action = if (targetItem.isChecked) HistoryAction.ITEM_UNCHECKED else HistoryAction.ITEM_CHECKED
+    override suspend fun toggleItemChecked(listId: String, itemId: String, checked: Boolean): Result<Unit> = resultOf {
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+            val targetItem = list.items.find { it.id == itemId } ?: throw Exception("Item not found")
+            // Idempotent: if Room already reflects the target state, still write through to
+            // Firestore so the intent propagates to other devices even if we missed a tap echo.
+            val updatedItems = list.items.map { i ->
+                if (i.id == itemId) i.copy(isChecked = checked) else i
+            }
+            val checkedDelta = when {
+                targetItem.isChecked == checked -> 0
+                checked -> 1
+                else -> -1
+            }
+            listDao.insert(ListEntity.fromDomain(list.copy(
+                items = updatedItems,
+                checkedCount = (list.checkedCount + checkedDelta).coerceIn(0, list.itemCount),
+                updatedAt = System.currentTimeMillis()
+            )))
+            listSource.setItemChecked(listId, itemId, checked)
+            val action = if (checked) HistoryAction.ITEM_CHECKED else HistoryAction.ITEM_UNCHECKED
             recordHistory(listId, action, itemId = itemId, itemText = targetItem.text)
         }
     }
@@ -204,17 +300,33 @@ class ListRepositoryImpl @Inject constructor(
         quantity: String?,
         unit: String?
     ): Result<Unit> = resultOf {
-        val entity = listDao.getById(listId) ?: throw Exception("List not found")
-        val list = entity.toDomain()
-        val updatedItems = list.items.map { item ->
-            if (item.id == itemId) item.copy(text = text, quantity = quantity, unit = unit) else item
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId) ?: throw Exception("List not found")
+            val list = entity.toDomain()
+            val updatedItems = list.items.map { item ->
+                if (item.id == itemId) item.copy(text = text, quantity = quantity, unit = unit) else item
+            }
+            listDao.insert(ListEntity.fromDomain(list.copy(
+                items = updatedItems,
+                updatedAt = System.currentTimeMillis()
+            )))
+            listSource.updateItem(listId, itemId, text, quantity, unit)
+            recordHistory(listId, HistoryAction.ITEM_MODIFIED, itemId = itemId, itemText = text)
         }
-        listSource.updateListItems(listId, updatedItems)
-        recordHistory(listId, HistoryAction.ITEM_MODIFIED, itemId = itemId, itemText = text)
     }
 
     override suspend fun reorderItems(listId: String, items: List<ListItem>): Result<Unit> = resultOf {
-        listSource.updateListItems(listId, items)
+        mutexFor(listId).withLock {
+            val entity = listDao.getById(listId)
+            if (entity != null) {
+                val reordered = items.mapIndexed { idx, item -> item.copy(order = idx) }
+                listDao.insert(ListEntity.fromDomain(entity.toDomain().copy(
+                    items = reordered,
+                    updatedAt = System.currentTimeMillis()
+                )))
+            }
+            listSource.reorderItems(listId, items.map { it.id })
+        }
     }
 
     override suspend fun updateListTitle(listId: String, title: String): Result<Unit> = resultOf {
@@ -239,11 +351,9 @@ class ListRepositoryImpl @Inject constructor(
         val entity = listDao.getById(listId) ?: throw Exception("List not found")
         val list = entity.toDomain()
 
-        // Single atomic Firestore write: add all chat participants + sharedChatId
         val chat = chatRepository.get().getChatById(chatId).getOrThrow()
         listSource.shareList(listId, chat.participants, chatId)
 
-        // Update local Room cache immediately
         val now = System.currentTimeMillis()
         val updatedIds = (list.sharedChatIds + chatId).distinct()
         listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
@@ -254,19 +364,17 @@ class ListRepositoryImpl @Inject constructor(
     }
 
     override fun getSharedListsForChat(chatId: String): Flow<List<ListData>> = channelFlow {
-        // Use Firestore query on sharedChatIds for real-time add/remove.
-        // When a list is unshared, Firestore fires immediately so the receiver
-        // sees the list removed from SharedListsScreen without any delay.
         launch {
             try {
                 listSource.observeSharedListsForChat(chatId).collectLatest { lists ->
-                    // Cache received lists locally so detail screens work offline
-                    listDao.insertAll(lists.map { ListEntity.fromDomain(it) })
+                    // Cache received lists locally so detail screens work offline.
+                    // Use merge to preserve any subcollection-sourced items already cached.
+                    val merged = lists.map { mergeWithCachedItems(it) }
+                    listDao.insertAll(merged.map { ListEntity.fromDomain(it) })
                     send(lists)
                 }
             } catch (_: Exception) { }
         }
-        // Keep the channel open so the launched coroutine can keep emitting.
         awaitClose()
     }
 
@@ -296,23 +404,16 @@ class ListRepositoryImpl @Inject constructor(
         val entity = listDao.getById(listId) ?: throw Exception("List not found")
         val list = entity.toDomain()
 
-        // 1. Fetch chat to determine participants to remove
         val chat = chatRepository.get().getChatById(chatId).getOrThrow()
         val toRemove = chat.participants.filter { it != list.createdBy }
 
-        // 2. Update Firestore FIRST — remove participants + sharedChatIds
-        //    Must complete before sending message so the receiver sees the updated
-        //    document when they open the chat from the FCM notification.
         listSource.unshareList(listId, toRemove, chatId)
 
-        // 3. Update local Room cache
         val now = System.currentTimeMillis()
         val arr = org.json.JSONArray(entity.sharedChatIds)
         val updatedIds = List(arr.length()) { i -> arr.getString(i) }.filter { it != chatId }
         listDao.updateSharedChatIds(listId, org.json.JSONArray(updatedIds).toString(), now)
 
-        // 4. Send the notification message LAST — by this point the Firestore doc
-        //    is already updated, so any FCM-triggered navigation sees correct state.
         messageRepository.get().sendListMessage(
             chatId, listId, list.title,
             com.firestream.chat.domain.model.ListDiff(unshared = true)
@@ -331,7 +432,7 @@ class ListRepositoryImpl @Inject constructor(
         try {
             val listData = listSource.getList(listId)
             if (listData != null) {
-                listDao.insert(ListEntity.fromDomain(listData))
+                listDao.insert(ListEntity.fromDomain(mergeWithCachedItems(listData)))
             } else {
                 listDao.delete(listId)
             }

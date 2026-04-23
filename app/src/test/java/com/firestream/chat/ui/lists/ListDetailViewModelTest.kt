@@ -85,7 +85,7 @@ class ListDetailViewModelTest {
     @Test
     fun `addItem calls repository`() = runTest {
         every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1"))
-        coEvery { listRepository.addItem("list1", "Eggs", null, null) } returns Result.success(Unit)
+        coEvery { listRepository.addItem("list1", any(), "Eggs", null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -93,7 +93,7 @@ class ListDetailViewModelTest {
         viewModel.addItem("Eggs")
         runCurrent()
 
-        coVerify(exactly = 1) { listRepository.addItem("list1", "Eggs", null, null) }
+        coVerify(exactly = 1) { listRepository.addItem("list1", any(), "Eggs", null, null) }
     }
 
     @Test
@@ -106,17 +106,17 @@ class ListDetailViewModelTest {
         viewModel.addItem("   ")
         runCurrent()
 
-        coVerify(exactly = 0) { listRepository.addItem(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { listRepository.addItem(any(), any(), any(), any(), any()) }
     }
 
     @Test
-    fun `toggleItem calls repository`() = runTest {
+    fun `toggleItem calls repository with target checked state`() = runTest {
         val listData = ListData(
             id = "list1",
             items = listOf(ListItem(id = "i1", text = "Milk"))
         )
         every { listRepository.observeList("list1") } returns flowOf(listData)
-        coEvery { listRepository.toggleItemChecked("list1", "i1") } returns Result.success(Unit)
+        coEvery { listRepository.toggleItemChecked("list1", "i1", true) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -124,7 +124,7 @@ class ListDetailViewModelTest {
         viewModel.toggleItem("i1")
         runCurrent()
 
-        coVerify(exactly = 1) { listRepository.toggleItemChecked("list1", "i1") }
+        coVerify(exactly = 1) { listRepository.toggleItemChecked("list1", "i1", true) }
     }
 
     @Test
@@ -196,6 +196,120 @@ class ListDetailViewModelTest {
 
         coVerify(exactly = 0) { listRepository.clearCheckedItems(any()) }
         assertEquals(1, viewModel.uiState.value.listData?.items?.size)
+    }
+
+    // ── Optimistic UI regression tests — the fix relies on every mutation showing
+    //    immediately so users don't perceive sync lag while Firestore echoes back.
+
+    @Test
+    fun `addItem optimistically appends before repo resolves`() = runTest {
+        every { listRepository.observeList("list1") } returns flowOf(ListData(id = "list1", itemCount = 0))
+        // Suspends forever — we assert UI state BEFORE the repo returns.
+        coEvery { listRepository.addItem("list1", any(), "Milk", null, null) } coAnswers {
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.addItem("Milk")
+        runCurrent()
+
+        val state = viewModel.uiState.value.listData!!
+        assertEquals(1, state.items.size)
+        assertEquals("Milk", state.items.first().text)
+        assertEquals(1, state.itemCount)
+    }
+
+    @Test
+    fun `addItem reverts on repo failure`() = runTest {
+        val initial = ListData(id = "list1", itemCount = 0)
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+        coEvery { listRepository.addItem("list1", any(), "Milk", null, null) } returns Result.failure(Exception("boom"))
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.addItem("Milk")
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertTrue("items should revert", state.listData?.items?.isEmpty() == true)
+        assertEquals(0, state.listData?.itemCount)
+        assertEquals("boom", state.error)
+    }
+
+    @Test
+    fun `removeItem optimistically drops before repo resolves`() = runTest {
+        val initial = ListData(
+            id = "list1",
+            items = listOf(
+                ListItem(id = "i1", text = "Milk", isChecked = true),
+                ListItem(id = "i2", text = "Eggs"),
+            ),
+            itemCount = 2,
+            checkedCount = 1,
+        )
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+        coEvery { listRepository.removeItem("list1", "i1") } coAnswers { kotlinx.coroutines.awaitCancellation() }
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.removeItem("i1")
+        runCurrent()
+
+        val state = viewModel.uiState.value.listData!!
+        assertEquals(1, state.items.size)
+        assertEquals("i2", state.items.first().id)
+        assertEquals(1, state.itemCount)
+        assertEquals(0, state.checkedCount)
+    }
+
+    @Test
+    fun `rapid toggles all reflected in final UI state`() = runTest {
+        val initial = ListData(
+            id = "list1",
+            items = (1..5).map { ListItem(id = "i$it", text = "t$it") },
+            itemCount = 5,
+        )
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+        coEvery { listRepository.toggleItemChecked("list1", any(), any()) } returns Result.success(Unit)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        (1..5).forEach { viewModel.toggleItem("i$it") }
+        runCurrent()
+
+        val state = viewModel.uiState.value.listData!!
+        assertTrue("every optimistic toggle lands", state.items.all { it.isChecked })
+        assertEquals(5, state.checkedCount)
+
+        // Each call uses the target state computed from the latest local value.
+        coVerify(exactly = 1) { listRepository.toggleItemChecked("list1", "i1", true) }
+        coVerify(exactly = 1) { listRepository.toggleItemChecked("list1", "i5", true) }
+    }
+
+    @Test
+    fun `updateItem optimistically rewrites before repo resolves`() = runTest {
+        val initial = ListData(
+            id = "list1",
+            items = listOf(ListItem(id = "i1", text = "Milk")),
+            itemCount = 1,
+        )
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+        coEvery { listRepository.updateItem("list1", "i1", "Oat milk", null, null) } coAnswers {
+            kotlinx.coroutines.awaitCancellation()
+        }
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.updateItem("i1", "Oat milk")
+        runCurrent()
+
+        assertEquals("Oat milk", viewModel.uiState.value.listData?.items?.first()?.text)
     }
 
     @Test

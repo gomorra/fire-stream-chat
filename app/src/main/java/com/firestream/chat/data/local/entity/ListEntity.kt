@@ -18,7 +18,9 @@ data class ListEntity(
     val createdAt: Long,
     val updatedAt: Long,
     val participants: String, // JSON array of userIds
-    val items: String, // JSON array of ListItem
+    val items: String, // JSON array of ListItem (cache of subcollection items; may be empty for lists not yet opened)
+    val itemCount: Int = 0,
+    val checkedCount: Int = 0,
     val sharedChatIds: String = "[]", // JSON array of chatIds
     val genericStyle: String = GenericListStyle.BULLET.name
 ) {
@@ -31,6 +33,8 @@ data class ListEntity(
         updatedAt = updatedAt,
         participants = parseStringList(participants),
         items = parseItemsJson(items),
+        itemCount = itemCount,
+        checkedCount = checkedCount,
         sharedChatIds = parseStringList(sharedChatIds),
         genericStyle = runCatching { GenericListStyle.valueOf(genericStyle) }.getOrDefault(GenericListStyle.BULLET)
     )
@@ -45,6 +49,8 @@ data class ListEntity(
             updatedAt = list.updatedAt,
             participants = JSONArray(list.participants).toString(),
             items = itemsToJson(list.items),
+            itemCount = list.itemCount,
+            checkedCount = list.checkedCount,
             sharedChatIds = JSONArray(list.sharedChatIds).toString(),
             genericStyle = list.genericStyle.name
         )

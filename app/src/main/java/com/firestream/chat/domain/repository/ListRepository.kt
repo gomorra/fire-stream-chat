@@ -11,10 +11,15 @@ interface ListRepository {
     fun observeList(listId: String): Flow<ListData?>
     fun observeMyLists(): Flow<List<ListData>>
     suspend fun createList(title: String, type: ListType, chatId: String? = null, genericStyle: GenericListStyle = GenericListStyle.BULLET): Result<ListData>
-    suspend fun addItem(listId: String, text: String, quantity: String? = null, unit: String? = null): Result<Unit>
+    /**
+     * Adds an item. The caller provides [itemId] so it can insert the item optimistically
+     * into its UI state and have the Firestore listener's echo line up on the same id.
+     */
+    suspend fun addItem(listId: String, itemId: String, text: String, quantity: String? = null, unit: String? = null): Result<Unit>
     suspend fun removeItem(listId: String, itemId: String): Result<Unit>
     suspend fun clearCheckedItems(listId: String): Result<List<String>>
-    suspend fun toggleItemChecked(listId: String, itemId: String): Result<Unit>
+    /** [checked] is the target state. Callers compute `!item.isChecked` from their local state. */
+    suspend fun toggleItemChecked(listId: String, itemId: String, checked: Boolean): Result<Unit>
     suspend fun updateItem(listId: String, itemId: String, text: String, quantity: String? = null, unit: String? = null): Result<Unit>
     suspend fun reorderItems(listId: String, items: List<com.firestream.chat.domain.model.ListItem>): Result<Unit>
     suspend fun updateListTitle(listId: String, title: String): Result<Unit>

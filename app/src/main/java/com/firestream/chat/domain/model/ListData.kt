@@ -42,6 +42,12 @@ data class ListData(
     val updatedAt: Long = System.currentTimeMillis(),
     val participants: List<String> = emptyList(),
     val items: List<ListItem> = emptyList(),
+    // Denormalized counts mirrored on the metadata doc so the Lists tab
+    // can show "N items, M checked" without loading every list's items.
+    // Maintained via FieldValue.increment in the same batch as the
+    // corresponding subcollection write.
+    val itemCount: Int = 0,
+    val checkedCount: Int = 0,
     val sharedChatIds: List<String> = emptyList(),
     val genericStyle: GenericListStyle = GenericListStyle.BULLET
 )

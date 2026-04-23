@@ -71,19 +71,21 @@ internal fun ListBubble(
                     )
                 )
             .then(
-                    // Clickable if:
-                    //  - listData is present AND the list is still shared to this chat
-                    //  - OR it's a diff bubble that isn't deleted/unshared/shared-only
-                    if (listData != null && chatId in listData.sharedChatIds) {
-                        Modifier.clickable(onClick = onClick)
-                    } else if (listData == null && message.listDiff != null
-                        && !message.listDiff.deleted && !message.listDiff.unshared && !message.listDiff.shared) {
-                        Modifier.clickable(onClick = onClick)
-                    } else if (listData != null && chatId !in listData.sharedChatIds) {
-                        // List exists but no longer shared to this chat — show snackbar on tap
-                        Modifier.clickable(onClick = onUnsharedListClick)
-                    } else {
-                        Modifier
+                    run {
+                        val diff = message.listDiff
+                        when {
+                            // Terminal states — list is gone from this chat, tapping can't help
+                            diff?.deleted == true || diff?.unshared == true -> Modifier
+                            // "This list was deleted" placeholder — listData gone, no diff context
+                            listData == null && diff == null -> Modifier
+                            // List exists but no longer shared to this chat — show snackbar
+                            listData != null && chatId !in listData.sharedChatIds ->
+                                Modifier.clickable(onClick = onUnsharedListClick)
+                            // Otherwise navigate; listData may still be loading on the receiver —
+                            // ListDetailScreen handles the loading/access-denied states itself.
+                            message.listId != null -> Modifier.clickable(onClick = onClick)
+                            else -> Modifier
+                        }
                     }
                 )
                 .padding(12.dp)
@@ -241,8 +243,8 @@ private fun StandardListContent(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        val itemCount = listData.items.size
-        val checkedCount = listData.items.count { it.isChecked }
+        val itemCount = listData.itemCount
+        val checkedCount = listData.checkedCount
         val subtitle = when (listData.type) {
             ListType.CHECKLIST, ListType.SHOPPING -> "$checkedCount of $itemCount checked"
             ListType.GENERIC -> "$itemCount item${if (itemCount != 1) "s" else ""}"
@@ -361,9 +363,9 @@ private fun DiffContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            if (!diff.deleted && !diff.unshared && !diff.shared) {
+            if (!diff.deleted && !diff.unshared) {
                 Text(
-                    text = "Tap to view",
+                    text = if (diff.shared) "Tap to open" else "Tap to view",
                     style = MaterialTheme.typography.labelSmall,
                     color = textColor.copy(alpha = 0.5f)
                 )

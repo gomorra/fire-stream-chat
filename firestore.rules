@@ -94,6 +94,11 @@ service cloud.firestore {
         allow create: if isAuth()
                       && request.auth.uid in get(/databases/$(database)/documents/lists/$(listId)).data.participants;
       }
+
+      match /items/{itemId} {
+        allow read, write: if isAuth()
+                           && request.auth.uid in get(/databases/$(database)/documents/lists/$(listId)).data.participants;
+      }
     }
 
     // ── Invite Links ─────────────────────────────────────────────

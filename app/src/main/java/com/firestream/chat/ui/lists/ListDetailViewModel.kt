@@ -26,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import java.util.UUID
 import javax.inject.Inject
 
 private const val DEBOUNCE_MS = 10_000L
@@ -156,19 +157,50 @@ class ListDetailViewModel @Inject constructor(
 
     fun addItem(text: String, quantity: String? = null, unit: String? = null) {
         if (text.isBlank()) return
+        val currentList = _uiState.value.listData ?: return
+        val itemId = UUID.randomUUID().toString()
+        val newItem = ListItem(
+            id = itemId,
+            text = text,
+            quantity = quantity,
+            unit = unit,
+            order = currentList.items.size,
+            addedBy = _uiState.value.currentUserId
+        )
+        // Optimistic insert: append locally so the user sees it immediately. The id matches
+        // the one passed to the repo, so the Firestore listener's echo reconciles in place.
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(
+                items = currentList.items + newItem,
+                itemCount = currentList.itemCount + 1
+            )
+        )
         viewModelScope.launch {
-            listRepository.addItem(listId, text, quantity, unit)
+            listRepository.addItem(listId, itemId, text, quantity, unit)
                 .onSuccess { accumulateAndDebounce(ListDiff(added = listOf(text))) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                }
         }
     }
 
     fun removeItem(itemId: String) {
-        val itemText = _uiState.value.listData?.items?.find { it.id == itemId }?.text ?: itemId
+        val currentList = _uiState.value.listData ?: return
+        val item = currentList.items.find { it.id == itemId } ?: return
+        val remaining = currentList.items.filter { it.id != itemId }
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(
+                items = remaining,
+                itemCount = (currentList.itemCount - 1).coerceAtLeast(0),
+                checkedCount = (currentList.checkedCount - if (item.isChecked) 1 else 0).coerceAtLeast(0)
+            )
+        )
         viewModelScope.launch {
             listRepository.removeItem(listId, itemId)
-                .onSuccess { accumulateAndDebounce(ListDiff(removed = listOf(itemText))) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onSuccess { accumulateAndDebounce(ListDiff(removed = listOf(item.text))) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                }
         }
     }
 
@@ -181,7 +213,11 @@ class ListDetailViewModel @Inject constructor(
         // so the UI reflects the change immediately.
         val remaining = currentList.items.filter { !it.isChecked }
         _uiState.value = _uiState.value.copy(
-            listData = currentList.copy(items = remaining)
+            listData = currentList.copy(
+                items = remaining,
+                itemCount = (currentList.itemCount - checkedItems.size).coerceAtLeast(0),
+                checkedCount = 0
+            )
         )
 
         viewModelScope.launch {
@@ -205,27 +241,30 @@ class ListDetailViewModel @Inject constructor(
     fun toggleItem(itemId: String) {
         val currentList = _uiState.value.listData ?: return
         val item = currentList.items.find { it.id == itemId } ?: return
+        val target = !item.isChecked
 
-        // Optimistic update: toggle locally before Firestore round-trip
         val updatedItems = currentList.items.map {
-            if (it.id == itemId) it.copy(isChecked = !it.isChecked) else it
+            if (it.id == itemId) it.copy(isChecked = target) else it
         }
         _uiState.value = _uiState.value.copy(
-            listData = currentList.copy(items = updatedItems)
+            listData = currentList.copy(
+                items = updatedItems,
+                checkedCount = (currentList.checkedCount + if (target) 1 else -1)
+                    .coerceIn(0, currentList.itemCount)
+            )
         )
 
         viewModelScope.launch {
-            listRepository.toggleItemChecked(listId, itemId)
+            listRepository.toggleItemChecked(listId, itemId, target)
                 .onSuccess {
-                    val diff = if (item.isChecked) {
-                        ListDiff(unchecked = listOf(item.text))
-                    } else {
+                    val diff = if (target) {
                         ListDiff(checked = listOf(item.text))
+                    } else {
+                        ListDiff(unchecked = listOf(item.text))
                     }
                     accumulateAndDebounce(diff)
                 }
                 .onFailure { e ->
-                    // Revert on failure
                     _uiState.value = _uiState.value.copy(
                         listData = currentList,
                         error = e.message
@@ -235,17 +274,32 @@ class ListDetailViewModel @Inject constructor(
     }
 
     fun updateItem(itemId: String, text: String, quantity: String? = null, unit: String? = null) {
+        val currentList = _uiState.value.listData ?: return
+        val updatedItems = currentList.items.map {
+            if (it.id == itemId) it.copy(text = text, quantity = quantity, unit = unit) else it
+        }
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(items = updatedItems)
+        )
         viewModelScope.launch {
             listRepository.updateItem(listId, itemId, text, quantity, unit)
                 .onSuccess { accumulateAndDebounce(ListDiff(edited = listOf(text))) }
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                }
         }
     }
 
     fun reorderItems(reorderedItems: List<ListItem>) {
+        val currentList = _uiState.value.listData ?: return
+        _uiState.value = _uiState.value.copy(
+            listData = currentList.copy(items = reorderedItems)
+        )
         viewModelScope.launch {
             listRepository.reorderItems(listId, reorderedItems)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = e.message) }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(listData = currentList, error = e.message)
+                }
         }
     }
 

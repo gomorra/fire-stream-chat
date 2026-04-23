@@ -79,7 +79,7 @@ class ListDetailViewModelCoalesceTest {
     @Test
     fun `adding an item triggers the list-update use case after the debounce`() = runTest {
         every { listRepository.observeList("list1") } returns flowOf(sharedList())
-        coEvery { listRepository.addItem("list1", "Bread", null, null) } returns Result.success(Unit)
+        coEvery { listRepository.addItem("list1", any(), "Bread", null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -110,7 +110,7 @@ class ListDetailViewModelCoalesceTest {
     @Test
     fun `multiple rapid edits coalesce into one accumulated use case call`() = runTest {
         every { listRepository.observeList("list1") } returns flowOf(sharedList())
-        coEvery { listRepository.addItem("list1", any(), null, null) } returns Result.success(Unit)
+        coEvery { listRepository.addItem("list1", any(), any(), null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -141,7 +141,7 @@ class ListDetailViewModelCoalesceTest {
     fun `fanout hits every shared chat once`() = runTest {
         every { listRepository.observeList("list1") } returns
             flowOf(sharedList(sharedChatIds = listOf("chat1", "chat2", "chat3")))
-        coEvery { listRepository.addItem("list1", "Bread", null, null) } returns Result.success(Unit)
+        coEvery { listRepository.addItem("list1", any(), "Bread", null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
@@ -168,7 +168,7 @@ class ListDetailViewModelCoalesceTest {
         // the plan), onCleared() must flush any pending diff rather than
         // silently cancelling it.
         every { listRepository.observeList("list1") } returns flowOf(sharedList())
-        coEvery { listRepository.addItem("list1", "Bread", null, null) } returns Result.success(Unit)
+        coEvery { listRepository.addItem("list1", any(), "Bread", null, null) } returns Result.success(Unit)
 
         val viewModel = buildViewModel()
         runCurrent()
