@@ -93,36 +93,37 @@ class ListDetailViewModel @Inject constructor(
 
     private fun observeList() {
         viewModelScope.launch {
+            var hasSeenData = false
             listRepository.observeList(listId)
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
                 }
                 .collect { listData ->
                     val state = _uiState.value
-                    if (listData == null && !state.isLoading && !isDeletingList) {
-                        // If the current user is not the owner of the last-known list,
-                        // a null emission means they lost access (removed from participants),
-                        // not that the list was deleted. Show the appropriate message.
-                        val wasOwner = state.listData?.createdBy == state.currentUserId
-                            || state.listData == null  // no prior data → default to deleted path
-                        if (wasOwner) {
-                            _uiState.value = state.copy(isDeleted = true, isLoading = false)
-                        } else {
+                    when {
+                        listData == null && hasSeenData && !isDeletingList -> {
+                            // Transitioned loaded → null: list deleted or access revoked.
+                            val wasOwner = state.listData?.createdBy == state.currentUserId
+                            _uiState.value = if (wasOwner) {
+                                state.copy(isDeleted = true, isLoading = false)
+                            } else {
+                                state.copy(isAccessDenied = true, isLoading = false)
+                            }
+                        }
+                        listData == null -> {
+                            // Freshly shared list: Room is empty on first open and the
+                            // Firestore listener's initial miss would otherwise look like
+                            // a deletion. Stay on the spinner until real data arrives.
+                        }
+                        listData.participants.isNotEmpty()
+                            && state.currentUserId !in listData.participants
+                            && state.currentUserId != listData.createdBy -> {
                             _uiState.value = state.copy(isAccessDenied = true, isLoading = false)
                         }
-                    } else if (listData != null
-                        && listData.participants.isNotEmpty()
-                        && state.currentUserId !in listData.participants
-                        && state.currentUserId != listData.createdBy
-                    ) {
-                        // Firestore delivered the updated doc before Room removed it:
-                        // participant check fires while the document is still visible.
-                        _uiState.value = state.copy(isAccessDenied = true, isLoading = false)
-                    } else {
-                        _uiState.value = state.copy(
-                            listData = listData,
-                            isLoading = false
-                        )
+                        else -> {
+                            hasSeenData = true
+                            _uiState.value = state.copy(listData = listData, isLoading = false)
+                        }
                     }
                 }
         }
@@ -158,7 +159,7 @@ class ListDetailViewModel @Inject constructor(
             text = text,
             quantity = quantity,
             unit = unit,
-            order = currentList.items.size,
+            order = (currentList.items.maxOfOrNull { it.order } ?: -1) + 1,
             addedBy = _uiState.value.currentUserId
         )
         // Optimistic insert: append locally so the user sees it immediately. The id matches

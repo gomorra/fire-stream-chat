@@ -214,12 +214,16 @@ class ListRepositoryImpl @Inject constructor(
         mutexFor(listId).withLock {
             val entity = listDao.getById(listId)
             val existing = entity?.toDomain()?.items.orEmpty()
+            // Use max(order)+1, not size: deletes leave gaps, so size can collide with a
+            // still-living item's order. Firestore orderBy("order") breaks ties by document
+            // id, so colliding new items land in random positions on the receiver's side.
+            val nextOrder = (existing.maxOfOrNull { it.order } ?: -1) + 1
             val item = ListItem(
                 id = itemId,
                 text = text,
                 quantity = quantity,
                 unit = unit,
-                order = existing.size,
+                order = nextOrder,
                 addedBy = userId
             )
             // Room-first: subsequent same-client reads see the new item.

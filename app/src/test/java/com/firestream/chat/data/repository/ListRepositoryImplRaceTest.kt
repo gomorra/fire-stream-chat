@@ -309,6 +309,71 @@ class ListRepositoryImplRaceTest {
     }
 
     @Test
+    fun `addItem after a delete assigns an order strictly greater than every surviving item`() = runTest(testDispatcher) {
+        // Regression: the receiver saw newly-added items land in the middle of the list.
+        // Cause was `order = items.size` — after deletes (especially clearChecked), size
+        // no longer equals max(order)+1, so the new item collided with a still-living
+        // item's order and Firestore tie-broke by doc id (random UUID).
+        val seed = listOf(
+            ListItem(id = "a", text = "a", order = 0),
+            ListItem(id = "b", text = "b", order = 1),
+            ListItem(id = "c", text = "c", order = 2),
+            ListItem(id = "d", text = "d", order = 3),
+        )
+        items.value = seed
+        metadata.value = metadata.value.copy(itemCount = 4)
+        daoStorage[LIST_ID] = ListEntity.fromDomain(metadata.value.copy(items = seed))
+        flowFor(LIST_ID).value = daoStorage[LIST_ID]
+
+        // Delete a middle item so size(=3) no longer equals max(order)+1 (=4).
+        repository.removeItem(LIST_ID, "b").getOrThrow()
+        advanceUntilIdle()
+
+        val newId = UUID.randomUUID().toString()
+        repository.addItem(LIST_ID, newId, "new", null, null).getOrThrow()
+        advanceUntilIdle()
+
+        val newOrder = items.value.single { it.id == newId }.order
+        val survivors = items.value.filter { it.id != newId }
+        assertTrue(
+            "new item's order ($newOrder) must be strictly greater than every survivor " +
+                "(${survivors.map { it.id to it.order }})",
+            survivors.all { newOrder > it.order }
+        )
+    }
+
+    @Test
+    fun `addItem after clearCheckedItems assigns an order greater than unchecked survivors`() = runTest(testDispatcher) {
+        // Worst case of the same regression: clearChecked deletes multiple items at once
+        // without renumbering, so size shrinks far below max(order)+1.
+        val seed = listOf(
+            ListItem(id = "a", text = "a", isChecked = false, order = 0),
+            ListItem(id = "b", text = "b", isChecked = true,  order = 1),
+            ListItem(id = "c", text = "c", isChecked = true,  order = 2),
+            ListItem(id = "d", text = "d", isChecked = false, order = 3),
+        )
+        items.value = seed
+        metadata.value = metadata.value.copy(itemCount = 4, checkedCount = 2)
+        daoStorage[LIST_ID] = ListEntity.fromDomain(metadata.value.copy(items = seed))
+        flowFor(LIST_ID).value = daoStorage[LIST_ID]
+
+        repository.clearCheckedItems(LIST_ID).getOrThrow()
+        advanceUntilIdle()
+
+        val newId = UUID.randomUUID().toString()
+        repository.addItem(LIST_ID, newId, "new", null, null).getOrThrow()
+        advanceUntilIdle()
+
+        val newOrder = items.value.single { it.id == newId }.order
+        val survivors = items.value.filter { it.id != newId }
+        assertTrue(
+            "after clearChecked, new item's order ($newOrder) must be greater than every " +
+                "survivor (${survivors.map { it.id to it.order }})",
+            survivors.all { newOrder > it.order }
+        )
+    }
+
+    @Test
     fun `toggleItemChecked waits for in-flight migration before hitting Firestore`() = runTest(testDispatcher) {
         // Simulate the pre-refactor case where migration is still running when the user
         // taps. Without the gate, setItemChecked would fire a batch.update on a
