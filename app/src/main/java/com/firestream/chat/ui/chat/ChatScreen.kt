@@ -133,6 +133,7 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -167,6 +168,7 @@ fun ChatScreen(
     onSharedMediaClick: () -> Unit = {},
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
+    fromNotification: Boolean = false,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -250,16 +252,34 @@ fun ChatScreen(
         }
     }
 
-    // Restore saved scroll position once messages are first available
+    // Restore saved scroll position once messages are first available.
+    // When opened from a notification, always land on the newest message —
+    // the saved index would point to wherever the user last scrolled.
     LaunchedEffect(uiState.messages.isNotEmpty()) {
         if (uiState.messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
             val savedIndex = viewModel.savedScrollIndex
-            if (savedIndex in 0 until uiState.messages.size) {
+            if (!fromNotification && savedIndex in 0 until uiState.messages.size) {
                 listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
             } else {
                 listState.scrollToItem(uiState.messages.size - 1)
             }
+        }
+    }
+
+    // getMessages() emits the cached batch first, then grows as the remote batch
+    // merges in. If we only scroll to the end of the cached batch above, the
+    // nearBottom hook below refuses to follow when the remote delta is large
+    // (since the cached-last item is outside the visible viewport). For a
+    // notification open we want the latest message — keep snapping to the tail
+    // for a short window until the size settles.
+    LaunchedEffect(fromNotification) {
+        if (!fromNotification) return@LaunchedEffect
+        withTimeoutOrNull(1500L) {
+            snapshotFlow { uiState.messages.size }
+                .collect { size ->
+                    if (size > 0) listState.scrollToItem(size - 1)
+                }
         }
     }
 

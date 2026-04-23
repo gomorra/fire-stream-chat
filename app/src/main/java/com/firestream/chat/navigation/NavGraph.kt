@@ -43,7 +43,7 @@ object Routes {
     const val OTP = "otp/{verificationId}/{phoneNumber}"
     const val PROFILE_SETUP = "profile_setup"
     const val CHAT_LIST = "chat_list"
-    const val CHAT = "chat/{chatId}/{recipientId}"
+    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}"
     const val CONTACTS = "contacts"
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
     // Phase 2 routes
@@ -65,8 +65,8 @@ object Routes {
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
 
-    fun chat(chatId: String, recipientId: String) =
-        "chat/$chatId/$recipientId"
+    fun chat(chatId: String, recipientId: String, fromNotification: Boolean = false) =
+        "chat/$chatId/$recipientId?fromNotification=$fromNotification"
 
     fun messageInfo(messageId: String, chatId: String) =
         "message_info/$messageId/$chatId"
@@ -99,6 +99,9 @@ fun FireStreamNavGraph(
     val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
     val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
     val pendingShare = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(isShareIntent) }
+    // Only true when the chat route originates from a notification tap (MainActivity
+    // intent extras), not from the last-open-chat restore path. Consumed once and reset.
+    val pendingFromNotification = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId != null) }
 
     // Restore last open chat when no deep link or share intent is pending
     val restoredLastChat = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
@@ -200,9 +203,11 @@ fun FireStreamNavGraph(
                     val chatId = pendingChatId.value
                     val senderId = pendingSenderId.value
                     if (chatId != null && senderId != null) {
+                        val fromNotification = pendingFromNotification.value
                         pendingChatId.value = null
                         pendingSenderId.value = null
-                        navController.navigate(Routes.chat(chatId, senderId))
+                        pendingFromNotification.value = false
+                        navController.navigate(Routes.chat(chatId, senderId, fromNotification))
                     }
                 }
             }
@@ -248,11 +253,16 @@ fun FireStreamNavGraph(
             route = Routes.CHAT,
             arguments = listOf(
                 navArgument("chatId") { type = NavType.StringType },
-                navArgument("recipientId") { type = NavType.StringType }
+                navArgument("recipientId") { type = NavType.StringType },
+                navArgument("fromNotification") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
             val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
+            val fromNotification = backStackEntry.arguments?.getBoolean("fromNotification") ?: false
             ChatScreen(
                 onBackClick = { navController.popBackStack() },
                 onMessageInfoClick = { message, participants ->
@@ -270,7 +280,8 @@ fun FireStreamNavGraph(
                     navController.navigate(Routes.listDetail(listId)) {
                         launchSingleTop = true
                     }
-                }
+                },
+                fromNotification = fromNotification
             )
         }
 
