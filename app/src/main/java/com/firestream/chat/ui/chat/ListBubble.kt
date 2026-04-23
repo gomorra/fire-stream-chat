@@ -51,8 +51,7 @@ internal fun ListBubble(
         if (isDark) com.firestream.chat.ui.theme.SentBubbleDark
         else com.firestream.chat.ui.theme.SentBubble
     } else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onSurface
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
     Column(

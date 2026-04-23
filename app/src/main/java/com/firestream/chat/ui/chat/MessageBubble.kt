@@ -176,8 +176,7 @@ internal fun MessageBubble(
     val bubbleColor = if (isOwnMessage) {
         if (isDark) SentBubbleDark else SentBubble
     } else MaterialTheme.colorScheme.surfaceVariant
-    val textColor = if (isOwnMessage) MaterialTheme.colorScheme.onSurface
-    else MaterialTheme.colorScheme.onSurfaceVariant
+    val textColor = MaterialTheme.colorScheme.onSurface
 
     val showTail = remember(groupPosition) {
         groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST
