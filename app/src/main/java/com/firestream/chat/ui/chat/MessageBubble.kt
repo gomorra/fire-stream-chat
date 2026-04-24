@@ -140,6 +140,16 @@ private val CenteredLineHeight = LineHeightStyle(
 // emits `copy-cat1` moves over `Alignment.Horizontal` slots that ART's class
 // verifier rejects on both arm64 and x86_64 — the "Verifier rejected class
 // MessageBubbleKt" crash on chat open.
+// Per-bubble display state. Kept as a separate holder so MessageBubble stays
+// at 10 explicit params — adding isHighlighted / uploadProgress directly pushed
+// the Compose-synthetic JVM signature to 15 total, tripping ART's VerifyError
+// at 0x32A (copy-cat1 over a Reference slot) in register-allocator spill.
+@Immutable
+internal data class MessageBubbleState(
+    val uploadProgress: Float? = null,
+    val isHighlighted: Boolean = false,
+)
+
 @Immutable
 internal data class MessageBubbleCallbacks(
     val onDelete: (() -> Unit)?,
@@ -175,8 +185,7 @@ internal fun MessageBubble(
     readReceiptsAllowed: Boolean = true,
     userIdToDisplayName: Map<String, String> = emptyMap(),
     callbacks: MessageBubbleCallbacks,
-    uploadProgress: Float? = null,
-    isHighlighted: Boolean = false,
+    state: MessageBubbleState = MessageBubbleState(),
 ) {
     val isDark = LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
@@ -263,8 +272,8 @@ internal fun MessageBubble(
         horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
     ) {
         val highlightColor by animateColorAsState(
-            targetValue = if (isHighlighted) MaterialTheme.colorScheme.tertiary else Color.Transparent,
-            animationSpec = tween(durationMillis = if (isHighlighted) 200 else 600),
+            targetValue = if (state.isHighlighted) MaterialTheme.colorScheme.tertiary else Color.Transparent,
+            animationSpec = tween(durationMillis = if (state.isHighlighted) 200 else 600),
             label = "jumpToSourceHighlight"
         )
         Box {
@@ -397,7 +406,8 @@ internal fun MessageBubble(
                                     )
 
                                     // Upload progress overlay
-                                    if (uploadProgress != null && uploadProgress < 1f) {
+                                    val progress = state.uploadProgress
+                                    if (progress != null && progress < 1f) {
                                         Box(
                                             modifier = Modifier
                                                 .align(Alignment.BottomEnd)
@@ -410,7 +420,7 @@ internal fun MessageBubble(
                                             contentAlignment = Alignment.Center
                                         ) {
                                             CircularProgressIndicator(
-                                                progress = { uploadProgress },
+                                                progress = { progress },
                                                 modifier = Modifier.size(20.dp),
                                                 color = Color.White,
                                                 strokeWidth = 2.dp

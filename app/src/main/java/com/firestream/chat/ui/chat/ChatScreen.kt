@@ -864,7 +864,6 @@ fun ChatScreen(
                                             currentUserId = uiState.session.currentUserId,
                                             readReceiptsAllowed = uiState.session.readReceiptsAllowed && !uiState.session.isBroadcast,
                                             userIdToDisplayName = uiState.session.participantNameMap,
-                                            isHighlighted = highlightedMessageId == message.id,
                                             callbacks = MessageBubbleCallbacks(
                                                 onDelete = if (isOwn) {
                                                     { viewModel.deleteMessage(message.id) }
@@ -916,7 +915,10 @@ fun ChatScreen(
                                                     }
                                                 } else null,
                                             ),
-                                            uploadProgress = uploadProgressMap[message.id],
+                                            state = MessageBubbleState(
+                                                uploadProgress = uploadProgressMap[message.id],
+                                                isHighlighted = highlightedMessageId == message.id,
+                                            ),
                                         )
 
                                         // Swipe-to-react panel popup
