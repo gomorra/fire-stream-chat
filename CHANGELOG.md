@@ -23,7 +23,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Code-review workflow.** `/simplify` now runs three parallel Sonnet-medium reviewers by default, with an Opus-medium triggered path for concurrency- or security-heavy diffs. (`378c5bb`, `6a72ea2`)
 
 ### Refactored
-- **Clipboard: use Android `ClipboardManager` directly.** Settings → App Version long-press migrated off the deprecated `LocalClipboardManager`, matching the pattern already used in `MessageBubble.kt:714`.
+- **Clipboard: use Android `ClipboardManager` directly.** Settings → App Version long-press migrated off the deprecated `LocalClipboardManager`, matching the pattern already used in `MessageBubble.kt:714`. (`dd0947e`)
 
 ## [1.0.0] — 2026-04-23
 
