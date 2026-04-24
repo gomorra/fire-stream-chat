@@ -1,9 +1,7 @@
 package com.firestream.chat.navigation
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
@@ -129,27 +127,27 @@ fun FireStreamNavGraph(
         startDestination = Routes.LOGIN,
         enterTransition = {
             slideInHorizontally(
-                initialOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
-                animationSpec = tween(350, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(350, easing = FastOutSlowInEasing))
+                initialOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+            )
         },
         exitTransition = {
             slideOutHorizontally(
-                targetOffsetX = { fullWidth -> -(fullWidth * 0.08f).toInt() },
-                animationSpec = tween(350, easing = FastOutSlowInEasing)
-            ) + fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing))
+                targetOffsetX = { fullWidth -> -(fullWidth / 3) },
+                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+            )
         },
         popEnterTransition = {
             slideInHorizontally(
-                initialOffsetX = { fullWidth -> -(fullWidth * 0.08f).toInt() },
-                animationSpec = tween(350, easing = FastOutSlowInEasing)
-            ) + fadeIn(animationSpec = tween(350, easing = FastOutSlowInEasing))
+                initialOffsetX = { fullWidth -> -(fullWidth / 3) },
+                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+            )
         },
         popExitTransition = {
             slideOutHorizontally(
-                targetOffsetX = { fullWidth -> (fullWidth * 0.25f).toInt() },
-                animationSpec = tween(350, easing = FastOutSlowInEasing)
-            ) + fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing))
+                targetOffsetX = { fullWidth -> fullWidth },
+                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+            )
         }
     ) {
         composable(Routes.LOGIN) {
