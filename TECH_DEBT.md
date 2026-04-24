@@ -59,6 +59,20 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Sync-path regression coverage — Firebase emulator tests + per-list-mutex tripwire
+
+**The smell.** Two related list-sync bugs shipped in 2026-04-23/24 — `e3c2c9c` (new items colliding on `order` after deletes) and `eed7519` (receiver's live updates clobbered by a race between `observeList`'s metadata listener, its items listener, and `ensureListSyncRunning`'s `observeMyLists` sync). Both were caught by dogfooding, not by tests. The race-condition class in particular can't be reliably reproduced in `runTest` with mocked DAOs: I tried adding a unit test for `eed7519`, found it passed even with the mutex reverted (false negative), and pulled it. The per-list mutex fix is logically correct but has no executable regression guard.
+
+**Why we haven't fixed it.** The gap is two pieces, and neither is a drive-by:
+- No Firebase emulator harness. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
+- No white-box tripwire asserting that `listDao.insert` callers in `ListRepositoryImpl.observeList`'s two listeners and `ensureListSyncRunning` hold `mutexFor(listId)`. A future refactor that accidentally strips one of the three `mutexFor(...).withLock { ... }` blocks would re-introduce `eed7519` silently. Five-minute test, lasts forever.
+
+**When to revisit.** Planned-for-soon, not deferred indefinitely — the user flagged a longer development horizon on 2026-04-24 and asked what coverage was in place. The trigger is the next free half-day: scaffold the emulator task first (`sender + receiver` repository instances against one emulator, asserting Room convergence on list add/toggle/clear, chat send/receive, and shared-list fan-out — ~5–10 tests total, not a full suite), then the tripwire test. Skip property-based / stress tests; they'll only produce the same false-negatives my pulled test did.
+
+**Do not** try to add a plain-unit-test regression for `eed7519` without the emulator — the synchronous DAO mocks collapse the interleaving the bug depends on. Verified experimentally: both `observeMyLists` and `observeList` metadata mutexes can be reverted and the test still passes.
+
+---
+
 ## Declined — not worth the churn
 
 ### Split `ChatRepository` (30 methods) and `MessageRepository` (25 methods) into smaller interfaces
@@ -70,6 +84,27 @@ Known refactors and code smells that have been consciously deferred or declined.
 **When to revisit.** Only if/when we commit to a broader "use cases everywhere" architectural shift. Half-doing it (interface split without use-case promotion) is pure churn with no payoff. If the sprawl starts actively hurting onboarding or code navigation, do both halves together or not at all.
 
 **Related:** finding #7 from the April 2026 audit; the updated use-case policy in `CLAUDE.md` already documents the pragmatic "managers as escape hatch" pattern.
+
+---
+
+## Planned — designed but not yet scheduled
+
+### Split `SignalDatabase` out of `AppDatabase` (unblocks encryption-in-debug)
+
+**The smell.** The seven Signal Protocol tables (`signal_identity`, `signal_prekeys`, `signal_signed_prekeys`, `signal_sessions`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) live inside `AppDatabase` alongside chats/messages/lists. `DatabaseModule.kt:30`'s `fallbackToDestructiveMigration()` wipes the entire DB whenever `MessageEntity`/`ChatEntity` schemas iterate, so every forgotten version bump destroys the user's Signal identity, pre-keys, and peer session state. To avoid that pain, `MessageRepositoryImpl.kt:296` skips encryption in debug (`!BuildConfig.DEBUG`) and `androidComponents.onVariants` excludes `libsignal_jni.so` from debug APKs. The practical effect: encryption is never exercised in day-to-day dev.
+
+**Why we haven't done it.** We have a complete plan (see below) but are holding off until there's a focused window to land it, verify it through a few schema iterations, and then remove the two debug guards as a follow-up. Waiting on user readiness, not on any technical block.
+
+**What the plan does.** Creates a new `SignalDatabase` (Room, `signal.db`) holding the seven Signal entities + `SignalDao`. `SignalProtocolStoreImpl` already takes `SignalDao` by `@Inject` constructor — no rewiring beyond the one line in `DatabaseModule.kt:46`. `AppDatabase` bumps 18 → 19 with a `MIGRATION_18_19` that `DROP TABLE`s the seven legacy Signal tables. Structurally clean: none of the Signal entities has a foreign key into a non-Signal table. No data-copy migration needed — the only users are debug users, and debug's libsignal has been excluded so there are no valid Signal rows to preserve.
+
+**Follow-up after verifying the split holds:**
+1. Remove `!BuildConfig.DEBUG` guard in `MessageRepositoryImpl.kt:296`
+2. Remove the `androidComponents.onVariants(selector().withBuildType("debug"))` block in `app/build.gradle.kts` that excludes `libsignal_jni.so`
+3. Delete the "Encryption is disabled in debug builds" note in `CLAUDE.md`
+
+**When to revisit.** When ready to land the encryption-in-debug story. Plan is executable as-written — one step, Sonnet/Medium, ~1 hour including the verification smoke tests.
+
+**Plan file:** `~/.claude/plans/i-wanna-have-new-mutable-ripple.md` (last updated 2026-04-24; current content is the SignalDatabase split — earlier versions of the file covered transition tweaks and the baseline profile, both now shipped).
 
 ---
 
