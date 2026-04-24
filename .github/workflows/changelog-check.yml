@@ -1,0 +1,68 @@
+name: Changelog check
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify CHANGELOG.md was updated
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.sha }}
+          NO_CHANGELOG_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" = "pull_request" ]; then
+            base="$PR_BASE"
+            head="$PR_HEAD"
+          else
+            base="$PUSH_BEFORE"
+            head="$PUSH_AFTER"
+          fi
+
+          # Initial push (new branch) or force-push with orphan history — nothing to compare.
+          if [ "$base" = "0000000000000000000000000000000000000000" ] || [ -z "$base" ]; then
+            echo "No base commit to diff against; skipping check."
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base" "$head")
+          app_changed=$(echo "$changed" | grep -E '^(app/src/|functions/)' || true)
+          changelog_changed=$(echo "$changed" | grep -E '^CHANGELOG\.md$' || true)
+
+          if [ -z "$app_changed" ]; then
+            echo "No app/ or functions/ changes — CHANGELOG update not required."
+            exit 0
+          fi
+
+          if [ -n "$changelog_changed" ]; then
+            echo "CHANGELOG.md was updated alongside app changes. ✓"
+            exit 0
+          fi
+
+          if [ "$NO_CHANGELOG_LABEL" = "true" ]; then
+            echo "::notice::App changes without CHANGELOG update, but 'no-changelog' label is applied."
+            exit 0
+          fi
+
+          if [ "$EVENT" = "push" ]; then
+            echo "::warning::Push to main touched app/ or functions/ without updating CHANGELOG.md. Add an entry under ## [Unreleased] in a follow-up commit."
+            exit 0
+          fi
+
+          echo "::error::App changes detected but CHANGELOG.md was not updated."
+          echo "Add an entry under ## [Unreleased] in CHANGELOG.md, or apply the 'no-changelog' label for exempt PRs (docs-only, test-only, refactors)."
+          exit 1

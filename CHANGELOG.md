@@ -5,6 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [Unreleased]
 
 ### Added
+- **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
 - **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
 
 ## [2026-04-24]

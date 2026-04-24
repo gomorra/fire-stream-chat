@@ -230,6 +230,21 @@ Three functions in `functions/index.js`. Runtime: Node.js 20.
 
 Deferred and declined refactors are catalogued in `TECH_DEBT.md` at the repo root. Before proposing a larger cleanup or interface split, check if it's already been evaluated there — each entry records the reason and the trigger condition for revisiting. Add a new entry when you consciously decide not to fix something you noticed.
 
+## Changelog
+
+User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format, dated by merge day — no release tags yet).
+
+**After each user-visible commit**, append an entry under `## [Unreleased]` in the matching section (`Added` / `Fixed` / `Changed` / `Removed`):
+- Lead with a bold descriptive name, not the raw commit subject.
+- One or two sentences explaining **what changed and why** — existing entries are editorial, not commit dumps.
+- End with the commit hash in backticks: `` (`8bb2a2e`) ``. Group related commits by appending more hashes: `` (`a972533`, `e892f58`) ``.
+
+**Skip for:** doc-only, test-only, refactors with no user-visible effect, CI/tooling changes.
+
+**At release time:** rename `## [Unreleased]` to `## [YYYY-MM-DD]` and add a new empty `## [Unreleased]` block above.
+
+`.github/workflows/changelog-check.yml` fails PRs that touch `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Apply the `no-changelog` label to bypass for exempt PRs.
+
 ## Sensitive Files
 
 These are gitignored and must not be committed:
