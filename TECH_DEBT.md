@@ -36,6 +36,29 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `testReleaseUnitTest` — 14 Compose/Robolectric tests fail to resolve the launcher activity
+
+**The smell.** `./gradlew testReleaseUnitTest` reports 14 failures across `MessageBubbleSmokeTest` (6), `MessageBubbleScreenshotTest` (4), and `ChatListItemUiTest` (4). Every failure is the same Robolectric error: `Unable to resolve activity for Intent { act=android.intent.action.MAIN cat=[LAUNCHER] cmp=com.firestream.chat/androidx.activity.ComponentActivity }` (Robolectric PR [#4736](https://github.com/robolectric/robolectric/pull/4736)). The debug suite (`testDebugUnitTest`) is green — only release is affected.
+
+**Why we haven't fixed it.**
+- The tests use `ActivityScenarioRule` / `createAndroidComposeRule<ComponentActivity>()`, which Robolectric resolves by launching the manifest-declared launcher activity. R8/minification in the release variant strips or rewrites the launcher entry Robolectric is hunting for; the debug variant leaves it intact.
+- The usual workarounds (a dedicated test-manifest that declares `ComponentActivity` as `LAUNCHER`, or switching to `createComposeRule()` for the pure-composable smoke tests) touch every affected test and need a variant-scoped manifest change — not a one-liner.
+- These are UI-smoke/screenshot tests; the production code they cover is exercised by the debug suite too, so release-suite breakage isn't hiding a production regression.
+
+**When to revisit.** When CI starts gating on `testReleaseUnitTest` (currently the debug suite is the gate), or when anyone actually relies on Robolectric screenshot tests for release-variant output. Quick fix: add an `app/src/testRelease/AndroidManifest.xml` stub declaring `androidx.activity.ComponentActivity` as `MAIN/LAUNCHER`, or migrate the affected tests to `createComposeRule()` (no Activity required).
+
+---
+
+### `MessageRepositoryBlockTest › sendMessage succeeds when recipient is not blocked` — release-only failure
+
+**The smell.** `MessageRepositoryBlockTest.kt:81` fails in `testReleaseUnitTest` only. The test stubs `messageSource.sendPlainMessage(...)` and asserts `result.isSuccess`, but release builds route through the Signal-encrypted send path instead of `sendPlainMessage` — the unmocked encrypted branch returns `Result.failure`, so the assertion trips.
+
+**Why we haven't fixed it.** Root cause is the `BuildConfig.DEBUG` guard in `MessageRepositoryImpl` (documented in `CLAUDE.md`: encryption disabled in debug to avoid key-loss during development). The test was written against the debug path. A proper fix either (a) mocks both paths and runs the assertion against whichever matches `BuildConfig.DEBUG`, or (b) injects the Signal path behind a test-only seam. Neither is a drive-by change, and the test provides no signal the debug suite doesn't already.
+
+**When to revisit.** Same trigger as the Robolectric item above: when `testReleaseUnitTest` becomes a CI gate. Until then, keep running the debug suite as the default.
+
+---
+
 ## Declined — not worth the churn
 
 ### Split `ChatRepository` (30 methods) and `MessageRepository` (25 methods) into smaller interfaces
