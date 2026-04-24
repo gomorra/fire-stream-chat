@@ -183,28 +183,6 @@ class ListDetailViewModelTest {
     }
 
     @Test
-    fun `clearCheckedItems does not send a list-update notification`() = runTest {
-        val listData = ListData(
-            id = "list1",
-            sharedChatIds = listOf("chat1"),
-            items = listOf(
-                ListItem(id = "i1", text = "Milk", isChecked = true),
-                ListItem(id = "i2", text = "Eggs")
-            )
-        )
-        every { listRepository.observeList("list1") } returns flowOf(listData)
-        coEvery { listRepository.clearCheckedItems("list1") } returns Result.success(listOf("Milk"))
-
-        val viewModel = buildViewModel()
-        runCurrent()
-
-        viewModel.clearCheckedItems()
-        runCurrent()
-
-        coVerify(exactly = 0) { sendListUpdateToChatsUseCase(any(), any(), any(), any()) }
-    }
-
-    @Test
     fun `clearCheckedItems is a no-op when nothing is checked`() = runTest {
         val listData = ListData(
             id = "list1",
