@@ -58,11 +58,6 @@ jobs:
             exit 0
           fi
 
-          if [ "$EVENT" = "push" ]; then
-            echo "::warning::Push to main touched app/ or functions/ without updating CHANGELOG.md. Add an entry under ## [Unreleased] in a follow-up commit."
-            exit 0
-          fi
-
           echo "::error::App changes detected but CHANGELOG.md was not updated."
           echo "Add an entry under ## [Unreleased] in CHANGELOG.md, or apply the 'no-changelog' label for exempt PRs (docs-only, test-only, refactors)."
           exit 1

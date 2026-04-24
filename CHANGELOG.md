@@ -8,6 +8,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
 - **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
 
+### Changed
+- **Snappier NavHost slide transitions.** Shortened per-route slide durations so navigation in and out of Chat and List Detail feels less sluggish. (`f974e5b`)
+
 ## [2026-04-24]
 
 ### Added
