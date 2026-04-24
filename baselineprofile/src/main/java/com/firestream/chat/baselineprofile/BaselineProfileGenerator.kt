@@ -1,15 +1,39 @@
 package com.firestream.chat.baselineprofile
 
+import android.util.Log
+import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.benchmark.macro.junit4.BaselineProfileRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.Direction
 import androidx.test.uiautomator.Until
+import java.io.ByteArrayOutputStream
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 private const val PACKAGE_NAME = "com.firestream.chat"
+private const val LOG_TAG = "BaselineGen"
+
+/**
+ * Dumps the current UI hierarchy to logcat and throws — used when a `device.wait`
+ * returns null so we can see exactly which screen the app was on.
+ */
+private fun MacrobenchmarkScope.dumpAndFail(what: String): Nothing {
+    val buf = ByteArrayOutputStream()
+    runCatching { device.dumpWindowHierarchy(buf) }
+    val xml = buf.toString(Charsets.UTF_8)
+    // Strip bytes we don't care about; only log the resource-ids + visible texts.
+    val highlights = Regex("""(resource-id="[^"]+"|text="[^"]+")""")
+        .findAll(xml)
+        .map { it.value }
+        .filter { !it.endsWith("=\"\"") }
+        .distinct()
+        .take(60)
+        .joinToString("\n  ")
+    Log.e(LOG_TAG, "$what — visible ids/texts:\n  $highlights")
+    error(what)
+}
 
 // Firebase Console test phone number (see baselineprofile/README.md).
 // Fictional number + fixed OTP that bypasses SMS.
@@ -29,39 +53,51 @@ class BaselineProfileGenerator {
         includeInStartupProfile = true,
     ) {
         pressHome()
-        startActivityAndWait()
+        // Pre-grant POST_NOTIFICATIONS so the runtime permission dialog
+        // doesn't steal focus before LoginScreen is interactive.
+        device.executeShellCommand("pm grant $PACKAGE_NAME android.permission.POST_NOTIFICATIONS")
+        // Bypass MacrobenchmarkScope.startActivityAndWait() — its framestats
+        // check doesn't work on software-GPU emulators (swiftshader_indirect)
+        // and throws "Unable to confirm activity launch completion".
+        killProcess()
+        device.executeShellCommand("am start -W -n $PACKAGE_NAME/.MainActivity")
+        device.wait(Until.hasObject(By.pkg(PACKAGE_NAME).depth(0)), 30_000)
+            ?: error("MainActivity did not launch within 30s")
 
-        // --- Login ---
+        // --- Login (conditional — BaselineProfileRule runs the block multiple
+        // times, and FirebaseAuth persistence survives `killProcess`, so
+        // iterations 2+ go straight to ChatListScreen without a login form) ---
         val countryInput = device.wait(Until.findObject(By.res("country_code_input")), 15_000)
-            ?: error("country_code_input not found on LoginScreen")
-        countryInput.text = TEST_PHONE_COUNTRY
+        if (countryInput != null) {
+            countryInput.text = TEST_PHONE_COUNTRY
 
-        val phoneInput = device.wait(Until.findObject(By.res("phone_input")), 5_000)
-            ?: error("phone_input not found on LoginScreen")
-        phoneInput.text = TEST_PHONE_LOCAL
+            val phoneInput = device.findObject(By.res("phone_input"))
+                ?: dumpAndFail("phone_input not found on LoginScreen")
+            phoneInput.text = TEST_PHONE_LOCAL
 
-        device.findObject(By.res("send_otp_button"))?.click()
-            ?: error("send_otp_button not found on LoginScreen")
+            device.findObject(By.res("send_otp_button"))?.click()
+                ?: dumpAndFail("send_otp_button not found on LoginScreen")
 
-        // --- OTP ---
-        val otpInput = device.wait(Until.findObject(By.res("otp_input")), 20_000)
-            ?: error("otp_input not found on OtpScreen")
-        otpInput.text = TEST_OTP
-        device.findObject(By.res("verify_otp_button"))?.click()
-            ?: error("verify_otp_button not found on OtpScreen")
+            val otpInput = device.wait(Until.findObject(By.res("otp_input")), 20_000)
+                ?: dumpAndFail("otp_input not found on OtpScreen")
+            otpInput.text = TEST_OTP
+            device.findObject(By.res("verify_otp_button"))?.click()
+                ?: dumpAndFail("verify_otp_button not found on OtpScreen")
 
-        // --- Optional profile setup (first-run only) ---
-        // If ProfileSetupScreen appears within 5s, fill it in. Otherwise assume
-        // we landed on ChatListScreen (returning user).
-        val profileNameInput = device.wait(Until.findObject(By.res("profile_name_input")), 5_000)
-        if (profileNameInput != null) {
-            profileNameInput.text = "Baseline Tester"
-            device.findObject(By.res("profile_complete_button"))?.click()
+            // Profile setup only shows for first-ever login of a fresh user.
+            val profileNameInput = device.wait(Until.findObject(By.res("profile_name_input")), 5_000)
+            if (profileNameInput != null) {
+                profileNameInput.text = "Baseline Tester"
+                device.findObject(By.res("profile_complete_button"))?.click()
+            }
         }
 
         // --- ChatList ---
-        device.wait(Until.findObject(By.res("chat_list_root")), 20_000)
-            ?: error("chat_list_root not found on ChatListScreen")
+        // MainScreen's pager state survives killProcess (rememberSaveable), so
+        // iteration 2+ may resume on Lists/Calls tab. Snap back to Chats first.
+        device.findObject(By.text("Chats"))?.click()
+        device.wait(Until.findObject(By.res("chat_list_root")), 30_000)
+            ?: dumpAndFail("chat_list_root not found on ChatListScreen")
 
         val firstChat = device.wait(Until.findObject(By.res("chat_list_item")), 10_000)
         if (firstChat != null) {

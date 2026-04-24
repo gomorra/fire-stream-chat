@@ -37,12 +37,10 @@ android {
             ndk {
                 abiFilters += "x86_64"
             }
-            packaging {
-                jniLibs {
-                    // Encryption is disabled in debug (BuildConfig.DEBUG guard) — exclude libsignal native lib (~70 MB)
-                    excludes += "**/libsignal_jni.so"
-                }
-            }
+            // libsignal_jni.so exclusion for debug is applied via
+            // androidComponents.onVariants below. Setting it here as
+            // `packaging.jniLibs.excludes` leaks to release in AGP 8.7.3,
+            // which silently broke release-build encryption.
         }
         release {
             signingConfig = signingConfigs.getByName("debug")
@@ -52,6 +50,15 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Opt-in: bundle x86_64 native libs so baseline profile generation
+            // works on x86 emulators (adds ~40 MB from libsignal_jni.so).
+            // Pass `-PbaselineProfileEmulator=true` when invoking
+            // :app:generateBaselineProfile; production release builds omit this.
+            if (project.findProperty("baselineProfileEmulator") == "true") {
+                ndk {
+                    abiFilters += "x86_64"
+                }
+            }
         }
     }
 
@@ -97,6 +104,17 @@ android {
         // existing RealtimePresenceSourceTest crashes on its first Log call.
         // Robolectric tests bypass this and use Robolectric shadows instead.
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+androidComponents {
+    // Exclude libsignal_jni.so only from the debug variant. Encryption is
+    // disabled in debug (BuildConfig.DEBUG guard in MessageRepositoryImpl),
+    // so shipping the ~70 MB native lib is wasted space during dev iteration.
+    // Scoping via onVariants avoids the AGP 8.7.3 quirk where
+    // buildTypes.debug.packaging.jniLibs.excludes leaks to release builds.
+    onVariants(selector().withBuildType("debug")) { variant ->
+        variant.packaging.jniLibs.excludes.add("**/libsignal_jni.so")
     }
 }
 
