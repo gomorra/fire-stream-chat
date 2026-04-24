@@ -34,8 +34,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -159,7 +164,7 @@ private data class FullscreenImage(
     val onSaveToDownloads: (() -> Unit)? = null,
 )
 
-@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun ChatScreen(
     onBackClick: () -> Unit,
@@ -307,6 +312,14 @@ fun ChatScreen(
                 .collect { size ->
                     if (size > 0) listState.scrollToItem(size - 1)
                 }
+        }
+    }
+
+    // When the IME opens, scroll to the last message so it sits above the composer.
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible && uiState.messages.messages.isNotEmpty()) {
+            listState.animateScrollToItem(uiState.messages.messages.lastIndex)
         }
     }
 
@@ -494,6 +507,7 @@ fun ChatScreen(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
+        contentWindowInsets = WindowInsets.systemBars,
         topBar = {
             TopAppBar(
                 title = {
@@ -615,6 +629,7 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .consumeWindowInsets(padding)
                 .imePadding()
         ) {
             // Pinned message banner
