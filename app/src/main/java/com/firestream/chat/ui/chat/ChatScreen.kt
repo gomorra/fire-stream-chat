@@ -38,13 +38,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -236,31 +234,46 @@ fun ChatScreen(
         }
     }
 
+    // Scroll the LazyColumn (reverseLayout=true) to `reversedIdx` and nudge the
+    // item to the centre of the viewport. One frame of delay lets the scroll settle
+    // before reading itemInfo.
+    suspend fun scrollToAndCenter(reversedIdx: Int) {
+        listState.scrollToItem(reversedIdx)
+        delay(16)
+        val viewportHeight = listState.layoutInfo.viewportSize.height
+        val itemInfo = listState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.index == reversedIdx }
+        if (itemInfo != null && viewportHeight > 0) {
+            listState.animateScrollBy(-(viewportHeight - itemInfo.size) / 2f)
+        }
+    }
+
     fun jumpToSourceMessage(sourceId: String) {
-        val idx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
-        if (idx < 0) return
+        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
+        if (chronoIdx < 0) return
         highlightedMessageId = sourceId
         scope.launch {
-            listState.scrollToItem(idx)
-            delay(16)
-            val viewportHeight = listState.layoutInfo.viewportSize.height
-            val itemInfo = listState.layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == idx }
-            if (itemInfo != null && viewportHeight > 0) {
-                listState.animateScrollBy(-(viewportHeight - itemInfo.size) / 2f)
-            }
+            scrollToAndCenter(uiState.messages.messages.lastIndex - chronoIdx)
         }
     }
 
     // Save scroll position when leaving so it can be restored on re-entry.
     // SavedStateHandle survives config changes (fast path); DataStore survives
     // process death (slow path). See ChatViewModel.persistScrollPosition.
+    //
+    // The list uses reverseLayout=true, so `firstVisibleItemIndex` refers to the
+    // reversed view (0 = newest). Persistence stays chronological: translate with
+    // `size - 1 - reversedIdx` before handing to the VM/DataStore so the stored
+    // index is stable against the LazyColumn's layout direction.
     DisposableEffect(Unit) {
         onDispose {
-            val index = listState.firstVisibleItemIndex
-            val offset = listState.firstVisibleItemScrollOffset
-            viewModel.saveScrollPosition(index, offset)
-            viewModel.persistScrollPosition(index, offset)
+            val size = uiState.messages.messages.size
+            if (size > 0) {
+                val chronoIndex = size - 1 - listState.firstVisibleItemIndex
+                val offset = listState.firstVisibleItemScrollOffset
+                viewModel.saveScrollPosition(chronoIndex, offset)
+                viewModel.persistScrollPosition(chronoIndex, offset)
+            }
         }
     }
 
@@ -272,8 +285,11 @@ fun ChatScreen(
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .distinctUntilChanged()
             .debounce(500)
-            .collect { (index, offset) ->
-                viewModel.persistScrollPosition(index, offset)
+            .collect { (reversedIdx, offset) ->
+                val size = uiState.messages.messages.size
+                if (size > 0) {
+                    viewModel.persistScrollPosition(size - 1 - reversedIdx, offset)
+                }
             }
     }
 
@@ -281,24 +297,28 @@ fun ChatScreen(
     // When opened from a notification, always land on the newest message —
     // the saved index would point to wherever the user last scrolled.
     // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
+    //
+    // Saved indices are chronological; convert to the reversed LazyColumn index
+    // with `size - 1 - chronoIdx` at the scroll boundary. "Newest message" is
+    // reversed index 0.
     LaunchedEffect(uiState.messages.messages.isNotEmpty()) {
         if (uiState.messages.messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
             if (fromNotification) {
-                listState.scrollToItem(uiState.messages.messages.size - 1)
+                listState.scrollToItem(0)
                 return@LaunchedEffect
             }
             val size = uiState.messages.messages.size
             val savedIndex = viewModel.savedScrollIndex
             if (savedIndex in 0 until size) {
-                listState.scrollToItem(savedIndex, viewModel.savedScrollOffset)
+                listState.scrollToItem(size - 1 - savedIndex, viewModel.savedScrollOffset)
                 return@LaunchedEffect
             }
             val persisted = viewModel.readPersistedScroll()
             if (persisted != null && persisted.index in 0 until size) {
-                listState.scrollToItem(persisted.index, persisted.offset)
+                listState.scrollToItem(size - 1 - persisted.index, persisted.offset)
             } else {
-                listState.scrollToItem(size - 1)
+                listState.scrollToItem(0)
             }
         }
     }
@@ -314,30 +334,9 @@ fun ChatScreen(
         withTimeoutOrNull(1500L) {
             snapshotFlow { uiState.messages.messages.size }
                 .collect { size ->
-                    if (size > 0) listState.scrollToItem(size - 1)
+                    if (size > 0) listState.scrollToItem(0)
                 }
         }
-    }
-
-    // Drive the message list's scroll from the IME inset per frame so the last
-    // bubble tracks the keyboard's top edge in lockstep with the composer's
-    // animated .imePadding(). Gated on "near the bottom" so mid-history reading
-    // isn't yanked forward when the keyboard opens.
-    val imeInsets = WindowInsets.ime
-    LaunchedEffect(listState) {
-        var previous = 0
-        snapshotFlow { imeInsets.getBottom(density) }
-            .collect { current ->
-                val delta = current - previous
-                previous = current
-                if (delta <= 0) return@collect
-                val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: 0
-                val total = uiState.messages.messages.size
-                if (total > 0 && total - 1 - last <= 2) {
-                    listState.scrollBy(delta.toFloat())
-                }
-            }
     }
 
     // Track screen visibility for read receipts — only mark READ when chat is in foreground.
@@ -387,49 +386,24 @@ fun ChatScreen(
         }
     }
 
-    // Auto-scroll only when near the bottom (within ~1 screen of the end)
-    // Skip until the initial scroll restore has run to avoid racing with it.
+    // Auto-scroll to the newest message only when the user is already near it
+    // (within ~1 screen of reversed index 0). Skip until the initial scroll
+    // restore has run to avoid racing with it.
+    //
+    // In reverseLayout, animateScrollToItem(0) anchors the newest message at
+    // the viewport's visual bottom; async image decode / link-preview load
+    // grow the item upward without clipping its bottom, so the follow-up
+    // nudge needed in the old forward-layout code isn't required here.
     LaunchedEffect(uiState.messages.messages.size) {
         if (!initialScrollDone) return@LaunchedEffect
         if (uiState.messages.messages.isNotEmpty()) {
-            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val firstVisible = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
             val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-            val nearBottom = (uiState.messages.messages.size - 1 - lastVisible) <= visibleCount
+            val nearBottom = firstVisible <= visibleCount
             if (nearBottom) {
-                listState.animateScrollToItem(uiState.messages.messages.size - 1)
-                // For tall items (e.g. images), the bottom edge may still be clipped after
-                // scrollToItem positions the item's top. Wait one frame for layout then nudge.
-                delay(50)
-                val layoutInfo = listState.layoutInfo
-                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()
-                if (lastVisibleItem != null) {
-                    val itemBottom = lastVisibleItem.offset + lastVisibleItem.size
-                    val viewportEnd = layoutInfo.viewportEndOffset
-                    if (itemBottom > viewportEnd) {
-                        listState.animateScrollBy((itemBottom - viewportEnd).toFloat())
-                    }
-                }
+                listState.animateScrollToItem(0)
             }
         }
-    }
-
-    // Scroll correction for receiver images that load from URL after initial layout.
-    // Coil's AsyncImage expands to its natural aspect-ratio height once decoded, which can
-    // push the bottom of the last message below the viewport. Only nudge when the very last
-    // message is the one that just grew — the 10 px threshold prevents micro-jitter.
-    LaunchedEffect(Unit) {
-        snapshotFlow { listState.layoutInfo }
-            .collect { layoutInfo ->
-                val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull() ?: return@collect
-                val totalItems = layoutInfo.totalItemsCount
-                if (totalItems > 0 && lastVisible.index == totalItems - 1) {
-                    val itemBottom = lastVisible.offset + lastVisible.size
-                    val viewportEnd = layoutInfo.viewportEndOffset
-                    if (itemBottom > viewportEnd + 10) {
-                        listState.animateScrollBy((itemBottom - viewportEnd).toFloat())
-                    }
-                }
-            }
     }
 
     // Dismiss swipe reaction panel when user scrolls
@@ -440,39 +414,43 @@ fun ChatScreen(
 
     // Report "at bottom" state to the ViewModel so it can reset the unread counter
     // while the user is actively reading new messages at the tail of the list.
+    // In reverseLayout, "at the bottom" means the newest item (reversed index 0)
+    // is visible at the viewport's visual bottom.
     LaunchedEffect(Unit) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
-            val total = layoutInfo.totalItemsCount
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            total > 0 && lastVisibleIndex >= total - 1
+            val firstVisibleIndex = layoutInfo.visibleItemsInfo.firstOrNull()?.index
+            layoutInfo.totalItemsCount > 0 && firstVisibleIndex == 0
         }
             .distinctUntilChanged()
             .collect { viewModel.setAtBottom(it) }
     }
 
-    // Always scroll to bottom when the user sends a message
+    // Always scroll to the newest message when the user sends a message.
     LaunchedEffect(uiState.messages.scrollToBottomTrigger) {
         if (uiState.messages.scrollToBottomTrigger > 0 && uiState.messages.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.messages.size - 1)
+            listState.animateScrollToItem(0)
         }
     }
 
-    // After a reaction is added, scroll so the reaction chips (bottom of the message) are visible
+    // After a reaction is added, scroll so the reaction chips (rendered below the
+    // bubble inside the item) stay fully visible. indexOfFirst gives a chronological
+    // index; the LazyColumn sees a reversed view so convert with `lastIndex - idx`.
     LaunchedEffect(reactionScrollTarget) {
         val target = reactionScrollTarget ?: return@LaunchedEffect
-        val idx = uiState.messages.messages.indexOfFirst { it.id == target }
-        if (idx < 0) { reactionScrollTarget = null; return@LaunchedEffect }
+        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == target }
+        if (chronoIdx < 0) { reactionScrollTarget = null; return@LaunchedEffect }
+        val reversedIdx = uiState.messages.messages.lastIndex - chronoIdx
 
         // Wait for the reaction row to render (Firestore round-trip + recomposition)
         delay(250)
 
         val viewportHeight = listState.layoutInfo.viewportSize.height
-        var item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+        var item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == reversedIdx }
         if (item == null) {
-            listState.animateScrollToItem(idx)
+            listState.animateScrollToItem(reversedIdx)
             delay(100)
-            item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == idx }
+            item = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.index == reversedIdx }
         }
         item?.let {
             val marginPx = with(density) { 12.dp.toPx() }
@@ -657,9 +635,10 @@ fun ChatScreen(
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.secondaryContainer)
                         .clickable {
-                            val index = uiState.messages.messages.indexOfFirst { it.id == pinned.id }
-                            if (index >= 0) {
-                                scope.launch { listState.animateScrollToItem(index) }
+                            val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == pinned.id }
+                            if (chronoIdx >= 0) {
+                                val reversedIdx = uiState.messages.messages.lastIndex - chronoIdx
+                                scope.launch { listState.animateScrollToItem(reversedIdx) }
                             }
                         }
                         .padding(horizontal = 12.dp, vertical = 6.dp),
@@ -766,19 +745,10 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        val idx = uiState.messages.messages.indexOfFirst { it.id == message.id }
-                                        if (idx >= 0) {
+                                        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == message.id }
+                                        if (chronoIdx >= 0) {
                                             scope.launch {
-                                                listState.scrollToItem(idx)
-                                                delay(16)
-                                                val viewportHeight = listState.layoutInfo.viewportSize.height
-                                                val itemInfo = listState.layoutInfo.visibleItemsInfo
-                                                    .firstOrNull { it.index == idx }
-                                                if (itemInfo != null && viewportHeight > 0) {
-                                                    listState.animateScrollBy(
-                                                        -(viewportHeight - itemInfo.size) / 2f
-                                                    )
-                                                }
+                                                scrollToAndCenter(uiState.messages.messages.lastIndex - chronoIdx)
                                             }
                                         }
                                         viewModel.clearSearch()
@@ -817,35 +787,50 @@ fun ChatScreen(
                         }
                     }
                     else -> {
-                        // Scroll-to-bottom: show FAB when more than 2 screens from bottom.
+                        // Scroll-to-bottom: show FAB when more than 2 screens from the newest
+                        // message. With reverseLayout, "at the bottom" means firstVisibleIdx == 0,
+                        // so distance to the newest is just `firstVisibleIdx`.
                         // derivedStateOf prevents recomposition on every scroll frame — the
                         // boolean only changes when the FAB needs to appear or disappear.
                         val totalItems = uiState.messages.messages.size
                         val showScrollToBottom by remember(totalItems) {
                             derivedStateOf {
                                 val visInfo = listState.layoutInfo.visibleItemsInfo
-                                val lastIdx = visInfo.lastOrNull()?.index ?: 0
+                                val firstIdx = visInfo.firstOrNull()?.index ?: 0
                                 val visible = visInfo.size
-                                totalItems > 0 && (totalItems - 1 - lastIdx) > visible * 2
+                                totalItems > 0 && firstIdx > visible * 2
                             }
                         }
 
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        // Index 0 = newest (anchored at viewport bottom by reverseLayout=true),
+                        // lastIndex = oldest.
+                        val reversed = remember(uiState.messages.messages) {
+                            uiState.messages.messages.asReversed()
+                        }
                         LazyColumn(
                             state = listState,
+                            reverseLayout = true,
                             modifier = Modifier
                                 .fillMaxSize()
                                 .padding(horizontal = 8.dp)
                                 .testTag("message_list")
                         ) {
-                            itemsIndexed(uiState.messages.messages, key = { _, msg -> msg.id }) { index, message ->
-                                val showSeparator = index == 0 ||
-                                    !isSameDay(message.timestamp, uiState.messages.messages[index - 1].timestamp)
+                            itemsIndexed(reversed, key = { _, msg -> msg.id }) { index, message ->
+                                // Date separator renders above the oldest message of each day.
+                                // In the reversed view, the chronologically older neighbour lives
+                                // at `index + 1`; `index == reversed.lastIndex` is the very oldest.
+                                val showSeparator = index == reversed.lastIndex ||
+                                    !isSameDay(message.timestamp, reversed[index + 1].timestamp)
                                 if (showSeparator) {
                                     DateSeparator(formatDateSeparator(message.timestamp))
                                 }
-                                val prevMessage = if (index > 0) uiState.messages.messages[index - 1] else null
-                                val nextMessage = if (index < uiState.messages.messages.size - 1) uiState.messages.messages[index + 1] else null
+                                // computeGroupPosition expects (message, chronologically-previous,
+                                // chronologically-next). In the reversed view, chronologically-prev
+                                // is the older neighbour at `index + 1` and chronologically-next
+                                // is the newer neighbour at `index - 1`.
+                                val prevMessage = if (index < reversed.lastIndex) reversed[index + 1] else null
+                                val nextMessage = if (index > 0) reversed[index - 1] else null
                                 val groupPosition = computeGroupPosition(message, prevMessage, nextMessage)
                                 val topPadding = when (groupPosition) {
                                     GroupPosition.MIDDLE, GroupPosition.LAST -> 2.dp
@@ -1000,7 +985,7 @@ fun ChatScreen(
                             SmallFloatingActionButton(
                                 onClick = {
                                     scope.launch {
-                                        listState.animateScrollToItem(uiState.messages.messages.size - 1)
+                                        listState.animateScrollToItem(0)
                                     }
                                 },
                                 containerColor = MaterialTheme.colorScheme.surfaceVariant,
