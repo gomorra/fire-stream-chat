@@ -15,7 +15,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Directional iOS-style slide transitions** between NavHost destinations, with per-route duration escalation for Chat and List Detail, tuned for snappier feel. (`df74ea3`, `f974e5b`)
 
 ### Fixed
-- **Build info dialog: long timestamps no longer collide with the label.** The `Committed` ISO-8601 value was wrapping into the space reserved for its own label in the `SpaceBetween` row layout. Switched to a vertical stack (small muted label above, monospace value below) so long values get the full row width.
+- **Build info dialog: long timestamps no longer collide with the label.** The `Committed` ISO-8601 value was wrapping into the space reserved for its own label in the `SpaceBetween` row layout. Switched to a vertical stack (small muted label above, monospace value below) so long values get the full row width. (`3b9338f`)
 - **IME inset plumbing in chat.** Composer and last bubble now lift cleanly above the keyboard via `Scaffold` padding; replaced the snapshot/scrollBy hack with `reverseLayout=true` + `messages.asReversed()`. (`a660c07`, `a972533`, `e892f58`)
 - **`MessageBubble` Compose register-allocator risk.** Collapsed `isHighlighted`/`uploadProgress` into a state holder and added a lint guard against `@Composable` param-count regressions. (`9777076`, `9929769`)
 - **Presence log level.** Downgraded a routine reconnect warning from `w` to the documented state machine log. (`c35722c`)
