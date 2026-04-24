@@ -87,6 +87,7 @@ fun ProfileScreen(
     var showBlockDialog by remember { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
     var fullscreenAvatar by remember { mutableStateOf(false) }
+    var fullscreenMedia by remember { mutableStateOf<Message?>(null) }
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     var editingAbout by remember { mutableStateOf(false) }
@@ -402,6 +403,7 @@ fun ProfileScreen(
                     } else {
                         SharedMediaGrid(
                             media = uiState.sharedMedia,
+                            onMediaClick = { fullscreenMedia = it },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
@@ -435,6 +437,18 @@ fun ProfileScreen(
                 imageUrl = avatarUrl ?: "",
                 localUri = localAvatarPath,
                 onDismiss = { fullscreenAvatar = false }
+            )
+        }
+    }
+
+    // Fullscreen shared media viewer
+    BackHandler(enabled = fullscreenMedia != null) { fullscreenMedia = null }
+    AnimatedVisibility(visible = fullscreenMedia != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenMedia?.let { msg ->
+            FullscreenImageViewer(
+                imageUrl = msg.mediaUrl ?: "",
+                localUri = msg.localUri,
+                onDismiss = { fullscreenMedia = null }
             )
         }
     }
@@ -572,6 +586,7 @@ private fun EditableProfileField(
 @Composable
 private fun SharedMediaGrid(
     media: List<Message>,
+    onMediaClick: (Message) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val rows = media.chunked(3)
@@ -583,13 +598,16 @@ private fun SharedMediaGrid(
             ) {
                 rowItems.forEach { message ->
                     AsyncImage(
-                        model = message.mediaThumbnailUrl ?: message.mediaUrl,
+                        model = message.localUri ?: message.mediaThumbnailUrl ?: message.mediaUrl,
                         contentDescription = "Shared media",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(4.dp))
+                            .clickable(enabled = message.mediaUrl != null || message.localUri != null) {
+                                onMediaClick(message)
+                            }
                     )
                 }
                 repeat(3 - rowItems.size) {

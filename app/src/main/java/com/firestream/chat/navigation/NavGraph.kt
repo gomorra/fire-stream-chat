@@ -1,5 +1,6 @@
 package com.firestream.chat.navigation
 
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
@@ -9,6 +10,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -42,7 +44,18 @@ import kotlinx.coroutines.launch
 // four NavHost transition lambdas so the bezier is allocated once at file init, not
 // on every navigation event.
 private val NavSlideEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
-private const val NAV_SLIDE_DURATION_MS = 400
+private const val NAV_SLIDE_DURATION_MS = 550
+private const val NAV_SLIDE_DURATION_MS_SLOW = 850
+
+// Routes whose enter/exit transitions run at the slower duration. Checked against
+// both initialState and targetState so the pair stays symmetric — leaving-screen
+// and entering-screen always animate for the same length.
+private val SlowTransitionRoutes = setOf(Routes.CHAT, Routes.LIST_DETAIL)
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.navSlideDuration(): Int =
+    if (initialState.destination.route in SlowTransitionRoutes ||
+        targetState.destination.route in SlowTransitionRoutes
+    ) NAV_SLIDE_DURATION_MS_SLOW else NAV_SLIDE_DURATION_MS
 
 object Routes {
     const val LOGIN = "login"
@@ -134,25 +147,25 @@ fun FireStreamNavGraph(
         enterTransition = {
             slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         },
         exitTransition = {
             slideOutHorizontally(
                 targetOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         },
         popEnterTransition = {
             slideInHorizontally(
                 initialOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         },
         popExitTransition = {
             slideOutHorizontally(
                 targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         }
     ) {

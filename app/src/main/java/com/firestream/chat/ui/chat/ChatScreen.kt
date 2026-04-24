@@ -135,6 +135,9 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.theme.FsSurface3
+import com.firestream.chat.ui.theme.LocalIsDarkTheme
+import com.firestream.chat.ui.theme.SentBubble
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
@@ -1509,20 +1512,22 @@ fun ChatScreen(
 
 @Composable
 private fun DateSeparator(label: String) {
-    Row(
+    val isDark = LocalIsDarkTheme.current
+    val pillColor = if (isDark) FsSurface3 else SentBubble
+    Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
+        contentAlignment = Alignment.Center
     ) {
-        HorizontalDivider(modifier = Modifier.weight(1f))
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(horizontal = 12.dp)
+            modifier = Modifier
+                .background(pillColor, RoundedCornerShape(10.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
         )
-        HorizontalDivider(modifier = Modifier.weight(1f))
     }
 }
 
