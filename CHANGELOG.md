@@ -7,7 +7,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.0.0] — 2026-04-24
 
 ### Added
-- **Build info in Settings → App Version.** Subtitle now shows the real `versionName` with a `(debug build)` suffix on debug. Tap the row to open a Material3 dialog with version / build / commit SHA / committed date / type; long-press to copy the same block to the clipboard. `versionCode` is now derived from `git rev-list --count HEAD` at configure time, and `BuildConfig` carries the HEAD SHA + committer date.
+- **Build info in Settings → App Version.** Subtitle now shows the real `versionName` with a `(debug build)` suffix on debug. Tap the row to open a Material3 dialog with version / build / commit SHA / committed date / type; long-press to copy the same block to the clipboard. `versionCode` is now derived from `git rev-list --count HEAD` at configure time, and `BuildConfig` carries the HEAD SHA + committer date. (`dbc17ff`)
 - **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
 - **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
 - **Recent emojis + usage tracking in `ImagePreviewScreen`.** Emoji picker surfaces the user's most-recent selections alongside the standard set. (`5e76b7c`)
