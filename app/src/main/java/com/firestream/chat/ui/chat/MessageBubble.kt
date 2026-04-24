@@ -53,6 +53,7 @@ import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.BrokenImage
@@ -168,6 +169,7 @@ internal data class MessageBubbleCallbacks(
     // Tapping a thumbnail inside a LinkPreviewCard. This MUST use the URL
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
+    val onSaveImage: (() -> Unit)? = null,
     val onCall: (() -> Unit)? = null,
     // Tapping the quoted-reply preview inside the bubble — jumps to the source.
     val onReplyPreviewClick: () -> Unit = {},
@@ -695,6 +697,15 @@ internal fun MessageBubble(
                     ) {
                         Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
                         Text("Forward")
+                    }
+                    callbacks.onSaveImage?.let {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; it() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.Download, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Save image")
+                        }
                     }
                     if (copyableText != null) {
                         FilledTonalButton(

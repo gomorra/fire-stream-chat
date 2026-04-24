@@ -924,6 +924,9 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     fullscreenImage = FullscreenImage(imageUrl = url)
                                                 },
+                                                onSaveImage = if (message.type == MessageType.IMAGE) {
+                                                    { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
+                                                } else null,
                                                 onReplyPreviewClick = {
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
