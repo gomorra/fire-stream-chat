@@ -15,14 +15,38 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Manages user presence via Firebase Realtime Database.
+ * Manages user online presence via Firebase Realtime Database (RTDB).
  *
- * Uses the standard Firebase presence pattern: a `.info/connected` listener
- * re-registers onDisconnect() on every reconnect, so the server-side cleanup
- * handler is never lost — even after network changes or RTDB timeouts.
+ * ## RTDB schema
+ * `/presence/{uid}` → `{ isOnline: Boolean, lastSeen: ServerValue.TIMESTAMP }`
  *
- * A Cloud Function (syncPresenceToFirestore) mirrors RTDB presence changes
- * to Firestore, so the rest of the app observes consistent updates.
+ * ## State transitions
+ * 1. **Foreground enter** — `AppLifecycleObserver.onStart` → [startPresence]
+ *    registers a `.info/connected` listener. On every (re)connect it registers
+ *    `onDisconnect().setValue(offline)` then writes `isOnline=true`.
+ * 2. **Background leave** — `AppLifecycleObserver.onStop` → [goOffline] tears
+ *    down the `.info/connected` listener (so a later socket reconnect cannot
+ *    flip the user back to online) and writes `isOnline=false`.
+ * 3. **Abrupt termination** (crash, force-quit, radio loss) — the server-side
+ *    `onDisconnect` registered in step 1 fires on the RTDB server and writes
+ *    `isOnline=false` without any client involvement.
+ * 4. **Reconnect while already tracking** (app-switcher round trip where the
+ *    RTDB socket never dropped) — idempotent [startPresence] call force-writes
+ *    `isOnline=true` because `.info/connected` won't re-fire.
+ * 5. **Logout** — not currently handled here; signed-out users stay online in
+ *    RTDB until the app is backgrounded. Tracked as a separate defect.
+ *
+ * ## Invariant
+ * At most one `.info/connected` listener per process at any time. Violating
+ * this double-writes presence on every reconnect.
+ *
+ * ## Read side
+ * [observeOnlineStatus] reads `/presence/{uid}/isOnline` directly; callers
+ * should not read `User.isOnline` from Firestore. `UserRepositoryImpl.observeUser`
+ * combines the two sources and lets RTDB win.
+ *
+ * The Cloud Function `syncPresenceToFirestore` mirrors RTDB presence changes
+ * to Firestore as a fallback for clients that don't subscribe to RTDB directly.
  */
 @Singleton
 class RealtimePresenceSource @Inject constructor(

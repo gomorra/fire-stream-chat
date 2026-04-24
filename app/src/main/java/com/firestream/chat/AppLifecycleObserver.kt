@@ -39,7 +39,7 @@ class AppLifecycleObserver @Inject constructor(
         Log.d(TAG, "onStart — setting online")
         scope.launch {
             val result = userRepository.setOnlineStatus(true)
-            Log.d(TAG, "setOnlineStatus(true) result: $result")
+            result.exceptionOrNull()?.let { Log.w(TAG, "setOnlineStatus(true) failed", it) }
         }
     }
 
@@ -48,7 +48,7 @@ class AppLifecycleObserver @Inject constructor(
         scope.launch {
             withContext(NonCancellable) {
                 val result = userRepository.setOnlineStatus(false)
-                Log.d(TAG, "setOnlineStatus(false) result: $result")
+                result.exceptionOrNull()?.let { Log.w(TAG, "setOnlineStatus(false) failed", it) }
             }
         }
     }
