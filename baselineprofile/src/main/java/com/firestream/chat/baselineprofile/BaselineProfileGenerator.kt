@@ -31,21 +31,19 @@ class BaselineProfileGenerator {
         pressHome()
         startActivityAndWait()
 
-        // --- Login: country code field, phone number field, send-code button ---
-        // LoginScreen has a Row with country code (default "+1") and phone number.
-        // We set the country code via the first matching phone input, then the second.
-        val phoneInput = device.wait(Until.findObject(By.res("phone_input")), 15_000)
+        // --- Login ---
+        val countryInput = device.wait(Until.findObject(By.res("country_code_input")), 15_000)
+            ?: error("country_code_input not found on LoginScreen")
+        countryInput.text = TEST_PHONE_COUNTRY
+
+        val phoneInput = device.wait(Until.findObject(By.res("phone_input")), 5_000)
             ?: error("phone_input not found on LoginScreen")
         phoneInput.text = TEST_PHONE_LOCAL
-
-        val countryInput = device.findObject(By.res("country_code_input"))
-        // Country code defaults to "+1"; clear and retype only if present.
-        countryInput?.text = TEST_PHONE_COUNTRY
 
         device.findObject(By.res("send_otp_button"))?.click()
             ?: error("send_otp_button not found on LoginScreen")
 
-        // --- OTP: enter 6-digit code ---
+        // --- OTP ---
         val otpInput = device.wait(Until.findObject(By.res("otp_input")), 20_000)
             ?: error("otp_input not found on OtpScreen")
         otpInput.text = TEST_OTP
@@ -61,7 +59,7 @@ class BaselineProfileGenerator {
             device.findObject(By.res("profile_complete_button"))?.click()
         }
 
-        // --- ChatList: wait for the list root, then open the first chat ---
+        // --- ChatList ---
         device.wait(Until.findObject(By.res("chat_list_root")), 20_000)
             ?: error("chat_list_root not found on ChatListScreen")
 
@@ -69,7 +67,7 @@ class BaselineProfileGenerator {
         if (firstChat != null) {
             firstChat.click()
 
-            // --- ChatScreen: wait for the message list, scroll to warm LazyColumn ---
+            // Fling to warm the LazyColumn recycling pool.
             val messageList = device.wait(Until.findObject(By.res("message_list")), 15_000)
             if (messageList != null) {
                 messageList.setGestureMargin(device.displayWidth / 5)
@@ -77,7 +75,7 @@ class BaselineProfileGenerator {
                 repeat(2) { messageList.fling(Direction.DOWN) }
             }
 
-            // --- Pop back to chat list (exercises pop transition) ---
+            // Exercises push + pop transition paths.
             device.pressBack()
             device.wait(Until.findObject(By.res("chat_list_root")), 10_000)
         }

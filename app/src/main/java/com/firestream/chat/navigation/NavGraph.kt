@@ -38,6 +38,12 @@ import com.firestream.chat.ui.starred.StarredMessagesScreen
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+// iOS spring-style easing (equivalent to UIView.animate defaultCurve). Shared by all
+// four NavHost transition lambdas so the bezier is allocated once at file init, not
+// on every navigation event.
+private val NavSlideEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+private const val NAV_SLIDE_DURATION_MS = 400
+
 object Routes {
     const val LOGIN = "login"
     const val OTP = "otp/{verificationId}/{phoneNumber}"
@@ -128,25 +134,25 @@ fun FireStreamNavGraph(
         enterTransition = {
             slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
             )
         },
         exitTransition = {
             slideOutHorizontally(
                 targetOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
             )
         },
         popEnterTransition = {
             slideInHorizontally(
                 initialOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
             )
         },
         popExitTransition = {
             slideOutHorizontally(
                 targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(400, easing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f))
+                animationSpec = tween(NAV_SLIDE_DURATION_MS, easing = NavSlideEasing)
             )
         }
     ) {

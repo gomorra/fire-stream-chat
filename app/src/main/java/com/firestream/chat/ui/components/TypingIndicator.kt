@@ -42,7 +42,7 @@ fun TypingIndicator(
                     animation = keyframes {
                         durationMillis = 900
                         0f at 0 + index * 150
-                        -4f at 150 + index * 150  // bounce up
+                        -5f at 150 + index * 150  // bounce up
                         0f at 300 + index * 150
                     },
                     repeatMode = RepeatMode.Restart

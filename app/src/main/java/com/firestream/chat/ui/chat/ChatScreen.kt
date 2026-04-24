@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.chat
 
 import android.Manifest
@@ -34,16 +36,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -115,6 +116,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
@@ -164,7 +168,7 @@ private data class FullscreenImage(
     val onSaveToDownloads: (() -> Unit)? = null,
 )
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, kotlinx.coroutines.FlowPreview::class)
+@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun ChatScreen(
     onBackClick: () -> Unit,
@@ -315,12 +319,25 @@ fun ChatScreen(
         }
     }
 
-    // When the IME opens, scroll to the last message so it sits above the composer.
-    val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisible) {
-        if (imeVisible && uiState.messages.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.messages.lastIndex)
-        }
+    // Drive the message list's scroll from the IME inset per frame so the last
+    // bubble tracks the keyboard's top edge in lockstep with the composer's
+    // animated .imePadding(). Gated on "near the bottom" so mid-history reading
+    // isn't yanked forward when the keyboard opens.
+    val imeInsets = WindowInsets.ime
+    LaunchedEffect(listState) {
+        var previous = 0
+        snapshotFlow { imeInsets.getBottom(density) }
+            .collect { current ->
+                val delta = current - previous
+                previous = current
+                if (delta <= 0) return@collect
+                val layout = listState.layoutInfo
+                val last = layout.visibleItemsInfo.lastOrNull()?.index ?: 0
+                val total = uiState.messages.messages.size
+                if (total > 0 && total - 1 - last <= 2) {
+                    listState.scrollBy(delta.toFloat())
+                }
+            }
     }
 
     // Track screen visibility for read receipts — only mark READ when chat is in foreground.
@@ -506,8 +523,8 @@ fun ChatScreen(
     }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets.systemBars.union(WindowInsets.ime),
         topBar = {
             TopAppBar(
                 title = {
@@ -629,6 +646,8 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .consumeWindowInsets(padding)
+                .imePadding()
         ) {
             // Pinned message banner
             if (uiState.messages.pinnedMessages.isNotEmpty()) {
@@ -814,7 +833,10 @@ fun ChatScreen(
                         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp)
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 8.dp)
+                                .testTag("message_list")
                         ) {
                             itemsIndexed(uiState.messages.messages, key = { _, msg -> msg.id }) { index, message ->
                                 val showSeparator = index == 0 ||
@@ -999,7 +1021,7 @@ fun ChatScreen(
             if (uiState.session.typingUserIds.isNotEmpty()) {
                 TypingIndicator(
                     dotColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 8.dp, bottom = 2.dp)
+                    modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp)
                 )
             }
 
