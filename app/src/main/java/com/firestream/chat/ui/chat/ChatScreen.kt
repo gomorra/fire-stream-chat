@@ -1495,6 +1495,8 @@ fun ChatScreen(
         pendingImageUri?.let { uri ->
             ImagePreviewScreen(
                 imageUri = uri,
+                recentEmojis = uiState.overlays.recentEmojis,
+                onEmojiUsed = viewModel::addRecentEmoji,
                 onSend = { caption ->
                     viewModel.sendMediaMessage(uri, pendingImageMimeType, caption)
                     pendingImageUri = null
