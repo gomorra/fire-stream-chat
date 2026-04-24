@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "FireStreamChat"
 include(":app")
+include(":baselineprofile")

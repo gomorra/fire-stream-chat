@@ -6,6 +6,7 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.google.services)
     alias(libs.plugins.roborazzi)
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 android {
@@ -97,6 +98,11 @@ android {
         // Robolectric tests bypass this and use Robolectric shadows instead.
         unitTests.isReturnDefaultValues = true
     }
+}
+
+baselineProfile {
+    // Explicit opt-in: profile regeneration is a maintenance task, not part of every assembleRelease.
+    automaticGenerationDuringBuild = false
 }
 
 // Fails the build when any @Composable function has more than COMPOSABLE_PARAM_MAX
@@ -265,6 +271,10 @@ dependencies {
 
     // Play Services Location
     implementation(libs.play.services.location)
+
+    // Baseline Profile
+    implementation(libs.androidx.profileinstaller)
+    baselineProfile(project(":baselineprofile"))
 
     // Core Library Desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
