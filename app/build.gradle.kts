@@ -99,6 +99,102 @@ android {
     }
 }
 
+// Fails the build when any @Composable function has more than COMPOSABLE_PARAM_MAX
+// explicit parameters. Above this threshold the Kotlin/Compose compiler's register
+// allocator has emitted `copy-cat1` over Reference slots that ART's class verifier
+// rejects at render time (crash at chat open on both emulator and device).
+// See ~/.claude/.../memory/feedback_composable_param_limit.md for background.
+val COMPOSABLE_PARAM_MAX = 10
+
+tasks.register("checkComposableParamCount") {
+    group = "verification"
+    description = "Fails if any @Composable has more than $COMPOSABLE_PARAM_MAX explicit parameters"
+
+    val sources = fileTree("src/main/java") { include("**/*.kt") }
+    inputs.files(sources)
+
+    doLast {
+        val violations = mutableListOf<String>()
+        sources.forEach { file ->
+            val text = file.readText()
+            Regex("@Composable\\b").findAll(text).forEach annotations@{ annotation ->
+                val start = annotation.range.first
+                val funKeyword = Regex("\\bfun\\s+([A-Za-z_][A-Za-z0-9_]*)").find(text, start) ?: return@annotations
+                val funName = funKeyword.groupValues[1]
+                val parenStart = text.indexOf('(', funKeyword.range.last)
+                if (parenStart == -1) return@annotations
+                // Walk to matching ')' tracking brackets, strings, and comments.
+                var depth = 1
+                var i = parenStart + 1
+                var inString = false
+                var inLineComment = false
+                var inBlockComment = false
+                while (i < text.length && depth > 0) {
+                    val c = text[i]
+                    when {
+                        inLineComment -> if (c == '\n') inLineComment = false
+                        inBlockComment -> if (c == '*' && i + 1 < text.length && text[i + 1] == '/') { inBlockComment = false; i++ }
+                        inString -> if (c == '"' && text[i - 1] != '\\') inString = false
+                        c == '"' -> inString = true
+                        c == '/' && i + 1 < text.length && text[i + 1] == '/' -> { inLineComment = true; i++ }
+                        c == '/' && i + 1 < text.length && text[i + 1] == '*' -> { inBlockComment = true; i++ }
+                        c == '(' || c == '<' || c == '{' || c == '[' -> depth++
+                        c == ')' || c == '>' || c == '}' || c == ']' -> depth--
+                    }
+                    i++
+                }
+                val parenEnd = i - 1
+                val paramsText = text.substring(parenStart + 1, parenEnd)
+                // Top-level comma count.
+                var commas = 0
+                var nest = 0
+                var s = false; var lc = false; var bc = false
+                var j = 0
+                while (j < paramsText.length) {
+                    val c = paramsText[j]
+                    when {
+                        lc -> if (c == '\n') lc = false
+                        bc -> if (c == '*' && j + 1 < paramsText.length && paramsText[j + 1] == '/') { bc = false; j++ }
+                        s -> if (c == '"' && paramsText[j - 1] != '\\') s = false
+                        c == '"' -> s = true
+                        c == '/' && j + 1 < paramsText.length && paramsText[j + 1] == '/' -> { lc = true; j++ }
+                        c == '/' && j + 1 < paramsText.length && paramsText[j + 1] == '*' -> { bc = true; j++ }
+                        c == '(' || c == '<' || c == '{' || c == '[' -> nest++
+                        c == ')' || c == '>' || c == '}' || c == ']' -> nest--
+                        c == ',' && nest == 0 -> commas++
+                    }
+                    j++
+                }
+                // Kotlin allows a trailing comma after the last param; don't count it.
+                val trimmedTail = paramsText.replace(Regex("(?s)\\s+$"), "")
+                val paramCount = when {
+                    paramsText.isBlank() -> 0
+                    trimmedTail.endsWith(",") -> commas
+                    else -> commas + 1
+                }
+                if (paramCount > COMPOSABLE_PARAM_MAX) {
+                    val line = text.substring(0, start).count { it == '\n' } + 1
+                    val rel = file.relativeTo(rootDir)
+                    violations += "$rel:$line  @Composable fun $funName has $paramCount params (max $COMPOSABLE_PARAM_MAX)"
+                }
+            }
+        }
+        if (violations.isNotEmpty()) {
+            throw GradleException(
+                "Composable param-count check failed (${violations.size} violation(s)):\n" +
+                    violations.joinToString("\n") { "  $it" } +
+                    "\n\nKeep @Composable functions <= $COMPOSABLE_PARAM_MAX explicit params. " +
+                    "Collapse callbacks and per-instance display state into @Immutable holder data classes " +
+                    "(see MessageBubble.kt for the MessageBubbleCallbacks / MessageBubbleState pattern)."
+            )
+        }
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("checkComposableParamCount")
+}
+
 dependencies {
     // AndroidX Core
     implementation(libs.androidx.core.ktx)
