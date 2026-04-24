@@ -6,8 +6,8 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.GroupRole
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.test.fakes.FakeChatRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -20,6 +20,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -29,7 +30,7 @@ class GroupSettingsViewModelTest {
 
     private val testDispatcher = UnconfinedTestDispatcher()
 
-    private lateinit var chatRepository: ChatRepository
+    private val chatRepository = FakeChatRepository()
     private lateinit var userRepository: UserRepository
     private lateinit var authRepository: AuthRepository
 
@@ -45,20 +46,22 @@ class GroupSettingsViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        chatRepository = mockk()
         userRepository = mockk()
         authRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
-        coEvery { chatRepository.getChatById("chat1") } returns Result.success(testChat)
         coEvery { userRepository.getUserById("user1") } returns Result.success(User(uid = "user1", displayName = "Alice"))
         coEvery { userRepository.getUserById("user2") } returns Result.success(User(uid = "user2", displayName = "Bob"))
         coEvery { userRepository.getUserById("user3") } returns Result.success(User(uid = "user3", displayName = "Charlie"))
+
+        chatRepository.emit(listOf(testChat))
+        chatRepository.chatByIdResult = Result.success(testChat)
     }
 
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+        chatRepository.reset()
     }
 
     private fun createViewModel(): GroupSettingsViewModel {
@@ -93,7 +96,7 @@ class GroupSettingsViewModelTest {
     fun `admin role is detected correctly`() = runTest {
         every { authRepository.currentUserId } returns "user2"
         val chatWithUser2Admin = testChat.copy(admins = listOf("user1", "user2"))
-        coEvery { chatRepository.getChatById("chat1") } returns Result.success(chatWithUser2Admin)
+        chatRepository.chatByIdResult = Result.success(chatWithUser2Admin)
 
         val viewModel = createViewModel()
 
@@ -111,7 +114,6 @@ class GroupSettingsViewModelTest {
 
     @Test
     fun `updateDescription updates chat state`() = runTest {
-        coEvery { chatRepository.updateGroupDescription("chat1", "Updated desc") } returns Result.success(Unit)
         val viewModel = createViewModel()
 
         viewModel.updateDescription("Updated desc")
@@ -121,31 +123,28 @@ class GroupSettingsViewModelTest {
 
     @Test
     fun `generateInviteLink updates chat state`() = runTest {
-        coEvery { chatRepository.generateInviteLink("chat1") } returns Result.success("new-token")
         val viewModel = createViewModel()
 
         viewModel.generateInviteLink()
 
-        assertEquals("new-token", viewModel.uiState.value.chat?.inviteLink)
+        assertEquals("invite-chat1", viewModel.uiState.value.chat?.inviteLink)
         assertTrue(viewModel.uiState.value.inviteLinkGenerated)
     }
 
     @Test
     fun `revokeInviteLink clears invite link`() = runTest {
-        coEvery { chatRepository.revokeInviteLink("chat1") } returns Result.success(Unit)
         val chatWithLink = testChat.copy(inviteLink = "old-token")
-        coEvery { chatRepository.getChatById("chat1") } returns Result.success(chatWithLink)
+        chatRepository.chatByIdResult = Result.success(chatWithLink)
         val viewModel = createViewModel()
 
         viewModel.revokeInviteLink()
 
-        assertEquals(null, viewModel.uiState.value.chat?.inviteLink)
+        assertNull(viewModel.uiState.value.chat?.inviteLink)
         assertFalse(viewModel.uiState.value.inviteLinkGenerated)
     }
 
     @Test
     fun `leaveGroup sets leftGroup flag`() = runTest {
-        coEvery { chatRepository.leaveGroup("chat1") } returns Result.success(Unit)
         val viewModel = createViewModel()
 
         viewModel.leaveGroup()
@@ -155,7 +154,6 @@ class GroupSettingsViewModelTest {
 
     @Test
     fun `setRequireApproval updates chat state`() = runTest {
-        coEvery { chatRepository.setRequireApproval("chat1", true) } returns Result.success(Unit)
         val viewModel = createViewModel()
 
         viewModel.setRequireApproval(true)
@@ -165,8 +163,8 @@ class GroupSettingsViewModelTest {
 
     @Test
     fun `error is set on failure`() = runTest {
-        coEvery { chatRepository.updateGroupDescription(any(), any()) } returns Result.failure(Exception("Network error"))
         val viewModel = createViewModel()
+        chatRepository.nextFailure = Exception("Network error")
 
         viewModel.updateDescription("desc")
 

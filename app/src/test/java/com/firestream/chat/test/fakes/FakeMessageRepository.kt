@@ -2,72 +2,74 @@ package com.firestream.chat.test.fakes
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.repository.MessageRepository
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
+import java.util.UUID
 
-/**
- * In-memory fake [MessageRepository] that lets tests push messages via
- * [emitMessages]. Unused methods throw.
- */
-class FakeMessageRepository : MessageRepository {
+internal class FakeMessageRepository : MessageRepository {
 
-    private val messagesFlow = MutableSharedFlow<List<Message>>(
-        replay = 1,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-
-    /** Calls made to [markMessagesAsRead]; list of (chatId, ids) pairs. */
-    val markAsReadCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
-
-    /** Calls made to [markMessagesAsDelivered]. */
-    val markAsDeliveredCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
+    private val messagesByChat = MutableStateFlow<Map<String, List<Message>>>(emptyMap())
+    private val starred = MutableStateFlow<Set<String>>(emptySet())
 
     private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     override val uploadProgress: StateFlow<Map<String, Float>> = _uploadProgress.asStateFlow()
 
-    fun emitMessages(messages: List<Message>) {
-        messagesFlow.tryEmit(messages)
+    var nextFailure: Throwable? = null
+
+    val markAsReadCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
+    val markAsDeliveredCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
+    var lastSentMessage: Message? = null
+    var lastSentRecipientId: String? = null
+
+    fun emit(chatId: String, messages: List<Message>) {
+        messagesByChat.value = messagesByChat.value + (chatId to messages)
     }
 
-    override fun getMessages(chatId: String): Flow<List<Message>> = messagesFlow
-
-    override suspend fun markMessagesAsRead(
-        chatId: String,
-        messageIds: List<String>,
-    ): Result<Unit> {
-        markAsReadCalls.add(chatId to messageIds)
-        return Result.success(Unit)
+    fun reset() {
+        messagesByChat.value = emptyMap()
+        starred.value = emptySet()
+        _uploadProgress.value = emptyMap()
+        nextFailure = null
+        markAsReadCalls.clear()
+        markAsDeliveredCalls.clear()
+        lastSentMessage = null
+        lastSentRecipientId = null
     }
 
-    override suspend fun markMessagesAsDelivered(
-        chatId: String,
-        messageIds: List<String>,
-    ): Result<Unit> {
-        markAsDeliveredCalls.add(chatId to messageIds)
-        return Result.success(Unit)
+    private fun consumeFailure(): Result<Nothing>? =
+        nextFailure?.also { nextFailure = null }?.let { Result.failure(it) }
+
+    private fun throwIfNextFailure() {
+        nextFailure?.also { nextFailure = null }?.let { throw it }
     }
 
-    override suspend fun markChatAsDelivered(chatId: String): Result<Unit> =
-        Result.success(Unit)
+    // ── Core flows ────────────────────────────────────────────────────────────
 
-    override fun getStarredMessages(): Flow<List<Message>> = emptyFlow()
+    override fun getMessages(chatId: String): Flow<List<Message>> =
+        messagesByChat.map { it[chatId].orEmpty() }
 
-    override fun getSharedMedia(chatId: String): Flow<List<Message>> = emptyFlow()
+    override fun getStarredMessages(): Flow<List<Message>> =
+        messagesByChat.map { byChat ->
+            byChat.values.flatten().filter { it.isStarred || it.id in starred.value }
+        }
 
-    override fun getSharedMediaForUser(userId: String): Flow<List<Message>> = emptyFlow()
+    override fun getSharedMedia(chatId: String): Flow<List<Message>> =
+        messagesByChat.map { it[chatId].orEmpty().filter { m -> m.mediaUrl != null } }
+
+    override fun getSharedMediaForUser(userId: String): Flow<List<Message>> =
+        messagesByChat.map { byChat ->
+            byChat.values.flatten().filter { it.senderId == userId && it.mediaUrl != null }
+        }
 
     override fun getCallLog(): Flow<List<Message>> = emptyFlow()
 
-    override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
-
-    // --- Unused by current tests; throw to surface accidental usage. ---
+    // ── Send / mutate ─────────────────────────────────────────────────────────
 
     override suspend fun sendMessage(
         chatId: String,
@@ -76,22 +78,64 @@ class FakeMessageRepository : MessageRepository {
         replyToId: String?,
         mentions: List<String>,
         emojiSizes: Map<Int, Float>,
-    ): Result<Message> = error("FakeMessageRepository.sendMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(),
+            chatId = chatId,
+            senderId = "me",
+            content = content,
+            replyToId = replyToId,
+            mentions = mentions,
+            emojiSizes = emojiSizes,
+            status = MessageStatus.SENT,
+        )
+        lastSentMessage = msg
+        lastSentRecipientId = recipientId
+        messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
+            map[chatId] = (map[chatId].orEmpty()) + msg
+        }
+        return Result.success(msg)
+    }
 
-    override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> =
-        error("FakeMessageRepository.deleteMessage not implemented")
+    override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> {
+        consumeFailure()?.let { return it }
+        messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
+            map[chatId] = map[chatId].orEmpty().filter { it.id != messageId }
+        }
+        return Result.success(Unit)
+    }
 
     override suspend fun updateMessageStatus(
         chatId: String,
         messageId: String,
         status: String,
-    ): Result<Unit> = error("FakeMessageRepository.updateMessageStatus not implemented")
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        val newStatus = MessageStatus.entries.firstOrNull { it.name == status }
+        if (newStatus != null) {
+            messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
+                map[chatId] = map[chatId].orEmpty().map { m ->
+                    if (m.id == messageId) m.copy(status = newStatus) else m
+                }
+            }
+        }
+        return Result.success(Unit)
+    }
 
     override suspend fun editMessage(
         chatId: String,
         messageId: String,
         newContent: String,
-    ): Result<Unit> = error("FakeMessageRepository.editMessage not implemented")
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
+            map[chatId] = map[chatId].orEmpty().map { m ->
+                if (m.id == messageId) m.copy(content = newContent) else m
+            }
+        }
+        return Result.success(Unit)
+    }
 
     override suspend fun sendMediaMessage(
         chatId: String,
@@ -99,61 +143,121 @@ class FakeMessageRepository : MessageRepository {
         mimeType: String,
         recipientId: String,
         caption: String,
-    ): Result<Message> = error("FakeMessageRepository.sendMediaMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, content = caption)
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
 
     override suspend fun addReaction(
         chatId: String,
         messageId: String,
         userId: String,
         emoji: String,
-    ): Result<Unit> = error("FakeMessageRepository.addReaction not implemented")
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
 
     override suspend fun removeReaction(
         chatId: String,
         messageId: String,
         userId: String,
-    ): Result<Unit> = error("FakeMessageRepository.removeReaction not implemented")
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
 
     override suspend fun forwardMessage(
         message: Message,
         targetChatId: String,
         recipientId: String,
-    ): Result<Message> = error("FakeMessageRepository.forwardMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val forwarded = message.copy(id = UUID.randomUUID().toString(), chatId = targetChatId, isForwarded = true)
+        lastSentMessage = forwarded
+        return Result.success(forwarded)
+    }
 
     override suspend fun sendVoiceMessage(
         chatId: String,
         uri: String,
         recipientId: String,
         durationSeconds: Int,
-    ): Result<Message> = error("FakeMessageRepository.sendVoiceMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, duration = durationSeconds)
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
 
-    override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> =
-        error("FakeMessageRepository.starMessage not implemented")
+    override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> {
+        consumeFailure()?.let { return it }
+        this.starred.value = if (starred) this.starred.value + messageId else this.starred.value - messageId
+        return Result.success(Unit)
+    }
 
-    override suspend fun searchMessages(query: String): List<Message> =
-        error("FakeMessageRepository.searchMessages not implemented")
+    override suspend fun searchMessages(query: String): List<Message> {
+        throwIfNextFailure()
+        return messagesByChat.value.values.flatten().filter { it.content.contains(query, ignoreCase = true) }
+    }
 
-    override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> =
-        error("FakeMessageRepository.searchMessagesInChat not implemented")
+    override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> {
+        throwIfNextFailure()
+        return messagesByChat.value[chatId].orEmpty().filter { it.content.contains(query, ignoreCase = true) }
+    }
+
+    override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
+
+    override suspend fun markMessagesAsDelivered(
+        chatId: String,
+        messageIds: List<String>,
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        markAsDeliveredCalls.add(chatId to messageIds)
+        return Result.success(Unit)
+    }
+
+    override suspend fun markMessagesAsRead(
+        chatId: String,
+        messageIds: List<String>,
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        markAsReadCalls.add(chatId to messageIds)
+        return Result.success(Unit)
+    }
 
     override suspend fun sendBroadcastMessage(
         broadcastChatId: String,
         content: String,
         recipientIds: List<String>,
-    ): Result<Message> = error("FakeMessageRepository.sendBroadcastMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(id = UUID.randomUUID().toString(), chatId = broadcastChatId, content = content)
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
 
     override suspend fun sendListMessage(
         chatId: String,
         listId: String,
         listTitle: String,
         listDiff: ListDiff?,
-    ): Result<Message> = error("FakeMessageRepository.sendListMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, listId = listId)
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
 
-    override suspend fun pinMessage(
-        chatId: String,
-        messageId: String,
-        pinned: Boolean,
-    ): Result<Unit> = error("FakeMessageRepository.pinMessage not implemented")
+    override suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
 
     override suspend fun sendLocationMessage(
         chatId: String,
@@ -161,5 +265,18 @@ class FakeMessageRepository : MessageRepository {
         longitude: Double,
         recipientId: String,
         comment: String,
-    ): Result<Message> = error("FakeMessageRepository.sendLocationMessage not implemented")
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(),
+            chatId = chatId,
+            latitude = latitude,
+            longitude = longitude,
+            content = comment,
+        )
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
+
+    override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
 }

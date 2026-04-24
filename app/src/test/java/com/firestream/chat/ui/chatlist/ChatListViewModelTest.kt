@@ -3,11 +3,11 @@ package com.firestream.chat.ui.chatlist
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
-import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
+import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeMessageRepository
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -35,10 +35,12 @@ class ChatListViewModelTest {
 
     private lateinit var searchMessagesUseCase: SearchMessagesUseCase
     private lateinit var authRepository: AuthRepository
-    private lateinit var chatRepository: ChatRepository
-    private lateinit var messageRepository: MessageRepository
     private lateinit var contactRepository: ContactRepository
     private lateinit var userRepository: UserRepository
+
+    private val chatRepository = FakeChatRepository()
+    private val messageRepository = FakeMessageRepository()
+
     private lateinit var viewModel: ChatListViewModel
 
     private val chat1 = Chat(
@@ -58,21 +60,16 @@ class ChatListViewModelTest {
         Dispatchers.setMain(testDispatcher)
         searchMessagesUseCase = mockk()
         authRepository = mockk()
-        chatRepository = mockk()
-        messageRepository = mockk()
         contactRepository = mockk()
         userRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
-        every { chatRepository.getChats() } returns flowOf(listOf(chat1, chat2))
         coEvery { searchMessagesUseCase(any(), any()) } returns emptyList()
-        coEvery { chatRepository.pinChat(any(), any()) } returns Result.success(Unit)
-        coEvery { chatRepository.deleteChat(any()) } returns Result.success(Unit)
-        coEvery { chatRepository.archiveChat(any(), any()) } returns Result.success(Unit)
-        coEvery { chatRepository.muteChat(any(), any()) } returns Result.success(Unit)
         coEvery { contactRepository.syncContacts() } returns Result.success(emptyList())
         every { contactRepository.getContacts() } returns flowOf(emptyList())
         every { userRepository.observeUser(any()) } returns emptyFlow()
+
+        chatRepository.emit(listOf(chat1, chat2))
 
         viewModel = ChatListViewModel(
             searchMessagesUseCase = searchMessagesUseCase,
@@ -86,6 +83,8 @@ class ChatListViewModelTest {
 
     @After
     fun tearDown() {
+        chatRepository.reset()
+        messageRepository.reset()
         Dispatchers.resetMain()
     }
 
@@ -120,9 +119,9 @@ class ChatListViewModelTest {
 
     @Test
     fun `togglePin shows error when trying to pin more than 3 chats`() = runTest {
-        // Setup: 3 pinned chats already
         val pinnedChats = (1..3).map { Chat(id = "pin$it", type = ChatType.INDIVIDUAL, isPinned = true) }
-        every { chatRepository.getChats() } returns flowOf(pinnedChats)
+        chatRepository.reset()
+        chatRepository.emit(pinnedChats)
 
         val vm = ChatListViewModel(
             searchMessagesUseCase = searchMessagesUseCase,
@@ -179,7 +178,7 @@ class ChatListViewModelTest {
     @Test
     fun `clearError clears error message`() = runTest {
         advanceUntilIdle()
-        viewModel.togglePin("newChat", false) // triggers "pin up to 3" if enough pinned
+        viewModel.togglePin("newChat", false)
 
         viewModel.clearError()
 

@@ -5,31 +5,26 @@ import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
+import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
-import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
-import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
-import io.mockk.coEvery
-import io.mockk.coVerify
+import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeMessageRepository
+import com.firestream.chat.test.fakes.FakeUserRepository
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkAll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -39,6 +34,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.setMain
 import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -47,20 +44,16 @@ class ChatViewModelReadReceiptTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    // extraBufferCapacity=1 so emit() returns immediately without suspending
-    private val messagesFlow = MutableSharedFlow<List<Message>>(replay = 0, extraBufferCapacity = 1)
-    private val readReceiptsFlow = MutableStateFlow(true)
-    private val recipientFlow = MutableSharedFlow<User>(replay = 1)
+    private val chatRepository = FakeChatRepository()
+    private val messageRepository = FakeMessageRepository()
+    private val userRepository = FakeUserRepository()
 
     private val checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>()
     private val searchMessagesUseCase = mockk<SearchMessagesUseCase>()
     private val linkPreviewSource = mockk<LinkPreviewSource>()
     private val authRepository = mockk<AuthRepository>()
-    private val chatRepository = mockk<ChatRepository>()
     private val listRepository = mockk<ListRepository>()
-    private val messageRepository = mockk<MessageRepository>()
     private val pollRepository = mockk<PollRepository>()
-    private val userRepository = mockk<UserRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
@@ -72,58 +65,40 @@ class ChatViewModelReadReceiptTest {
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
 
-        // Mock NotificationManagerCompat static factory so cancel() doesn't crash on JVM
         mockkStatic(NotificationManagerCompat::class)
         every { NotificationManagerCompat.from(any()) } returns mockk(relaxed = true)
 
-        // Auth
         every { authRepository.currentUserId } returns "uid1"
-
-        // Messages
-        every { messageRepository.getMessages(any()) } returns messagesFlow
-        every { messageRepository.uploadProgress } returns MutableStateFlow(emptyMap())
         every { linkPreviewSource.extractUrl(any()) } returns null
-
-        // Chat
-        every { chatRepository.observeTyping(any()) } returns emptyFlow()
-        every { chatRepository.getChats() } returns flowOf(emptyList<Chat>())
-        coEvery { chatRepository.getChatById(any()) } returns Result.success(
-            Chat(id = "chat1", type = ChatType.INDIVIDUAL)
-        )
-        coEvery { chatRepository.resetUnreadCount(any()) } returns Result.success(Unit)
-
-        // Preferences
-        every { preferencesDataStore.readReceiptsFlow } returns readReceiptsFlow
+        every { preferencesDataStore.readReceiptsFlow } returns flowOf(true)
         every { preferencesDataStore.recentEmojisFlow } returns flowOf(emptyList())
 
-        // Recipient
-        every { userRepository.observeUser(any()) } returns recipientFlow
-
-        // Delivery/read — the calls under test
-        coEvery { messageRepository.markMessagesAsDelivered(any(), any()) } returns Result.success(Unit)
-        coEvery { messageRepository.markMessagesAsRead(any(), any()) } returns Result.success(Unit)
+        chatRepository.chatByIdResult = Result.success(Chat(id = "chat1", type = ChatType.INDIVIDUAL))
 
         viewModel = buildViewModel()
     }
 
     @After
     fun tearDown() {
-        Dispatchers.resetMain()
+        chatRepository.reset()
+        messageRepository.reset()
         unmockkAll()
+        Dispatchers.resetMain()
     }
 
-    // ── Two-phase flow ────────────────────────────────────────────────────────
+    // ── Two-phase flow ────────────────────────────────────────────────────────────
 
     @Test
     fun `SENT messages are marked DELIVERED before READ`() = runTest {
         viewModel.setScreenVisible(true)
         runCurrent()
 
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.SENT)))
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.SENT)))
         runCurrent()
 
-        coVerify(exactly = 1) { messageRepository.markMessagesAsDelivered("chat1", listOf("m1")) }
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertEquals(1, messageRepository.markAsDeliveredCalls.size)
+        assertEquals("chat1" to listOf("m1"), messageRepository.markAsDeliveredCalls.last())
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
     @Test
@@ -131,54 +106,53 @@ class ChatViewModelReadReceiptTest {
         viewModel.setScreenVisible(true)
         runCurrent()
 
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent() // collectLatest fires, readReceiptJob starts and suspends at delay(1500)
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
+        runCurrent()
 
-        // Delay has not fired yet — no read marking
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
 
         advanceTimeBy(1500)
-        runCurrent() // delay fires, markMessagesAsRead runs
+        runCurrent()
 
-        coVerify(exactly = 1) { messageRepository.markMessagesAsRead("chat1", listOf("m1")) }
+        assertEquals(1, messageRepository.markAsReadCalls.size)
+        assertEquals("chat1" to listOf("m1"), messageRepository.markAsReadCalls.last())
     }
 
-    // ── Privacy guards ────────────────────────────────────────────────────────
+    // ── Privacy guards ────────────────────────────────────────────────────────────
 
     @Test
     fun `READ marking skipped when readReceiptsAllowed is false`() = runTest {
-        readReceiptsFlow.value = false
-        runCurrent() // let ViewModel collect the pref change → readReceiptsAllowed = false
+        every { preferencesDataStore.readReceiptsFlow } returns flowOf(false)
+        val vm = buildViewModel()
 
-        viewModel.setScreenVisible(true)
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent() // code returns early at readReceiptsAllowed check — no job started
+        vm.setScreenVisible(true)
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
+        runCurrent()
 
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
     @Test
     fun `READ marking skipped when recipient has receipts disabled`() = runTest {
-        recipientFlow.emit(User(uid = "recipient1", readReceiptsEnabled = false))
-        runCurrent() // observeRecipient fires → readReceiptsAllowed = false
+        userRepository.emitUser(User(uid = "recipient1", readReceiptsEnabled = false))
+        runCurrent()
 
         viewModel.setScreenVisible(true)
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent() // code returns early at readReceiptsAllowed check — no job started
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
+        runCurrent()
 
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
-    // ── Visibility guard ──────────────────────────────────────────────────────
+    // ── Visibility guard ──────────────────────────────────────────────────────────
 
     @Test
     fun `No marking when screen is not visible`() = runTest {
-        // screenVisible stays false (default) — markIncomingMessagesAsRead returns immediately
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.SENT)))
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.SENT)))
         runCurrent()
 
-        coVerify(exactly = 0) { messageRepository.markMessagesAsDelivered(any(), any()) }
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertTrue(messageRepository.markAsDeliveredCalls.isEmpty())
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
     @Test
@@ -186,38 +160,42 @@ class ChatViewModelReadReceiptTest {
         viewModel.setScreenVisible(true)
         runCurrent()
 
-        messagesFlow.emit(listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
-        runCurrent() // readReceiptJob starts, suspended at delay(1500)
-
-        advanceTimeBy(500) // halfway through delay, job still pending
+        messageRepository.emit("chat1", listOf(Message(id = "m1", senderId = "other", status = MessageStatus.DELIVERED)))
         runCurrent()
 
-        viewModel.setScreenVisible(false) // cancels readReceiptJob
+        advanceTimeBy(500)
         runCurrent()
 
-        advanceTimeBy(2000) // well past 1500ms, but job was cancelled
+        viewModel.setScreenVisible(false)
         runCurrent()
 
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        advanceTimeBy(2000)
+        runCurrent()
+
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
-    // ── Sender filter ─────────────────────────────────────────────────────────
+    // ── Sender filter ─────────────────────────────────────────────────────────────
 
     @Test
     fun `Own messages are not marked`() = runTest {
         viewModel.setScreenVisible(true)
         runCurrent()
 
-        val ownSent = Message(id = "m1", senderId = "uid1", status = MessageStatus.SENT)
-        val ownDelivered = Message(id = "m2", senderId = "uid1", status = MessageStatus.DELIVERED)
-        messagesFlow.emit(listOf(ownSent, ownDelivered))
-        runCurrent() // senderId == currentUserId, so needsDelivery and needsRead are both empty
+        messageRepository.emit(
+            "chat1",
+            listOf(
+                Message(id = "m1", senderId = "uid1", status = MessageStatus.SENT),
+                Message(id = "m2", senderId = "uid1", status = MessageStatus.DELIVERED),
+            )
+        )
+        runCurrent()
 
-        coVerify(exactly = 0) { messageRepository.markMessagesAsDelivered(any(), any()) }
-        coVerify(exactly = 0) { messageRepository.markMessagesAsRead(any(), any()) }
+        assertTrue(messageRepository.markAsDeliveredCalls.isEmpty())
+        assertTrue(messageRepository.markAsReadCalls.isEmpty())
     }
 
-    // ── Constructor helper ────────────────────────────────────────────────────
+    // ── Constructor helper ────────────────────────────────────────────────────────
 
     private fun buildViewModel() = ChatViewModel(
         savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "recipientId" to "recipient1")),

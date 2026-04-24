@@ -6,20 +6,17 @@ import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
-import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
-import com.firestream.chat.domain.repository.ChatRepository
-import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeMessageRepository
 import io.mockk.coEvery
-import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -39,8 +36,9 @@ class SharePickerViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private lateinit var chatRepository: ChatRepository
-    private lateinit var messageRepository: MessageRepository
+    private val chatRepository = FakeChatRepository()
+    private val messageRepository = FakeMessageRepository()
+
     private lateinit var linkPreviewSource: LinkPreviewSource
     private lateinit var authRepository: AuthRepository
     private lateinit var userRepository: UserRepository
@@ -66,8 +64,6 @@ class SharePickerViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        chatRepository = mockk()
-        messageRepository = mockk()
         linkPreviewSource = mockk(relaxed = true)
         authRepository = mockk()
         userRepository = mockk()
@@ -75,13 +71,16 @@ class SharePickerViewModelTest {
         shareContentResolver = mockk()
 
         every { authRepository.currentUserId } returns me
-        every { chatRepository.getChats() } returns flowOf(listOf(individualChat, groupChat))
         coEvery { userRepository.getUserById(any()) } returns Result.success(User(uid = peer))
         every { linkPreviewSource.extractUrl(any()) } returns null
+
+        chatRepository.emit(listOf(individualChat, groupChat))
     }
 
     @After
     fun tearDown() {
+        chatRepository.reset()
+        messageRepository.reset()
         Dispatchers.resetMain()
     }
 
@@ -99,9 +98,7 @@ class SharePickerViewModelTest {
     fun `send failure surfaces error and does not navigate`() = runTest {
         every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
         coEvery { shareContentResolver.resolve(any()) } returns SharedContent.Text("hi")
-        coEvery {
-            messageRepository.sendMessage(any(), any(), any(), any(), any(), any())
-        } returns Result.failure(IOException("boom"))
+        messageRepository.nextFailure = IOException("boom")
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -121,16 +118,6 @@ class SharePickerViewModelTest {
     fun `send to group uses empty recipientId`() = runTest {
         every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
         coEvery { shareContentResolver.resolve(any()) } returns SharedContent.Text("hi")
-        coEvery {
-            messageRepository.sendMessage(
-                chatId = groupChat.id,
-                content = "hi",
-                recipientId = "",
-                replyToId = any(),
-                mentions = any(),
-                emojiSizes = any()
-            )
-        } returns Result.success(Message(id = "m1", chatId = groupChat.id, content = "hi"))
 
         val viewModel = buildViewModel()
         advanceUntilIdle()
@@ -142,16 +129,7 @@ class SharePickerViewModelTest {
 
         assertEquals(groupChat.id, doneChatId)
         // Confirms the group branch passed "" and NOT otherGroupMember.
-        coVerify(exactly = 1) {
-            messageRepository.sendMessage(
-                chatId = groupChat.id,
-                content = "hi",
-                recipientId = "",
-                replyToId = any(),
-                mentions = any(),
-                emojiSizes = any()
-            )
-        }
+        assertEquals("", messageRepository.lastSentRecipientId)
     }
 
     @Test
