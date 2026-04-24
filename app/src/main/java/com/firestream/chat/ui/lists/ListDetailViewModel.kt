@@ -220,12 +220,6 @@ class ListDetailViewModel @Inject constructor(
 
         viewModelScope.launch {
             listRepository.clearCheckedItems(listId)
-                .onSuccess { clearedTexts ->
-                    val texts = clearedTexts.ifEmpty { checkedItems.map { it.text } }
-                    if (texts.isNotEmpty()) {
-                        sendListUpdateThrottled(ListDiff(removed = texts))
-                    }
-                }
                 .onFailure { e ->
                     // Revert on failure
                     _uiState.value = _uiState.value.copy(
