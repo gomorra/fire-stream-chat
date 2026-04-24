@@ -4,7 +4,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
-## [1.1.0] — 2026-04-24
+## [1.1.1] — 2026-04-24
 
 ### Added
 - **Build info in Settings → App Version.** Subtitle now shows the real `versionName` with a `(debug build)` suffix on debug. Tap the row to open a Material3 dialog with version / build / commit SHA / committed date / type; long-press to copy the same block to the clipboard. `versionCode` is now derived from `git rev-list --count HEAD` at configure time, and `BuildConfig` carries the HEAD SHA + committer date. (`dbc17ff`)

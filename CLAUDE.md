@@ -243,14 +243,15 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 
 ### Versioning
 
-Before committing a user-visible change, bump `versionName` in `app/build.gradle.kts` per the conventional-commit prefix:
+**Principle:** any commit that lands a CHANGELOG entry gets a version bump. The converse also holds — if the commit doesn't warrant a CHANGELOG entry (doc-only, test-only, CI/tooling, internal refactors with no release-visible effect), it doesn't bump. Bump severity follows the conventional-commit prefix:
 
 | Prefix | Bump | Example |
 |--------|------|---------|
 | `feat:` | minor | `1.2.3` → `1.3.0` |
 | `fix:` | patch | `1.2.3` → `1.2.4` |
+| `refactor:` (when it lands a Refactored entry) | patch | `1.2.3` → `1.2.4` |
 | `feat!:` or `BREAKING CHANGE:` | major | `1.2.3` → `2.0.0` |
-| `chore:`, `refactor:`, `docs:`, `test:`, `ci:` | none | — |
+| `chore:`, `docs:`, `test:`, `ci:` (no CHANGELOG entry) | none | — |
 
 **Section placement.** If the top section below `[Unreleased]` is already dated today, append to it — and if this commit's bump is higher-severity than the section's current version, upgrade the header too (e.g. a `feat` landing on a `## [1.2.4] — today` section promotes it to `## [1.3.0] — today`). Otherwise insert a fresh `## [X.Y.Z] — YYYY-MM-DD` section.
 
