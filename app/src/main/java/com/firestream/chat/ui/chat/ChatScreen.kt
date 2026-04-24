@@ -165,6 +165,14 @@ private data class FullscreenImage(
     val onSaveToDownloads: (() -> Unit)? = null,
 )
 
+// Chronological↔reversed index translation at the LazyColumn boundary.
+// The LazyColumn runs `reverseLayout = true` so `firstVisibleItemIndex` and
+// every `scrollToItem` target is in reversed space (0 = newest); the message
+// list, `indexOfFirst`, persistence, and `computeGroupPosition` all use
+// chronological space (0 = oldest). Since reversal is an involution, the
+// same function works both directions.
+private fun List<Message>.toReversedIndex(idx: Int): Int = lastIndex - idx
+
 @OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
 @Composable
 fun ChatScreen(
@@ -252,23 +260,20 @@ fun ChatScreen(
         if (chronoIdx < 0) return
         highlightedMessageId = sourceId
         scope.launch {
-            scrollToAndCenter(uiState.messages.messages.lastIndex - chronoIdx)
+            scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
         }
     }
 
     // Save scroll position when leaving so it can be restored on re-entry.
     // SavedStateHandle survives config changes (fast path); DataStore survives
     // process death (slow path). See ChatViewModel.persistScrollPosition.
-    //
-    // The list uses reverseLayout=true, so `firstVisibleItemIndex` refers to the
-    // reversed view (0 = newest). Persistence stays chronological: translate with
-    // `size - 1 - reversedIdx` before handing to the VM/DataStore so the stored
-    // index is stable against the LazyColumn's layout direction.
+    // Persistence stores chronological indices; translation happens via
+    // `toReversedIndex` at the LazyColumn boundary.
     DisposableEffect(Unit) {
         onDispose {
-            val size = uiState.messages.messages.size
-            if (size > 0) {
-                val chronoIndex = size - 1 - listState.firstVisibleItemIndex
+            val messages = uiState.messages.messages
+            if (messages.isNotEmpty()) {
+                val chronoIndex = messages.toReversedIndex(listState.firstVisibleItemIndex)
                 val offset = listState.firstVisibleItemScrollOffset
                 viewModel.saveScrollPosition(chronoIndex, offset)
                 viewModel.persistScrollPosition(chronoIndex, offset)
@@ -285,9 +290,9 @@ fun ChatScreen(
             .distinctUntilChanged()
             .debounce(500)
             .collect { (reversedIdx, offset) ->
-                val size = uiState.messages.messages.size
-                if (size > 0) {
-                    viewModel.persistScrollPosition(size - 1 - reversedIdx, offset)
+                val messages = uiState.messages.messages
+                if (messages.isNotEmpty()) {
+                    viewModel.persistScrollPosition(messages.toReversedIndex(reversedIdx), offset)
                 }
             }
     }
@@ -297,9 +302,8 @@ fun ChatScreen(
     // the saved index would point to wherever the user last scrolled.
     // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
     //
-    // Saved indices are chronological; convert to the reversed LazyColumn index
-    // with `size - 1 - chronoIdx` at the scroll boundary. "Newest message" is
-    // reversed index 0.
+    // Saved indices are chronological; `toReversedIndex` flips them at the
+    // scroll boundary. "Newest message" is reversed index 0.
     LaunchedEffect(uiState.messages.messages.isNotEmpty()) {
         if (uiState.messages.messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
@@ -307,15 +311,15 @@ fun ChatScreen(
                 listState.scrollToItem(0)
                 return@LaunchedEffect
             }
-            val size = uiState.messages.messages.size
+            val messages = uiState.messages.messages
             val savedIndex = viewModel.savedScrollIndex
-            if (savedIndex in 0 until size) {
-                listState.scrollToItem(size - 1 - savedIndex, viewModel.savedScrollOffset)
+            if (savedIndex in messages.indices) {
+                listState.scrollToItem(messages.toReversedIndex(savedIndex), viewModel.savedScrollOffset)
                 return@LaunchedEffect
             }
             val persisted = viewModel.readPersistedScroll()
-            if (persisted != null && persisted.index in 0 until size) {
-                listState.scrollToItem(size - 1 - persisted.index, persisted.offset)
+            if (persisted != null && persisted.index in messages.indices) {
+                listState.scrollToItem(messages.toReversedIndex(persisted.index), persisted.offset)
             } else {
                 listState.scrollToItem(0)
             }
@@ -391,8 +395,7 @@ fun ChatScreen(
     //
     // In reverseLayout, animateScrollToItem(0) anchors the newest message at
     // the viewport's visual bottom; async image decode / link-preview load
-    // grow the item upward without clipping its bottom, so the follow-up
-    // nudge needed in the old forward-layout code isn't required here.
+    // grow the item upward without clipping its bottom.
     LaunchedEffect(uiState.messages.messages.size) {
         if (!initialScrollDone) return@LaunchedEffect
         if (uiState.messages.messages.isNotEmpty()) {
@@ -439,7 +442,7 @@ fun ChatScreen(
         val target = reactionScrollTarget ?: return@LaunchedEffect
         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == target }
         if (chronoIdx < 0) { reactionScrollTarget = null; return@LaunchedEffect }
-        val reversedIdx = uiState.messages.messages.lastIndex - chronoIdx
+        val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
 
         // Wait for the reaction row to render (Firestore round-trip + recomposition)
         delay(250)
@@ -636,7 +639,7 @@ fun ChatScreen(
                         .clickable {
                             val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == pinned.id }
                             if (chronoIdx >= 0) {
-                                val reversedIdx = uiState.messages.messages.lastIndex - chronoIdx
+                                val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
                                 scope.launch { listState.animateScrollToItem(reversedIdx) }
                             }
                         }
@@ -747,7 +750,7 @@ fun ChatScreen(
                                         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == message.id }
                                         if (chronoIdx >= 0) {
                                             scope.launch {
-                                                scrollToAndCenter(uiState.messages.messages.lastIndex - chronoIdx)
+                                                scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
                                             }
                                         }
                                         viewModel.clearSearch()
