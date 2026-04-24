@@ -4,19 +4,14 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
-### Added
-- **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
-- **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
-
-### Changed
-- **Snappier NavHost slide transitions.** Shortened per-route slide durations so navigation in and out of Chat and List Detail feels less sluggish. (`f974e5b`)
-
 ## [2026-04-24]
 
 ### Added
+- **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
+- **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
 - **Recent emojis + usage tracking in `ImagePreviewScreen`.** Emoji picker surfaces the user's most-recent selections alongside the standard set. (`5e76b7c`)
 - **Baseline profile.** Shipped the first baseline profile plus generator module, testTags on key screens, and unblocked release-build encryption. (`c11aee5`, `d42bc7f`, `8bc1db4`, `8872785`)
-- **Directional iOS-style slide transitions** between NavHost destinations, with per-route duration escalation for Chat and List Detail. (`df74ea3`)
+- **Directional iOS-style slide transitions** between NavHost destinations, with per-route duration escalation for Chat and List Detail, tuned for snappier feel. (`df74ea3`, `f974e5b`)
 
 ### Fixed
 - **IME inset plumbing in chat.** Composer and last bubble now lift cleanly above the keyboard via `Scaffold` padding; replaced the snapshot/scrollBy hack with `reverseLayout=true` + `messages.asReversed()`. (`a660c07`, `a972533`, `e892f58`)
