@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.main
 
 import androidx.compose.animation.animateColorAsState
@@ -26,6 +28,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 
 internal enum class MainTab { CHATS, CALLS, LISTS }
@@ -39,7 +44,7 @@ internal fun BottomNavBar(
     modifier: Modifier = Modifier
 ) {
     NavigationBar(
-        modifier = modifier,
+        modifier = modifier.semantics { testTagsAsResourceId = true },
         containerColor = MaterialTheme.colorScheme.background,
         tonalElevation = 0.dp
     ) {
@@ -65,7 +70,8 @@ internal fun BottomNavBar(
             selectedIcon = Icons.AutoMirrored.Filled.List,
             unselectedIcon = Icons.AutoMirrored.Outlined.List,
             label = "Lists",
-            enabled = true
+            enabled = true,
+            modifier = Modifier.testTag("bottom_nav_lists")
         )
     }
 }
@@ -78,7 +84,8 @@ private fun RowScope.NavItem(
     unselectedIcon: ImageVector,
     label: String,
     enabled: Boolean,
-    showComingSoon: Boolean = false
+    showComingSoon: Boolean = false,
+    modifier: Modifier = Modifier
 ) {
     val iconScale by animateFloatAsState(
         targetValue = if (selected) 1.15f else 1f,
@@ -97,6 +104,7 @@ private fun RowScope.NavItem(
     )
 
     NavigationBarItem(
+        modifier = modifier,
         selected = selected,
         onClick = onClick,
         enabled = enabled,

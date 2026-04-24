@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.auth
 
 import androidx.compose.foundation.layout.Arrangement
@@ -27,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,6 +66,7 @@ fun OtpScreen(
     }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
@@ -92,7 +98,7 @@ fun OtpScreen(
                 value = otpCode,
                 onValueChange = { if (it.length <= 6) otpCode = it },
                 label = { Text("Verification Code") },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("otp_input"),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 textStyle = MaterialTheme.typography.headlineMedium.copy(
@@ -104,7 +110,7 @@ fun OtpScreen(
 
             Button(
                 onClick = { viewModel.verifyOtp(verificationId, otpCode) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("verify_otp_button"),
                 enabled = otpCode.length == 6 && !uiState.isLoading
             ) {
                 if (uiState.isLoading) {

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.chatlist
 
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -62,7 +64,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
@@ -123,6 +128,9 @@ fun ChatListScreen(
     // would clip it or render it below the chat list.
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
+        modifier = Modifier
+            .semantics { testTagsAsResourceId = true }
+            .testTag("chat_list_root"),
         contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar(
@@ -416,7 +424,8 @@ private fun ChatItem(
                 chat.participants.firstOrNull { it != currentUserId }?.let { it in onlineUserIds } == true,
             onClick = onClick,
             onLongClick = { showMenu = true },
-            onAvatarClick = onAvatarClick
+            onAvatarClick = onAvatarClick,
+            modifier = Modifier.testTag("chat_list_item")
         )
         DropdownMenu(
             expanded = showMenu,

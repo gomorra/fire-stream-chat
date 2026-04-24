@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.auth
 
 import android.app.Activity
@@ -33,7 +35,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -82,6 +87,7 @@ fun LoginScreen(
     }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
@@ -116,7 +122,7 @@ fun LoginScreen(
                     value = countryCode,
                     onValueChange = { countryCode = it },
                     label = { Text(stringResource(R.string.country_code_hint)) },
-                    modifier = Modifier.width(100.dp),
+                    modifier = Modifier.width(100.dp).testTag("country_code_input"),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true
                 )
@@ -127,7 +133,7 @@ fun LoginScreen(
                     value = phoneNumber,
                     onValueChange = { phoneNumber = it },
                     label = { Text(stringResource(R.string.phone_number_hint)) },
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).testTag("phone_input"),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                     singleLine = true
                 )
@@ -143,7 +149,7 @@ fun LoginScreen(
                         onOtpSent(verificationId, fullNumber)
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("send_otp_button"),
                 enabled = phoneNumber.length >= 7 && !uiState.isLoading
             ) {
                 if (uiState.isLoading) {

@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.lists
 
 import androidx.compose.animation.AnimatedVisibility
@@ -60,6 +62,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -119,6 +124,7 @@ internal fun ListsScreen(
     }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -266,7 +272,8 @@ internal fun ListsScreen(
                                     onLongClick = {
                                         selectedListForAction = listData
                                         viewModel.loadHistory(listData.id)
-                                    }
+                                    },
+                                    modifier = Modifier.testTag("list_row")
                                 )
                                 HorizontalDivider()
                             }
@@ -344,10 +351,11 @@ private fun ListRow(
     participants: List<com.firestream.chat.domain.model.User>,
     isPinned: Boolean = false,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,

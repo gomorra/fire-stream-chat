@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+
 package com.firestream.chat.ui.auth
 
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +34,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
@@ -60,6 +65,7 @@ fun ProfileSetupScreen(
     }
 
     Scaffold(
+        modifier = Modifier.semantics { testTagsAsResourceId = true },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Column(
@@ -97,7 +103,7 @@ fun ProfileSetupScreen(
                 value = displayName,
                 onValueChange = { displayName = it },
                 label = { Text(stringResource(R.string.display_name_hint)) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("profile_name_input"),
                 singleLine = true
             )
 
@@ -105,7 +111,7 @@ fun ProfileSetupScreen(
 
             Button(
                 onClick = { viewModel.createProfile(displayName) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("profile_complete_button"),
                 enabled = displayName.isNotBlank() && !uiState.isLoading
             ) {
                 if (uiState.isLoading) {
