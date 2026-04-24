@@ -1,5 +1,8 @@
 package com.firestream.chat.ui.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -68,9 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -98,7 +99,6 @@ fun SettingsScreen(
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
-    val clipboard = LocalClipboardManager.current
     val appContext = LocalContext.current.applicationContext
 
     Scaffold(
@@ -363,8 +363,9 @@ fun SettingsScreen(
                 subtitle = BuildConfig.VERSION_NAME + if (BuildConfig.DEBUG) " (debug build)" else "",
                 onClick = { showBuildInfo = true },
                 onLongClick = {
-                    clipboard.setText(AnnotatedString(buildInfoPlaintext()))
-                    // Android 13+ shows its own "Copied" system confirmation; skip ours to avoid double-toast.
+                    val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Build info", buildInfoPlaintext()))
+                    // API 33+ shows a system clipboard confirmation; avoid the duplicate toast.
                     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
                         Toast.makeText(appContext, "Build info copied", Toast.LENGTH_SHORT).show()
                     }
