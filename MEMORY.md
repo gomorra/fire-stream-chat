@@ -1,0 +1,1 @@
+/home/hanz3000/.claude/projects/-home-hanz3000-repo-fire-stream-chat/memory/MEMORY.md
