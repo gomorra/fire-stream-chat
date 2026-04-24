@@ -1,3 +1,5 @@
+import java.io.ByteArrayOutputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -9,6 +11,26 @@ plugins {
     alias(libs.plugins.androidx.baselineprofile)
 }
 
+// Runs `git <args>` at configure time. Returns "" on any failure so callers can
+// pick a sane default. `%cI` (committer ISO date) is used instead of Instant.now()
+// so BuildConfig stays stable across rebuilds — a build-time timestamp would
+// invalidate BuildConfig every invocation and cascade recompiles through Compose.
+fun git(vararg args: String): String = try {
+    val out = ByteArrayOutputStream()
+    exec {
+        commandLine(listOf("git") + args.toList())
+        standardOutput = out
+        isIgnoreExitValue = true
+    }
+    out.toString().trim()
+} catch (_: Exception) { "" }
+
+val gitCommitCount: Int = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
+// Batched: one `git log` call yields both short SHA and committer ISO date.
+val gitHeadMeta: List<String> = git("log", "-1", "--format=%h%n%cI", "HEAD").split("\n")
+val gitShortSha: String = gitHeadMeta.getOrNull(0)?.takeIf { it.isNotEmpty() } ?: "unknown"
+val commitTimestamp: String = gitHeadMeta.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: "unknown"
+
 android {
     namespace = "com.firestream.chat"
     compileSdk = 35
@@ -17,8 +39,11 @@ android {
         applicationId = "com.firestream.chat"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
+        versionCode = gitCommitCount
         versionName = "1.0.0"
+
+        buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
+        buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -1,6 +1,11 @@
 package com.firestream.chat.ui.settings
 
+import android.os.Build
+import android.widget.Toast
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -63,10 +68,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.NotificationSound
@@ -87,6 +97,9 @@ fun SettingsScreen(
     var showSoundPicker by remember { mutableStateOf(false) }
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
+    var showBuildInfo by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val appContext = LocalContext.current.applicationContext
 
     Scaffold(
         topBar = {
@@ -347,8 +360,15 @@ fun SettingsScreen(
             SettingsItem(
                 icon = Icons.Default.Info,
                 title = "App Version",
-                subtitle = "1.0.0",
-                onClick = { }
+                subtitle = BuildConfig.VERSION_NAME + if (BuildConfig.DEBUG) " (debug build)" else "",
+                onClick = { showBuildInfo = true },
+                onLongClick = {
+                    clipboard.setText(AnnotatedString(buildInfoPlaintext()))
+                    // Android 13+ shows its own "Copied" system confirmation; skip ours to avoid double-toast.
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                        Toast.makeText(appContext, "Build info copied", Toast.LENGTH_SHORT).show()
+                    }
+                }
             )
 
             SettingsItem(
@@ -442,6 +462,10 @@ fun SettingsScreen(
         )
     }
 
+    if (showBuildInfo) {
+        BuildInfoDialog(onDismiss = { showBuildInfo = false })
+    }
+
     if (showSignOutDialog) {
         AlertDialog(
             onDismissRequest = { showSignOutDialog = false },
@@ -475,13 +499,15 @@ private fun SectionHeader(title: String) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SettingsItem(
     icon: ImageVector,
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    tintError: Boolean = false
+    tintError: Boolean = false,
+    onLongClick: (() -> Unit)? = null
 ) {
     val tint = if (tintError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     ListItem(
@@ -490,7 +516,7 @@ private fun SettingsItem(
         },
         supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
         leadingContent = { Icon(icon, contentDescription = null, tint = tint) },
-        modifier = Modifier.clickable(onClick = onClick)
+        modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
     )
 }
 
@@ -510,6 +536,49 @@ private fun SettingsToggleItem(
             Switch(checked = checked, onCheckedChange = onCheckedChange)
         },
         modifier = Modifier.clickable { onCheckedChange(!checked) }
+    )
+}
+
+private fun buildInfoFields(): List<Pair<String, String>> = listOf(
+    "Version" to BuildConfig.VERSION_NAME,
+    "Build" to BuildConfig.VERSION_CODE.toString(),
+    "Commit" to BuildConfig.GIT_SHA,
+    "Committed" to BuildConfig.COMMIT_TIMESTAMP,
+    "Type" to if (BuildConfig.DEBUG) "Debug" else "Release"
+)
+
+private fun buildInfoPlaintext(): String =
+    buildInfoFields().joinToString("\n") { (label, value) -> "$label $value" }
+
+@Composable
+private fun BuildInfoDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+        title = { Text("Build info") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                buildInfoFields().forEach { (label, value) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = value,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
     )
 }
 

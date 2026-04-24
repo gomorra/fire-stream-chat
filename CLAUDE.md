@@ -232,7 +232,7 @@ Deferred and declined refactors are catalogued in `TECH_DEBT.md` at the repo roo
 
 ## Changelog
 
-User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format, dated by merge day — no release tags yet).
+User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Each section is headed by the SemVer `versionName` shipped on that merge day: `## [1.2.3] — 2026-04-24`.
 
 **After each user-visible commit**, append an entry under `## [Unreleased]` in the matching section (`Added` / `Fixed` / `Changed` / `Removed`):
 - Lead with a bold descriptive name, not the raw commit subject.
@@ -241,9 +241,24 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format, dat
 
 **Skip for:** doc-only, test-only, refactors with no user-visible effect, CI/tooling changes.
 
-**At release time:** rename `## [Unreleased]` to `## [YYYY-MM-DD]` and add a new empty `## [Unreleased]` block above.
+### Versioning
 
-`.github/workflows/changelog-check.yml` fails PRs that touch `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Apply the `no-changelog` label to bypass for exempt PRs.
+Before committing a user-visible change, bump `versionName` in `app/build.gradle.kts` per the conventional-commit prefix:
+
+| Prefix | Bump | Example |
+|--------|------|---------|
+| `feat:` | minor | `1.2.3` → `1.3.0` |
+| `fix:` | patch | `1.2.3` → `1.2.4` |
+| `feat!:` or `BREAKING CHANGE:` | major | `1.2.3` → `2.0.0` |
+| `chore:`, `refactor:`, `docs:`, `test:`, `ci:` | none | — |
+
+**Section placement.** If the top section below `[Unreleased]` is already dated today, append to it — and if this commit's bump is higher-severity than the section's current version, upgrade the header too (e.g. a `feat` landing on a `## [1.2.4] — today` section promotes it to `## [1.3.0] — today`). Otherwise insert a fresh `## [X.Y.Z] — YYYY-MM-DD` section.
+
+**`versionCode` is auto-derived** from `git rev-list --count HEAD` at Gradle configure time — never edit it by hand. Same with `BuildConfig.GIT_SHA` / `COMMIT_TIMESTAMP`.
+
+**At release time** (once store tagging begins): rename `## [Unreleased]` to the released version header and add a new empty `## [Unreleased]` block above.
+
+`.github/workflows/changelog-check.yml` fails pushes and PRs that touch `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Apply the `no-changelog` label to bypass for exempt PRs.
 
 ## Sensitive Files
 

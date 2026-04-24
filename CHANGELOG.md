@@ -1,12 +1,13 @@
 # Changelog
 
-All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project does not yet tag releases, so sections are dated by merge day on `main`.
+All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
 ## [Unreleased]
 
-## [2026-04-24]
+## [1.0.0] — 2026-04-24
 
 ### Added
+- **Build info in Settings → App Version.** Subtitle now shows the real `versionName` with a `(debug build)` suffix on debug. Tap the row to open a Material3 dialog with version / build / commit SHA / committed date / type; long-press to copy the same block to the clipboard. `versionCode` is now derived from `git rev-list --count HEAD` at configure time, and `BuildConfig` carries the HEAD SHA + committer date.
 - **Save image from chat bubble.** Long-pressing an image message now surfaces a `Save image` action in the dropdown, routing through the existing `saveImageToDownloads` → `MediaFileManager.saveToDownloads` pipeline. (`8bb2a2e`)
 - **Profile → Shared Media fullscreen viewer.** Tapping a thumbnail in the ProfileScreen shared-media grid now opens the existing `FullscreenImageViewer` (pinch-zoom, double-tap, tap-to-dismiss). Prefers `localUri` over the remote thumbnail, matching the in-chat image bubble. (`37300aa`)
 - **Recent emojis + usage tracking in `ImagePreviewScreen`.** Emoji picker surfaces the user's most-recent selections alongside the standard set. (`5e76b7c`)
@@ -21,7 +22,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Changed
 - **Code-review workflow.** `/simplify` now runs three parallel Sonnet-medium reviewers by default, with an Opus-medium triggered path for concurrency- or security-heavy diffs. (`378c5bb`, `6a72ea2`)
 
-## [2026-04-23]
+## [1.0.0] — 2026-04-23
 
 ### Added
 - **`AppError` sealed type.** Every UiState's `error` field is now `AppError?` instead of `String?`; `AppError.from(Throwable)` standardizes VM-boundary wrapping. (`5242ece`, `182fd15`, `0dfc285`)
@@ -46,7 +47,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Lists feature** uses `AuthRepository` instead of leaking `FirebaseAuthSource` into ViewModels. (`e6985b0`)
 - **Repository fakes expanded** (`FakeMessageRepository`, `FakeChatRepository`); flagship VM tests migrated off MockK. (`2e91150`)
 
-## [2026-04-19]
+## [1.0.0] — 2026-04-19
 
 ### Added
 - **Dark palette refresh** — calmer neutrals with orange as the true accent. (`28b7c02`)
@@ -56,7 +57,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Chat list ordering** preserved across the bottom-nav tab persistence refactor. (`700e332`)
 - **List-update chat bubble** now delivers even if the user leaves the detail screen mid-debounce. (`ddd387c`)
 
-## [2026-04-16]
+## [1.0.0] — 2026-04-16
 
 ### Added
 - **Jump-to-source** when tapping a reply preview — scrolls the quoted message into view and highlights it. (`d079d7c`)
@@ -65,7 +66,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Receiver flashing online after `goOffline`.** (`88e31d0`)
 - **Bottom-nav tab persistence** restores the last open tab on relaunch. (`5065338`)
 
-## [2026-04-12]
+## [1.0.0] — 2026-04-12
 
 ### Added
 - **Test infrastructure scaffold** — fakes, test data, dispatcher rule. (`24dde3f`, `317d9f5`)
@@ -76,19 +77,19 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **`MessageBubble` VerifyError** — collapsed callbacks to dodge the Compose register-allocator crash that blocked chat-open on release builds. (`00b15da`)
 - **x86_64 ABI** added to debug builds for native emulator support. (`4d56698`)
 
-## [2026-04-11]
+## [1.0.0] — 2026-04-11
 
 ### Refactored
 - **Repository layer cleanup** — `resultOf` helper, `Uri → String` at the boundary, `FirestoreChatSource` tidy. (`3cc2229`)
 - **`rememberImagePicker` composable** extracted for gallery/camera flows. (`f6132f0`)
 - **Compose-specific mention formatter** moved out of the domain layer. (`6454836`)
 
-## [2026-04-06]
+## [1.0.0] — 2026-04-06
 
 ### Added
 - **Location sharing.** New `LOCATION` message type with GPS capture via `FusedLocationProviderClient`, OpenStreetMap static-tile previews, and `geo:` URI intent on tap. `LocationPickerSheet` composable for one-tap capture.
 
-## [2026-04-04]
+## [1.0.0] — 2026-04-04
 
 ### Added
 - **UI/UX polish pass** across the app:
@@ -102,7 +103,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
   - Message enter animations and receipt transitions.
   - Skeleton shimmer loading for three screens.
 
-## [2026-03-29]
+## [1.0.0] — 2026-03-29
 
 ### Added
 - **Image handling overhaul.** Local-first media storage under `Android/media/com.firestream.chat/{chatId}/`, EXIF-aware compression with a "full quality" preference, dynamic bubble sizing from `mediaWidth/mediaHeight`, determinate upload-progress overlay, and gallery export via MediaStore.
@@ -114,20 +115,20 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - Per-chat download scan on chat open.
 - Sent-image file rename from tempId to remoteId to prevent orphans.
 
-## [2026-03-21]
+## [1.0.0] — 2026-03-21
 
 ### Added
 - **Bottom navigation + Calls tab.** `MainScreen` hosts a `HorizontalPager` with Chats, Calls, and Lists; `BottomNavBar` lives exclusively in `MainScreen`.
 - **Robust online presence** via Firebase RTDB with the `.info/connected` reconnect pattern.
 
-## [2026-03-13]
+## [1.0.0] — 2026-03-13
 
 ### Added
 - **Phase 4.1 — 1-to-1 voice calls** over WebRTC: domain layer, `CallService` foreground service, `CallStateHolder`, incoming-call FCM, `CallActivity`, and the call push Cloud Function.
 - **Clickable links in message content** with a fullscreen image viewer for link previews and shared media.
 - **Content sharing** — share picker UI; message search uses word-boundary matching.
 
-## [2026-03-10]
+## [1.0.0] — 2026-03-10
 
 ### Added
 - **Message soft deletion.**
@@ -138,7 +139,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 - Sporadic message decryption failures caused by `collectLatest` cancellation. (`8f0b297`)
 
-## [2026-03-09]
+## [1.0.0] — 2026-03-09
 
 ### Added
 - **Phase 5.5 — Broadcast lists.** (`cd7ec32`)
@@ -146,7 +147,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Phase 5.1 — Enhanced group management** (description, invite links, QR codes). (`5f0819b`)
 - **Group creation + mention parser** with mention-only notification setting. (`1f0c009`)
 
-## [2026-03-08]
+## [1.0.0] — 2026-03-08
 
 ### Added
 - **Phase 2 — User experience & chat management.** Archived chats screen, in-chat search, richer message-status indicators.
@@ -155,14 +156,14 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 - **Chat screen back-navigation hang** under rapid-fire Room emissions. (`cb628d5`)
 
-## [2026-03-07]
+## [1.0.0] — 2026-03-07
 
 ### Added
 - **Phase 1 — Core messaging completeness.**
 - **Push notifications, fullscreen image viewer, media send.**
 - **Firebase Phone Auth + Signal Protocol** wired up.
 
-## [2026-03-06]
+## [1.0.0] — 2026-03-06
 
 ### Added
 - **Initial Android chat client** — project scaffold and first feature pass.
