@@ -44,8 +44,8 @@ import kotlinx.coroutines.launch
 // four NavHost transition lambdas so the bezier is allocated once at file init, not
 // on every navigation event.
 private val NavSlideEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
-private const val NAV_SLIDE_DURATION_MS = 550
-private const val NAV_SLIDE_DURATION_MS_SLOW = 850
+private const val NAV_SLIDE_DURATION_MS = 500
+private const val NAV_SLIDE_DURATION_MS_SLOW = 600
 
 // Routes whose enter/exit transitions run at the slower duration. Checked against
 // both initialState and targetState so the pair stays symmetric — leaving-screen
