@@ -1,3 +1,16 @@
+// region: AGENT-NOTE
+// Responsibility: Application-data Room database (`fire_stream_chat.db`).
+//   5 entities: Users, Messages, Chats, Contacts, Lists. Signal Protocol tables
+//   were split out into SignalDatabase (`signal.db`) at version 19 so destructive
+//   migrations on this DB no longer wipe key material.
+// Owns: @Database `version` field — bump on any column/table add/remove/rename
+//   (Pattern: docs/PATTERNS.md#room-version-bump-rule). Migration registrations.
+// Collaborators: DatabaseModule (Hilt provider), all DAOs in dao/, all entities
+//   in entity/.
+// Don't put here: Signal Protocol entities (SignalDatabase), DataStore
+//   preferences (PreferencesDataStore), in-memory caches.
+// endregion
+
 package com.firestream.chat.data.local
 
 import androidx.room.Database

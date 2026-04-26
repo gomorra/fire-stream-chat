@@ -1,3 +1,19 @@
+// region: AGENT-NOTE
+// Responsibility: Single NavHost for the whole app + the `Routes` object that
+//   defines every route string and helper. CallActivity is the only screen
+//   *not* hosted here (separate Activity for lock-screen support).
+//   `CHAT_LIST` renders MainScreen, which hosts a HorizontalPager — Calls and
+//   Lists tabs are pager state, not NavHost destinations.
+// Owns: Route constants, route arg helpers (Routes.chat / Routes.otp /
+//   Routes.messageInfo / Routes.userProfile), NavHost transition timing.
+// Collaborators: every UI screen package; PreferencesDataStore for
+//   first-launch routing.
+// Don't put here: Bottom navigation (lives in MainScreen), per-screen state
+//   (lives in ViewModels), call-screen wiring (CallActivity).
+// Adding a route: add a constant to Routes, a helper if it takes args, and a
+//   composable() block here. Never construct route strings manually at call sites.
+// endregion
+
 package com.firestream.chat.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope

@@ -1,3 +1,17 @@
+// region: AGENT-NOTE
+// Responsibility: Firestore message subcollection I/O — chats/{chatId}/messages/{id}.
+//   Reads emit RawFirestoreMessage (ciphertext or plaintext); writes accept
+//   pre-encrypted payloads. Per-key map updates for readBy / deliveredTo /
+//   reactions via FieldValue dot-notation.
+// Owns: Listener registrations on chats/{chatId}/messages — caller must close
+//   the returned Flow to detach.
+// Collaborators: MessageRepositoryImpl (only caller); decrypts via SignalManager
+//   on the way out.
+// Don't put here: Signal encryption itself (SignalManager), Room caching
+//   (MessageRepositoryImpl), unread-count increments (sendPushNotification
+//   Cloud Function in functions/index.js).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.MessageStatus

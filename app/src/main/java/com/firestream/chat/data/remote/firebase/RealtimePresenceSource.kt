@@ -1,3 +1,17 @@
+// region: AGENT-NOTE
+// Responsibility: User presence on Firebase RTDB at `/presence/{uid}`.
+//   `.info/connected` pattern + `onDisconnect()` registration handles abrupt
+//   disconnects without client cooperation. Presence transitions documented
+//   in the KDoc just below.
+// Owns: RTDB writes to /presence/* + idempotency state for foreground reentry.
+// Collaborators: AppLifecycleObserver (process-level driver — startPresence on
+//   onStart, goOffline on onStop), UserRepositoryImpl (consumer of
+//   observeOnlineStatus), Cloud Function syncPresenceToFirestore (mirrors to
+//   Firestore for abrupt-termination cases).
+// Don't put here: lifecycle observer logic (AppLifecycleObserver), Firestore
+//   mirror (Cloud Function), cached presence in users table (UserRepositoryImpl).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import android.util.Log

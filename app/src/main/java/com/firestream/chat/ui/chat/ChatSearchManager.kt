@@ -1,3 +1,12 @@
+// region: AGENT-NOTE
+// Responsibility: Debounced full-text search across the current chat.
+// Owns: ChatUiState.overlays.{searchQuery, searchResults, isSearchActive}.
+// Collaborators: ChatViewModel (composition root), SearchMessagesUseCase.
+// Don't put here: global search across chats (lives in ChatListViewModel),
+//   any state outside the overlays slice. Pattern:
+//   docs/PATTERNS.md#chat-manager-slice-ownership.
+// endregion
+
 package com.firestream.chat.ui.chat
 
 import kotlinx.coroutines.CoroutineScope

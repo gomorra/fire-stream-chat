@@ -1,3 +1,16 @@
+// region: AGENT-NOTE
+// Responsibility: Drives composer voice dictation via the system SpeechRecognizer.
+// Owns: ChatUiState.dictation.* (entire slice). Side-channel: `commits` SharedFlow
+//   for committed text segments; `audioLevel` StateFlow kept separate so RMS
+//   updates (~10/s) don't recompose all of ChatScreen.
+// Collaborators: ChatViewModel (composition root), SpeechRecognizerManager,
+//   CallStateHolder (suppresses dictation during a call).
+// Don't put here: language-pref persistence (DataStore — owned by SettingsViewModel),
+//   composer text writes (commits flow → ChatViewModel applies them). Pattern:
+//   docs/PATTERNS.md#chat-manager-slice-ownership — this file is the canonical
+//   clean example.
+// endregion
+
 package com.firestream.chat.ui.chat
 
 import android.content.Context

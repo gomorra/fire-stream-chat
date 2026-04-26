@@ -1,3 +1,15 @@
+// region: AGENT-NOTE
+// Responsibility: WebRTC call signalling — create/end calls, exchange SDP +
+//   ICE candidates via Firestore. Also writes a CALL message into the chat
+//   so the call shows up in CallsScreen's call log.
+// Owns: Coordination between FirestoreCallSource (signalling docs) and the
+//   message stream (call-log entries). Stateless — call state itself lives in
+//   CallStateHolder + CallService, not here.
+// Collaborators: FirestoreCallSource, FirestoreMessageSource, ChatDao, CallService.
+// Don't put here: PeerConnection lifecycle (CallService), in-call UI state
+//   (CallStateHolder), call-log derivation (CallsViewModel).
+// endregion
+
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ChatDao

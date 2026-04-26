@@ -1,3 +1,18 @@
+// region: AGENT-NOTE
+// Responsibility: User profile CRUD + presence merging. observeUser() combines
+//   Firestore profile + RTDB presence into a single stream so the UI sees
+//   live online status without depending on the syncPresenceToFirestore
+//   Cloud Function for the live indicator.
+// Owns: UserEntity rows. Profile image cache via ProfileImageManager (on
+//   avatar URL change, kicks off background download/cache).
+// Collaborators: UserDao, FirestoreUserSource, RealtimePresenceSource,
+//   FirebaseStorageSource (avatar uploads), FirebaseAuthSource (current user),
+//   ProfileImageManager.
+// Don't put here: sign-in / sign-out (AuthRepositoryImpl), block-list writes
+//   (lives on FirestoreUserSource subcollection — call from here, don't
+//   reimplement).
+// endregion
+
 package com.firestream.chat.data.repository
 
 import android.net.Uri

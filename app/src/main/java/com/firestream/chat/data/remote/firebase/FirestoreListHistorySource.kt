@@ -1,3 +1,14 @@
+// region: AGENT-NOTE
+// Responsibility: Audit-trail subcollection at `lists/{listId}/history/{entryId}`.
+//   Each list mutation (add/check/edit/remove/title-change/type-change/share/
+//   unshare) writes one entry with action, itemId, userId, userName, timestamp.
+// Owns: Listener registrations on `lists/{id}/history`, ordered by timestamp.
+// Collaborators: ListRepositoryImpl (caller; writes are fire-and-forget on a
+//   SupervisorJob so they never block the main flow).
+// Don't put here: list/item state itself (FirestoreListSource); business rules
+//   for which mutations get audited (ListRepositoryImpl decides).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.HistoryAction

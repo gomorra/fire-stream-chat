@@ -1,3 +1,16 @@
+// region: AGENT-NOTE
+// Responsibility: Loads and observes chat-level metadata for ChatScreen — chat doc,
+//   recipient profile, group permissions, recent emojis, mention candidates.
+// Owns: ChatUiState.session.* (chat name/avatar, blocked state, isLoading)
+//   — and currently also writes ComposerState.canSendMessages / mentionCandidates
+//   and OverlaysState.recentEmojis (Phase 2 will move these out per the manager
+//   contract — see docs/PATTERNS.md#chat-manager-slice-ownership).
+// Collaborators: ChatViewModel (composition root), ChatRepository, UserRepository,
+//   ListRepository, CheckGroupPermissionUseCase, PreferencesDataStore.
+// Don't put here: composer state writes, message send/edit, overlay state writes.
+//   New session fields are fine; cross-slice writes are not.
+// endregion
+
 package com.firestream.chat.ui.chat
 
 import kotlinx.coroutines.CoroutineScope

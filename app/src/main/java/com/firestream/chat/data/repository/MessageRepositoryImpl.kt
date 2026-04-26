@@ -1,3 +1,21 @@
+// region: AGENT-NOTE
+// Responsibility: Message CRUD across all message types — text / image / voice /
+//   document / poll / location / list / call. Routes through Signal encryption
+//   in release builds (with user opt-out from PreferencesDataStore) and plaintext
+//   in debug. Owns the local-first send pipeline (Room first, upload + remoteId
+//   rename second), media download with in-flight dedup, per-chat backfill scan,
+//   block-state filtering on receive.
+// Owns: MessageEntity rows + uploadProgress: StateFlow<Map<String, Float>>.
+// Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
+//   FirebaseStorageSource, SignalManager (release encrypt/decrypt path),
+//   PreferencesDataStore (encryption opt-out, AutoDownloadOption), MediaFileManager,
+//   ImageCompressor, ConnectivityManager (WiFi-only download check).
+// Don't put here: poll vote/close (PollRepositoryImpl), list mutations
+//   (ListRepositoryImpl), call signalling (CallRepositoryImpl). Class is large
+//   (~1100 LOC) — Phase 2 plan adds a section-comment TOC and 1100-LOC ceiling.
+//   See docs/PATTERNS.md for the encryption-guard and AppError-wrap conventions.
+// endregion
+
 package com.firestream.chat.data.repository
 
 import android.net.ConnectivityManager

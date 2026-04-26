@@ -1,3 +1,13 @@
+// region: AGENT-NOTE
+// Responsibility: Send / vote / close polls from the chat composer.
+// Owns: ChatUiState.composer.isSending — and currently writes session.error
+//   via AppError.from() (Phase 2 will route this through composer.error per
+//   the manager contract — see docs/PATTERNS.md#chat-manager-slice-ownership).
+// Collaborators: ChatViewModel (composition root), PollRepository.
+// Don't put here: poll rendering (PollBubble) or poll-create UI (CreatePollSheet).
+//   New send/vote intents are fine; reading non-poll state is not.
+// endregion
+
 package com.firestream.chat.ui.chat
 
 import kotlinx.coroutines.CoroutineScope

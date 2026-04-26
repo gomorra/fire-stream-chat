@@ -1,3 +1,15 @@
+// region: AGENT-NOTE
+// Responsibility: Firebase Storage uploads — user avatars, group avatars, message
+//   media. Streams determinate progress for media uploads via
+//   `addOnProgressListener` wrapped in `suspendCancellableCoroutine`.
+// Owns: Storage path conventions: `avatars/{userId}/profile.jpg`,
+//   `avatars/groups/{chatId}/group.jpg`, message media under `messages/{chatId}/`.
+// Collaborators: ChatRepositoryImpl (group avatars), UserRepositoryImpl
+//   (user avatars), MessageRepositoryImpl (media + uploadProgress flow).
+// Don't put here: local media file management (MediaFileManager), image
+//   compression (ImageCompressor), media backfill (MediaBackfillWorker).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import android.net.Uri

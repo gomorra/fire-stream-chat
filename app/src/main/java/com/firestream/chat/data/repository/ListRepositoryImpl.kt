@@ -1,3 +1,16 @@
+// region: AGENT-NOTE
+// Responsibility: Shared-list CRUD + share/unshare flows. Per-list mutex and
+//   resultOf() wrapping for the multi-step share/unshare pipelines that
+//   need atomic-feeling semantics across Firestore writes + history entries.
+// Owns: ListEntity rows + lists/{id}/items/{itemId} subcollection writes via
+//   FirestoreListSource. Denormalized itemCount/checkedCount maintained on the
+//   parent metadata doc.
+// Collaborators: ListDao, MessageDao (LIST message creation), FirestoreListSource,
+//   FirestoreListHistorySource (audit trail, fire-and-forget on SupervisorJob).
+// Don't put here: 30s debounce for LIST update fan-out (ListDetailViewModel),
+//   chat-side LIST bubble rendering (ListBubble).
+// endregion
+
 package com.firestream.chat.data.repository
 
 import android.util.Log

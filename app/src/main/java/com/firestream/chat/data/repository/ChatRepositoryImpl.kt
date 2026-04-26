@@ -1,3 +1,15 @@
+// region: AGENT-NOTE
+// Responsibility: Chat lifecycle — create/observe/update chats, group metadata,
+//   admin operations, archive/pin/mute, group avatar upload. Local-first: writes
+//   to ChatDao, observes Firestore, merges into Room.
+// Owns: ChatEntity rows + group-management Firestore writes.
+// Collaborators: ChatDao, MessageDao (lastMessage propagation), FirestoreChatSource,
+//   FirebaseAuthSource (current user), FirebaseStorageSource (group avatars),
+//   ProfileImageManager.
+// Don't put here: message CRUD (MessageRepositoryImpl), per-user profile
+//   (UserRepositoryImpl), Signal session creation (SignalManager).
+// endregion
+
 package com.firestream.chat.data.repository
 
 import android.net.Uri

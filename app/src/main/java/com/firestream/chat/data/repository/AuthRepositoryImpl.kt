@@ -1,3 +1,14 @@
+// region: AGENT-NOTE
+// Responsibility: Phone-OTP authentication, FCM token registration, sign-out.
+// Owns: Current Firebase user state. Sign-out clears AppDatabase + SignalDatabase
+//   so a fresh signed-in user gets clean local state and fresh Signal keys.
+// Collaborators: FirebaseAuthSource (PhoneAuthProvider), FirebaseMessaging
+//   (FCM tokens), AppDatabase + SignalDatabase (clear on sign-out), SignalManager
+//   (re-init on sign-in), UserDao (cache the new user).
+// Don't put here: profile-edit operations (UserRepositoryImpl), session presence
+//   (RealtimePresenceSource), key-bundle exchange (FirebaseKeySource).
+// endregion
+
 package com.firestream.chat.data.repository
 
 import android.util.Log

@@ -9,8 +9,12 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Added
 - **Settings → Chat → Dictation Language.** A new "Chat" section in Settings exposes a picker for the dictation language with two options: German (`de-DE`, default) and English (`en-US`). The choice persists in DataStore (`dictation_language` key) and `ChatViewModel.startDictation` reads it on each mic tap, replacing the previous diagnostic hardcode and the earlier `Locale.getDefault()` fallback that silently returned the wrong recognizer locale on some devices.
 
+### Changed
+- **End-to-end encryption now defaults to off in release.** The Settings → Privacy toggle introduced in 1.2.0 previously defaulted on; new installs (and existing users who never touched the toggle) now start with the plaintext path until they explicitly enable Signal in Settings. Receive path is unchanged — incoming encrypted messages still decrypt. Debug builds were already plaintext-only and are unaffected.
+
 ### Fixed
 - **Voice dictation: mic now actually records.** The recording bar opened for a fraction of a second and closed again with no transcript. Cause: `RecognizerIntent.EXTRA_PREFER_OFFLINE` was set unconditionally on SDK ≥ 31, which forces the recognizer to fail with `ERROR_NETWORK` whenever the offline language pack for the user's locale isn't downloaded. Dropped the flag — the system now picks online or offline by itself. Also surfaced `dictation.error` as a snackbar (previously silently swallowed) and added the `RECORD_AUDIO` calling-package extra plus a logcat line tagged `SpeechRecognizer` for the error code.
+- **Quoted reply preview no longer renders in italic.** The snippet shown inside a chat bubble when replying to a message was set to `FontStyle.Italic`, leaving it visually inconsistent with the upright "Replying to" banner in the composer. Dropped the italic so both surfaces use the same plain `bodySmall` style.
 
 ## [1.2.0] — 2026-04-26
 

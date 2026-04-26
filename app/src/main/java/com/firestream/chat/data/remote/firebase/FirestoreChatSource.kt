@@ -1,3 +1,14 @@
+// region: AGENT-NOTE
+// Responsibility: Firestore I/O for `chats/{chatId}` + `inviteLinks/{token}`
+//   collections. Group metadata, participants, admins, owner, invite links,
+//   pending-member approval, typing indicators, unread-count reads.
+// Owns: Listener registrations on `chats/*`. Permission map serialisation.
+// Collaborators: ChatRepositoryImpl (only caller).
+// Don't put here: messages subcollection (FirestoreMessageSource),
+//   per-user blocked list (FirestoreUserSource subcollection), call signalling
+//   (FirestoreCallSource).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.Chat

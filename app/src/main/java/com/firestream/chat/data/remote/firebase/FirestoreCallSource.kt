@@ -1,3 +1,15 @@
+// region: AGENT-NOTE
+// Responsibility: WebRTC signalling I/O — `calls/{callId}` doc + `callerCandidates`
+//   / `calleeCandidates` ICE subcollections. Status transitions
+//   (ringing → answered → ended), SDP offer/answer storage, ICE candidate streams.
+// Owns: Listener registrations on `calls/*` for call status + ICE candidates.
+// Collaborators: CallRepositoryImpl (only caller); the Cloud Function
+//   `sendCallPushNotification` triggers off `calls/*` document creates with
+//   status == ringing.
+// Don't put here: PeerConnection itself (CallService), call-log derivation
+//   (call-type messages live in FirestoreMessageSource).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.CallSignalingData

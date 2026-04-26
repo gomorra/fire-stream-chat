@@ -1,3 +1,16 @@
+// region: AGENT-NOTE
+// Responsibility: Firestore I/O for `lists/{listId}` metadata doc + items
+//   subcollection at `lists/{listId}/items/{itemId}`. Maintains denormalized
+//   `itemCount` / `checkedCount` on the parent doc via FieldValue.increment in
+//   the same batch as item writes. One-shot legacy migration for pre-refactor
+//   embedded `items` arrays (migrateEmbeddedItemsIfNeeded).
+// Owns: Listener registrations on `lists/*` and items subcollection.
+// Collaborators: ListRepositoryImpl (only caller).
+// Don't put here: history audit trail (FirestoreListHistorySource), share-state
+//   coordination with chats (ListRepositoryImpl handles sharedChatIds + LIST
+//   message creation).
+// endregion
+
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.domain.model.GenericListStyle
