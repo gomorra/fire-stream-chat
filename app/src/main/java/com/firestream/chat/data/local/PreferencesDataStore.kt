@@ -35,6 +35,7 @@ class PreferencesDataStore @Inject constructor(
     private val readReceiptsKey = booleanPreferencesKey("read_receipts")
     private val lastSeenKey = booleanPreferencesKey("last_seen_visible")
     private val screenSecurityKey = booleanPreferencesKey("screen_security")
+    private val e2eEncryptionKey = booleanPreferencesKey("e2e_encryption_enabled")
 
     // Notifications
     private val messageNotificationsKey = booleanPreferencesKey("message_notifications")
@@ -110,6 +111,16 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setScreenSecurity(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[screenSecurityKey] = enabled }
+    }
+
+    // Debug builds ignore this — the BuildConfig.DEBUG guard in MessageRepositoryImpl
+    // forces plaintext regardless.
+    val e2eEncryptionEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[e2eEncryptionKey] ?: true
+    }
+
+    suspend fun setE2eEncryptionEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[e2eEncryptionKey] = enabled }
     }
 
     // --- Notifications ---

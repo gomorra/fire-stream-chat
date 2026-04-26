@@ -39,6 +39,7 @@ data class SettingsUiState(
     val readReceipts: Boolean = true,
     val lastSeenVisible: Boolean = true,
     val screenSecurity: Boolean = false,
+    val e2eEncryption: Boolean = true,
     // Notifications
     val messageNotifications: Boolean = true,
     val groupNotifications: Boolean = true,
@@ -110,6 +111,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            preferencesDataStore.e2eEncryptionEnabledFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(e2eEncryption = enabled)
+            }
+        }
+        viewModelScope.launch {
             preferencesDataStore.messageNotificationsFlow.collect { enabled ->
                 _uiState.value = _uiState.value.copy(messageNotifications = enabled)
             }
@@ -164,6 +170,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setScreenSecurity(enabled: Boolean) {
         viewModelScope.launch { preferencesDataStore.setScreenSecurity(enabled) }
+    }
+
+    fun setE2eEncryption(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setE2eEncryptionEnabled(enabled) }
     }
 
     // Notifications

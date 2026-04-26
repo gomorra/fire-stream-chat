@@ -80,6 +80,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.readReceiptsFlow } returns flowOf(true)
         every { preferencesDataStore.lastSeenVisibleFlow } returns flowOf(true)
         every { preferencesDataStore.screenSecurityFlow } returns flowOf(false)
+        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
         every { preferencesDataStore.messageNotificationsFlow } returns flowOf(true)
         every { preferencesDataStore.groupNotificationsFlow } returns flowOf(true)
         every { preferencesDataStore.mentionOnlyNotificationsFlow } returns flowOf(false)

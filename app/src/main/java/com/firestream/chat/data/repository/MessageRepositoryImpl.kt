@@ -293,7 +293,11 @@ class MessageRepositoryImpl @Inject constructor(
         longitude: Double? = null,
         isForwarded: Boolean = false,
     ): String {
-        return if (recipientId.isNotEmpty() && !BuildConfig.DEBUG) {
+        return if (
+            recipientId.isNotEmpty() &&
+            !BuildConfig.DEBUG &&
+            preferencesDataStore.e2eEncryptionEnabledFlow.first()
+        ) {
             signalManager.ensureInitialized()
             val encrypted = signalManager.encrypt(recipientId, plaintext)
             messageSource.sendMessage(

@@ -98,6 +98,7 @@ fun SettingsScreen(
     var showSoundPicker by remember { mutableStateOf(false) }
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
+    var showDisableEncryptionDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
     val appContext = LocalContext.current.applicationContext
 
@@ -221,6 +222,24 @@ fun SettingsScreen(
                 checked = uiState.screenSecurity,
                 onCheckedChange = { viewModel.setScreenSecurity(it) }
             )
+
+            // Hidden in debug — debug builds always send plaintext regardless of this toggle.
+            if (!BuildConfig.DEBUG) {
+                SettingsToggleItem(
+                    icon = Icons.Default.Lock,
+                    title = "End-to-End Encryption",
+                    subtitle = if (uiState.e2eEncryption) {
+                        "Encrypt 1:1 messages with Signal Protocol (recommended)"
+                    } else {
+                        "Off — outgoing 1:1 messages are sent as plaintext"
+                    },
+                    checked = uiState.e2eEncryption,
+                    onCheckedChange = { enabled ->
+                        if (enabled) viewModel.setE2eEncryption(true)
+                        else showDisableEncryptionDialog = true
+                    }
+                )
+            }
 
             // Notifications section
             Spacer(Modifier.height(8.dp))
@@ -465,6 +484,33 @@ fun SettingsScreen(
 
     if (showBuildInfo) {
         BuildInfoDialog(onDismiss = { showBuildInfo = false })
+    }
+
+    if (showDisableEncryptionDialog) {
+        AlertDialog(
+            onDismissRequest = { showDisableEncryptionDialog = false },
+            title = { Text("Disable End-to-End Encryption?") },
+            text = {
+                Text(
+                    "New 1:1 messages you send will be readable by anyone with access to the " +
+                        "server. Messages already in your chats stay as they were sent. " +
+                        "Group and broadcast messages were never encrypted."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.setE2eEncryption(false)
+                    showDisableEncryptionDialog = false
+                }) {
+                    Text("Disable", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisableEncryptionDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showSignOutDialog) {
