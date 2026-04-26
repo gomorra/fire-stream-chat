@@ -95,6 +95,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -112,6 +113,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
@@ -336,7 +338,14 @@ internal fun MessageBubble(
                     }
 
                     if (replyToMessage != null) {
-                        Box(
+                        val replySnippet = if (replyToMessage.type == MessageType.IMAGE) {
+                            replyToMessage.content.take(80)
+                                .ifBlank { stringResource(R.string.reply_preview_photo) }
+                        } else {
+                            replyToMessage.content.take(80)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp))
@@ -344,8 +353,15 @@ internal fun MessageBubble(
                                 .clickable { callbacks.onReplyPreviewClick() }
                                 .padding(horizontal = 8.dp, vertical = 4.dp)
                         ) {
+                            if (replyToMessage.type == MessageType.IMAGE) {
+                                ReplyImageThumbnail(
+                                    message = replyToMessage,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            }
                             Text(
-                                text = replyToMessage.content.take(80),
+                                text = replySnippet,
                                 style = MaterialTheme.typography.bodySmall.copy(
                                     lineHeightStyle = CenteredLineHeight
                                 ),
@@ -366,20 +382,7 @@ internal fun MessageBubble(
                                 4f / 3f // fallback for old messages without dimensions
                             }
 
-                            // Determine image source: prefer local file, fall back to remote URL.
-                            // File.exists() runs on IO dispatcher to avoid blocking composition.
-                            val localFileExists by produceState(initialValue = false, message.localUri) {
-                                value = message.localUri != null &&
-                                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        val f = File(message.localUri!!)
-                                        f.exists() && f.isFile && f.canRead()
-                                    }
-                            }
-                            val imageModel: Any? = when {
-                                localFileExists -> File(message.localUri!!)
-                                message.mediaUrl != null -> message.mediaUrl
-                                else -> null
-                            }
+                            val imageModel = rememberMessageImageModel(message)
 
                             Box(
                                 modifier = Modifier
@@ -911,5 +914,53 @@ private fun LocationBubbleContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+internal fun ReplyImageThumbnail(
+    message: Message,
+    modifier: Modifier = Modifier,
+) {
+    val imageModel = rememberMessageImageModel(message)
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (imageModel != null) {
+            AsyncImage(
+                model = imageModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                error = rememberVectorPainter(Icons.Default.BrokenImage),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.BrokenImage,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// Resolves a Message's display image: local file if present on disk, else
+// remote URL, else null. File.exists() runs on IO to avoid blocking composition.
+@Composable
+private fun rememberMessageImageModel(message: Message): Any? {
+    val localUri = message.localUri
+    val localFileExists by produceState(initialValue = false, localUri) {
+        value = localUri != null &&
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val f = File(localUri)
+                f.exists() && f.isFile && f.canRead()
+            }
+    }
+    return when {
+        localFileExists && localUri != null -> File(localUri)
+        message.mediaUrl != null -> message.mediaUrl
+        else -> null
     }
 }

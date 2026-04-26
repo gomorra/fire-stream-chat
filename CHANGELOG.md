@@ -7,6 +7,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.2.0] — 2026-04-26
 
 ### Added
+- **Image thumbnails in reply previews.** Replying to a photo now shows a small thumbnail next to the snippet — both in the composer's "Replying to" banner and in the quoted block at the top of the sent reply bubble. Falls back to "Photo" when the original has no caption. Pure UI change: the existing reply-by-id lookup already had the source `Message` (with `localUri`/`mediaUrl`/dimensions) in scope at both render sites, so no Firestore/Room schema change was needed.
 - **Voice dictation in the message composer.** A mic button morphs from the send icon while the field is empty; tapping it requests `RECORD_AUDIO`, then streams the system speech recognizer (`android.speech.SpeechRecognizer`) live into the editable input — no model bundling, on-device on modern phones. While listening, a sliding control bar above the composer shows an animated sine waveform driven by mic RMS plus a cancel ✕. Recording ends only on a second mic tap (silence does not auto-finalize — the manager restarts the recognizer between segments and joins them with spaces); typing into the field cancels dictation without overwriting what's already there. Refuses to start during a voice call.
 
 ## [1.1.3] — 2026-04-26
