@@ -389,6 +389,15 @@ fun ChatScreen(
         }
     }
 
+    // Same treatment for dictation errors — without this the recording bar opens
+    // briefly, the recognizer fires onError, and the bar closes with no user feedback.
+    LaunchedEffect(uiState.dictation.error) {
+        uiState.dictation.error?.let { error ->
+            snackbarHostState.showSnackbar(error.message, duration = SnackbarDuration.Short)
+            viewModel.clearDictationError()
+        }
+    }
+
     // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the host.
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { message ->
