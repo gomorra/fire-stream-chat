@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.ScrollPos
 import com.firestream.chat.di.ApplicationScope
@@ -14,6 +15,7 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.SpeechRecognizerManager
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -36,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.Locale
 import javax.inject.Inject
 
 internal data class ChatUiState(
@@ -43,6 +46,7 @@ internal data class ChatUiState(
     val composer: ComposerState = ComposerState(),
     val overlays: OverlaysState = OverlaysState(),
     val session: SessionState = SessionState(),
+    val dictation: DictationState = DictationState(),
 ) {
     val broadcastRecipientCount: Int get() = session.broadcastRecipientIds.size
     val avatarUrl: String? get() = session.recipientAvatarUrl ?: session.chatAvatarUrl
@@ -65,6 +69,8 @@ class ChatViewModel @Inject constructor(
     private val preferencesDataStore: PreferencesDataStore,
     private val mediaFileManager: MediaFileManager,
     private val activeChatTracker: ActiveChatTracker,
+    private val speechRecognizerManager: SpeechRecognizerManager,
+    private val callStateHolder: CallStateHolder,
     @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -119,11 +125,15 @@ class ChatViewModel @Inject constructor(
         chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
         checkGroupPermissionUseCase, _uiState, viewModelScope
     )
+    private val dictationManager = ChatDictationManager(
+        speechRecognizerManager, callStateHolder, context, _uiState, viewModelScope
+    )
 
     init {
         _uiState.update { it.copy(session = it.session.copy(currentUserId = authRepository.currentUserId ?: "")) }
         messageLoader.start()
         infoManager.start()
+        dictationManager.init()
     }
 
     // ── Message loading & visibility ──
@@ -198,12 +208,22 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // ── Dictation ──
+    fun startDictation(languageTag: String = Locale.getDefault().toLanguageTag()) =
+        dictationManager.start(languageTag)
+    fun stopDictation() = dictationManager.stop()
+    fun cancelDictation() = dictationManager.cancel()
+    fun clearDictationError() = dictationManager.clearError()
+    internal val dictationCommits: SharedFlow<DictationCommit> get() = dictationManager.commits
+    internal val dictationAudioLevel: StateFlow<Float> get() = dictationManager.audioLevel
+
     // ── Error ──
     fun clearError() { _uiState.update { it.copy(session = it.session.copy(error = null)) } }
 
     override fun onCleared() {
         super.onCleared()
         messageSender.onCleared()
+        dictationManager.cancel()
         activeChatTracker.clearActive(chatId)
     }
 }

@@ -65,6 +65,8 @@ import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Reply
@@ -101,6 +103,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -196,6 +199,15 @@ fun ChatScreen(
     // Indices are based on messageText.length at insertion time and cleared on send/cancel.
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     var inputCursor by remember { mutableStateOf(TextRange(0)) }
+    // Per-session anchor for live dictation. -1 = no active dictation session.
+    // First commit sets the anchor at inputCursor.start; each subsequent partial
+    // replaces text from anchor to anchor+lastLen.
+    var dictationAnchor by remember { mutableIntStateOf(-1) }
+    var dictationLastLen by remember { mutableIntStateOf(0) }
+    // Sentinel: messageText value last written by the dictation collector. If
+    // BasicTextField.onValueChange fires while listening with text != this, the
+    // change came from the user (typing, cursor move) → cancel dictation.
+    var lastDictationWriteText by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     var initialScrollDone by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -503,6 +515,44 @@ fun ChatScreen(
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) showLocationSheet = true
+    }
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) viewModel.startDictation()
+        else openAppSettings(context)
+    }
+
+    // Reset anchor when dictation ends (user stop, cancel, or back-press).
+    LaunchedEffect(uiState.dictation.isListening) {
+        if (!uiState.dictation.isListening) {
+            dictationAnchor = -1
+            dictationLastLen = 0
+            lastDictationWriteText = null
+        }
+    }
+
+    // Live-write dictation events into the editable message field. Each Partial
+    // and Final replaces the text from the anchor to anchor+lastLen with the
+    // event's cumulative text and advances the cursor to the end of the
+    // dictated region. Anchor reset is handled by the isListening effect above.
+    LaunchedEffect(Unit) {
+        viewModel.dictationCommits.collect { event ->
+            if (dictationAnchor < 0) dictationAnchor = inputCursor.start.coerceIn(0, messageText.length)
+            val safeAnchor = dictationAnchor.coerceIn(0, messageText.length)
+            val before = messageText.substring(0, safeAnchor)
+            val after = messageText.substring((safeAnchor + dictationLastLen).coerceAtMost(messageText.length))
+            val newText = before + event.text + after
+            messageText = newText
+            lastDictationWriteText = newText
+            dictationLastLen = event.text.length
+            inputCursor = TextRange((safeAnchor + event.text.length).coerceIn(0, newText.length))
+        }
+    }
+
+    BackHandler(enabled = uiState.dictation.isListening) { viewModel.cancelDictation() }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.cancelDictation() }
     }
 
     Scaffold(
@@ -1050,6 +1100,8 @@ fun ChatScreen(
 
             // Reply-to banner
             if (uiState.composer.replyToMessage != null) {
+                val replyTo = uiState.composer.replyToMessage!!
+                val isImageReply = replyTo.type == MessageType.IMAGE
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1064,14 +1116,27 @@ fun ChatScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
+                    if (isImageReply) {
+                        ReplyImageThumbnail(
+                            message = replyTo,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "Replying to",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
+                        val snippet = if (isImageReply) {
+                            replyTo.content.take(60)
+                                .ifBlank { stringResource(R.string.reply_preview_photo) }
+                        } else {
+                            replyTo.content.take(60)
+                        }
                         Text(
-                            text = uiState.composer.replyToMessage!!.content.take(60),
+                            text = snippet,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -1163,6 +1228,18 @@ fun ChatScreen(
                 }
             }
 
+            // Recording control bar — slides in above the composer while dictation is active.
+            AnimatedVisibility(
+                visible = uiState.dictation.isListening,
+                enter = slideInVertically { it } + fadeIn(),
+                exit = slideOutVertically { it } + fadeOut(),
+            ) {
+                DictationControlBar(
+                    audioLevel = viewModel.dictationAudioLevel,
+                    onCancel = { viewModel.cancelDictation() },
+                )
+            }
+
             // Input row — hidden when the user has blocked the recipient; the
             // "You blocked this contact" banner above replaces it.
             if (uiState.composer.canSendMessages && !uiState.session.isRecipientBlocked) Row(
@@ -1210,6 +1287,12 @@ fun ChatScreen(
                     BasicTextField(
                         value = inputValue,
                         onValueChange = { newValue ->
+                            // User interaction during dictation cancels the session
+                            // without emitting a final commit, so the partial we
+                            // already wrote stays and the user's edit applies on top.
+                            if (uiState.dictation.isListening && newValue.text != lastDictationWriteText) {
+                                viewModel.cancelDictation()
+                            }
                             inputCursor = newValue.selection
                             val newText = newValue.text
                             if (newText != messageText) {
@@ -1274,19 +1357,52 @@ fun ChatScreen(
                 }
                 Spacer(modifier = Modifier.width(8.dp))
 
-                IconButton(
-                    onClick = {
-                        handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                        clearInput()
-                    },
-                    enabled = messageText.isNotBlank() && !uiState.composer.isSending
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send),
-                        tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                    )
+                val showMic = messageText.isBlank() &&
+                    uiState.composer.editingMessage == null &&
+                    uiState.dictation.isAvailable
+                when {
+                    uiState.dictation.isListening -> IconButton(
+                        onClick = { viewModel.stopDictation() }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Stop,
+                            contentDescription = stringResource(R.string.dictation_stop),
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    showMic -> IconButton(
+                        onClick = {
+                            if (ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.RECORD_AUDIO,
+                                ) == PackageManager.PERMISSION_GRANTED
+                            ) {
+                                viewModel.startDictation()
+                            } else {
+                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Mic,
+                            contentDescription = stringResource(R.string.dictation_start),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    else -> IconButton(
+                        onClick = {
+                            handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
+                            clearInput()
+                        },
+                        enabled = messageText.isNotBlank() && !uiState.composer.isSending
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = stringResource(R.string.send),
+                            tint = if (messageText.isNotBlank()) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
                 }
             }
 
@@ -1595,4 +1711,12 @@ private fun AttachmentOption(
         Spacer(modifier = Modifier.width(16.dp))
         Text(text = label, style = MaterialTheme.typography.bodyLarge)
     }
+}
+
+private fun openAppSettings(context: Context) {
+    val intent = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+        data = Uri.fromParts("package", context.packageName, null)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching { context.startActivity(intent) }
 }

@@ -51,6 +51,8 @@ class ChatViewModelBlockedStateTest {
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
+    private val speechRecognizerManager = mockk<com.firestream.chat.data.util.SpeechRecognizerManager>(relaxed = true)
+    private val callStateHolder = com.firestream.chat.data.call.CallStateHolder()
     private val context = mockk<android.content.Context>(relaxed = true)
 
     private val chatRepository = FakeChatRepository()
@@ -90,6 +92,8 @@ class ChatViewModelBlockedStateTest {
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
         activeChatTracker = activeChatTracker,
+        speechRecognizerManager = speechRecognizerManager,
+        callStateHolder = callStateHolder,
         appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,
     )

@@ -30,4 +30,11 @@
     <string name="share_recipients_selected">%d chat(s) selected</string>
     <string name="share_sending">Sending…</string>
     <string name="share_no_chats">No chats yet</string>
+    <string name="dictation_listening">Listening…</string>
+    <string name="dictation_unavailable">Speech recognition not available on this device</string>
+    <string name="dictation_in_call">Cannot dictate during a call</string>
+    <string name="dictation_cancel">Cancel dictation</string>
+    <string name="dictation_start">Start voice input</string>
+    <string name="dictation_stop">Stop voice input</string>
+    <string name="reply_preview_photo">Photo</string>
 </resources>
