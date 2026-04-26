@@ -1,18 +1,18 @@
 package com.firestream.chat.ui.chat
 
-import android.content.ContentValues
-import android.os.Environment
-import android.provider.MediaStore
-import android.widget.Toast
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -20,16 +20,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,30 +43,60 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import coil.request.ImageRequest
 import java.io.File
 
 @Composable
 internal fun FullscreenImageViewer(
-    imageUrl: String,
+    imageUrl: String?,
     localUri: String? = null,
     onDismiss: () -> Unit,
-    onSaveToDownloads: (() -> Unit)? = null
+    onSaveToDownloads: (() -> Unit)? = null,
 ) {
     // Prefer local file for faster loading, fall back to remote URL.
-    // File.exists() runs on IO dispatcher to avoid blocking composition.
+    // canRead() catches MediaStore files written by a previous install of this
+    // app — they exist but EACCES on direct open. Without this check we'd
+    // hand Coil an unreadable path and silently render a broken image.
     val localFileExists by produceState(initialValue = false, localUri) {
         value = localUri != null &&
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                File(localUri!!).exists()
+                val f = File(localUri)
+                f.exists() && f.isFile && f.canRead()
             }
     }
-    val imageModel: Any = if (localFileExists && localUri != null) File(localUri) else imageUrl
+    val imageModel: Any? = when {
+        localFileExists && localUri != null -> File(localUri)
+        !imageUrl.isNullOrBlank() -> imageUrl
+        else -> {
+            Log.w(
+                "FullscreenImageViewer",
+                "No model — localUri=$localUri (exists=$localFileExists), imageUrl=$imageUrl",
+            )
+            null
+        }
+    }
+    val context = LocalContext.current
+    val request = remember(imageModel) {
+        imageModel?.let { model ->
+            ImageRequest.Builder(context)
+                .data(model)
+                .crossfade(true)
+                .listener(
+                    onError = { req, result ->
+                        Log.w(
+                            "FullscreenImageViewer",
+                            "Load failed for ${req.data}",
+                            result.throwable,
+                        )
+                    },
+                )
+                .build()
+        }
+    }
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -94,19 +127,32 @@ internal fun FullscreenImageViewer(
             },
         contentAlignment = Alignment.Center
     ) {
-        AsyncImage(
-            model = imageModel,
-            contentDescription = "Full screen image",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y
-                )
-        )
+        if (request != null) {
+            SubcomposeAsyncImage(
+                model = request,
+                contentDescription = "Full screen image",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y
+                    ),
+                loading = {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                },
+                error = { ErrorState(label = "Failed to load") },
+            )
+        } else {
+            ErrorState(label = "No image data")
+        }
         Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -145,5 +191,26 @@ internal fun FullscreenImageViewer(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun ErrorState(label: String) {
+    Column(
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(
+            imageVector = Icons.Default.BrokenImage,
+            contentDescription = label,
+            tint = Color.White,
+            modifier = Modifier.size(64.dp),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = label,
+            color = Color.White,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }

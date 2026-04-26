@@ -166,7 +166,7 @@ private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.get
 // settings, etc.) without growing the state surface.
 @Immutable
 private data class FullscreenImage(
-    val imageUrl: String,
+    val imageUrl: String?,
     val localUri: String? = null,
     val onSaveToDownloads: (() -> Unit)? = null,
 )
@@ -973,7 +973,7 @@ fun ChatScreen(
                                                 onSwipeReact = { swipeReactMessage = message },
                                                 onImageClick = { _ ->
                                                     fullscreenImage = FullscreenImage(
-                                                        imageUrl = message.mediaUrl ?: "",
+                                                        imageUrl = message.mediaUrl,
                                                         localUri = message.localUri,
                                                         onSaveToDownloads = {
                                                             viewModel.saveImageToDownloads(message.localUri, message.mediaUrl)
