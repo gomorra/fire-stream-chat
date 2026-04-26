@@ -1,0 +1,3 @@
+# PocketBase-flavor source set (plan step 4 adds PocketBaseClient, realtime, 11
+# *Source impls; step 5+ replaces stubs). Empty placeholder so the directory
+# survives in git.

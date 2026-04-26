@@ -1,0 +1,3 @@
+# Firebase-flavor unit tests (plan step 3f moves RealtimePresenceSourceTest
+# here; it tests Firebase impl details and only compiles in the firebase
+# variant). Empty placeholder so the directory survives in git.

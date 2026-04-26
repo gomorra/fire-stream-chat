@@ -52,6 +52,26 @@ android {
         }
     }
 
+    flavorDimensions += "backend"
+    productFlavors {
+        create("firebase") {
+            dimension = "backend"
+            isDefault = true
+            buildConfigField("Boolean", "SUPPORTS_SIGNAL", "true")
+            buildConfigField("String", "POCKETBASE_URL", "\"\"")
+        }
+        create("pocketbase") {
+            dimension = "backend"
+            buildConfigField("Boolean", "SUPPORTS_SIGNAL", "false")
+            // Default targets the emulator's loopback to the host PC. Override
+            // for physical-device testing on the same Wi-Fi via either:
+            //   ./gradlew assemblePocketbaseDebug -PpocketbaseUrl=http://192.168.x.x:8090
+            // or by adding `pocketbaseUrl=...` to local.properties.
+            val pbUrl = (project.findProperty("pocketbaseUrl") as? String) ?: "http://10.0.2.2:8090"
+            buildConfigField("String", "POCKETBASE_URL", "\"$pbUrl\"")
+        }
+    }
+
     buildTypes {
         debug {
             // Include x86_64 in debug so the app runs natively on x86_64 emulators.
