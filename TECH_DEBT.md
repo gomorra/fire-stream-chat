@@ -87,27 +87,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-## Planned — designed but not yet scheduled
-
-### Split `SignalDatabase` out of `AppDatabase` (unblocks encryption-in-debug)
-
-**The smell.** The seven Signal Protocol tables (`signal_identity`, `signal_prekeys`, `signal_signed_prekeys`, `signal_sessions`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) live inside `AppDatabase` alongside chats/messages/lists. `DatabaseModule.kt:30`'s `fallbackToDestructiveMigration()` wipes the entire DB whenever `MessageEntity`/`ChatEntity` schemas iterate, so every forgotten version bump destroys the user's Signal identity, pre-keys, and peer session state. To avoid that pain, `MessageRepositoryImpl.kt:296` skips encryption in debug (`!BuildConfig.DEBUG`) and `androidComponents.onVariants` excludes `libsignal_jni.so` from debug APKs. The practical effect: encryption is never exercised in day-to-day dev.
-
-**Why we haven't done it.** We have a complete plan (see below) but are holding off until there's a focused window to land it, verify it through a few schema iterations, and then remove the two debug guards as a follow-up. Waiting on user readiness, not on any technical block.
-
-**What the plan does.** Creates a new `SignalDatabase` (Room, `signal.db`) holding the seven Signal entities + `SignalDao`. `SignalProtocolStoreImpl` already takes `SignalDao` by `@Inject` constructor — no rewiring beyond the one line in `DatabaseModule.kt:46`. `AppDatabase` bumps 18 → 19 with a `MIGRATION_18_19` that `DROP TABLE`s the seven legacy Signal tables. Structurally clean: none of the Signal entities has a foreign key into a non-Signal table. No data-copy migration needed — the only users are debug users, and debug's libsignal has been excluded so there are no valid Signal rows to preserve.
-
-**Follow-up after verifying the split holds:**
-1. Remove `!BuildConfig.DEBUG` guard in `MessageRepositoryImpl.kt:296`
-2. Remove the `androidComponents.onVariants(selector().withBuildType("debug"))` block in `app/build.gradle.kts` that excludes `libsignal_jni.so`
-3. Delete the "Encryption is disabled in debug builds" note in `CLAUDE.md`
-
-**When to revisit.** When ready to land the encryption-in-debug story. Plan is executable as-written — one step, Sonnet/Medium, ~1 hour including the verification smoke tests.
-
-**Plan file:** `~/.claude/plans/i-wanna-have-new-mutable-ripple.md` (last updated 2026-04-24; current content is the SignalDatabase split — earlier versions of the file covered transition tweaks and the baseline profile, both now shipped).
-
----
-
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

@@ -3,6 +3,7 @@ package com.firestream.chat.di
 import android.content.Context
 import androidx.room.Room
 import com.firestream.chat.data.local.AppDatabase
+import com.firestream.chat.data.local.SignalDatabase
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
@@ -27,6 +28,19 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "fire_stream_chat.db"
+        )
+            .addMigrations(AppDatabase.MIGRATION_18_19)
+            .fallbackToDestructiveMigration()
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSignalDatabase(@ApplicationContext context: Context): SignalDatabase {
+        return Room.databaseBuilder(
+            context,
+            SignalDatabase::class.java,
+            "signal.db"
         ).fallbackToDestructiveMigration().build()
     }
 
@@ -43,7 +57,7 @@ object DatabaseModule {
     fun provideContactDao(db: AppDatabase): ContactDao = db.contactDao()
 
     @Provides
-    fun provideSignalDao(db: AppDatabase): SignalDao = db.signalDao()
+    fun provideSignalDao(db: SignalDatabase): SignalDao = db.signalDao()
 
     @Provides
     fun provideListDao(db: AppDatabase): ListDao = db.listDao()

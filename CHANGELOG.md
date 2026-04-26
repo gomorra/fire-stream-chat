@@ -4,6 +4,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+## [1.1.3] — 2026-04-26
+
+### Refactored
+- **Signal Protocol tables moved to a dedicated `signal.db`.** Splits the seven `signal_*` tables out of `AppDatabase` into a new `SignalDatabase` so destructive schema migrations on the main app no longer wipe identity / pre-keys / sessions. `AuthRepository.signOut()` now clears both databases. Sets up a follow-up to enable encryption-in-debug. (`HASH`)
+
 ## [1.1.2] — 2026-04-24
 
 ### Added
