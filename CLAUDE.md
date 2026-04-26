@@ -181,16 +181,23 @@ com.firestream.chat/
 
 ## Key Conventions
 
-- **Use cases** live in `domain/usecase/<feature>/` and are reserved for **non-trivial cross-repository orchestration or pure logic that benefits from isolated unit tests** (e.g. `SearchMessagesUseCase`, `SendListUpdateToChatsUseCase`, `CheckGroupPermissionUseCase`). Simple single-repository calls go directly from the ViewModel to the repository — do not wrap every repo method in a use case. Multi-step flows that currently live in `ui/chat/Chat*Manager.kt` are the pragmatic escape hatch for "ViewModel-scoped orchestration that isn't pure enough to be a use case".
-- **Chat\*Manager contract** — every `Chat*Manager` in `ui/chat/` receives a shared `MutableStateFlow<ChatUiState>` and `viewModelScope`, owns one conceptual slice of the state, and mutates it via `_uiState.update {}`. Managers never read or write each other's slices and never call each other; `ChatViewModel` is the only composition root. When adding a new manager, follow this shape — do not introduce manager-to-manager calls.
-- **ChatUiState slices** — `ChatUiState` nests `MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`. New chat-screen fields go in the slice that matches their semantic. Multi-field writes across slices must collapse into a single `.update { it.copy(a = it.a.copy(...), b = it.b.copy(...)) }` to avoid inconsistent intermediate emissions.
-- **Error surface** — every UiState's `error` field is `AppError?` (`domain/model/AppError.kt`), never `String?`. At VM boundaries, wrap Throwables via `AppError.from(e)`. User-input validation uses `AppError.Validation("display text")`. UI renders `uiState.error?.message`.
-- **Repository test doubles** — prefer the fakes in `test/fakes/` (`FakeMessageRepository`, `FakeChatRepository`) over MockK for new tests that exercise those repos. MockK stays fine for everything else; migration is opportunistic.
-- **ViewModels** live alongside their screens in `ui/<feature>/`.
-- **Repository interfaces** are in `domain/repository/`; implementations in `data/repository/`.
-- **Room entities** are in `data/local/entity/`; DAOs in `data/local/dao/`.
-- **Firebase sources** are in `data/remote/firebase/`.
-- **DI bindings**: `AppModule` binds repository interfaces to implementations via `@Binds`. Firebase instances provided in `FirebaseModule`. Room DAOs provided in `DatabaseModule`.
+Each pattern below is a one-line pointer; for the rule's *example, trap, and when-not-to-use* see [`docs/PATTERNS.md`](docs/PATTERNS.md). Package layout (where ViewModels / repos / entities / sources / DI live) is in [`docs/ARCHITECTURE.md` §12](docs/ARCHITECTURE.md).
+
+- **Chat\*Manager slice-ownership** — each manager owns one slice of `ChatUiState`, mutates only via `_uiState.update {}`, never calls another manager. → [PATTERNS.md#chat-manager-slice-ownership](docs/PATTERNS.md#chat-manager-slice-ownership)
+- **ChatUiState slice composition** — five nested slices (`MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`, `DictationState`); cross-slice writes must collapse into one `.update {}`. → [PATTERNS.md#chatuistate-slice-composition](docs/PATTERNS.md#chatuistate-slice-composition)
+- **AppError boundary wrapping** — every `UiState.error` is `AppError?`; wrap Throwables via `AppError.from(e)`, validation via `AppError.Validation(...)`. → [PATTERNS.md#apperror-boundary-wrapping](docs/PATTERNS.md#apperror-boundary-wrapping)
+- **Fake repositories vs. MockK** — use `test/fakes/Fake{Message,Chat,User}Repository` for those three; MockK stays default elsewhere. → [PATTERNS.md#fake-repositories-vs-mockk](docs/PATTERNS.md#fake-repositories-vs-mockk)
+- **Use-case vs. direct repository** — use cases only for cross-repository orchestration or pure logic worth isolating; otherwise call the repo directly. → [PATTERNS.md#use-case-vs-direct-repository](docs/PATTERNS.md#use-case-vs-direct-repository)
+- **DataStore writes need `@ApplicationScope`** — preference writes that must outlive `onCleared()` use `appScope`, not `viewModelScope`. → [PATTERNS.md#datastore-writes-need-applicationscope](docs/PATTERNS.md#datastore-writes-need-applicationscope)
+- **Room version bump rule** — any column/table change bumps `@Database(version = …)` in `AppDatabase.kt` / `SignalDatabase.kt`. → [PATTERNS.md#room-version-bump-rule](docs/PATTERNS.md#room-version-bump-rule)
+- **`reverseLayout` for chat lists** — chat-style `LazyColumn`s use `reverseLayout = true` + `messages.asReversed()`; never reintroduce IME-coupling via `snapshotFlow{ime}`. → [PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling](docs/PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling)
+
+### Discovery & maintenance
+
+- **Cross-cutting work** — for any feature spanning 4+ packages, [`docs/FEATURE-MAP.md`](docs/FEATURE-MAP.md) lists every file involved. Check there before grepping.
+- **Maintaining FEATURE-MAP** — when you add, move, rename, or delete a file in `app/src/main/java/`, check whether it appears in `docs/FEATURE-MAP.md` and update if so. Refresh the `last-verified` HTML comment quarterly.
+- **Plans** — in-flight plans live in `.claude/plans/`; shipped plans archive to `.claude/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome).
+- **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
 
 ## Navigation
 
