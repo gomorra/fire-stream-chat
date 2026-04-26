@@ -367,8 +367,7 @@ internal fun MessageBubble(
                                 ),
                                 color = textColor.copy(alpha = 0.8f),
                                 maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                fontStyle = FontStyle.Italic
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Spacer(modifier = Modifier.height(4.dp))
