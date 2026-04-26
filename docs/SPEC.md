@@ -6,17 +6,18 @@ This document is the product-level feature list for **FireStream**, a real-time 
 
 - **1-on-1 Chat**: Text messaging with real-time syncing.
 - **Media Support**: Send and receive images, voice messages, and generic documents. Includes a fullscreen image viewer and voice media player with adjustable playback speed. Local-first media pipeline: images are compressed (`ImageCompressor`), stored locally (`MediaFileManager` at `filesDir/media/{chatId}/`), displayed immediately from local files, and uploaded to Firebase Storage with a progress overlay. `MediaBackfillWorker` runs on first launch to download existing media. Full quality opt-in via DataStore preference. **Image Preview with Caption**: Gallery/camera image selection opens a fullscreen preview screen (`ImagePreviewScreen`) with pinch-to-zoom and an optional caption text field before sending (WhatsApp-style). Captions are stored in the message `content` field and displayed below the image in message bubbles. Chat list previews show `📷 caption` for captioned images.
-- **End-to-End Encryption (E2EE)**: All messages are encrypted natively on the client device using the **Signal Protocol** before transmission. Encryption is disabled in debug builds (`BuildConfig.DEBUG` guard) — messages are sent as plaintext to avoid key-loss issues during development.
+- **End-to-End Encryption (E2EE)**: All messages are encrypted natively on the client device using the **Signal Protocol** before transmission. Encryption is disabled in debug builds (`BuildConfig.DEBUG` guard) — messages are sent as plaintext to avoid key-loss issues during development. Release builds expose a Settings → Privacy toggle that lets users opt out of E2E encryption per-device (default: on).
 - **Read Receipts Status**:
   - **Sent** (Single gray tick): Message reached the server.
   - **Delivered** (Double gray tick): Message reached the recipient's device.
   - **Read** (Double blue tick): Recipient opened and viewed the conversation.
   - **Privacy Control**: Users can disable read receipts (Bidirectional enforcement: if disabled by either user, both users see only up to the Delivered status).
-- **Typing Indicators**: Real-time "typing..." status.
+- **Typing Indicators**: Real-time "typing..." status. In group chats the typing row shows the avatar of each participant currently typing.
+- **Voice Dictation**: Composer microphone button uses the Android system `SpeechRecognizer` to dictate into the input field. Dictation language is selectable in Settings → Chat (German / English). Devices without an offline language pack surface a clear error rather than failing silently.
 
 ### Message Interactions
 
-- **Reply**: Swipe-to-reply or long-press context menu to quote/reply to specific messages.
+- **Reply**: Swipe-to-reply or long-press context menu to quote/reply to specific messages. Reply previews show an inline thumbnail when the quoted message is an image.
 - **React**: Emoji reactions on messages (map of userId → emoji).
 - **Forward**: Share messages to other active chats.
 - **Star**: Bookmark messages.

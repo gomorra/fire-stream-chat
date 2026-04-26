@@ -97,7 +97,7 @@ The most isolated layer, containing enterprise-wide and application-specific bus
 
 The concrete implementation resolving the Repository Interfaces.
 
-- **Local Sources**: Room DB handles the reactive caching. The app primarily drives the UI from Room via `Flow`.
+- **Local Sources**: Room handles the reactive caching. The app primarily drives the UI from Room via `Flow`. Two databases live side by side: `AppDatabase` (`fire_stream_chat.db`) for application data and `SignalDatabase` (`signal.db`) for Signal Protocol key material — splitting them means destructive schema migrations on application data cannot wipe cryptographic state.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firestore, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: `SignalManager` and `SignalProtocolStoreImpl` orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
 - **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). `MediaBackfillWorker` (WorkManager) runs a one-time job on first launch to download existing media, respecting `AutoDownloadOption` and network constraints.
@@ -144,7 +144,9 @@ sequenceDiagram
     App_B->>Firestore: Marks Message as "Read" (if receipts enabled)
 ```
 
-> **Debug builds**: Encryption is bypassed — `MessageRepositoryImpl` calls `sendPlainMessage()` instead of the encrypted path. This avoids key-loss issues during development.
+> **Debug builds**: Encryption is bypassed — `MessageRepositoryImpl` calls `sendPlainMessage()` instead of the encrypted path, avoiding key-loss issues during development.
+>
+> **Release builds**: Users may opt out of Signal end-to-end encryption from Settings → Privacy. The flag is read from `PreferencesDataStore.e2eEncryptionEnabledFlow` (default `true`) and gates the same `sendPlainMessage()` branch.
 
 ---
 
@@ -381,13 +383,15 @@ com.firestream.chat/
 │   ├── local/
 │   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, SignalDao, UserDao
 │   │   ├── entity/              # 5 core (Chat, Contact, List, Message, User) + 6 Signal entities + SignalTrustedIdentity
-│   │   ├── AppDatabase.kt
+│   │   ├── AppDatabase.kt       # fire_stream_chat.db — application data
+│   │   ├── SignalDatabase.kt    # signal.db — Signal Protocol key material (split from AppDatabase)
 │   │   ├── Converters.kt
 │   │   └── PreferencesDataStore.kt
 │   ├── util/
 │   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
 │   │   ├── MediaFileManager.kt  # Local media storage & gallery export
 │   │   ├── ProfileImageManager.kt # Avatar download/cache management
+│   │   ├── SpeechRecognizerManager.kt # System SpeechRecognizer wrapper for composer dictation
 │   │   ├── ResultExt.kt         # Result extension helpers
 │   │   └── CurrentActivityHolder.kt
 │   ├── worker/
@@ -433,6 +437,7 @@ com.firestream.chat/
 │   ├── chat/                    # ChatScreen, ChatViewModel (orchestrator),
 │   │                            # ChatPollManager, ChatSearchManager, ChatMessageActions,
 │   │                            # ChatMessageSender, ChatMessageLoader, ChatInfoManager,
+│   │                            # ChatDictationManager, DictationControlBar, TypingRow,
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
 │   │                            # FullscreenImageViewer, ImagePreviewScreen,
 │   │                            # ForwardChatPicker, LocationPickerSheet,

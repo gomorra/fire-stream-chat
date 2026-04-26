@@ -62,7 +62,9 @@ lists/{listId}
 ├── createdBy, createdAt, updatedAt
 ├── participants[]
 ├── sharedChatIds[]                            # which chats this list is shared into
-├── items[]: { id, text, isChecked, quantity, unit, order, addedBy }
+├── itemCount, checkedCount                    # denormalized counts for the Lists tab
+├── items/{itemId}                             # subcollection — one doc per list item
+│   └── id, text, isChecked, quantity, unit, order, addedBy
 └── history/{entryId}                          # subcollection — audit trail
     └── action, itemId, itemText, userId, userName, timestamp
 
@@ -84,8 +86,9 @@ The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOn
 
 - **Array mutations** (`participants`, `admins`, `pendingMembers`, `sharedChatIds`): Use `FieldValue.arrayUnion()` / `arrayRemove()` for atomic updates.
 - **Per-key maps** (`typingUsers`, `unreadCounts`, `readBy`, `deliveredTo`): Updated via `FieldValue` dot-notation paths (e.g., `"unreadCounts.$userId"`).
-- **Encryption duality**: Messages store either `content` (plaintext, debug builds) or `ciphertext` + `signalType` (encrypted, release builds). Never both.
-- **Subcollection isolation**: `blockedUsers`, `messages`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
+- **Encryption duality**: Messages store either `content` (plaintext — debug builds, or release builds where the user has opted out) or `ciphertext` + `signalType` (Signal-encrypted, release builds with E2E enabled). Never both.
+- **List items live in a subcollection.** Each item mutation is a single-doc write under `lists/{listId}/items/{itemId}`; `itemCount` / `checkedCount` on the parent metadata doc are kept in sync via `FieldValue.increment()` in the same batch. A one-shot `migrateEmbeddedItemsIfNeeded` upgrade runs on first observe for legacy lists that still carry an embedded `items[]` array.
+- **Subcollection isolation**: `blockedUsers`, `messages`, `items`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
 
 ---
 
