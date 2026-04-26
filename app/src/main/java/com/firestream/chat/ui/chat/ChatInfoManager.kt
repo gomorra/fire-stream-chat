@@ -96,8 +96,16 @@ internal class ChatInfoManager(
                 .awaitAll()
                 .filterNotNull()
             val nameMap = users.associate { it.uid to it.displayName }
+            val avatarMap = users.associate {
+                it.uid to ParticipantAvatar(it.displayName, it.avatarUrl, it.localAvatarPath)
+            }
             allGroupParticipants = users
-            _uiState.update { it.copy(session = it.session.copy(participantNameMap = nameMap)) }
+            _uiState.update {
+                it.copy(session = it.session.copy(
+                    participantNameMap = nameMap,
+                    participantAvatars = it.session.participantAvatars + avatarMap
+                ))
+            }
         }
     }
 
@@ -106,13 +114,22 @@ internal class ChatInfoManager(
             userRepository.observeUser(recipientId)
                 .catch { /* non-fatal */ }
                 .collect { user ->
+                    val avatar = ParticipantAvatar(user.displayName, user.avatarUrl, user.localAvatarPath)
                     _uiState.update {
+                        // Reuse the existing map when avatar fields are unchanged, so RTDB
+                        // presence ticks (online/lastSeen) don't churn participantAvatars.
+                        val avatars = if (it.session.participantAvatars[user.uid] == avatar) {
+                            it.session.participantAvatars
+                        } else {
+                            it.session.participantAvatars + (user.uid to avatar)
+                        }
                         it.copy(
                             session = it.session.copy(
                                 chatName = user.displayName.takeIf { n -> n.isNotBlank() } ?: it.session.chatName,
                                 recipientAvatarUrl = user.avatarUrl,
                                 recipientLocalAvatarPath = user.localAvatarPath,
-                                isRecipientOnline = user.isOnline
+                                isRecipientOnline = user.isOnline,
+                                participantAvatars = avatars
                             )
                         )
                     }

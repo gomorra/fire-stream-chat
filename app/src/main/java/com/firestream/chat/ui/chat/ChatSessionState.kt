@@ -4,6 +4,12 @@ import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.User
 
+internal data class ParticipantAvatar(
+    val displayName: String,
+    val avatarUrl: String?,
+    val localAvatarPath: String?,
+)
+
 internal data class SessionState(
     val isLoading: Boolean = true,
     val error: AppError? = null,
@@ -15,6 +21,7 @@ internal data class SessionState(
     val isGroupChat: Boolean = false,
     val chatName: String? = null,
     val participantNameMap: Map<String, String> = emptyMap(),
+    val participantAvatars: Map<String, ParticipantAvatar> = emptyMap(),
     val isBroadcast: Boolean = false,
     val broadcastRecipientIds: List<String> = emptyList(),
     val recipientAvatarUrl: String? = null,
