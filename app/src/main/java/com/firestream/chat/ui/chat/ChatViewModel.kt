@@ -6,6 +6,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.data.call.CallStateHolder
+import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.ScrollPos
 import com.firestream.chat.di.ApplicationScope
@@ -38,7 +39,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
-import java.util.Locale
 import javax.inject.Inject
 
 internal data class ChatUiState(
@@ -129,11 +129,21 @@ class ChatViewModel @Inject constructor(
         speechRecognizerManager, callStateHolder, context, _uiState, viewModelScope
     )
 
+    // Latest persisted dictation language. Updated via collect of dictationLanguageFlow
+    // so startDictation() can synchronously read it from the IconButton onClick path.
+    @Volatile
+    private var dictationLanguageTag: String = DictationLanguage.GERMAN.tag
+
     init {
         _uiState.update { it.copy(session = it.session.copy(currentUserId = authRepository.currentUserId ?: "")) }
         messageLoader.start()
         infoManager.start()
         dictationManager.init()
+        viewModelScope.launch {
+            preferencesDataStore.dictationLanguageFlow.collect { language ->
+                dictationLanguageTag = language.tag
+            }
+        }
     }
 
     // ── Message loading & visibility ──
@@ -209,7 +219,8 @@ class ChatViewModel @Inject constructor(
     }
 
     // ── Dictation ──
-    fun startDictation(languageTag: String = Locale.getDefault().toLanguageTag()) =
+    // Defaults to the Settings → Chat → Dictation Language preference (de-DE / en-US).
+    fun startDictation(languageTag: String = dictationLanguageTag) =
         dictationManager.start(languageTag)
     fun stopDictation() = dictationManager.stop()
     fun cancelDictation() = dictationManager.cancel()

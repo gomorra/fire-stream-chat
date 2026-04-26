@@ -14,6 +14,7 @@ import androidx.work.workDataOf
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.AppError
@@ -50,6 +51,8 @@ data class SettingsUiState(
     val cacheSize: Long = 0L,
     val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
     val sendImagesFullQuality: Boolean = false,
+    // Chat
+    val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
     // Media backfill
     val mediaBackfillProgress: Pair<Int, Int>? = null,
     val mediaBackfillRunning: Boolean = false
@@ -150,6 +153,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(sendImagesFullQuality = enabled)
             }
         }
+        viewModelScope.launch {
+            preferencesDataStore.dictationLanguageFlow.collect { language ->
+                _uiState.value = _uiState.value.copy(dictationLanguage = language)
+            }
+        }
     }
 
     fun setTheme(theme: AppTheme) {
@@ -204,6 +212,11 @@ class SettingsViewModel @Inject constructor(
 
     fun setSendImagesFullQuality(enabled: Boolean) {
         viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
+    }
+
+    // Chat
+    fun setDictationLanguage(language: DictationLanguage) {
+        viewModelScope.launch { preferencesDataStore.setDictationLanguage(language) }
     }
 
     fun startMediaBackfill() {

@@ -4,7 +4,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
-## [1.2.1] — 2026-04-26
+## [1.3.0] — 2026-04-26
+
+### Added
+- **Settings → Chat → Dictation Language.** A new "Chat" section in Settings exposes a picker for the dictation language with two options: German (`de-DE`, default) and English (`en-US`). The choice persists in DataStore (`dictation_language` key) and `ChatViewModel.startDictation` reads it on each mic tap, replacing the previous diagnostic hardcode and the earlier `Locale.getDefault()` fallback that silently returned the wrong recognizer locale on some devices.
 
 ### Fixed
 - **Voice dictation: mic now actually records.** The recording bar opened for a fraction of a second and closed again with no transcript. Cause: `RecognizerIntent.EXTRA_PREFER_OFFLINE` was set unconditionally on SDK ≥ 31, which forces the recognizer to fail with `ERROR_NETWORK` whenever the offline language pack for the user's locale isn't downloaded. Dropped the flag — the system now picks online or offline by itself. Also surfaced `dictation.error` as a snackbar (previously silently swallowed) and added the `RECORD_AUDIO` calling-package extra plus a logcat line tagged `SpeechRecognizer` for the error code.

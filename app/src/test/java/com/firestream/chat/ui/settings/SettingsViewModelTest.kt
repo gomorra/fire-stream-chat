@@ -3,6 +3,7 @@ package com.firestream.chat.ui.settings
 import android.content.Context
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.User
@@ -88,6 +89,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(true)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
+        every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -377,6 +379,40 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { preferencesDataStore.setVibration(true) }
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `init reflects persisted dictation language`() = runTest {
+        every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+
+        advanceUntilIdle()
+
+        assertEquals(DictationLanguage.ENGLISH, vm.uiState.value.dictationLanguage)
+    }
+
+    @Test
+    fun `setDictationLanguage ENGLISH calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setDictationLanguage(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setDictationLanguage(DictationLanguage.ENGLISH)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setDictationLanguage(DictationLanguage.ENGLISH) }
+    }
+
+    @Test
+    fun `setDictationLanguage GERMAN calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setDictationLanguage(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setDictationLanguage(DictationLanguage.GERMAN)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setDictationLanguage(DictationLanguage.GERMAN) }
     }
 
     // ── Storage ───────────────────────────────────────────────────────────────

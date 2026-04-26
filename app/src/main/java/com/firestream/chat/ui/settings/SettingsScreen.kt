@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
@@ -80,6 +81,7 @@ import coil.compose.AsyncImage
 import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -97,6 +99,7 @@ fun SettingsScreen(
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showSoundPicker by remember { mutableStateOf(false) }
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
+    var showDictationLanguagePicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showDisableEncryptionDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
@@ -288,6 +291,21 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setVibration(it) }
             )
 
+            // Chat section
+            Spacer(Modifier.height(8.dp))
+            SectionHeader("Chat")
+
+            val dictationLanguageLabel = when (uiState.dictationLanguage) {
+                DictationLanguage.GERMAN -> "German (de-DE)"
+                DictationLanguage.ENGLISH -> "English (en-US)"
+            }
+            SettingsItem(
+                icon = Icons.Default.Mic,
+                title = "Dictation Language",
+                subtitle = dictationLanguageLabel,
+                onClick = { showDictationLanguagePicker = true }
+            )
+
             // Storage section
             Spacer(Modifier.height(8.dp))
             SectionHeader("Storage")
@@ -458,6 +476,17 @@ fun SettingsScreen(
                 showAutoDownloadPicker = false
             },
             onDismiss = { showAutoDownloadPicker = false }
+        )
+    }
+
+    if (showDictationLanguagePicker) {
+        DictationLanguagePickerDialog(
+            currentLanguage = uiState.dictationLanguage,
+            onSelect = { language ->
+                viewModel.setDictationLanguage(language)
+                showDictationLanguagePicker = false
+            },
+            onDismiss = { showDictationLanguagePicker = false }
         )
     }
 
@@ -723,6 +752,42 @@ private fun AutoDownloadPickerDialog(
                         Text(
                             text = label,
                             color = if (option == currentOption) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun DictationLanguagePickerDialog(
+    currentLanguage: DictationLanguage,
+    onSelect: (DictationLanguage) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Dictation Language") },
+        text = {
+            Column {
+                DictationLanguage.entries.forEach { language ->
+                    val label = when (language) {
+                        DictationLanguage.GERMAN -> "German (de-DE)"
+                        DictationLanguage.ENGLISH -> "English (en-US)"
+                    }
+                    TextButton(
+                        onClick = { onSelect(language) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (language == currentLanguage) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.onSurface
                         )
                     }

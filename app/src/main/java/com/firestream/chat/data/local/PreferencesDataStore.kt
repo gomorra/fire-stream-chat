@@ -22,6 +22,8 @@ enum class AutoDownloadOption { WIFI_ONLY, ALWAYS, NEVER }
 
 enum class NotificationSound { DEFAULT, SILENT }
 
+enum class DictationLanguage(val tag: String) { GERMAN("de-DE"), ENGLISH("en-US") }
+
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "fire_stream_prefs")
 
 @Singleton
@@ -49,6 +51,9 @@ class PreferencesDataStore @Inject constructor(
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
     private val sendImagesFullQualityKey = booleanPreferencesKey("send_images_full_quality")
+
+    // Chat
+    private val dictationLanguageKey = stringPreferencesKey("dictation_language")
 
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
@@ -185,6 +190,17 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setSendImagesFullQuality(fullQuality: Boolean) {
         context.dataStore.edit { prefs -> prefs[sendImagesFullQualityKey] = fullQuality }
+    }
+
+    // --- Chat ---
+
+    val dictationLanguageFlow: Flow<DictationLanguage> = context.dataStore.data.map { prefs ->
+        runCatching { DictationLanguage.valueOf(prefs[dictationLanguageKey] ?: DictationLanguage.GERMAN.name) }
+            .getOrDefault(DictationLanguage.GERMAN)
+    }
+
+    suspend fun setDictationLanguage(language: DictationLanguage) {
+        context.dataStore.edit { prefs -> prefs[dictationLanguageKey] = language.name }
     }
 
     // --- Emoji recents ---
