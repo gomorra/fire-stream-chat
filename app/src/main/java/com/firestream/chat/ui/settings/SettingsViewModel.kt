@@ -40,7 +40,7 @@ data class SettingsUiState(
     val readReceipts: Boolean = true,
     val lastSeenVisible: Boolean = true,
     val screenSecurity: Boolean = false,
-    val e2eEncryption: Boolean = true,
+    val e2eEncryption: Boolean = false,
     // Notifications
     val messageNotifications: Boolean = true,
     val groupNotifications: Boolean = true,

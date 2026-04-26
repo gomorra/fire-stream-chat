@@ -121,7 +121,7 @@ class PreferencesDataStore @Inject constructor(
     // Debug builds ignore this — the BuildConfig.DEBUG guard in MessageRepositoryImpl
     // forces plaintext regardless.
     val e2eEncryptionEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[e2eEncryptionKey] ?: true
+        prefs[e2eEncryptionKey] ?: false
     }
 
     suspend fun setE2eEncryptionEnabled(enabled: Boolean) {
