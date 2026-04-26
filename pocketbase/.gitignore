@@ -1,0 +1,13 @@
+# PocketBase binary (downloaded per platform; not vendored)
+pocketbase
+pocketbase.exe
+
+# Runtime data and migrations PocketBase generates on first run
+pb_data/
+pb_migrations/
+
+# Service-account key — must never be committed
+firebase-admin-key.json
+
+# Logs
+*.log

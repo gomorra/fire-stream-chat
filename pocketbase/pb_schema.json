@@ -1,0 +1,281 @@
+[
+  {
+    "id": "fc_users_v0",
+    "name": "users",
+    "type": "auth",
+    "system": false,
+    "schema": [
+      {
+        "id": "fc_u_firebase_uid",
+        "name": "firebase_uid",
+        "type": "text",
+        "required": false,
+        "unique": true,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_u_phone",
+        "name": "phone",
+        "type": "text",
+        "required": false,
+        "unique": true,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_u_name",
+        "name": "name",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_u_avatar_url",
+        "name": "avatar_url",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_u_fcm_token",
+        "name": "fcm_token",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_u_status_text",
+        "name": "status_text",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": 200, "pattern": "" }
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_users_firebase_uid` ON `users` (`firebase_uid`) WHERE `firebase_uid` != ''",
+      "CREATE UNIQUE INDEX `idx_users_phone` ON `users` (`phone`) WHERE `phone` != ''"
+    ],
+    "listRule": "id != ''",
+    "viewRule": "id != ''",
+    "createRule": null,
+    "updateRule": "id = @request.auth.id",
+    "deleteRule": null,
+    "options": {
+      "allowEmailAuth": false,
+      "allowOAuth2Auth": false,
+      "allowUsernameAuth": false,
+      "exceptEmailDomains": null,
+      "manageRule": null,
+      "minPasswordLength": 8,
+      "onlyEmailDomains": null,
+      "requireEmail": false
+    }
+  },
+  {
+    "id": "fc_chats_v0",
+    "name": "chats",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "fc_c_type",
+        "name": "type",
+        "type": "select",
+        "required": true,
+        "unique": false,
+        "options": { "maxSelect": 1, "values": ["INDIVIDUAL", "GROUP", "BROADCAST"] }
+      },
+      {
+        "id": "fc_c_participants",
+        "name": "participants",
+        "type": "json",
+        "required": true,
+        "unique": false,
+        "options": { "maxSize": 65536 }
+      },
+      {
+        "id": "fc_c_last_message_id",
+        "name": "last_message_id",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_c_last_message_preview",
+        "name": "last_message_preview",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": 500, "pattern": "" }
+      },
+      {
+        "id": "fc_c_last_message_at",
+        "name": "last_message_at",
+        "type": "number",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "noDecimal": true }
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX `idx_chats_last_message_at` ON `chats` (`last_message_at` DESC)"
+    ],
+    "listRule": "@request.auth.id != '' && participants ~ @request.auth.id",
+    "viewRule": "@request.auth.id != '' && participants ~ @request.auth.id",
+    "createRule": "@request.auth.id != '' && participants ~ @request.auth.id",
+    "updateRule": "@request.auth.id != '' && participants ~ @request.auth.id",
+    "deleteRule": null,
+    "options": {}
+  },
+  {
+    "id": "fc_messages_v0",
+    "name": "messages",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "fc_m_chat_id",
+        "name": "chat_id",
+        "type": "relation",
+        "required": true,
+        "unique": false,
+        "options": {
+          "collectionId": "fc_chats_v0",
+          "cascadeDelete": true,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": null
+        }
+      },
+      {
+        "id": "fc_m_sender_id",
+        "name": "sender_id",
+        "type": "relation",
+        "required": true,
+        "unique": false,
+        "options": {
+          "collectionId": "fc_users_v0",
+          "cascadeDelete": false,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": null
+        }
+      },
+      {
+        "id": "fc_m_content",
+        "name": "content",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_m_type",
+        "name": "type",
+        "type": "select",
+        "required": true,
+        "unique": false,
+        "options": {
+          "maxSelect": 1,
+          "values": ["TEXT", "IMAGE", "VIDEO", "VOICE", "DOCUMENT", "POLL", "LIST", "LOCATION", "CALL"]
+        }
+      },
+      {
+        "id": "fc_m_status",
+        "name": "status",
+        "type": "select",
+        "required": false,
+        "unique": false,
+        "options": {
+          "maxSelect": 1,
+          "values": ["SENDING", "SENT", "DELIVERED", "READ", "FAILED"]
+        }
+      },
+      {
+        "id": "fc_m_media_url",
+        "name": "media_url",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_m_reply_to_id",
+        "name": "reply_to_id",
+        "type": "text",
+        "required": false,
+        "unique": false,
+        "options": { "min": null, "max": null, "pattern": "" }
+      },
+      {
+        "id": "fc_m_timestamp",
+        "name": "timestamp",
+        "type": "number",
+        "required": true,
+        "unique": false,
+        "options": { "min": null, "max": null, "noDecimal": true }
+      }
+    ],
+    "indexes": [
+      "CREATE INDEX `idx_messages_chat_timestamp` ON `messages` (`chat_id`, `timestamp` DESC)"
+    ],
+    "listRule": "@request.auth.id != '' && chat_id.participants ~ @request.auth.id",
+    "viewRule": "@request.auth.id != '' && chat_id.participants ~ @request.auth.id",
+    "createRule": "@request.auth.id != '' && sender_id = @request.auth.id && chat_id.participants ~ @request.auth.id",
+    "updateRule": "@request.auth.id != '' && sender_id = @request.auth.id",
+    "deleteRule": "@request.auth.id != '' && sender_id = @request.auth.id",
+    "options": {}
+  },
+  {
+    "id": "fc_presence_v0",
+    "name": "presence",
+    "type": "base",
+    "system": false,
+    "schema": [
+      {
+        "id": "fc_p_user_id",
+        "name": "user_id",
+        "type": "relation",
+        "required": true,
+        "unique": true,
+        "options": {
+          "collectionId": "fc_users_v0",
+          "cascadeDelete": true,
+          "minSelect": null,
+          "maxSelect": 1,
+          "displayFields": null
+        }
+      },
+      {
+        "id": "fc_p_is_online",
+        "name": "is_online",
+        "type": "bool",
+        "required": false,
+        "unique": false,
+        "options": {}
+      },
+      {
+        "id": "fc_p_last_heartbeat",
+        "name": "last_heartbeat",
+        "type": "number",
+        "required": true,
+        "unique": false,
+        "options": { "min": null, "max": null, "noDecimal": true }
+      }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_presence_user_id` ON `presence` (`user_id`)",
+      "CREATE INDEX `idx_presence_heartbeat` ON `presence` (`last_heartbeat`)"
+    ],
+    "listRule": "@request.auth.id != ''",
+    "viewRule": "@request.auth.id != ''",
+    "createRule": "@request.auth.id != '' && user_id = @request.auth.id",
+    "updateRule": "@request.auth.id != '' && user_id = @request.auth.id",
+    "deleteRule": null,
+    "options": {}
+  }
+]
