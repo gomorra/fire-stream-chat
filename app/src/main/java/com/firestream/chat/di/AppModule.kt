@@ -19,10 +19,7 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.database.FirebaseDatabase
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.messaging.FirebaseMessaging
-import com.google.firebase.storage.FirebaseStorage
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -79,9 +76,16 @@ object SystemModule {
     }
 }
 
+/**
+ * Shared-Firebase providers — visible to BOTH Gradle flavors. Both keep
+ * Firebase Auth (for Phone OTP login) and Firebase Messaging (FCM device-side
+ * push). The Firestore / Storage / RTDB providers live in
+ * `app/src/firebase/.../di/FirebaseModule.kt` and are only on the firebase
+ * variant's classpath.
+ */
 @Module
 @InstallIn(SingletonComponent::class)
-object FirebaseModule {
+object FirebaseSharedModule {
 
     @Provides
     @Singleton
@@ -89,17 +93,5 @@ object FirebaseModule {
 
     @Provides
     @Singleton
-    fun provideFirebaseFirestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
-
-    @Provides
-    @Singleton
-    fun provideFirebaseStorage(): FirebaseStorage = FirebaseStorage.getInstance()
-
-    @Provides
-    @Singleton
     fun provideFirebaseMessaging(): FirebaseMessaging = FirebaseMessaging.getInstance()
-
-    @Provides
-    @Singleton
-    fun provideFirebaseDatabase(): FirebaseDatabase = FirebaseDatabase.getInstance()
 }

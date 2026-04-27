@@ -1,3 +1,0 @@
-# Firebase-flavor source set (plan step 3 moves data/remote/firebase/* and the
-# Firestore/RTDB/Storage Hilt providers here). Empty placeholder so the
-# directory survives in git.
