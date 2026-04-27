@@ -150,7 +150,7 @@ class PocketBaseRealtime @Inject constructor(
             .build()
 
         withContext(Dispatchers.IO) {
-            client.streamingClient().newCall(request).execute().use { response ->
+            client.streamingClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     throw PocketBaseHttpException(response.code, response.message)
                 }

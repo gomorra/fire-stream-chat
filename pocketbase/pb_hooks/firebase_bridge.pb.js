@@ -50,31 +50,29 @@ function fetchGooglePublicKeys(forceRefresh) {
   return keys
 }
 
-function verifyFirebaseIdToken(token, projectId) {
-  // Try each currently-valid Google key. Exactly one will match the JWT's
-  // signing kid; the rest throw inside parseJWT. Cheaper than decoding the
-  // header to read kid directly (which would need a base64url helper Goja
-  // doesn't ship).
-  let claims = null
+// Try each currently-valid Google key. Exactly one will match the JWT's
+// signing kid; the rest throw inside parseJWT. Cheaper than decoding the
+// header to read kid directly (which would need a base64url helper Goja
+// doesn't ship).
+function tryKeys(token, keys) {
   let lastErr = null
-  let triedRefresh = false
-  for (let attempt = 0; attempt < 2 && claims === null; attempt++) {
-    const keys = fetchGooglePublicKeys(triedRefresh)
-    for (const kid in keys) {
-      try {
-        claims = $security.parseJWT(token, keys[kid])
-        break
-      } catch (e) {
-        lastErr = e
-      }
-    }
-    if (claims === null && !triedRefresh) {
-      // Maybe Google rotated; clear the cache and refetch once.
-      triedRefresh = true
+  for (const kid in keys) {
+    try {
+      return $security.parseJWT(token, keys[kid])
+    } catch (e) {
+      lastErr = e
     }
   }
-  if (!claims) {
-    throw new Error("signature verification failed: " + (lastErr || "no key matched"))
+  throw new Error("signature verification failed: " + (lastErr || "no key matched"))
+}
+
+function verifyFirebaseIdToken(token, projectId) {
+  let claims
+  try {
+    claims = tryKeys(token, fetchGooglePublicKeys(false))
+  } catch (e) {
+    // Maybe Google rotated; clear the cache and refetch once.
+    claims = tryKeys(token, fetchGooglePublicKeys(true))
   }
 
   const now = Math.floor(Date.now() / 1000)
@@ -83,8 +81,18 @@ function verifyFirebaseIdToken(token, projectId) {
   if (claims.aud !== projectId) throw new Error("bad aud: " + claims.aud)
   if (!claims.exp || claims.exp <= now) throw new Error("token expired")
   if (claims.iat && claims.iat > now + IAT_SKEW_SEC) throw new Error("iat in future")
+  // Firebase always sets auth_time when this came from a real sign-in; reject
+  // tokens with a future auth_time (clock-skew bound matches iat).
+  if (claims.auth_time && claims.auth_time > now + IAT_SKEW_SEC) {
+    throw new Error("auth_time in future")
+  }
   if (!claims.sub) throw new Error("missing sub")
-  // Firebase puts the uid in user_id (and also sub) — trust user_id.
+  // Firebase puts the uid in user_id (and also sub). When both are present they
+  // must agree — disagreeing values would mean the token was forged across two
+  // identities (the verified signature alone can't catch this).
+  if (claims.user_id && claims.sub && claims.user_id !== claims.sub) {
+    throw new Error("sub / user_id mismatch")
+  }
   if (!claims.user_id) claims.user_id = claims.sub
   return claims
 }
@@ -106,7 +114,12 @@ function findOrCreateUser(claims) {
   record.set("firebase_uid", claims.user_id)
   record.set("phone", claims.phone_number || "")
   // Auth collections require a password even when we never use it. Random,
-  // discarded, and unreachable — sign-in always goes through this bridge.
+  // discarded, and unreachable: pb_schema.json gates the users collection
+  // with allowEmailAuth/allowOAuth2Auth/allowUsernameAuth all `false`, so the
+  // /api/collections/users/auth-with-* endpoints can never reach this hash.
+  // If a future schema edit flips any of those flags, the random 32-char
+  // password is still computationally infeasible to brute force, but the
+  // attack surface widens — keep the schema gate intact.
   record.setPassword($security.randomString(RANDOM_PASSWORD_LEN))
   dao.saveRecord(record)
   return record

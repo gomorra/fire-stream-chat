@@ -4,9 +4,7 @@ import com.google.firebase.auth.FirebaseAuth
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -26,11 +24,11 @@ class PocketBaseAuthSourceTest {
         // FirebaseAuth is only touched by sign-in/out paths; getUserDocument
         // doesn't reach it, so a relaxed mock is fine here.
         val firebaseAuth = mockk<FirebaseAuth>(relaxed = true)
-        // pbUserIdFlow is consumed by the StateFlow seed/collect; an empty
-        // flow keeps currentUserId at null without DataStore IO.
-        every { client.pbUserIdFlow } returns flowOf(null)
-        val appScope = CoroutineScope(SupervisorJob())
-        return PocketBaseAuthSource(client, firebaseAuth, appScope)
+        // pbUserId is the synchronous source-of-truth StateFlow exposed by
+        // the client; for these tests it's never read but mockk needs the
+        // backing property to resolve.
+        every { client.pbUserId } returns MutableStateFlow(null)
+        return PocketBaseAuthSource(client, firebaseAuth)
     }
 
     @Test

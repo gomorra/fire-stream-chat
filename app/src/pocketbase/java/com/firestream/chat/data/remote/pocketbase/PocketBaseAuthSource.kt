@@ -6,27 +6,24 @@
 //      verificationId + otp).
 //   2. signInWithVerification builds a PhoneAuthCredential, signs into Firebase
 //      to get an ID token, POSTs /api/auth/firebase-bridge to swap it for a PB
-//      session token, persists token+pbUserId in DataStore.
+//      session token, persists token+pbUserId via PocketBaseClient.setSession.
 //   3. Firebase session is KEPT (no signOut) so we can refresh the ID token on
 //      401.
 //
 // Don't put here:
 //   - Direct password storage / username login — PB users are mint-only via
-//     the bridge; we never call /api/collections/users/auth-with-password.
+//     the bridge; pb_schema.json gates `users` with allowEmailAuth=false.
 //   - Field-name mapping for non-auth paths — keep getUserDocument's
 //     Firestore-shaped Map output isolated to the AuthRepository surface.
+//   - Cached session-id state — `client.pbUserId` is the single source of
+//     truth (StateFlow seeded once from DataStore at PocketBaseClient init).
 // endregion
 package com.firestream.chat.data.remote.pocketbase
 
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.di.ApplicationScope
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.PhoneAuthProvider
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
 import org.json.JSONObject
 import javax.inject.Inject
@@ -35,36 +32,22 @@ import javax.inject.Singleton
 @Singleton
 class PocketBaseAuthSource @Inject constructor(
     private val client: PocketBaseClient,
-    private val firebaseAuth: FirebaseAuth,
-    @ApplicationScope private val appScope: CoroutineScope
+    private val firebaseAuth: FirebaseAuth
 ) : AuthSource, PbTokenBridge {
 
-    // Seeded synchronously from DataStore at first construction so cold-start
-    // synchronous reads of `currentUserId` reflect the persisted session — the
-    // firebase impl gets this for free via FirebaseAuth's local cache. After
-    // seeding, the appScope collector keeps the StateFlow live across
-    // sign-in/out events.
-    private val _currentUserId = MutableStateFlow<String?>(
-        runBlocking { client.pbUserIdFlow.first() }
-    )
+    // The bridge endpoint returns the user's phone alongside the session
+    // token; cache it for later [currentUserPhone] reads. Not in DataStore
+    // because firebaseAuth.currentUser?.phoneNumber covers the cold-start
+    // case before signInWithVerification runs.
     private val _currentPhone = MutableStateFlow<String?>(null)
 
-    init {
-        appScope.launch {
-            client.pbUserIdFlow.collect { _currentUserId.value = it }
-        }
-    }
-
     override val currentUserId: String?
-        get() = _currentUserId.value
+        get() = client.pbUserId.value
 
     override val isLoggedIn: Boolean
-        get() = _currentUserId.value != null
+        get() = client.pbUserId.value != null
 
     override val currentUserPhone: String?
-        // Prefer the bridge-resolved phone (matches the PB users record); fall
-        // back to FirebaseUser.phoneNumber for the brief window before
-        // signInWithVerification has populated _currentPhone.
         get() = _currentPhone.value ?: firebaseAuth.currentUser?.phoneNumber
 
     override suspend fun signInWithVerification(verificationId: String, otp: String): String {
@@ -75,8 +58,7 @@ class PocketBaseAuthSource @Inject constructor(
             ?: throw RuntimeException("Firebase getIdToken returned null")
 
         val response = bridgeIdToken(idToken)
-        val pbUserId = applyBridgeResponse(response, fallbackPhone = firebaseUser.phoneNumber)
-        return pbUserId
+        return applyBridgeResponse(response, fallbackPhone = firebaseUser.phoneNumber)
     }
 
     override suspend fun createUserDocument(
@@ -126,7 +108,6 @@ class PocketBaseAuthSource @Inject constructor(
     override fun signOut() {
         client.clearSession()
         firebaseAuth.signOut()
-        _currentUserId.value = null
         _currentPhone.value = null
     }
 
@@ -151,7 +132,6 @@ class PocketBaseAuthSource @Inject constructor(
         val pbUserId = record.getString("id")
         val phone = record.optString("phone").takeIf { it.isNotEmpty() }
         client.setSession(pbToken, pbUserId)
-        _currentUserId.value = pbUserId
         _currentPhone.value = phone ?: fallbackPhone
         return pbUserId
     }
