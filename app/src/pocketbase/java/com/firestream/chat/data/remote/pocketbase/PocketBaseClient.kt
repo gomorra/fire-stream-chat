@@ -1,13 +1,14 @@
 // region: AGENT-NOTE
-// PocketBase HTTP client. Wraps OkHttp with auth-header injection and
-// session-token storage in DataStore. Reads parse JSON via `org.json` to match
-// the existing house style (MessageRepositoryImpl + FirestoreMessageSource
-// already use it; `org.json` ships in android.jar, no new prod dep).
+// PocketBase HTTP client. Wraps OkHttp with auth-header injection, session-token
+// storage in DataStore, and 401 → auto-refresh → re-bridge → retry. Reads parse
+// JSON via `org.json` to match the existing house style (MessageRepositoryImpl
+// + FirestoreMessageSource already use it; `org.json` ships in android.jar, no
+// new prod dep).
 //
 // Don't put here:
 //   - SSE realtime — that's PocketBaseRealtime.kt next door.
-//   - 401 retry / re-bridge with Firebase ID token — deferred to step 5
-//     (auth bridge); needs PocketBaseAuthSource to know how to re-mint.
+//   - Firebase ID-token re-mint logic itself — that's PocketBaseAuthSource via
+//     the [PbTokenBridge] callback. The cycle is broken with `Lazy<>`.
 //   - Token writes from non-application scope — must use @ApplicationScope so
 //     they outlive a ViewModel onCleared (see feedback_datastore_scope_fence).
 // endregion
@@ -20,6 +21,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import android.content.Context
 import com.firestream.chat.BuildConfig
 import com.firestream.chat.di.ApplicationScope
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -46,13 +48,15 @@ private val Context.pocketBaseDataStore by preferencesDataStore(name = "pocketba
  * session-token storage so every `*Source` impl in this flavor can authenticate
  * uniformly.
  *
- * Step 4 (current) installs the wrapper; the real auth bridge that obtains the
- * token lives in step 5's `PocketBaseAuthSource`.
+ * Step 5 layered on the auth flow: [authedRequest] now retries once on 401 by
+ * (a) calling PB's `auth-refresh` if it has a session token, and if that fails
+ * (b) asking [PbTokenBridge] to re-bridge a fresh Firebase ID token.
  */
 @Singleton
 class PocketBaseClient @Inject constructor(
     @ApplicationContext private val context: Context,
-    @ApplicationScope private val appScope: CoroutineScope
+    @ApplicationScope private val appScope: CoroutineScope,
+    private val tokenBridge: Lazy<PbTokenBridge>
 ) {
     val baseUrl: String = BuildConfig.POCKETBASE_URL
 
@@ -113,25 +117,96 @@ class PocketBaseClient @Inject constructor(
     }
 
     /**
+     * Sends an unauthenticated POST. Used by the bridge endpoint itself, which
+     * doesn't take a PB session — it mints one. Skipping the Authorization
+     * header avoids confusing PB during sign-in when an old session may still
+     * sit in DataStore.
+     */
+    suspend fun unauthedPost(path: String, body: JSONObject): JSONObject =
+        withContext(Dispatchers.IO) {
+            val request = Request.Builder()
+                .url("$baseUrl$path")
+                .post(body.toRequestBody())
+                .build()
+            httpClient.newCall(request).execute().use(::parseJson)
+        }
+
+    /**
      * Builds the request, attaches the session token (if any) as
      * `Authorization: <token>`, executes synchronously on IO, and parses the
-     * body as JSON. PocketBase returns `{}` for 204-style success on writes;
-     * callers that don't need the body can ignore the return value.
+     * body as JSON. On 401, retries once after running [recoverFromUnauthorized].
      *
-     * 401 retry path is deferred to step 5 — it needs `PocketBaseAuthSource`
-     * to re-mint via the Firebase bridge.
+     * The retry uses a *fresh* token read from DataStore — the recovery path
+     * may have just persisted a new one.
      */
     private suspend fun authedRequest(buildRequest: () -> Request.Builder): JSONObject =
         withContext(Dispatchers.IO) {
-            val token = sessionTokenFlow.first()
-            val builder = buildRequest()
-            if (!token.isNullOrEmpty()) {
-                builder.header("Authorization", token)
+            val firstResponse = executeOnce(buildRequest())
+            if (firstResponse !is AuthedResult.Unauthorized) {
+                return@withContext firstResponse.unwrap()
             }
-            httpClient.newCall(builder.build()).execute().use { response ->
-                parseJson(response)
+            // 401 path: try to recover, retry once, fail loudly if still 401.
+            if (!recoverFromUnauthorized()) {
+                throw PocketBaseHttpException(401, firstResponse.body)
+            }
+            executeOnce(buildRequest()).unwrap()
+        }
+
+    private suspend fun executeOnce(builder: Request.Builder): AuthedResult {
+        val token = sessionTokenFlow.first()
+        if (!token.isNullOrEmpty()) {
+            builder.header("Authorization", token)
+        }
+        return httpClient.newCall(builder.build()).execute().use { response ->
+            when {
+                response.isSuccessful -> AuthedResult.Ok(parseBody(response))
+                response.code == 401 -> AuthedResult.Unauthorized(response.body?.string().orEmpty())
+                else -> AuthedResult.Error(PocketBaseHttpException(response.code, response.body?.string().orEmpty()))
             }
         }
+    }
+
+    /**
+     * Two-step recovery:
+     *   1. If we have a session token, hit `/api/collections/users/auth-refresh`.
+     *      PB extends the session for ~30 days as long as the token isn't fully
+     *      expired and the user record still exists.
+     *   2. Otherwise (or if step 1 also returns 401), delegate to
+     *      [PbTokenBridge.refreshSession] which re-bridges a fresh Firebase
+     *      ID token. If even that fails the caller sees the original 401 and
+     *      can route to login.
+     */
+    private suspend fun recoverFromUnauthorized(): Boolean {
+        val token = sessionTokenFlow.first()
+        if (!token.isNullOrEmpty() && tryAuthRefresh(token)) {
+            return true
+        }
+        return runCatching { tokenBridge.get().refreshSession() }.getOrDefault(false)
+    }
+
+    private fun tryAuthRefresh(token: String): Boolean = runCatching {
+        val request = Request.Builder()
+            .url("$baseUrl/api/collections/users/auth-refresh")
+            .header("Authorization", token)
+            .post("".toRequestBody(JSON_MEDIA))
+            .build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) return@use false
+            val body = response.body?.string().orEmpty()
+            if (body.isBlank()) return@use false
+            val json = JSONObject(body)
+            val newToken = json.optString("token").takeIf { it.isNotEmpty() } ?: return@use false
+            val record = json.optJSONObject("record") ?: return@use false
+            val userId = record.optString("id").takeIf { it.isNotEmpty() } ?: return@use false
+            setSession(newToken, userId)
+            true
+        }
+    }.getOrDefault(false)
+
+    private fun parseBody(response: Response): JSONObject {
+        val raw = response.body?.string().orEmpty()
+        return if (raw.isBlank()) JSONObject() else JSONObject(raw)
+    }
 
     private fun parseJson(response: Response): JSONObject {
         val raw = response.body?.string().orEmpty()
@@ -139,6 +214,17 @@ class PocketBaseClient @Inject constructor(
             throw PocketBaseHttpException(response.code, raw)
         }
         return if (raw.isBlank()) JSONObject() else JSONObject(raw)
+    }
+
+    private sealed interface AuthedResult {
+        fun unwrap(): JSONObject
+        data class Ok(val body: JSONObject) : AuthedResult { override fun unwrap() = body }
+        data class Unauthorized(val body: String) : AuthedResult {
+            override fun unwrap() = throw PocketBaseHttpException(401, body)
+        }
+        data class Error(val cause: PocketBaseHttpException) : AuthedResult {
+            override fun unwrap(): JSONObject = throw cause
+        }
     }
 
     companion object {

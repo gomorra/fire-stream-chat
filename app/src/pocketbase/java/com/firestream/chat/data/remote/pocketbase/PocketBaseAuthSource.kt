@@ -1,38 +1,158 @@
+// region: AGENT-NOTE
+// PocketBase auth source — bridges Firebase Phone OTP to a PB session.
+//
+// Flow:
+//   1. Firebase Phone OTP runs as in the firebase flavor (verifyOtp gives us
+//      verificationId + otp).
+//   2. signInWithVerification builds a PhoneAuthCredential, signs into Firebase
+//      to get an ID token, POSTs /api/auth/firebase-bridge to swap it for a PB
+//      session token, persists token+pbUserId in DataStore.
+//   3. Firebase session is KEPT (no signOut) so we can refresh the ID token on
+//      401.
+//
+// Don't put here:
+//   - Direct password storage / username login — PB users are mint-only via
+//     the bridge; we never call /api/collections/users/auth-with-password.
+//   - Field-name mapping for non-auth paths — keep getUserDocument's
+//     Firestore-shaped Map output isolated to the AuthRepository surface.
+// endregion
 package com.firestream.chat.data.remote.pocketbase
 
 import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.di.ApplicationScope
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.PhoneAuthProvider
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.tasks.await
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Step 4 stub. Real impl lands in step 5 (Firebase ID token → PB session
- * bridge). Reading `currentUserId` while logged-out returns null, matching
- * the firebase impl's pre-login behaviour, so DI graph initialization doesn't
- * blow up.
- */
 @Singleton
-class PocketBaseAuthSource @Inject constructor() : AuthSource {
-    override val currentUserId: String? = null
-    override val isLoggedIn: Boolean = false
-    override val currentUserPhone: String? = null
+class PocketBaseAuthSource @Inject constructor(
+    private val client: PocketBaseClient,
+    private val firebaseAuth: FirebaseAuth,
+    @ApplicationScope private val appScope: CoroutineScope
+) : AuthSource, PbTokenBridge {
 
-    override suspend fun signInWithVerification(verificationId: String, otp: String): String =
-        throw NotImplementedError("PB v0 stub")
+    // Seeded synchronously from DataStore at first construction so cold-start
+    // synchronous reads of `currentUserId` reflect the persisted session — the
+    // firebase impl gets this for free via FirebaseAuth's local cache. After
+    // seeding, the appScope collector keeps the StateFlow live across
+    // sign-in/out events.
+    private val _currentUserId = MutableStateFlow<String?>(
+        runBlocking { client.pbUserIdFlow.first() }
+    )
+    private val _currentPhone = MutableStateFlow<String?>(null)
+
+    init {
+        appScope.launch {
+            client.pbUserIdFlow.collect { _currentUserId.value = it }
+        }
+    }
+
+    override val currentUserId: String?
+        get() = _currentUserId.value
+
+    override val isLoggedIn: Boolean
+        get() = _currentUserId.value != null
+
+    override val currentUserPhone: String?
+        // Prefer the bridge-resolved phone (matches the PB users record); fall
+        // back to FirebaseUser.phoneNumber for the brief window before
+        // signInWithVerification has populated _currentPhone.
+        get() = _currentPhone.value ?: firebaseAuth.currentUser?.phoneNumber
+
+    override suspend fun signInWithVerification(verificationId: String, otp: String): String {
+        val credential = PhoneAuthProvider.getCredential(verificationId, otp)
+        val firebaseUser = firebaseAuth.signInWithCredential(credential).await().user
+            ?: throw RuntimeException("Firebase sign-in returned no user")
+        val idToken = firebaseUser.getIdToken(false).await().token
+            ?: throw RuntimeException("Firebase getIdToken returned null")
+
+        val response = bridgeIdToken(idToken)
+        val pbUserId = applyBridgeResponse(response, fallbackPhone = firebaseUser.phoneNumber)
+        return pbUserId
+    }
 
     override suspend fun createUserDocument(
         uid: String,
         phoneNumber: String,
         displayName: String,
         avatarUrl: String?
-    ): Unit = throw NotImplementedError("PB v0 stub")
+    ) {
+        // The bridge already created the record on first sign-in, so this is an
+        // update (PATCH) that fills in the profile-setup fields. PB's auth
+        // collection allows the owner (`id = @request.auth.id`) to mutate.
+        val body = JSONObject().apply {
+            put("phone", phoneNumber)
+            put("name", displayName)
+            put("avatar_url", avatarUrl ?: "")
+            put("status_text", "Hey there! I'm using FireStream")
+        }
+        client.patch("/api/collections/users/records/$uid", body)
+        _currentPhone.value = phoneNumber
+    }
 
-    override suspend fun getUserDocument(uid: String): Map<String, Any>? =
-        throw NotImplementedError("PB v0 stub")
+    override suspend fun getUserDocument(uid: String): Map<String, Any>? {
+        val record = runCatching {
+            client.get("/api/collections/users/records/$uid")
+        }.getOrNull() ?: return null
+        // Treat empty `name` as "profile not set up yet" — matches the firebase
+        // semantics where the firestore doc doesn't exist until createUserProfile
+        // runs. AuthRepositoryImpl uses null to route the user to profile setup.
+        val name = record.optString("name")
+        if (name.isEmpty()) return null
+        return mapOf(
+            "uid" to uid,
+            "phoneNumber" to record.optString("phone"),
+            "displayName" to name,
+            "avatarUrl" to record.optString("avatar_url"),
+            "statusText" to record.optString("status_text"),
+            "lastSeen" to System.currentTimeMillis(),
+            "isOnline" to true
+        )
+    }
 
-    override suspend fun updateFcmToken(uid: String, token: String): Unit =
-        throw NotImplementedError("PB v0 stub")
+    override suspend fun updateFcmToken(uid: String, token: String) {
+        val body = JSONObject().put("fcm_token", token)
+        runCatching { client.patch("/api/collections/users/records/$uid", body) }
+    }
 
     override fun signOut() {
-        // No-op stub — overridden in step 5.
+        client.clearSession()
+        firebaseAuth.signOut()
+        _currentUserId.value = null
+        _currentPhone.value = null
+    }
+
+    override suspend fun refreshSession(): Boolean {
+        val firebaseUser = firebaseAuth.currentUser ?: return false
+        val idToken = runCatching {
+            firebaseUser.getIdToken(true).await().token
+        }.getOrNull() ?: return false
+        val response = runCatching { bridgeIdToken(idToken) }.getOrNull() ?: return false
+        applyBridgeResponse(response, fallbackPhone = firebaseUser.phoneNumber)
+        return true
+    }
+
+    private suspend fun bridgeIdToken(idToken: String): JSONObject {
+        val body = JSONObject().put("idToken", idToken)
+        return client.unauthedPost("/api/auth/firebase-bridge", body)
+    }
+
+    private fun applyBridgeResponse(response: JSONObject, fallbackPhone: String?): String {
+        val pbToken = response.getString("token")
+        val record = response.getJSONObject("record")
+        val pbUserId = record.getString("id")
+        val phone = record.optString("phone").takeIf { it.isNotEmpty() }
+        client.setSession(pbToken, pbUserId)
+        _currentUserId.value = pbUserId
+        _currentPhone.value = phone ?: fallbackPhone
+        return pbUserId
     }
 }

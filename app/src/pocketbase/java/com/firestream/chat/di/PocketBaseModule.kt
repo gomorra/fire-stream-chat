@@ -12,6 +12,7 @@
 // endregion
 package com.firestream.chat.di
 
+import com.firestream.chat.data.remote.pocketbase.PbTokenBridge
 import com.firestream.chat.data.remote.pocketbase.PocketBaseAuthSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseCallSignalingSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseChatSource
@@ -44,6 +45,9 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindAuthSource(impl: PocketBaseAuthSource): AuthSource
+
+    @Binds @Singleton
+    abstract fun bindPbTokenBridge(impl: PocketBaseAuthSource): PbTokenBridge
 
     @Binds @Singleton
     abstract fun bindUserSource(impl: PocketBaseUserSource): UserSource
