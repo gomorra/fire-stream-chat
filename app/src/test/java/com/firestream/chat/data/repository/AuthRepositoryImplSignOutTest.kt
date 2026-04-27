@@ -4,7 +4,7 @@ import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.SignalDatabase
 import com.firestream.chat.data.local.dao.UserDao
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.source.AuthSource
 import com.google.firebase.messaging.FirebaseMessaging
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
@@ -20,7 +20,7 @@ import org.junit.Test
  */
 class AuthRepositoryImplSignOutTest {
 
-    private val authSource = mockk<FirebaseAuthSource>(relaxed = true)
+    private val authSource = mockk<AuthSource>(relaxed = true)
     private val database = mockk<AppDatabase>(relaxed = true)
     private val signalDatabase = mockk<SignalDatabase>(relaxed = true)
     private val userDao = mockk<UserDao>(relaxed = true)

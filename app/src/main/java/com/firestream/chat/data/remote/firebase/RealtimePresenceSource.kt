@@ -15,6 +15,7 @@
 package com.firestream.chat.data.remote.firebase
 
 import android.util.Log
+import com.firestream.chat.data.remote.source.PresenceSource
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.FirebaseDatabase
@@ -65,7 +66,7 @@ import javax.inject.Singleton
 @Singleton
 class RealtimePresenceSource @Inject constructor(
     private val database: FirebaseDatabase
-) {
+) : PresenceSource {
     private var connectedListener: ValueEventListener? = null
     private var currentUserId: String? = null
 
@@ -80,7 +81,7 @@ class RealtimePresenceSource @Inject constructor(
      * listener before registering a new one.
      */
     @Synchronized
-    fun startPresence(userId: String) {
+    override fun startPresence(userId: String) {
         Log.d(TAG, "startPresence called for userId=$userId (current=$currentUserId, hasListener=${connectedListener != null})")
         if (currentUserId == userId && connectedListener != null) {
             // Listener already registered — but we may have been set offline by goOffline()
@@ -142,7 +143,7 @@ class RealtimePresenceSource @Inject constructor(
      * is a redundant offline write from the server, which is harmless. This
      * avoids the race where the process dies between cancel() and setValue().
      */
-    suspend fun goOffline(userId: String) {
+    override suspend fun goOffline(userId: String) {
         Log.d(TAG, "goOffline called for userId=$userId")
         synchronized(this) {
             connectedListener?.let { listener ->
@@ -161,7 +162,7 @@ class RealtimePresenceSource @Inject constructor(
      * Observes the live online status of [userId] directly from RTDB.
      * Does not depend on the Cloud Function sync — changes are visible instantly.
      */
-    fun observeOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
+    override fun observeOnlineStatus(userId: String): Flow<Boolean> = callbackFlow {
         Log.d(TAG, "observeOnlineStatus: listening on presence/$userId")
         val presenceRef = database.getReference("presence/$userId")
         val listener = object : ValueEventListener {
@@ -184,7 +185,7 @@ class RealtimePresenceSource @Inject constructor(
      * Removes the `.info/connected` listener. Called on logout.
      */
     @Synchronized
-    fun stopPresence() {
+    override fun stopPresence() {
         Log.d(TAG, "stopPresence called (currentUserId=$currentUserId)")
         connectedListener?.let { listener ->
             database.getReference(".info/connected").removeEventListener(listener)

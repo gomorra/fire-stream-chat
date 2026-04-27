@@ -1,5 +1,6 @@
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.domain.model.User
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
@@ -13,8 +14,8 @@ import javax.inject.Singleton
 @Singleton
 class FirestoreUserSource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
-    fun observeUser(userId: String): Flow<User> = callbackFlow {
+) : UserSource {
+    override fun observeUser(userId: String): Flow<User> = callbackFlow {
         val listener: ListenerRegistration = firestore.collection("users")
             .document(userId)
             .addSnapshotListener { snapshot, error ->
@@ -29,19 +30,19 @@ class FirestoreUserSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    suspend fun getUserById(userId: String): User? {
+    override suspend fun getUserById(userId: String): User? {
         val doc = firestore.collection("users").document(userId).get().await()
         return if (doc.exists()) doc.data?.let { mapToUser(it, doc.id) } else null
     }
 
-    suspend fun updateProfile(userId: String, updates: Map<String, Any?>) {
+    override suspend fun updateProfile(userId: String, updates: Map<String, Any?>) {
         val filtered = updates.filterValues { it != null }
         if (filtered.isNotEmpty()) {
             firestore.collection("users").document(userId).update(filtered).await()
         }
     }
 
-    suspend fun setOnlineStatus(userId: String, isOnline: Boolean) {
+    override suspend fun setOnlineStatus(userId: String, isOnline: Boolean) {
         firestore.collection("users").document(userId).update(
             mapOf(
                 "isOnline" to isOnline,
@@ -50,21 +51,21 @@ class FirestoreUserSource @Inject constructor(
         ).await()
     }
 
-    suspend fun blockUser(currentUserId: String, targetUserId: String) {
+    override suspend fun blockUser(currentUserId: String, targetUserId: String) {
         firestore.collection("users").document(currentUserId)
             .collection("blockedUsers").document(targetUserId)
             .set(mapOf("blockedAt" to System.currentTimeMillis()))
             .await()
     }
 
-    suspend fun unblockUser(currentUserId: String, targetUserId: String) {
+    override suspend fun unblockUser(currentUserId: String, targetUserId: String) {
         firestore.collection("users").document(currentUserId)
             .collection("blockedUsers").document(targetUserId)
             .delete()
             .await()
     }
 
-    suspend fun isUserBlocked(currentUserId: String, targetUserId: String): Boolean {
+    override suspend fun isUserBlocked(currentUserId: String, targetUserId: String): Boolean {
         val doc = firestore.collection("users").document(currentUserId)
             .collection("blockedUsers").document(targetUserId)
             .get()
@@ -72,7 +73,7 @@ class FirestoreUserSource @Inject constructor(
         return doc.exists()
     }
 
-    suspend fun getBlockedUserIds(userId: String): Set<String> {
+    override suspend fun getBlockedUserIds(userId: String): Set<String> {
         val snapshot = firestore.collection("users").document(userId)
             .collection("blockedUsers").get().await()
         return snapshot.documents.mapTo(mutableSetOf()) { it.id }

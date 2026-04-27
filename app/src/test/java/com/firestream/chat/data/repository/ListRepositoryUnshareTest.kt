@@ -3,9 +3,9 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ListEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
-import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.ListHistorySource
+import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.repository.ChatRepository
@@ -46,7 +46,7 @@ class ListRepositoryUnshareTest {
         coEvery { getById(any()) } returns null
     }
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val listSource = mockk<FirestoreListSource> {
+    private val listSource = mockk<ListSource> {
         // observeMyLists is called by ensureListSyncRunning() inside observeList();
         // return an empty flow so the retry loop never interferes with test assertions.
         every { observeMyLists(any()) } returns flowOf(emptyList())
@@ -55,8 +55,8 @@ class ListRepositoryUnshareTest {
         every { observeItems(any()) } returns flowOf(emptyList())
         coEvery { migrateEmbeddedItemsIfNeeded(any()) } just Runs
     }
-    private val historySource = mockk<FirestoreListHistorySource>(relaxed = true)
-    private val authSource = mockk<FirebaseAuthSource>()
+    private val historySource = mockk<ListHistorySource>(relaxed = true)
+    private val authSource = mockk<AuthSource>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val messageRepository = mockk<dagger.Lazy<MessageRepository>>()
     private val userRepository = mockk<dagger.Lazy<UserRepository>>()

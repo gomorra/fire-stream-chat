@@ -3,9 +3,9 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ListEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
-import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.ListHistorySource
+import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
@@ -68,7 +68,7 @@ class ListRepositoryImplRaceTest {
     // mirroring Firestore's single-document write guarantee.
     private val fakeFirestoreLock = Mutex()
 
-    private val listSource = mockk<FirestoreListSource>(relaxed = true).also { src ->
+    private val listSource = mockk<ListSource>(relaxed = true).also { src ->
         every { src.observeList(LIST_ID) } returns metadata.map { it as ListData? }
         every { src.observeItems(LIST_ID) } returns items.map { it.toList() }
         every { src.observeMyLists(any()) } returns flowOf(emptyList())
@@ -160,8 +160,8 @@ class ListRepositoryImplRaceTest {
     }
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val historySource = mockk<FirestoreListHistorySource>(relaxed = true)
-    private val authSource = mockk<FirebaseAuthSource>().also {
+    private val historySource = mockk<ListHistorySource>(relaxed = true)
+    private val authSource = mockk<AuthSource>().also {
         every { it.currentUserId } returns USER_ID
     }
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>(relaxed = true)

@@ -3,10 +3,10 @@ package com.firestream.chat.data.repository
 import android.net.Uri
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreUserSource
-import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.remote.source.PresenceSource
 import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.User
 import io.mockk.Ordering
@@ -32,10 +32,10 @@ import java.io.File
 class UserRepositoryImplAvatarCacheTest {
 
     private val userDao = mockk<UserDao>()
-    private val userSource = mockk<FirestoreUserSource>()
-    private val authSource = mockk<FirebaseAuthSource>()
-    private val storageSource = mockk<FirebaseStorageSource>()
-    private val presenceSource = mockk<RealtimePresenceSource>()
+    private val userSource = mockk<UserSource>()
+    private val authSource = mockk<AuthSource>()
+    private val storageSource = mockk<StorageSource>()
+    private val presenceSource = mockk<PresenceSource>()
     private val profileImageManager = mockk<ProfileImageManager>()
 
     private lateinit var repository: UserRepositoryImpl

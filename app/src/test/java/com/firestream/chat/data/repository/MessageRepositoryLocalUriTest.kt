@@ -7,11 +7,11 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
-import com.firestream.chat.data.remote.firebase.FirestoreUserSource
-import com.firestream.chat.data.remote.firebase.RawFirestoreMessage
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.ChatRepository
@@ -48,19 +48,19 @@ class MessageRepositoryLocalUriTest {
 
     private val messageDao = mockk<MessageDao>()
     private val chatDao = mockk<ChatDao>(relaxed = true)
-    private val messageSource = mockk<FirestoreMessageSource>()
-    private val authSource = mockk<FirebaseAuthSource>()
+    private val messageSource = mockk<MessageSource>()
+    private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val storageSource = mockk<FirebaseStorageSource>()
+    private val storageSource = mockk<StorageSource>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val userSource = mockk<FirestoreUserSource>(relaxed = true)
+    private val userSource = mockk<UserSource>(relaxed = true)
 
-    private val firestoreFlow = MutableSharedFlow<List<RawFirestoreMessage>>(extraBufferCapacity = 1)
+    private val firestoreFlow = MutableSharedFlow<List<RawMessage>>(extraBufferCapacity = 1)
     private val roomFlow = MutableSharedFlow<List<MessageEntity>>(replay = 1)
     private val insertSlot = slot<MessageEntity>()
 
@@ -106,7 +106,7 @@ class MessageRepositoryLocalUriTest {
         )
         coEvery { messageDao.getMessageById("msg1") } returns existingEntity
 
-        val raw = RawFirestoreMessage(
+        val raw = RawMessage(
             id = "msg1", chatId = "chat1", senderId = "sender1",
             content = "Hello edited", ciphertext = null, signalType = null,
             type = "IMAGE", mediaUrl = "https://firebasestorage.example/msg1.jpg",
@@ -133,7 +133,7 @@ class MessageRepositoryLocalUriTest {
     fun `localUri is null for genuinely new incoming message`() = runTest {
         coEvery { messageDao.getMessageById("msg2") } returns null
 
-        val raw = RawFirestoreMessage(
+        val raw = RawMessage(
             id = "msg2", chatId = "chat1", senderId = "sender1",
             content = "New photo", ciphertext = null, signalType = null,
             type = "IMAGE", mediaUrl = "https://firebasestorage.example/msg2.jpg",
@@ -166,7 +166,7 @@ class MessageRepositoryLocalUriTest {
         )
         coEvery { messageDao.getMessageById("msg3") } returns existingEntity
 
-        val raw = RawFirestoreMessage(
+        val raw = RawMessage(
             id = "msg3", chatId = "chat1", senderId = "sender1",
             content = "Hi", ciphertext = null, signalType = null,
             type = "TEXT", mediaUrl = null, mediaThumbnailUrl = null,

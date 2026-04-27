@@ -1,12 +1,14 @@
 // region: AGENT-NOTE
 // Responsibility: Phone-OTP authentication, FCM token registration, sign-out.
-// Owns: Current Firebase user state. Sign-out clears AppDatabase + SignalDatabase
+// Owns: Current backend user state. Sign-out clears AppDatabase + SignalDatabase
 //   so a fresh signed-in user gets clean local state and fresh Signal keys.
-// Collaborators: FirebaseAuthSource (PhoneAuthProvider), FirebaseMessaging
-//   (FCM tokens), AppDatabase + SignalDatabase (clear on sign-out), SignalManager
-//   (re-init on sign-in), UserDao (cache the new user).
-// Don't put here: profile-edit operations (UserRepositoryImpl), session presence
-//   (RealtimePresenceSource), key-bundle exchange (FirebaseKeySource).
+// Collaborators: AuthSource (interface — Firebase impl in firebase/, PocketBase
+//   impl bridges Firebase ID token → PB session), FirebaseMessaging (FCM tokens —
+//   both flavors keep FCM device-side), AppDatabase + SignalDatabase (clear on
+//   sign-out), SignalManager (re-init on sign-in), UserDao (cache the new user).
+// Don't put here: OTP send (FirebasePhoneAuth helper consumed by AuthViewModel),
+//   profile-edit operations (UserRepositoryImpl), session presence
+//   (PresenceSource), key-bundle exchange (KeySource).
 // endregion
 
 package com.firestream.chat.data.repository
@@ -17,11 +19,9 @@ import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.SignalDatabase
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
-import com.google.firebase.auth.PhoneAuthCredential
-import com.google.firebase.auth.PhoneAuthProvider
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,7 +33,7 @@ import javax.inject.Singleton
 
 @Singleton
 class AuthRepositoryImpl @Inject constructor(
-    private val authSource: FirebaseAuthSource,
+    private val authSource: AuthSource,
     private val database: AppDatabase,
     private val signalDatabase: SignalDatabase,
     private val userDao: UserDao,
@@ -49,8 +49,7 @@ class AuthRepositoryImpl @Inject constructor(
 
     override suspend fun verifyOtp(verificationId: String, otp: String): Result<User> {
         return try {
-            val credential = PhoneAuthProvider.getCredential(verificationId, otp)
-            val uid = authSource.signInWithCredential(credential)
+            val uid = authSource.signInWithVerification(verificationId, otp)
             // Sync FCM token now that we have a UID — onNewToken may have fired before login
             try {
                 val token = firebaseMessaging.token.await()

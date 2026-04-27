@@ -6,10 +6,10 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
-import com.firestream.chat.data.remote.firebase.FirestoreUserSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.ChatRepository
@@ -30,17 +30,17 @@ class MessageRepositoryBlockTest {
 
     private val messageDao = mockk<MessageDao>()
     private val chatDao = mockk<ChatDao>(relaxed = true)
-    private val messageSource = mockk<FirestoreMessageSource>()
-    private val authSource = mockk<FirebaseAuthSource>()
+    private val messageSource = mockk<MessageSource>()
+    private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val storageSource = mockk<FirebaseStorageSource>()
+    private val storageSource = mockk<StorageSource>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
-    private val userSource = mockk<FirestoreUserSource>(relaxed = true)
+    private val userSource = mockk<UserSource>(relaxed = true)
 
     private lateinit var repository: MessageRepositoryImpl
 

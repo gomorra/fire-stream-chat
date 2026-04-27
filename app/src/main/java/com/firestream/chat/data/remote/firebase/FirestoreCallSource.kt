@@ -12,6 +12,7 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
@@ -27,10 +28,10 @@ import javax.inject.Singleton
 @Singleton
 class FirestoreCallSource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : CallSignalingSource {
     private val callsCollection get() = firestore.collection("calls")
 
-    suspend fun createCallDocument(callerId: String, calleeId: String): String {
+    override suspend fun createCallDocument(callerId: String, calleeId: String): String {
         val callId = callsCollection.document().id
         val data = hashMapOf(
             "callerId" to callerId,
@@ -46,7 +47,7 @@ class FirestoreCallSource @Inject constructor(
         return callId
     }
 
-    suspend fun updateCallStatus(callId: String, status: String, endReason: String? = null) {
+    override suspend fun updateCallStatus(callId: String, status: String, endReason: String?) {
         val updates = hashMapOf<String, Any?>(
             "status" to status
         )
@@ -57,20 +58,20 @@ class FirestoreCallSource @Inject constructor(
         callsCollection.document(callId).update(updates).await()
     }
 
-    suspend fun setOffer(callId: String, sdp: SdpData) {
+    override suspend fun setOffer(callId: String, sdp: SdpData) {
         callsCollection.document(callId).update(
             "offer", hashMapOf("sdp" to sdp.sdp, "type" to sdp.type)
         ).await()
     }
 
-    suspend fun setAnswer(callId: String, sdp: SdpData) {
+    override suspend fun setAnswer(callId: String, sdp: SdpData) {
         callsCollection.document(callId).update(
             "answer", hashMapOf("sdp" to sdp.sdp, "type" to sdp.type)
         ).await()
     }
 
     /** Write answer SDP and status="answered" atomically so the caller always sees both. */
-    suspend fun setAnswerAndAccept(callId: String, sdp: SdpData) {
+    override suspend fun setAnswerAndAccept(callId: String, sdp: SdpData) {
         callsCollection.document(callId).update(
             mapOf(
                 "answer" to hashMapOf("sdp" to sdp.sdp, "type" to sdp.type),
@@ -79,7 +80,7 @@ class FirestoreCallSource @Inject constructor(
         ).await()
     }
 
-    suspend fun addIceCandidate(callId: String, subcollection: String, candidate: IceCandidateData) {
+    override suspend fun addIceCandidate(callId: String, subcollection: String, candidate: IceCandidateData) {
         val data = hashMapOf(
             "sdpMid" to candidate.sdpMid,
             "sdpMLineIndex" to candidate.sdpMLineIndex,
@@ -91,7 +92,7 @@ class FirestoreCallSource @Inject constructor(
             .await()
     }
 
-    fun observeCallDocument(callId: String): Flow<CallSignalingData> = callbackFlow {
+    override fun observeCallDocument(callId: String): Flow<CallSignalingData> = callbackFlow {
         val listener: ListenerRegistration = callsCollection.document(callId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -104,7 +105,7 @@ class FirestoreCallSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>> = callbackFlow {
+    override fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>> = callbackFlow {
         val listener: ListenerRegistration = callsCollection.document(callId)
             .collection(subcollection)
             .addSnapshotListener { snapshot, error ->
@@ -125,7 +126,7 @@ class FirestoreCallSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    suspend fun getCallById(callId: String): CallSignalingData? {
+    override suspend fun getCallById(callId: String): CallSignalingData? {
         val snapshot = callsCollection.document(callId).get().await()
         val data = snapshot.data ?: return null
         return mapToCallSignaling(callId, data)

@@ -29,10 +29,10 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
-import com.firestream.chat.data.remote.firebase.FirestoreUserSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.resultOf
@@ -87,17 +87,17 @@ private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
-    private val messageSource: FirestoreMessageSource,
-    private val authSource: FirebaseAuthSource,
+    private val messageSource: MessageSource,
+    private val authSource: AuthSource,
     private val signalManager: SignalManager,
-    private val storageSource: FirebaseStorageSource,
+    private val storageSource: StorageSource,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val listRepository: dagger.Lazy<ListRepository>,
     private val mediaFileManager: MediaFileManager,
     private val imageCompressor: ImageCompressor,
     private val preferencesDataStore: PreferencesDataStore,
     private val connectivityManager: ConnectivityManager,
-    private val userSource: FirestoreUserSource
+    private val userSource: UserSource
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -313,6 +313,7 @@ class MessageRepositoryImpl @Inject constructor(
     ): String {
         return if (
             recipientId.isNotEmpty() &&
+            BuildConfig.SUPPORTS_SIGNAL &&
             !BuildConfig.DEBUG &&
             preferencesDataStore.e2eEncryptionEnabledFlow.first()
         ) {

@@ -11,6 +11,7 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.ChatSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.GroupPermissions
@@ -41,10 +42,10 @@ private const val COL_INVITE_LINKS = "inviteLinks"
 @Singleton
 class FirestoreChatSource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : ChatSource {
     // ── Observers ────────────────────────────────────────────────────────────
 
-    fun observeChatsForUser(uid: String): Flow<List<Chat>> = callbackFlow {
+    override fun observeChatsForUser(uid: String): Flow<List<Chat>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection(COL_CHATS)
             .whereArrayContains("participants", uid)
@@ -62,7 +63,7 @@ class FirestoreChatSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    fun observeTypingUsers(chatId: String): Flow<List<String>> = callbackFlow {
+    override fun observeTypingUsers(chatId: String): Flow<List<String>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection(COL_CHATS).document(chatId)
             .addSnapshotListener { snapshot, error ->
@@ -85,14 +86,14 @@ class FirestoreChatSource @Inject constructor(
 
     // ── Reads ────────────────────────────────────────────────────────────────
 
-    suspend fun getChat(chatId: String, currentUid: String): Chat? {
+    override suspend fun getChat(chatId: String, currentUid: String): Chat? {
         val doc = firestore.collection(COL_CHATS).document(chatId).get().await()
         val data = doc.data ?: return null
         return mapChat(doc.id, data, currentUid)
     }
 
     /** Finds an existing INDIVIDUAL chat for the given sorted participant pair. */
-    suspend fun findIndividualChat(participants: List<String>, currentUid: String): Chat? {
+    override suspend fun findIndividualChat(participants: List<String>, currentUid: String): Chat? {
         val snapshot = firestore.collection(COL_CHATS)
             .whereEqualTo("type", ChatType.INDIVIDUAL.name)
             .whereEqualTo("participants", participants)
@@ -104,7 +105,7 @@ class FirestoreChatSource @Inject constructor(
     }
 
     /** Returns the document id of the chat, or `null` if the link is invalid. */
-    suspend fun getChatIdForInviteToken(token: String): String? {
+    override suspend fun getChatIdForInviteToken(token: String): String? {
         val linkDoc = firestore.collection(COL_INVITE_LINKS).document(token).get().await()
         if (!linkDoc.exists()) return null
         return linkDoc.getString("chatId")
@@ -113,34 +114,34 @@ class FirestoreChatSource @Inject constructor(
     // ── Writes ───────────────────────────────────────────────────────────────
 
     /** Creates a new chat document and returns the generated doc id. */
-    suspend fun createChat(data: Map<String, Any?>): String {
+    override suspend fun createChat(data: Map<String, Any?>): String {
         val docRef = firestore.collection(COL_CHATS).add(data).await()
         return docRef.id
     }
 
-    suspend fun updateChatFields(chatId: String, updates: Map<String, Any?>) {
+    override suspend fun updateChatFields(chatId: String, updates: Map<String, Any?>) {
         if (updates.isEmpty()) return
         firestore.collection(COL_CHATS).document(chatId).update(updates).await()
     }
 
-    suspend fun deleteChatDocument(chatId: String) {
+    override suspend fun deleteChatDocument(chatId: String) {
         firestore.collection(COL_CHATS).document(chatId).delete().await()
     }
 
-    suspend fun addToArrayField(chatId: String, field: String, value: Any) {
+    override suspend fun addToArrayField(chatId: String, field: String, value: Any) {
         firestore.collection(COL_CHATS).document(chatId)
             .update(field, FieldValue.arrayUnion(value))
             .await()
     }
 
-    suspend fun removeFromArrayField(chatId: String, field: String, value: Any) {
+    override suspend fun removeFromArrayField(chatId: String, field: String, value: Any) {
         firestore.collection(COL_CHATS).document(chatId)
             .update(field, FieldValue.arrayRemove(value))
             .await()
     }
 
     /** Best-effort typing update — callers should catch and ignore failures. */
-    suspend fun setTyping(chatId: String, uid: String, isTyping: Boolean) {
+    override suspend fun setTyping(chatId: String, uid: String, isTyping: Boolean) {
         val update = if (isTyping) {
             mapOf("typingUsers.$uid" to System.currentTimeMillis())
         } else {
@@ -149,7 +150,7 @@ class FirestoreChatSource @Inject constructor(
         firestore.collection(COL_CHATS).document(chatId).update(update).await()
     }
 
-    suspend fun resetUnreadCount(chatId: String, uid: String) {
+    override suspend fun resetUnreadCount(chatId: String, uid: String) {
         firestore.collection(COL_CHATS).document(chatId)
             .update("unreadCounts.$uid", 0)
             .await()
@@ -157,7 +158,7 @@ class FirestoreChatSource @Inject constructor(
 
     // ── Invite links ─────────────────────────────────────────────────────────
 
-    suspend fun setInviteLink(chatId: String, token: String, createdBy: String) {
+    override suspend fun setInviteLink(chatId: String, token: String, createdBy: String) {
         val batch = firestore.batch()
         batch.update(
             firestore.collection(COL_CHATS).document(chatId),
@@ -174,7 +175,7 @@ class FirestoreChatSource @Inject constructor(
         batch.commit().await()
     }
 
-    suspend fun clearInviteLink(chatId: String, existingToken: String?) {
+    override suspend fun clearInviteLink(chatId: String, existingToken: String?) {
         val batch = firestore.batch()
         batch.update(
             firestore.collection(COL_CHATS).document(chatId),
@@ -186,14 +187,14 @@ class FirestoreChatSource @Inject constructor(
         batch.commit().await()
     }
 
-    suspend fun getExistingInviteToken(chatId: String): String? {
+    override suspend fun getExistingInviteToken(chatId: String): String? {
         val doc = firestore.collection(COL_CHATS).document(chatId).get().await()
         return doc.getString("inviteLink")
     }
 
     // ── Batched operations ───────────────────────────────────────────────────
 
-    suspend fun approveMember(chatId: String, userId: String) {
+    override suspend fun approveMember(chatId: String, userId: String) {
         val batch = firestore.batch()
         val chatRef = firestore.collection(COL_CHATS).document(chatId)
         batch.update(chatRef, "pendingMembers", FieldValue.arrayRemove(userId))
@@ -201,7 +202,7 @@ class FirestoreChatSource @Inject constructor(
         batch.commit().await()
     }
 
-    suspend fun leaveGroupPromotingAdmin(chatId: String, leavingUid: String, newAdminUid: String) {
+    override suspend fun leaveGroupPromotingAdmin(chatId: String, leavingUid: String, newAdminUid: String) {
         val batch = firestore.batch()
         val chatRef = firestore.collection(COL_CHATS).document(chatId)
         batch.update(chatRef, "participants", FieldValue.arrayRemove(leavingUid))
@@ -214,7 +215,7 @@ class FirestoreChatSource @Inject constructor(
      * Removes [leavingUid] from both `participants` and `admins` in a single
      * atomic update. For the ordinary non-last-admin path of [leaveGroup].
      */
-    suspend fun leaveGroupRemovingSelf(chatId: String, leavingUid: String) {
+    override suspend fun leaveGroupRemovingSelf(chatId: String, leavingUid: String) {
         firestore.collection(COL_CHATS).document(chatId).update(
             mapOf(
                 "participants" to FieldValue.arrayRemove(leavingUid),
@@ -223,7 +224,7 @@ class FirestoreChatSource @Inject constructor(
         ).await()
     }
 
-    suspend fun transferOwnership(chatId: String, newOwnerId: String) {
+    override suspend fun transferOwnership(chatId: String, newOwnerId: String) {
         val batch = firestore.batch()
         val chatRef = firestore.collection(COL_CHATS).document(chatId)
         batch.update(chatRef, "owner", newOwnerId)

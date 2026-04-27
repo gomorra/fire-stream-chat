@@ -16,9 +16,9 @@ import android.net.Uri
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ChatEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreChatSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.ChatSource
 import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.domain.model.Chat
@@ -37,9 +37,9 @@ import javax.inject.Singleton
 class ChatRepositoryImpl @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
-    private val chatSource: FirestoreChatSource,
-    private val authSource: FirebaseAuthSource,
-    private val storageSource: FirebaseStorageSource,
+    private val chatSource: ChatSource,
+    private val authSource: AuthSource,
+    private val storageSource: StorageSource,
     private val profileImageManager: ProfileImageManager
 ) : ChatRepository {
 

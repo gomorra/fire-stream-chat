@@ -13,6 +13,7 @@
 package com.firestream.chat.data.remote.firebase
 
 import android.net.Uri
+import com.firestream.chat.data.remote.source.StorageSource
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
@@ -24,25 +25,25 @@ import kotlin.coroutines.resumeWithException
 @Singleton
 class FirebaseStorageSource @Inject constructor(
     private val storage: FirebaseStorage
-) {
-    suspend fun uploadAvatar(userId: String, uri: Uri): String {
+) : StorageSource {
+    override suspend fun uploadAvatar(userId: String, uri: Uri): String {
         val ref = storage.reference.child("avatars/$userId/profile.jpg")
         ref.putFile(uri).await()
         return ref.downloadUrl.await().toString()
     }
 
-    suspend fun uploadGroupAvatar(chatId: String, uri: Uri): String {
+    override suspend fun uploadGroupAvatar(chatId: String, uri: Uri): String {
         val ref = storage.reference.child("avatars/groups/$chatId/group.jpg")
         ref.putFile(uri).await()
         return ref.downloadUrl.await().toString()
     }
 
-    suspend fun uploadMedia(
+    override suspend fun uploadMedia(
         chatId: String,
         messageId: String,
         uri: Uri,
         mimeType: String,
-        onProgress: ((Float) -> Unit)? = null
+        onProgress: ((Float) -> Unit)?
     ): String {
         val extension = mimeType.substringAfter("/")
         val ref = storage.reference.child("media/$chatId/$messageId.$extension")

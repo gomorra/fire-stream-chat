@@ -3,20 +3,19 @@ package com.firestream.chat.ui.auth
 import android.app.Activity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.remote.auth.FirebasePhoneAuth
+import com.firestream.chat.data.remote.auth.OtpEvent
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.PhoneAuthOptions
-import com.google.firebase.auth.PhoneAuthProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 data class AuthUiState(
@@ -32,7 +31,7 @@ data class AuthUiState(
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val authRepository: AuthRepository,
-    private val firebaseAuth: FirebaseAuth
+    private val firebasePhoneAuth: FirebasePhoneAuth
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(AuthUiState())
@@ -63,39 +62,30 @@ class AuthViewModel @Inject constructor(
 
     fun sendOtp(phoneNumber: String, activity: Activity, onCodeSent: (String) -> Unit) {
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
-        val callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
-            override fun onVerificationCompleted(credential: com.google.firebase.auth.PhoneAuthCredential) {
-                // Auto-verification (rare on most devices)
-            }
-
-            override fun onVerificationFailed(e: com.google.firebase.FirebaseException) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    error = AppError.from(e)
-                )
-            }
-
-            override fun onCodeSent(
-                verificationId: String,
-                token: PhoneAuthProvider.ForceResendingToken
-            ) {
-                _uiState.value = _uiState.value.copy(
-                    isLoading = false,
-                    verificationId = verificationId
-                )
-                onCodeSent(verificationId)
+        viewModelScope.launch {
+            firebasePhoneAuth.send(phoneNumber, activity).collect { event ->
+                when (event) {
+                    is OtpEvent.CodeSent -> {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            verificationId = event.verificationId
+                        )
+                        onCodeSent(event.verificationId)
+                    }
+                    OtpEvent.AutoVerified -> {
+                        // Auto-verification (rare on most devices) — handled implicitly by
+                        // FirebaseAuth's session; the user lands logged-in after the next
+                        // checkLoginStatus pass.
+                    }
+                    is OtpEvent.Failed -> {
+                        _uiState.value = _uiState.value.copy(
+                            isLoading = false,
+                            error = event.error
+                        )
+                    }
+                }
             }
         }
-
-        val options = PhoneAuthOptions.newBuilder(firebaseAuth)
-            .setPhoneNumber(phoneNumber)
-            .setTimeout(60L, TimeUnit.SECONDS)
-            .setActivity(activity)
-            .setCallbacks(callbacks)
-            .build()
-
-        PhoneAuthProvider.verifyPhoneNumber(options)
     }
 
     fun verifyOtp(verificationId: String, otp: String) {

@@ -17,9 +17,9 @@ import android.util.Log
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.ListEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirestoreListHistorySource
-import com.firestream.chat.data.remote.firebase.FirestoreListSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.ListHistorySource
+import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.HistoryAction
@@ -53,9 +53,9 @@ import javax.inject.Singleton
 class ListRepositoryImpl @Inject constructor(
     private val listDao: ListDao,
     private val messageDao: MessageDao,
-    private val listSource: FirestoreListSource,
-    private val historySource: FirestoreListHistorySource,
-    private val authSource: FirebaseAuthSource,
+    private val listSource: ListSource,
+    private val historySource: ListHistorySource,
+    private val authSource: AuthSource,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val messageRepository: dagger.Lazy<MessageRepository>,
     private val userRepository: dagger.Lazy<UserRepository>

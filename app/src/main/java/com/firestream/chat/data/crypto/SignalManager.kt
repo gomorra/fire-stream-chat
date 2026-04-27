@@ -1,8 +1,8 @@
 package com.firestream.chat.data.crypto
 
 import android.util.Base64
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseKeySource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.KeySource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -38,8 +38,8 @@ data class EncryptedMessage(
 @Singleton
 class SignalManager @Inject constructor(
     private val store: SignalProtocolStoreImpl,
-    private val keySource: FirebaseKeySource,
-    private val authSource: FirebaseAuthSource
+    private val keySource: KeySource,
+    private val authSource: AuthSource
 ) {
     private val initMutex = Mutex()
     private val deviceId = 1

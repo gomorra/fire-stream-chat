@@ -13,6 +13,7 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListItem
@@ -40,12 +41,12 @@ import javax.inject.Singleton
 @Singleton
 class FirestoreListSource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : ListSource {
     private val listsCollection get() = firestore.collection("lists")
     private fun itemsCollection(listId: String) = listsCollection.document(listId).collection("items")
 
     /** Emits list metadata (items arrive via [observeItems]). */
-    fun observeList(listId: String): Flow<ListData?> = callbackFlow {
+    override fun observeList(listId: String): Flow<ListData?> = callbackFlow {
         val listener: ListenerRegistration = listsCollection.document(listId)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -57,7 +58,7 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    fun observeItems(listId: String): Flow<List<ListItem>> = callbackFlow {
+    override fun observeItems(listId: String): Flow<List<ListItem>> = callbackFlow {
         val listener: ListenerRegistration = itemsCollection(listId).orderBy("order")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
@@ -72,7 +73,7 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    fun observeSharedListsForChat(chatId: String): Flow<List<ListData>> = callbackFlow {
+    override fun observeSharedListsForChat(chatId: String): Flow<List<ListData>> = callbackFlow {
         val listener: ListenerRegistration = listsCollection
             .whereArrayContains("sharedChatIds", chatId)
             .addSnapshotListener { snapshot, error ->
@@ -88,7 +89,7 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    fun observeMyLists(userId: String): Flow<List<ListData>> = callbackFlow {
+    override fun observeMyLists(userId: String): Flow<List<ListData>> = callbackFlow {
         val listener: ListenerRegistration = listsCollection
             .whereArrayContains("participants", userId)
             .addSnapshotListener { snapshot, error ->
@@ -104,12 +105,12 @@ class FirestoreListSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    suspend fun getList(listId: String): ListData? {
+    override suspend fun getList(listId: String): ListData? {
         val doc = listsCollection.document(listId).get().await()
         return doc.data?.let { mapToListData(listId, it) }
     }
 
-    suspend fun createList(list: ListData): String {
+    override suspend fun createList(list: ListData): String {
         val data = hashMapOf(
             "title" to list.title,
             "type" to list.type.name,
@@ -128,7 +129,7 @@ class FirestoreListSource @Inject constructor(
 
     // ── Item mutations (subcollection-based) ─────────────────────────
 
-    suspend fun addItem(listId: String, item: ListItem) {
+    override suspend fun addItem(listId: String, item: ListItem) {
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
             batch.set(itemsCollection(listId).document(item.id), itemToMap(item))
@@ -143,7 +144,7 @@ class FirestoreListSource @Inject constructor(
         }.await()
     }
 
-    suspend fun setItemChecked(listId: String, itemId: String, checked: Boolean) {
+    override suspend fun setItemChecked(listId: String, itemId: String, checked: Boolean) {
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
             batch.update(
@@ -160,7 +161,7 @@ class FirestoreListSource @Inject constructor(
         }.await()
     }
 
-    suspend fun updateItem(listId: String, itemId: String, text: String, quantity: String?, unit: String?) {
+    override suspend fun updateItem(listId: String, itemId: String, text: String, quantity: String?, unit: String?) {
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
             batch.update(
@@ -176,7 +177,7 @@ class FirestoreListSource @Inject constructor(
         }.await()
     }
 
-    suspend fun deleteItem(listId: String, itemId: String, wasChecked: Boolean) {
+    override suspend fun deleteItem(listId: String, itemId: String, wasChecked: Boolean) {
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
             batch.delete(itemsCollection(listId).document(itemId))
@@ -192,7 +193,7 @@ class FirestoreListSource @Inject constructor(
     }
 
     /** Batch-deletes the listed item ids and decrements itemCount by N, checkedCount by N. */
-    suspend fun clearCheckedItems(listId: String, checkedItemIds: List<String>) {
+    override suspend fun clearCheckedItems(listId: String, checkedItemIds: List<String>) {
         if (checkedItemIds.isEmpty()) return
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
@@ -210,7 +211,7 @@ class FirestoreListSource @Inject constructor(
         }.await()
     }
 
-    suspend fun reorderItems(listId: String, orderedIds: List<String>) {
+    override suspend fun reorderItems(listId: String, orderedIds: List<String>) {
         val now = System.currentTimeMillis()
         firestore.runBatch { batch ->
             orderedIds.forEachIndexed { index, id ->
@@ -224,7 +225,7 @@ class FirestoreListSource @Inject constructor(
      * Migrate a pre-refactor list (embedded `items` array in the metadata doc) to the subcollection.
      * Idempotent: if the subcollection already has content, only the legacy `items` field is stripped.
      */
-    suspend fun migrateEmbeddedItemsIfNeeded(listId: String) {
+    override suspend fun migrateEmbeddedItemsIfNeeded(listId: String) {
         val docRef = listsCollection.document(listId)
         val doc = docRef.get().await()
         @Suppress("UNCHECKED_CAST")
@@ -258,7 +259,7 @@ class FirestoreListSource @Inject constructor(
 
     // ── List-level mutations (unchanged) ─────────────────────────────
 
-    suspend fun deleteList(listId: String) {
+    override suspend fun deleteList(listId: String) {
         // Firestore does not cascade-delete subcollections. Best effort: drop items first
         // so a re-created list-id does not inherit stale items.
         runCatching {
@@ -272,25 +273,25 @@ class FirestoreListSource @Inject constructor(
         listsCollection.document(listId).delete().await()
     }
 
-    suspend fun addParticipant(listId: String, userId: String) {
+    override suspend fun addParticipant(listId: String, userId: String) {
         listsCollection.document(listId).update(
             "participants", FieldValue.arrayUnion(userId)
         ).await()
     }
 
-    suspend fun removeParticipant(listId: String, userId: String) {
+    override suspend fun removeParticipant(listId: String, userId: String) {
         listsCollection.document(listId).update(
             "participants", FieldValue.arrayRemove(userId)
         ).await()
     }
 
-    suspend fun removeParticipants(listId: String, userIds: List<String>) {
+    override suspend fun removeParticipants(listId: String, userIds: List<String>) {
         listsCollection.document(listId).update(
             "participants", FieldValue.arrayRemove(*userIds.toTypedArray())
         ).await()
     }
 
-    suspend fun updateListTitle(listId: String, title: String) {
+    override suspend fun updateListTitle(listId: String, title: String) {
         listsCollection.document(listId).update(
             mapOf(
                 "title" to title,
@@ -299,7 +300,7 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
-    suspend fun shareList(listId: String, participantIds: List<String>, chatId: String) {
+    override suspend fun shareList(listId: String, participantIds: List<String>, chatId: String) {
         listsCollection.document(listId).update(mapOf(
             "participants" to FieldValue.arrayUnion(*participantIds.toTypedArray()),
             "sharedChatIds" to FieldValue.arrayUnion(chatId),
@@ -307,13 +308,13 @@ class FirestoreListSource @Inject constructor(
         )).await()
     }
 
-    suspend fun updateSharedChatIds(listId: String, chatId: String) {
+    override suspend fun updateSharedChatIds(listId: String, chatId: String) {
         listsCollection.document(listId).update(
             "sharedChatIds", FieldValue.arrayUnion(chatId)
         ).await()
     }
 
-    suspend fun unshareList(listId: String, participantIdsToRemove: List<String>, chatId: String) {
+    override suspend fun unshareList(listId: String, participantIdsToRemove: List<String>, chatId: String) {
         val updates = mutableMapOf<String, Any>(
             "sharedChatIds" to FieldValue.arrayRemove(chatId)
         )
@@ -323,7 +324,7 @@ class FirestoreListSource @Inject constructor(
         listsCollection.document(listId).update(updates).await()
     }
 
-    suspend fun updateListType(listId: String, type: ListType) {
+    override suspend fun updateListType(listId: String, type: ListType) {
         listsCollection.document(listId).update(
             mapOf(
                 "type" to type.name,
@@ -332,7 +333,7 @@ class FirestoreListSource @Inject constructor(
         ).await()
     }
 
-    suspend fun updateGenericStyle(listId: String, style: GenericListStyle) {
+    override suspend fun updateGenericStyle(listId: String, style: GenericListStyle) {
         listsCollection.document(listId).update(
             mapOf(
                 "genericStyle" to style.name,

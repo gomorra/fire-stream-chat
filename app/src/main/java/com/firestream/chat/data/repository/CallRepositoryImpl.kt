@@ -5,7 +5,7 @@
 // Owns: Coordination between FirestoreCallSource (signalling docs) and the
 //   message stream (call-log entries). Stateless — call state itself lives in
 //   CallStateHolder + CallService, not here.
-// Collaborators: FirestoreCallSource, FirestoreMessageSource, ChatDao, CallService.
+// Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService.
 // Don't put here: PeerConnection lifecycle (CallService), in-call UI state
 //   (CallStateHolder), call-log derivation (CallsViewModel).
 // endregion
@@ -13,9 +13,9 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ChatDao
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirestoreCallSource
-import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.CallSignalingSource
+import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.MessageType
@@ -27,9 +27,9 @@ import javax.inject.Singleton
 
 @Singleton
 class CallRepositoryImpl @Inject constructor(
-    private val callSource: FirestoreCallSource,
-    private val authSource: FirebaseAuthSource,
-    private val messageSource: FirestoreMessageSource,
+    private val callSource: CallSignalingSource,
+    private val authSource: AuthSource,
+    private val messageSource: MessageSource,
     private val chatDao: ChatDao
 ) : CallRepository {
 

@@ -1,6 +1,7 @@
 package com.firestream.chat.data.remote.firebase
 
 import android.util.Base64
+import com.firestream.chat.data.remote.source.KeySource
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 import org.signal.libsignal.protocol.IdentityKey
@@ -31,9 +32,9 @@ import javax.inject.Singleton
 @Singleton
 class FirebaseKeySource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : KeySource {
 
-    suspend fun publishKeys(
+    override suspend fun publishKeys(
         uid: String,
         identityKey: IdentityKey,
         registrationId: Int,
@@ -59,7 +60,7 @@ class FirebaseKeySource @Inject constructor(
         firestore.collection("keyBundles").document(uid).set(data).await()
     }
 
-    suspend fun fetchPreKeyBundle(uid: String): PreKeyBundle? {
+    override suspend fun fetchPreKeyBundle(uid: String): PreKeyBundle? {
         val doc = firestore.collection("keyBundles").document(uid).get().await()
         if (!doc.exists()) return null
         val data = doc.data ?: return null

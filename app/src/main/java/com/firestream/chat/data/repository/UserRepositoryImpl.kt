@@ -18,10 +18,10 @@ package com.firestream.chat.data.repository
 import android.net.Uri
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirebaseStorageSource
-import com.firestream.chat.data.remote.firebase.FirestoreUserSource
-import com.firestream.chat.data.remote.firebase.RealtimePresenceSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.remote.source.PresenceSource
 import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.UserRepository
@@ -35,10 +35,10 @@ import javax.inject.Singleton
 @Singleton
 class UserRepositoryImpl @Inject constructor(
     private val userDao: UserDao,
-    private val userSource: FirestoreUserSource,
-    private val authSource: FirebaseAuthSource,
-    private val storageSource: FirebaseStorageSource,
-    private val presenceSource: RealtimePresenceSource,
+    private val userSource: UserSource,
+    private val authSource: AuthSource,
+    private val storageSource: StorageSource,
+    private val presenceSource: PresenceSource,
     private val profileImageManager: ProfileImageManager
 ) : UserRepository {
 

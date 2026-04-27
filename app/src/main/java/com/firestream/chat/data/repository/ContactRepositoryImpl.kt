@@ -2,20 +2,19 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.entity.ContactEntity
+import com.firestream.chat.data.remote.source.ContactSource
 import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.repository.ContactRepository
-import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class ContactRepositoryImpl @Inject constructor(
     private val contactDao: ContactDao,
-    private val firestore: FirebaseFirestore,
+    private val contactSource: ContactSource,
     private val profileImageManager: ProfileImageManager
 ) : ContactRepository {
 
@@ -34,19 +33,9 @@ class ContactRepositoryImpl @Inject constructor(
 
     override suspend fun syncContacts(): Result<List<Contact>> {
         return try {
-            // Query all registered users from Firestore
-            // In production, this would check against the device's contact list
-            val snapshot = firestore.collection("users").get().await()
-            val contacts = snapshot.documents.mapNotNull { doc ->
-                val data = doc.data ?: return@mapNotNull null
-                Contact(
-                    uid = doc.id,
-                    phoneNumber = data["phoneNumber"] as? String ?: "",
-                    displayName = data["displayName"] as? String ?: "",
-                    avatarUrl = data["avatarUrl"] as? String,
-                    isRegistered = true
-                )
-            }
+            // Query all registered users from the backend.
+            // In production, this would check against the device's contact list.
+            val contacts = contactSource.fetchAllRegisteredContacts()
 
             // Preserve existing avatar cache fields during bulk insert
             val existingMap = contactDao.getAllContactsSync().associateBy { it.uid }

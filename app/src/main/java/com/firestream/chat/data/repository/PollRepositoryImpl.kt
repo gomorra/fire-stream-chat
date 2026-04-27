@@ -3,8 +3,8 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
-import com.firestream.chat.data.remote.firebase.FirestoreMessageSource
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -18,8 +18,8 @@ import javax.inject.Singleton
 class PollRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
-    private val messageSource: FirestoreMessageSource,
-    private val authSource: FirebaseAuthSource
+    private val messageSource: MessageSource,
+    private val authSource: AuthSource
 ) : PollRepository {
 
     override suspend fun sendPoll(

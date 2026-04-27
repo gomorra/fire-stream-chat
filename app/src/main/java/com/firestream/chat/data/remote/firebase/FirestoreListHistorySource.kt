@@ -11,6 +11,7 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.ListHistorySource
 import com.firestream.chat.domain.model.HistoryAction
 import com.firestream.chat.domain.model.ListHistoryEntry
 import com.google.firebase.firestore.FirebaseFirestore
@@ -26,11 +27,11 @@ import javax.inject.Singleton
 @Singleton
 class FirestoreListHistorySource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : ListHistorySource {
     private fun historyCollection(listId: String) =
         firestore.collection("lists").document(listId).collection("history")
 
-    suspend fun addEntry(listId: String, entry: ListHistoryEntry) {
+    override suspend fun addEntry(listId: String, entry: ListHistoryEntry) {
         val data = hashMapOf(
             "action" to entry.action.name,
             "itemId" to entry.itemId,
@@ -42,7 +43,7 @@ class FirestoreListHistorySource @Inject constructor(
         historyCollection(listId).add(data).await()
     }
 
-    fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> = callbackFlow {
+    override fun observeHistory(listId: String): Flow<List<ListHistoryEntry>> = callbackFlow {
         val listener: ListenerRegistration = historyCollection(listId)
             .orderBy("timestamp", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->

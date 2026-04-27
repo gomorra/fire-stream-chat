@@ -1,12 +1,13 @@
 // region: AGENT-NOTE
 // Responsibility: Firestore message subcollection I/O — chats/{chatId}/messages/{id}.
-//   Reads emit RawFirestoreMessage (ciphertext or plaintext); writes accept
+//   Reads emit RawMessage (ciphertext or plaintext); writes accept
 //   pre-encrypted payloads. Per-key map updates for readBy / deliveredTo /
 //   reactions via FieldValue dot-notation.
 // Owns: Listener registrations on chats/{chatId}/messages — caller must close
 //   the returned Flow to detach.
 // Collaborators: MessageRepositoryImpl (only caller); decrypts via SignalManager
-//   on the way out.
+//   on the way out. Also reachable through the MessageSource interface in
+//   data/remote/source/ so the pocketbase flavor can swap in its own impl.
 // Don't put here: Signal encryption itself (SignalManager), Room caching
 //   (MessageRepositoryImpl), unread-count increments (sendPushNotification
 //   Cloud Function in functions/index.js).
@@ -14,6 +15,8 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.google.firebase.firestore.FieldValue
@@ -27,44 +30,6 @@ import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Raw Firestore message before decryption.
- * [ciphertext] and [signalType] are non-null for encrypted messages.
- * [content] is non-null for group/plaintext messages.
- */
-data class RawFirestoreMessage(
-    val id: String,
-    val chatId: String,
-    val senderId: String,
-    val content: String?,
-    val ciphertext: String?,
-    val signalType: Int?,
-    val type: String,
-    val mediaUrl: String?,
-    val mediaThumbnailUrl: String?,
-    val status: String,
-    val replyToId: String?,
-    val timestamp: Long,
-    val editedAt: Long?,
-    // Phase 1
-    val reactions: Map<String, String> = emptyMap(),
-    val isForwarded: Boolean = false,
-    val duration: Int? = null,
-    val readBy: Map<String, Long> = emptyMap(),
-    val deliveredTo: Map<String, Long> = emptyMap(),
-    val pollData: Map<String, Any?>? = null,
-    val mentions: List<String> = emptyList(),
-    val deletedAt: Long? = null,
-    val emojiSizes: Map<Int, Float> = emptyMap(),
-    val listId: String? = null,
-    val listDiff: Map<String, Any?>? = null,
-    val isPinned: Boolean = false,
-    val mediaWidth: Int? = null,
-    val mediaHeight: Int? = null,
-    val latitude: Double? = null,
-    val longitude: Double? = null
-)
-
 private const val POLL_CONTENT = "📊 Poll"
 private const val LIST_CONTENT = "📋 List"
 private const val CALL_CONTENT = "📞 Voice call"
@@ -72,7 +37,7 @@ private const val CALL_CONTENT = "📞 Voice call"
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
-) {
+) : MessageSource {
     /**
      * The preview string written to `chats/{id}.lastMessageContent` for a given
      * [type]. [plain] is the raw user content (text body, image caption, etc.);
@@ -80,7 +45,7 @@ class FirestoreMessageSource @Inject constructor(
      * the same string into Room for optimistic local updates, avoiding a
      * preview flicker when the Firestore echo lands.
      */
-    fun lastContentFor(type: MessageType, plain: String = ""): String = when (type) {
+    override fun lastContentFor(type: MessageType, plain: String): String = when (type) {
         MessageType.IMAGE -> if (plain.isNotBlank()) "📷 $plain" else "📷 Photo"
         MessageType.DOCUMENT -> "📎 File"
         MessageType.VOICE -> "🎤 Voice message"
@@ -90,7 +55,7 @@ class FirestoreMessageSource @Inject constructor(
         MessageType.CALL -> CALL_CONTENT
         else -> plain.ifBlank { "Message" }
     }
-    fun observeMessages(chatId: String): Flow<List<RawFirestoreMessage>> = callbackFlow {
+    override fun observeMessages(chatId: String): Flow<List<RawMessage>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -108,7 +73,7 @@ class FirestoreMessageSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    suspend fun fetchMessages(chatId: String): List<RawFirestoreMessage> {
+    override suspend fun fetchMessages(chatId: String): List<RawMessage> {
         val snapshot = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -120,7 +85,7 @@ class FirestoreMessageSource @Inject constructor(
         }
     }
 
-    suspend fun sendMessage(
+    override suspend fun sendMessage(
         chatId: String,
         senderId: String,
         ciphertext: String,
@@ -128,16 +93,16 @@ class FirestoreMessageSource @Inject constructor(
         type: MessageType,
         replyToId: String?,
         timestamp: Long,
-        mediaUrl: String? = null,
-        isForwarded: Boolean = false,
-        duration: Int? = null,
-        mentions: List<String> = emptyList(),
-        plainContent: String = "",
-        emojiSizes: Map<Int, Float> = emptyMap(),
-        mediaWidth: Int? = null,
-        mediaHeight: Int? = null,
-        latitude: Double? = null,
-        longitude: Double? = null
+        mediaUrl: String?,
+        isForwarded: Boolean,
+        duration: Int?,
+        mentions: List<String>,
+        plainContent: String,
+        emojiSizes: Map<Int, Float>,
+        mediaWidth: Int?,
+        mediaHeight: Int?,
+        latitude: Double?,
+        longitude: Double?
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -175,22 +140,22 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    suspend fun sendPlainMessage(
+    override suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,
         content: String,
         type: MessageType,
         replyToId: String?,
         timestamp: Long,
-        mediaUrl: String? = null,
-        isForwarded: Boolean = false,
-        duration: Int? = null,
-        mentions: List<String> = emptyList(),
-        emojiSizes: Map<Int, Float> = emptyMap(),
-        mediaWidth: Int? = null,
-        mediaHeight: Int? = null,
-        latitude: Double? = null,
-        longitude: Double? = null
+        mediaUrl: String?,
+        isForwarded: Boolean,
+        duration: Int?,
+        mentions: List<String>,
+        emojiSizes: Map<Int, Float>,
+        mediaWidth: Int?,
+        mediaHeight: Int?,
+        latitude: Double?,
+        longitude: Double?
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -227,7 +192,7 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long) {
+    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -235,7 +200,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun deleteMessage(chatId: String, messageId: String) {
+    override suspend fun deleteMessage(chatId: String, messageId: String) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -249,7 +214,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun updateMessageStatus(chatId: String, messageId: String, status: String) {
+    override suspend fun updateMessageStatus(chatId: String, messageId: String, status: String) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -257,7 +222,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun getUndeliveredMessageIds(chatId: String, currentUserId: String): List<String> {
+    override suspend fun getUndeliveredMessageIds(chatId: String, currentUserId: String): List<String> {
         val snapshot = firestore.collection("chats").document(chatId)
             .collection("messages")
             .whereEqualTo("status", MessageStatus.SENT.name)
@@ -268,7 +233,7 @@ class FirestoreMessageSource @Inject constructor(
             .map { it.id }
     }
 
-    suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long) {
+    override suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long) {
         firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
             .update(mapOf(
@@ -278,7 +243,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long) {
+    override suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long) {
         firestore.collection("chats").document(chatId)
             .collection("messages").document(messageId)
             .update(mapOf(
@@ -288,7 +253,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun sendPollMessage(
+    override suspend fun sendPollMessage(
         chatId: String,
         senderId: String,
         pollData: Map<String, Any?>,
@@ -321,7 +286,7 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    suspend fun votePoll(
+    override suspend fun votePoll(
         chatId: String,
         messageId: String,
         userId: String,
@@ -355,7 +320,7 @@ class FirestoreMessageSource @Inject constructor(
         docRef.update("pollData.options", updatedOptions).await()
     }
 
-    suspend fun sendCallMessage(
+    override suspend fun sendCallMessage(
         chatId: String,
         senderId: String,
         endReason: String,
@@ -387,13 +352,13 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    suspend fun sendListMessage(
+    override suspend fun sendListMessage(
         chatId: String,
         senderId: String,
         listId: String,
         content: String,
         timestamp: Long,
-        listDiff: Map<String, Any?>? = null
+        listDiff: Map<String, Any?>?
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -423,7 +388,7 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    suspend fun updateListMessageDiff(
+    override suspend fun updateListMessageDiff(
         chatId: String,
         messageId: String,
         content: String,
@@ -447,7 +412,7 @@ class FirestoreMessageSource @Inject constructor(
         ).await()
     }
 
-    suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean) {
+    override suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -455,7 +420,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun closePoll(chatId: String, messageId: String) {
+    override suspend fun closePoll(chatId: String, messageId: String) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -463,7 +428,7 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
-    suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) {
+    override suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
@@ -472,7 +437,7 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawFirestoreMessage {
+    private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawMessage {
         val rawReactions = (data["reactions"] as? Map<*, *>)
             ?.entries
             ?.mapNotNull { (k, v) ->
@@ -482,7 +447,7 @@ class FirestoreMessageSource @Inject constructor(
             }
             ?.toMap() ?: emptyMap()
 
-        return RawFirestoreMessage(
+        return RawMessage(
             id = id,
             chatId = chatId,
             senderId = data["senderId"] as? String ?: "",
