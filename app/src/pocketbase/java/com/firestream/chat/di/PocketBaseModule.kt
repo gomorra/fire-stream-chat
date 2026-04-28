@@ -17,6 +17,7 @@ import com.firestream.chat.data.remote.pocketbase.PocketBaseAuthSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseCallSignalingSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseChatSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseContactSource
+import com.firestream.chat.data.remote.pocketbase.PocketBaseLifecycleHook
 import com.firestream.chat.data.remote.pocketbase.PocketBaseListHistorySource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseListSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseMessageSource
@@ -37,6 +38,7 @@ import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.IntoSet
 import javax.inject.Singleton
 
 @Module
@@ -75,4 +77,12 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindContactSource(impl: PocketBaseContactSource): ContactSource
+
+    /**
+     * Adds [PocketBaseLifecycleHook] to the multibound `Set<FlavorBootstrap>`
+     * so FireStreamApp.onCreate triggers it, which registers the hook with
+     * ProcessLifecycleOwner. Firebase flavor contributes nothing to this set.
+     */
+    @Binds @IntoSet
+    abstract fun bindLifecycleBootstrap(impl: PocketBaseLifecycleHook): FlavorBootstrap
 }
