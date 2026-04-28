@@ -156,7 +156,7 @@ class PocketBasePresenceSource @Inject constructor(
             }
     }
 
-    private fun derivePresence(record: JSONObject): Boolean {
+    internal fun derivePresence(record: JSONObject): Boolean {
         if (!record.optBoolean("is_online", false)) return false
         val lastHeartbeat = record.optLong("last_heartbeat", 0L)
         return System.currentTimeMillis() - lastHeartbeat < FRESHNESS_WINDOW_MS
