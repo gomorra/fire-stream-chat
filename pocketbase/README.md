@@ -14,10 +14,9 @@ default Firebase backend.
   collection filters this code relies on).
 - A Firebase project (we still use Firebase **Phone OTP** for login and **FCM**
   for push delivery — only the data layer is self-hosted).
-- A Firebase Admin SDK service-account JSON (used by the push hook to mint FCM
-  HTTP v1 access tokens). Generate from the Firebase console:
-  *Project Settings → Service Accounts → Generate new private key*. Save as
-  `pocketbase/firebase-admin-key.json` — it is gitignored.
+- The Firebase project's FCM access token (see *FCM access token rotation*
+  below — PB hooks can't sign RS256, so tokens are minted out-of-band by
+  `gcloud auth print-access-token` and exported as `FCM_ACCESS_TOKEN`).
 
 ## One-time setup
 
@@ -44,10 +43,35 @@ rm pocketbase.zip
 # Set environment variables, then start
 export FIREBASE_PROJECT_ID="your-firebase-project-id"
 export FCM_PROJECT_ID="your-firebase-project-id"   # usually the same
-export FIREBASE_ADMIN_KEY_PATH="$(pwd)/firebase-admin-key.json"
+
+# FCM access token — see "FCM access token rotation" below for why this
+# isn't read from the service-account JSON directly.
+export FCM_ACCESS_TOKEN="$(gcloud auth print-access-token)"
 
 ./pocketbase serve --http=0.0.0.0:8090
 ```
+
+### FCM access token rotation
+
+The push hook (`push_on_message.pb.js`) posts to FCM HTTP v1, which requires
+an OAuth2 access token. The standard way to mint one is signing a JWT with
+the service-account private key (RS256), but **PocketBase v0.22's Goja
+runtime only ships HMAC JWT signing** — there is no RSA signer, no Node
+modules, and no shell-out. Mint tokens out-of-band instead:
+
+```bash
+# One-shot
+export FCM_ACCESS_TOKEN="$(gcloud auth print-access-token)"
+
+# Or refresh on a 50-minute cron (token TTL is 1 h)
+*/50 * * * * pgrep pocketbase >/dev/null && \
+    systemctl --user set-environment FCM_ACCESS_TOKEN=$(gcloud auth print-access-token)
+```
+
+If `FCM_ACCESS_TOKEN` is unset or expired, the hook **logs and skips the
+push** — it does not 500 the message-create request, so chat messages still
+land for live SSE subscribers. Automating refresh inside PocketBase
+(sidecar / Go plugin) is tracked in `TECH_DEBT.md`.
 
 `--http=0.0.0.0:8090` makes the server reachable from your phone over LAN. If
 you only need the emulator, `127.0.0.1:8090` is fine.
