@@ -92,6 +92,41 @@ For a physical device on the same Wi-Fi, find your dev PC's LAN IP
 You can also set `pocketbaseUrl=http://192.168.x.x:8090` in `local.properties`
 to make the override sticky across builds.
 
+## Smoke test
+
+After the server is running and the app is installed via
+`./gradlew installPocketbaseDebug`, watch logcat in another terminal:
+
+```bash
+adb logcat -c && adb logcat | grep -E "PbAuth|PbPresence|PbRealtime|PbClient"
+```
+
+Then run through the v0 surface in order. Each row is something v0 actually
+implements; deferred surface (calls, polls, lists, groups, encryption,
+reactions, edits, typing, unread counters) surfaces a `NotImplementedError`
+snackbar in the UI and is tracked in `TECH_DEBT.md`.
+
+| # | Action | What you should see |
+|---|--------|---------------------|
+| 1 | Phone OTP sign-in | `PbAuth` line — POST to `/api/auth/firebase-bridge` returns a PB session token; row appears in PB admin → `users` |
+| 2 | App in foreground | `PbRealtime` connect — single SSE stream open; reconnects within seconds if you toggle airplane mode |
+| 3 | Open a chat with another phone-number you've added | `users` row for the peer; `chats` row of `type=INDIVIDUAL` if it's a fresh conversation |
+| 4 | Send a text | New `messages` row in PB admin; chat's `last_message_*` denormalized fields update |
+| 5 | Send a text from a second device → first device receives it live | Receiver's `PbRealtime` logs a `messages` event; bubble appears without a refresh |
+| 6 | Background the app for ~70 s, then re-foreground | `presence` row flips to `is_online=false` after the cron sweeps (every 30 s, 60 s threshold); flips back to `true` on resume |
+| 7 | With `FCM_ACCESS_TOKEN` set: kill the app, send a message from device 2 | Device 1 gets a system notification; PB server log shows the FCM POST returning 200 |
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---------|--------------|-----|
+| App can't reach the server | Emulator pointing at localhost instead of `10.0.2.2` | Use `installPocketbaseDebug` (default) or override `pocketbaseUrl` for a LAN host |
+| Sign-in returns 401 | `FIREBASE_PROJECT_ID` env var missing on the server | Export it and restart `pocketbase serve` |
+| Push works for a while then stops | `FCM_ACCESS_TOKEN` expired (1 h TTL) | Re-export from `gcloud auth print-access-token`; or set up the 50-min cron above |
+| `users` row created but app shows "complete profile" loop | `name` field is empty (intentional — the bridge creates the row, profile-setup populates `name`) | Complete the profile-setup screen; subsequent logins skip it |
+| Online indicator stuck on a peer | PC hibernated mid-test (stale snapshot) | Reconnect and wait for the next 30 s cron tick |
+| Build fails in `mergeFirebaseReleaseNativeLibs` with `Input/output error` | Corrupted `.so` in the Gradle transform cache | `find ~/.gradle/caches -name '*.so' -exec cat {} >/dev/null \;` to find it; remove the parent transform dir; retry |
+
 ## Directory layout
 
 ```
@@ -106,6 +141,3 @@ pocketbase/
     │                               # posts to FCM HTTP v1
     └── presence_sweeper.pb.js      # cron — marks stale heartbeats offline
 ```
-
-The hooks shipped here are **stubs** in step 1. Real implementations land in
-steps 5 (auth bridge), 6 (presence sweeper), and 7 (push).
