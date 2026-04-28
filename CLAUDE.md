@@ -7,11 +7,17 @@ FireStream Chat is an Android messaging app built with Kotlin, Jetpack Compose, 
 ## Build & Run
 
 ```bash
-# Build debug APK
+# Build debug APK (defaults to firebase flavor)
 ./gradlew assembleDebug
 
-# Run unit tests
+# Per-flavor builds — firebase is default; pocketbase is the self-host variant
+./gradlew assembleFirebaseDebug
+./gradlew assemblePocketbaseDebug
+
+# Run unit tests (per-flavor; the bare `test` task covers all flavors)
 ./gradlew test
+./gradlew :app:testFirebaseDebugUnitTest
+./gradlew :app:testPocketbaseDebugUnitTest
 
 # Run a specific test class
 ./gradlew test --tests "com.firestream.chat.domain.usecase.chat.ArchiveChatUseCaseTest"
@@ -19,8 +25,11 @@ FireStream Chat is an Android messaging app built with Kotlin, Jetpack Compose, 
 # Lint check
 ./gradlew lint
 
-# Deploy Firebase Cloud Functions
+# Deploy Firebase Cloud Functions (firebase flavor only)
 cd functions && npm install && firebase deploy --only functions
+
+# Run the PocketBase backend (pocketbase flavor only — see pocketbase/README.md)
+cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 ```
 
 - JVM target: 17

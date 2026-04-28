@@ -4,6 +4,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-04-28
+
+### Added
+- **PocketBase backend variant (walking skeleton).** A new `pocketbase` Gradle product flavor swaps Firestore + RTDB for a self-hostable PocketBase server. v0 covers login (Firebase Phone OTP exchanged for a PB session via the `firebase_bridge.pb.js` hook), 1:1 text messaging, presence (heartbeat + cron sweeper), and FCM push notifications. SSE realtime auto-pauses on backgrounding via a `ProcessLifecycleOwner`-bound hook so idle phones don't pin a connection. Calls, polls, lists, group permissions, and Signal encryption are out of scope for v0 and surface `NotImplementedError` at the source boundary — tracked in `TECH_DEBT.md`. The default `firebase` flavor is unchanged. (`b95bd07`, `1e5f3bf`, `0d1b019`)
+
 ## [1.3.0] — 2026-04-26
 
 ### Added

@@ -87,6 +87,70 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+## PocketBase v0 walking-skeleton — follow-ups
+
+The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `.claude/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
+
+### PocketBase push: automate FCM access-token refresh
+
+**The smell.** `pocketbase/pb_hooks/push_on_message.pb.js` reads `FCM_ACCESS_TOKEN` from the environment and skips push if it's missing or expired. The standard FCM HTTP v1 OAuth2 JWT-bearer flow needs RS256 to sign the assertion, but PocketBase v0.22's Goja `$security.createJWT` only supports HS256/384/512 — there's no RSA signer, no Node modules, and no shell-out. Operator currently rotates manually (`gcloud auth print-access-token`, 1 h TTL).
+
+**Why we haven't fixed it.** Real fixes mean a sidecar process (Node.js with `google-auth`, ~30 LOC) or a Go plugin (recompiles PocketBase). Both are valuable but expand the deployment surface beyond a single binary, which is part of what made PocketBase attractive in the first place. For the walking skeleton the env-var pattern is honest and unblocked enough.
+
+**When to revisit.** When the PB variant ships to anyone whose ops aren't comfortable with a 50-minute `cron` rotating an env var, or when push reliability becomes a release-blocker.
+
+---
+
+### PocketBase: re-enable Signal encryption (`BuildConfig.SUPPORTS_SIGNAL = false`)
+
+**The smell.** The pocketbase flavor's `MessageRepositoryImpl` always sends plaintext (`sendPlainMessage`) — `BuildConfig.SUPPORTS_SIGNAL` is gated false in the flavor source set so the Signal pre-key publish/fetch paths never execute. Receive-side decryption is reachable but never feeds non-null `ciphertext` (PB schema has no `ciphertext`/`signalType` columns).
+
+**Why we haven't fixed it.** Adding Signal needs three coordinated changes: (1) two new columns on `messages` (`ciphertext`, `signal_type`) plus a migration; (2) new collections for pre-keys + signed pre-keys + sessions, mirroring the Firestore key paths; (3) PB-side ACL rules that match Firebase's "only the recipient can read their pre-keys" guarantee. None of those are mechanical translations — listRule expressions need careful audit.
+
+**When to revisit.** Before anyone uses the PB variant for non-test traffic. Encryption is the headline product feature; shipping a self-host backend without it would diverge the variants in a way no user wants.
+
+---
+
+### PocketBase: deferred `MessageSource` methods throw `NotImplementedError`
+
+**The smell.** ~18 methods on `PocketBaseMessageSource` throw `NotImplementedError` in v0: reactions (`addReaction`, `removeReaction`), polls (`updatePollVote`, `closePoll`), lists (`sendListMessage`, `applyListDiff`), edits/deletes (`editMessage`, `deleteMessage`), forwards, pin/unpin, ephemeral receipts (`markRead`, `markDelivered` — no-op for v0 since the schema has a single `status` field), and the Signal-only `sendMessage(ciphertext, ...)`. The corresponding Firebase impls cover all of these.
+
+**Why we haven't fixed it.** Each requires a schema change to `messages` (or, for polls, a new `polls` collection with realtime ACLs) plus a JS hook to enforce sender-only writes on edit/delete. The walking skeleton's success criterion was 1:1 text + presence + push — bolting on the rest before someone needs the variant for real chat is overbuilding.
+
+**When to revisit.** Per-feature, as the variant gets used. The `NotImplementedError`s are a forcing function: the UI surfaces them as snackbars, so anyone hitting one will know exactly which method to implement.
+
+---
+
+### PocketBase: deferred `ChatSource` group/typing/unread surface
+
+**The smell.** Group operations (`createGroup`, `addMember`, `removeMember`, `updateAdmins`, `joinViaInvite`), typing indicators (`setTyping`, `observeTyping`), and unread counters (`incrementUnread`, `markChatRead`) on `PocketBaseChatSource` are no-ops or throw. `addToArrayField` / `removeFromArrayField` only handle the `participants` array and throw `NotImplementedError` for `admins` / `pending_members` — those columns don't exist in v0.
+
+**Why we haven't fixed it.** Same shape as the message-source gaps: needs schema columns + JS hooks + listRule audit. Typing indicators specifically need ephemeral signaling that doesn't exist in PB collections — would likely use a separate `typing` collection with a 5 s TTL cron sweeper, or piggyback on PB's realtime broadcast topics if those land in v0.23.
+
+**When to revisit.** When group chat becomes a requirement for a PB-flavor user. 1:1 unread counts can probably be added in isolation first (single column on `chats`).
+
+---
+
+### PocketBase: array-field RMW could lose updates without optimistic concurrency
+
+**The smell.** `PocketBaseChatSource.addToArrayField` / `removeFromArrayField` do read-modify-write on the JSON `participants` column under a per-chat `Mutex`. The Mutex serialises writes from a single client, but two clients writing concurrently still race — last-write-wins on the underlying PB `PATCH`.
+
+**Why we haven't fixed it.** PocketBase has no native `arrayUnion` / `arrayRemove` and no optimistic-concurrency token (`updated` is a timestamp, but PB doesn't accept it as a write-condition). Real fixes need either (a) a custom JS hook exposing `POST /api/chats/:id/participants/add` with server-side merge, or (b) moving participants into a `chat_members` join collection and dropping the array entirely.
+
+**When to revisit.** When concurrent group-membership edits happen in practice (e.g., two admins adding members at the same time). For the walking skeleton's 1:1 use case, races are theoretical.
+
+---
+
+### PocketBase: presence sweeper scans the whole `presence` collection every 30 s
+
+**The smell.** `pocketbase/pb_hooks/presence_sweeper.pb.js` calls `findRecordsByFilter("presence", "is_online = true && last_heartbeat < {:cutoff}", ...)` every 30 s with a 100-row page. For a few hundred users this is fine — for tens of thousands it'd scan the table on each tick. PocketBase auto-indexes single-column lookups but compound conditions like this one fall back to a sequential scan unless you add a manual `(is_online, last_heartbeat)` index.
+
+**Why we haven't fixed it.** Walking-skeleton scale doesn't warrant index tuning. The upper limit is also bounded by the `100` page size — a saturating sweep would just defer the rest by one tick (30 s), still well inside the 60 s freshness window.
+
+**When to revisit.** When the PB instance has > ~5 k users actively online or when sweep latency exceeds the 30 s tick. Add `CREATE INDEX presence_sweep_idx ON presence(is_online, last_heartbeat)` via `pb_migrations/`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.
