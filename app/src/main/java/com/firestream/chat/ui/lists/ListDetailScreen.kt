@@ -60,7 +60,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -87,7 +86,6 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 import com.firestream.chat.domain.model.GenericListStyle
 import com.firestream.chat.domain.model.ListItem
 import com.firestream.chat.domain.model.ListType
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,10 +104,9 @@ fun ListDetailScreen(
     var isEditingTitle by remember { mutableStateOf(false) }
     var titleEditValue by remember { mutableStateOf(TextFieldValue("")) }
     var titleHadFocus by remember(isEditingTitle) { mutableStateOf(false) }
-    var pendingRemoval by remember { mutableStateOf<ListItem?>(null) }
+    val pendingRemoval by viewModel.pendingRemoval.collectAsState()
     var editingItemId by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
-    val coroutineScope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val addItemFocusRequester = remember { FocusRequester() }
     val titleFocusRequester = remember { FocusRequester() }
@@ -141,6 +138,21 @@ fun ListDetailScreen(
         if (autoFocus && uiState.listData != null) {
             addItemFocusRequester.requestFocus()
             keyboardController?.show()
+        }
+    }
+
+    // Show the Undo snackbar whenever a pending removal is set. The ViewModel
+    // owns the timer + commit on applicationScope, so dismissal here only
+    // controls the visual — the delete proceeds (or was undone) regardless.
+    LaunchedEffect(pendingRemoval?.item?.id) {
+        val pending = pendingRemoval ?: return@LaunchedEffect
+        val result = snackbarHostState.showSnackbar(
+            message = "\"${pending.item.text}\" removed",
+            actionLabel = "Undo",
+            duration = SnackbarDuration.Short
+        )
+        if (result == SnackbarResult.ActionPerformed) {
+            viewModel.undoRemoveItem()
         }
     }
 
@@ -309,7 +321,7 @@ fun ListDetailScreen(
                 val listData = uiState.listData!!
                 var localItems by remember { mutableStateOf(uiState.displayItems) }
                 var draggedItemId by remember { mutableStateOf<String?>(null) }
-                val displayItems = localItems.filter { it.id != pendingRemoval?.id }
+                val displayItems = localItems.filter { it.id != pendingRemoval?.item?.id }
 
                 var awaitingReorderSync by remember { mutableStateOf(false) }
 
@@ -378,20 +390,7 @@ fun ListDetailScreen(
                                 val dismissState = rememberSwipeToDismissBoxState(
                                     confirmValueChange = { value ->
                                         if (value == SwipeToDismissBoxValue.EndToStart) {
-                                            pendingRemoval = item
-                                            coroutineScope.launch {
-                                                val result = snackbarHostState.showSnackbar(
-                                                    message = "\"${item.text}\" removed",
-                                                    actionLabel = "Undo",
-                                                    duration = SnackbarDuration.Short
-                                                )
-                                                if (result == SnackbarResult.ActionPerformed) {
-                                                    pendingRemoval = null
-                                                } else {
-                                                    pendingRemoval?.let { viewModel.removeItem(it.id) }
-                                                    pendingRemoval = null
-                                                }
-                                            }
+                                            viewModel.requestRemoveItem(item.id)
                                         }
                                         false // Never persist EndToStart — item hidden via pendingRemoval filter
                                     }

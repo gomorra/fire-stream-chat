@@ -151,6 +151,16 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### List-level deletion writes still run on `viewModelScope`
+
+**The smell.** `ListDetailViewModel.deleteList()` (`app/src/main/java/com/firestream/chat/ui/lists/ListDetailViewModel.kt:362`) and `ListsViewModel.deleteList()` both perform `listRepository.deleteList(...)` plus the shared-user `sendListUpdateToChatsUseCase` notification on `viewModelScope`. If the user triggers a list delete and immediately backs out of the screen (no undo snackbar in this path — the delete is final), the write can be cancelled mid-flight: the local Room delete may land but the Firestore call and shared-user notification can be lost.
+
+**Why we haven't fixed it.** No user-reported regression yet — the list-item swipe-to-delete bug (1.4.1) was the visible case because the 4-second snackbar window made the race practically reachable. List-level delete is a single tap with no enforced delay, so the race is much narrower.
+
+**When to revisit.** First user report of "I deleted a list and it came back," or as a small followup applying the same `applicationScope` pattern that 1.4.1 introduced for `requestRemoveItem`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

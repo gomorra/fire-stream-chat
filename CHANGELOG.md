@@ -4,6 +4,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+## [1.4.1] — 2026-04-29
+
+### Fixed
+- **List item deletions no longer get dropped when leaving the list mid-snackbar.** Swiping a list item shows an Undo snackbar; previously, if the user navigated away from `ListDetailScreen` before the snackbar timed out, the optimistic UI hide had already happened but the Firestore commit was launched on `viewModelScope` and was cancelled along with the screen — so on the next sync the deleted item silently reappeared. The pending-delete state machine (timer + commit + undo) now lives on the ViewModel and runs on `@ApplicationScope`, mirroring the same pattern already used for the throttled chat-update notification, so the delete commits regardless of whether the user is still on the screen.
+
 ## [1.4.0] — 2026-04-28
 
 ### Added

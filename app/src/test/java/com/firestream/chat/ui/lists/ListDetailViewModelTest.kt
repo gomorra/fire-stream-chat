@@ -19,6 +19,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -242,7 +243,7 @@ class ListDetailViewModelTest {
     }
 
     @Test
-    fun `removeItem optimistically drops before repo resolves`() = runTest {
+    fun `requestRemoveItem optimistically drops before repo resolves`() = runTest {
         val initial = ListData(
             id = "list1",
             items = listOf(
@@ -258,7 +259,7 @@ class ListDetailViewModelTest {
         val viewModel = buildViewModel()
         runCurrent()
 
-        viewModel.removeItem("i1")
+        viewModel.requestRemoveItem("i1")
         runCurrent()
 
         val state = viewModel.uiState.value.listData!!
@@ -266,6 +267,72 @@ class ListDetailViewModelTest {
         assertEquals("i2", state.items.first().id)
         assertEquals(1, state.itemCount)
         assertEquals(0, state.checkedCount)
+        // Pending state is exposed so the screen can show the Undo snackbar.
+        assertEquals("i1", viewModel.pendingRemoval.value?.item?.id)
+    }
+
+    // Regression: leaving ListsScreen during the undo snackbar used to drop the
+    // deletion because it was launched on viewModelScope. The timer + commit now
+    // run on applicationScope so they survive screen navigation.
+    @Test
+    fun `requestRemoveItem commits delete after the undo window elapses`() = runTest {
+        val initial = ListData(
+            id = "list1",
+            items = listOf(ListItem(id = "i1", text = "Milk")),
+            itemCount = 1,
+        )
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+        coEvery { listRepository.removeItem("list1", "i1") } returns Result.success(Unit)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.requestRemoveItem("i1")
+        // Before the window elapses, no commit yet.
+        runCurrent()
+        coVerify(exactly = 0) { listRepository.removeItem(any(), any()) }
+
+        // Advance past the undo window — the timer + commit run on applicationScope,
+        // which shares testDispatcher, so this also advances the pending job.
+        advanceTimeBy(5_000L)
+        runCurrent()
+
+        coVerify(exactly = 1) { listRepository.removeItem("list1", "i1") }
+        assertEquals(null, viewModel.pendingRemoval.value)
+    }
+
+    @Test
+    fun `undoRemoveItem cancels the timer and restores the list`() = runTest {
+        val initial = ListData(
+            id = "list1",
+            items = listOf(
+                ListItem(id = "i1", text = "Milk"),
+                ListItem(id = "i2", text = "Eggs"),
+            ),
+            itemCount = 2,
+        )
+        every { listRepository.observeList("list1") } returns flowOf(initial)
+
+        val viewModel = buildViewModel()
+        runCurrent()
+
+        viewModel.requestRemoveItem("i1")
+        runCurrent()
+        // Optimistic hide is in effect.
+        assertEquals(1, viewModel.uiState.value.listData?.items?.size)
+
+        viewModel.undoRemoveItem()
+        runCurrent()
+
+        // Advancing past the window must NOT trigger a commit — undo cancelled it.
+        advanceTimeBy(5_000L)
+        runCurrent()
+
+        coVerify(exactly = 0) { listRepository.removeItem(any(), any()) }
+        val restored = viewModel.uiState.value.listData!!
+        assertEquals(2, restored.items.size)
+        assertEquals(listOf("i1", "i2"), restored.items.map { it.id })
+        assertEquals(null, viewModel.pendingRemoval.value)
     }
 
     @Test

@@ -32,6 +32,9 @@ import java.util.UUID
 import javax.inject.Inject
 
 private const val COOLDOWN_MS = 10_000L
+private const val UNDO_WINDOW_MS = 4_000L
+
+data class PendingRemoval(val item: ListItem, val previousList: ListData)
 
 data class ListDetailUiState(
     val listData: ListData? = null,
@@ -70,6 +73,14 @@ class ListDetailViewModel @Inject constructor(
     private var cooldownJob: Job? = null
     // Prevents the Firestore observer from triggering navigation while we send the delete notification
     private var isDeletingList = false
+
+    // Pending swipe-to-delete: optimistic UI hide is applied immediately, but
+    // the Firestore commit is deferred so the user can Undo. The timer + commit
+    // run on applicationScope so they survive screen navigation — otherwise the
+    // delete is silently lost when the user leaves before the snackbar expires.
+    private val _pendingRemoval = MutableStateFlow<PendingRemoval?>(null)
+    val pendingRemoval: StateFlow<PendingRemoval?> = _pendingRemoval.asStateFlow()
+    private var pendingRemovalJob: Job? = null
 
     init {
         _uiState.value = _uiState.value.copy(currentUserId = authRepository.currentUserId ?: "")
@@ -182,7 +193,7 @@ class ListDetailViewModel @Inject constructor(
         }
     }
 
-    fun removeItem(itemId: String) {
+    fun requestRemoveItem(itemId: String) {
         val currentList = _uiState.value.listData ?: return
         val item = currentList.items.find { it.id == itemId } ?: return
         val remaining = currentList.items.filter { it.id != itemId }
@@ -193,13 +204,28 @@ class ListDetailViewModel @Inject constructor(
                 checkedCount = (currentList.checkedCount - if (item.isChecked) 1 else 0).coerceAtLeast(0)
             )
         )
-        viewModelScope.launch {
-            listRepository.removeItem(listId, itemId)
-                .onSuccess { sendListUpdateThrottled(ListDiff(removed = listOf(item.text))) }
-                .onFailure { e ->
-                    _uiState.value = _uiState.value.copy(listData = currentList, error = AppError.from(e))
-                }
+        _pendingRemoval.value = PendingRemoval(item, currentList)
+        pendingRemovalJob?.cancel()
+        pendingRemovalJob = applicationScope.launch {
+            delay(UNDO_WINDOW_MS)
+            commitRemoval(item, currentList)
         }
+    }
+
+    fun undoRemoveItem() {
+        pendingRemovalJob?.cancel()
+        val pending = _pendingRemoval.value ?: return
+        _uiState.value = _uiState.value.copy(listData = pending.previousList)
+        _pendingRemoval.value = null
+    }
+
+    private suspend fun commitRemoval(item: ListItem, previousList: ListData) {
+        listRepository.removeItem(listId, item.id)
+            .onSuccess { sendListUpdateThrottled(ListDiff(removed = listOf(item.text))) }
+            .onFailure { e ->
+                _uiState.value = _uiState.value.copy(listData = previousList, error = AppError.from(e))
+            }
+        _pendingRemoval.value = null
     }
 
     fun clearCheckedItems() {
