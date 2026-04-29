@@ -392,10 +392,13 @@ com.firestream.chat/
 │   │   ├── MediaFileManager.kt  # Local media storage & gallery export
 │   │   ├── ProfileImageManager.kt # Avatar download/cache management
 │   │   ├── SpeechRecognizerManager.kt # System SpeechRecognizer wrapper for composer dictation
+│   │   ├── ApkDownloader.kt     # Streaming APK download + SHA-256 verification (in-app updater)
+│   │   ├── ApkInstaller.kt      # FileProvider + ACTION_VIEW system-installer hand-off
 │   │   ├── ResultExt.kt         # Result extension helpers
 │   │   └── CurrentActivityHolder.kt
 │   ├── worker/
-│   │   └── MediaBackfillWorker.kt # WorkManager job to backfill local media
+│   │   ├── MediaBackfillWorker.kt # WorkManager job to backfill local media
+│   │   └── UpdateCheckWorker.kt   # 24h periodic check; notifies on new release
 │   ├── remote/
 │   │   ├── fcm/                 # FCMService, ActiveChatTracker
 │   │   ├── firebase/            # FirebaseAuthSource, FirestoreChatSource,
@@ -404,12 +407,13 @@ com.firestream.chat/
 │   │   │                        # FirestoreUserSource, FirebaseKeySource,
 │   │   │                        # FirebaseStorageSource, RealtimePresenceSource,
 │   │   │                        # LinkPreviewSource
+│   │   ├── update/              # UpdateManifestSource — fetches latest-{flavor}.json
 │   │   └── WebPagePreviewCapture.kt # Off-screen WebView screenshot fallback
 │   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
 │   │                            # ChatRepositoryImpl, ContactRepositoryImpl,
 │   │                            # ListRepositoryImpl, MessageRepositoryImpl,
 │   │                            # PollRepositoryImpl, PollMapper,
-│   │                            # UserRepositoryImpl
+│   │                            # UserRepositoryImpl, AppUpdateRepositoryImpl
 │   └── share/
 │       ├── SharedContentHolder.kt
 │       └── ShareContentResolver.kt
@@ -420,9 +424,11 @@ com.firestream.chat/
 │   │                            # IceCandidateData, GroupPermissions, GroupRole,
 │   │                            # ListData, ListItem, ListDiff, ListType, GenericListStyle,
 │   │                            # ListHistoryEntry, HistoryAction, MediaAttachment,
-│   │                            # SharedContent, MessageStatus, MessageType, ChatType
+│   │                            # SharedContent, MessageStatus, MessageType, ChatType,
+│   │                            # AppUpdate, UpdateCheckResult
 │   ├── repository/              # AuthRepository, CallRepository, ChatRepository, ContactRepository,
-│   │                            # ListRepository, MessageRepository, PollRepository, UserRepository
+│   │                            # ListRepository, MessageRepository, PollRepository, UserRepository,
+│   │                            # AppUpdateRepository
 │   ├── usecase/
 │   │   ├── chat/                # CheckGroupPermissionUseCase
 │   │   ├── list/                # SendListUpdateToChatsUseCase

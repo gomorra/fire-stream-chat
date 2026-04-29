@@ -13,4 +13,5 @@ One-line pointers to every doc in this folder. Start here when you're not sure w
 | [SCHEMA-ROOM.md](SCHEMA-ROOM.md) | Local Room schema — entities, columns, both `AppDatabase` and `SignalDatabase`. |
 | [SCHEMA-FIRESTORE.md](SCHEMA-FIRESTORE.md) | Firestore collections and Realtime Database paths — the authoritative remote store. |
 | [CLOUD-FUNCTIONS.md](CLOUD-FUNCTIONS.md) | The three Firebase Cloud Functions in `functions/index.js` and their triggers. |
+| [RELEASING.md](RELEASING.md) | One-time keystore setup, GitHub Secrets, and the tag-and-publish flow that drives the in-app updater. |
 | [test-plans/](test-plans/) | Manual / sprint test plans, dated by sprint. |
