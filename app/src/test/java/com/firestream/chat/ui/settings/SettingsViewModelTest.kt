@@ -6,8 +6,12 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.AppUpdate
+import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.DownloadProgress
 import com.firestream.chat.domain.repository.UserRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -40,6 +44,7 @@ class SettingsViewModelTest {
     private lateinit var authRepository: AuthRepository
     private lateinit var userRepository: UserRepository
     private lateinit var preferencesDataStore: PreferencesDataStore
+    private lateinit var appUpdateRepository: AppUpdateRepository
     private lateinit var appContext: Context
     private lateinit var viewModel: SettingsViewModel
 
@@ -56,6 +61,7 @@ class SettingsViewModelTest {
         authRepository = mockk()
         userRepository = mockk()
         preferencesDataStore = mockk()
+        appUpdateRepository = mockk(relaxed = true)
         appContext = mockk(relaxed = true)
 
         stubDefaultPreferences()
@@ -67,6 +73,7 @@ class SettingsViewModelTest {
             authRepository = authRepository,
             userRepository = userRepository,
             preferencesDataStore = preferencesDataStore,
+            appUpdateRepository = appUpdateRepository,
             appContext = appContext
         )
     }
@@ -124,7 +131,7 @@ class SettingsViewModelTest {
     @Test
     fun `init with no current user id skips user load`() = runTest {
         every { authRepository.currentUserId } returns null
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -134,7 +141,7 @@ class SettingsViewModelTest {
     @Test
     fun `init sets error state when user flow throws`() = runTest {
         every { userRepository.observeUser("user1") } returns flow { throw RuntimeException("network error") }
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -150,7 +157,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(false)
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -386,7 +393,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted dictation language`() = runTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -501,5 +508,88 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { authRepository.signOut() }
+    }
+
+    // ── App update ────────────────────────────────────────────────────────────
+
+    private fun manifest(versionCode: Int = 999, versionName: String = "9.9.9") = AppUpdate(
+        versionCode = versionCode,
+        versionName = versionName,
+        apkUrl = "https://example.com/x.apk",
+        sha256 = "abc",
+        minSupportedVersionCode = 1,
+        releaseNotes = "Notes",
+        publishedAt = "",
+        mandatory = false
+    )
+
+    @Test
+    fun `checkForUpdate sets Available when repo returns newer version`() = runTest {
+        val update = manifest()
+        coEvery { appUpdateRepository.checkForUpdate() } returns Result.success(UpdateCheckResult.Available(update))
+        advanceUntilIdle()
+
+        viewModel.checkForUpdate()
+        advanceUntilIdle()
+
+        assertEquals(UpdateUiState.Available(update), viewModel.uiState.value.update)
+    }
+
+    @Test
+    fun `checkForUpdate sets UpToDate when repo says no update`() = runTest {
+        coEvery { appUpdateRepository.checkForUpdate() } returns Result.success(UpdateCheckResult.UpToDate)
+        advanceUntilIdle()
+
+        viewModel.checkForUpdate()
+        advanceUntilIdle()
+
+        assertEquals(UpdateUiState.UpToDate, viewModel.uiState.value.update)
+    }
+
+    @Test
+    fun `checkForUpdate sets Failed when repo returns failure`() = runTest {
+        coEvery { appUpdateRepository.checkForUpdate() } returns Result.failure(RuntimeException("boom"))
+        advanceUntilIdle()
+
+        viewModel.checkForUpdate()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.update
+        assertTrue(state is UpdateUiState.Failed)
+    }
+
+    @Test
+    fun `downloadAndInstall progresses through Downloading then triggers install`() = runTest {
+        val update = manifest()
+        val tmpFile = java.io.File.createTempFile("test", ".apk")
+        coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
+            DownloadProgress.InProgress(50, 100),
+            DownloadProgress.Done(tmpFile)
+        )
+        coEvery { appUpdateRepository.installUpdate(tmpFile) } returns Result.success(Unit)
+        advanceUntilIdle()
+
+        viewModel.downloadAndInstall(update)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { appUpdateRepository.installUpdate(tmpFile) }
+        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+        tmpFile.delete()
+    }
+
+    @Test
+    fun `downloadAndInstall sets Failed when downloader emits Failed`() = runTest {
+        val update = manifest()
+        coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
+            DownloadProgress.Failed("checksum mismatch")
+        )
+        advanceUntilIdle()
+
+        viewModel.downloadAndInstall(update)
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.update
+        assertTrue(state is UpdateUiState.Failed)
+        assertEquals("checksum mismatch", (state as UpdateUiState.Failed).message)
     }
 }

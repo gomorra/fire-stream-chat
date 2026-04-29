@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -410,6 +411,20 @@ fun SettingsScreen(
             )
 
             SettingsItem(
+                icon = Icons.Default.SystemUpdate,
+                title = "Check for updates",
+                subtitle = updateRowSubtitle(uiState.update),
+                onClick = {
+                    when (val s = uiState.update) {
+                        is UpdateUiState.Available -> viewModel.downloadAndInstall(s.update)
+                        UpdateUiState.Checking,
+                        is UpdateUiState.Downloading -> Unit
+                        else -> viewModel.checkForUpdate()
+                    }
+                }
+            )
+
+            SettingsItem(
                 icon = Icons.Default.Description,
                 title = "Terms of Service",
                 subtitle = "Read our terms of service",
@@ -563,6 +578,74 @@ fun SettingsScreen(
             }
         )
     }
+
+    when (val s = uiState.update) {
+        is UpdateUiState.Available -> AlertDialog(
+            onDismissRequest = { viewModel.dismissUpdateState() },
+            title = { Text("Update available") },
+            text = {
+                Column {
+                    Text("Version ${s.update.versionName} is ready to install.")
+                    if (s.update.releaseNotes.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(s.update.releaseNotes, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.downloadAndInstall(s.update) }) {
+                    Text("Update now")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissUpdateState() }) {
+                    Text("Later")
+                }
+            }
+        )
+        is UpdateUiState.Downloading -> AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Downloading update") },
+            text = {
+                Column {
+                    val progress = if (s.totalBytes > 0) {
+                        s.bytesDownloaded.toFloat() / s.totalBytes.toFloat()
+                    } else 0f
+                    LinearProgressIndicator(
+                        progress = { progress.coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "${s.bytesDownloaded / 1024 / 1024} MB" +
+                            if (s.totalBytes > 0) " / ${s.totalBytes / 1024 / 1024} MB" else "",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+        is UpdateUiState.Failed -> AlertDialog(
+            onDismissRequest = { viewModel.dismissUpdateState() },
+            title = { Text("Update failed") },
+            text = { Text(s.message) },
+            confirmButton = {
+                TextButton(onClick = { viewModel.dismissUpdateState() }) {
+                    Text("OK")
+                }
+            }
+        )
+        else -> Unit
+    }
+}
+
+private fun updateRowSubtitle(state: UpdateUiState): String = when (state) {
+    UpdateUiState.Idle -> "Tap to check for a newer version"
+    UpdateUiState.Checking -> "Checking…"
+    UpdateUiState.UpToDate -> "You're on the latest version"
+    is UpdateUiState.Available -> "Version ${state.update.versionName} ready to install"
+    is UpdateUiState.Downloading -> "Downloading…"
+    is UpdateUiState.Failed -> state.message
 }
 
 @Composable

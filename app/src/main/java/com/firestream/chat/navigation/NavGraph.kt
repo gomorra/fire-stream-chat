@@ -119,6 +119,7 @@ fun FireStreamNavGraph(
     initialChatId: String? = null,
     initialSenderId: String? = null,
     isShareIntent: Boolean = false,
+    openSettings: Boolean = false,
     preferencesDataStore: PreferencesDataStore? = null
 ) {
     val navController = rememberNavController()
@@ -138,6 +139,7 @@ fun FireStreamNavGraph(
     // intent extras), not from the last-open-chat restore path. Consumed once and reset.
     val pendingFromNotification = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId != null) }
     val pendingListId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    val pendingOpenSettings = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(openSettings) }
 
     // Restore last open chat when no deep link or share intent is pending. If no
     // chat was persisted, fall back to restoring the last open list detail — chat
@@ -235,10 +237,13 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value) {
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value, pendingOpenSettings.value) {
                 if (pendingShare.value) {
                     pendingShare.value = false
                     navController.navigate(Routes.SHARE_PICKER)
+                } else if (pendingOpenSettings.value) {
+                    pendingOpenSettings.value = false
+                    navController.navigate(Routes.SETTINGS)
                 } else {
                     val chatId = pendingChatId.value
                     val senderId = pendingSenderId.value

@@ -4,6 +4,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-04-29
+
+### Added
+- **In-app updater + automated APK release pipeline.** Releases are now produced by a tag-driven GitHub Actions workflow (`.github/workflows/release-apk.yml`): pushing a `v*` tag builds signed `firebase` and `pocketbase` release APKs, computes SHA-256, renders flavor-specific manifests (`latest-firebase.json`, `latest-pocketbase.json`), and publishes everything as GitHub Release assets at the predictable `.../releases/latest/download/<file>` alias URL. The app fetches that manifest, compares `versionCode`, downloads with checksum verification into the cache dir, and hands the APK to the system installer via FileProvider + `ACTION_VIEW`. A 24-hour `UpdateCheckWorker` (`UNMETERED` constraint) posts a low-priority "App updates" notification when a newer version is found; tapping deep-links to Settings → Check for updates, where the user sees release notes and a download progress bar. Settings → Help also gains a manual "Check for updates" row above "App Version". Release builds now read keystore credentials from CI secrets / `local.properties` and fall back to the debug keystore when absent — see `docs/RELEASING.md` for the one-time setup. Adds `REQUEST_INSTALL_PACKAGES` to the manifest.
+
 ## [1.4.0] — 2026-04-28
 
 ### Added

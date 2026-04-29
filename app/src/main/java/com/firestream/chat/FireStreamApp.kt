@@ -4,8 +4,13 @@ import android.app.Application
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
+import androidx.work.Constraints
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.firestream.chat.data.util.CurrentActivityHolder
+import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.FlavorBootstrap
 import dagger.hilt.android.HiltAndroidApp
 import java.io.File
@@ -43,6 +48,23 @@ class FireStreamApp : Application(), Configuration.Provider {
         flavorBootstraps.forEach { it.start() }
         currentActivityHolder.register(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
+        scheduleUpdateCheck()
+    }
+
+    private fun scheduleUpdateCheck() {
+        val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(24, TimeUnit.HOURS)
+            .setInitialDelay(30, TimeUnit.MINUTES)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.UNMETERED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            UpdateCheckWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
     }
 
     private fun cleanOldSharedMedia() {

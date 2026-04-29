@@ -2,6 +2,7 @@ package com.firestream.chat.di
 
 import android.content.Context
 import android.net.ConnectivityManager
+import com.firestream.chat.data.repository.AppUpdateRepositoryImpl
 import com.firestream.chat.data.repository.AuthRepositoryImpl
 import com.firestream.chat.data.repository.CallRepositoryImpl
 import com.firestream.chat.data.repository.ChatRepositoryImpl
@@ -10,6 +11,7 @@ import com.firestream.chat.data.repository.ListRepositoryImpl
 import com.firestream.chat.data.repository.MessageRepositoryImpl
 import com.firestream.chat.data.repository.PollRepositoryImpl
 import com.firestream.chat.data.repository.UserRepositoryImpl
+import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.domain.repository.ChatRepository
@@ -63,6 +65,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindListRepository(impl: ListRepositoryImpl): ListRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindAppUpdateRepository(impl: AppUpdateRepositoryImpl): AppUpdateRepository
 }
 
 @Module
