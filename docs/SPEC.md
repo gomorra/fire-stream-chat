@@ -72,6 +72,14 @@ This document is the product-level feature list for **FireStream**, a real-time 
 - **Blocking Mechanism**: Block/unblock users to prevent communication.
 - **Share Intent**: External share intents (text or media) are routed through a `SharePickerScreen` so users can forward content into any chat.
 
+### Distribution & Updates
+
+- **Sideload distribution**: APKs are published to GitHub Releases by a tag-driven CI workflow (`.github/workflows/release-apk.yml`). Pushing a `v*` tag builds signed `firebase` and `pocketbase` APKs and attaches them, plus per-flavor manifests (`latest-firebase.json`, `latest-pocketbase.json`), to a GitHub Release. The Play Store is not part of the distribution path.
+- **In-app updater**: A 24-hour `UpdateCheckWorker` (unmetered network constraint) fetches the manifest at the GitHub "latest release" alias URL baked into `BuildConfig.UPDATE_MANIFEST_URL`. When the manifest's `versionCode` exceeds the installed one, a low-priority "App updates" notification is posted; tapping it deep-links to Settings → Check for updates. No nag dialogs on app start.
+- **Manual check**: Settings → Help also exposes a "Check for updates" row above "App Version" for on-demand checks. The dialog shows release notes and a download progress bar.
+- **Verified install**: Downloads land in `cacheDir/apk_updates/`, are SHA-256 verified against the manifest, and handed to the system installer via FileProvider + `ACTION_VIEW`. The app declares `REQUEST_INSTALL_PACKAGES`; users grant "Install unknown apps" once on first install.
+- **Release signing**: Production APKs are signed with a single CI keystore (passwords + base64 keystore stored in GitHub Secrets). Local `assembleRelease` falls back to the debug keystore when those env vars / `local.properties` keys are absent — see [RELEASING.md](RELEASING.md) for the one-time setup.
+
 ---
 
-**See also:** [ARCHITECTURE.md](ARCHITECTURE.md) for how these features are implemented, [ROADMAP.md](ROADMAP.md) for upcoming work.
+**See also:** [ARCHITECTURE.md](ARCHITECTURE.md) for how these features are implemented, [ROADMAP.md](ROADMAP.md) for upcoming work, [RELEASING.md](RELEASING.md) for the release pipeline.

@@ -355,7 +355,7 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - **Analytics** — privacy-respecting anonymous usage analytics (opt-in)
 - **App size optimization** — split APKs per ABI, asset optimization, R8 fine-tuning
 - **Modularization** — split the app into Gradle modules (`:core`, `:feature:chat`, `:feature:auth`, etc.) for build speed and team scalability
-- **CI/CD pipeline** — GitHub Actions for automated build, test, lint, and release
+- **CI/CD pipeline** — release path shipped (1.5.0): tag-driven `release-apk.yml` builds signed APKs for both flavors, publishes manifests + APKs to GitHub Releases, and the in-app updater consumes them. Still TODO: a per-PR `assembleDebug` / `test` / `lint` gate, and Firebase App Distribution for closed beta tracks.
 - **Widget** — home screen widget showing recent unread messages or quick-compose
 
 ### Accessibility & Inclusion

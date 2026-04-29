@@ -276,6 +276,10 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 
 `.github/workflows/changelog-check.yml` fails pushes and PRs that touch `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Apply the `no-changelog` label to bypass for exempt PRs.
 
+### Cutting a release
+
+Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. To ship a release: bump `versionName` in `app/build.gradle.kts`, rename `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
+
 ## Sensitive Files
 
 These are gitignored and must not be committed:
