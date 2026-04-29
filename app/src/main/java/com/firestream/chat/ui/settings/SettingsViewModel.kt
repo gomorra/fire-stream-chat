@@ -18,8 +18,12 @@ import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.AppUpdate
+import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
+import com.firestream.chat.domain.repository.DownloadProgress
 import com.firestream.chat.domain.repository.UserRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -27,9 +31,19 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
+
+sealed interface UpdateUiState {
+    data object Idle : UpdateUiState
+    data object Checking : UpdateUiState
+    data object UpToDate : UpdateUiState
+    data class Available(val update: AppUpdate) : UpdateUiState
+    data class Downloading(val bytesDownloaded: Long, val totalBytes: Long) : UpdateUiState
+    data class Failed(val message: String) : UpdateUiState
+}
 
 data class SettingsUiState(
     val currentUser: User? = null,
@@ -55,7 +69,9 @@ data class SettingsUiState(
     val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
     // Media backfill
     val mediaBackfillProgress: Pair<Int, Int>? = null,
-    val mediaBackfillRunning: Boolean = false
+    val mediaBackfillRunning: Boolean = false,
+    // App update
+    val update: UpdateUiState = UpdateUiState.Idle
 )
 
 private const val WORK_MEDIA_BACKFILL = "media_backfill"
@@ -65,6 +81,7 @@ class SettingsViewModel @Inject constructor(
     private val authRepository: AuthRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
+    private val appUpdateRepository: AppUpdateRepository,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
@@ -314,5 +331,59 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             authRepository.signOut()
         }
+    }
+
+    fun checkForUpdate() {
+        _uiState.value = _uiState.value.copy(update = UpdateUiState.Checking)
+        viewModelScope.launch {
+            appUpdateRepository.checkForUpdate()
+                .onSuccess { result ->
+                    _uiState.value = _uiState.value.copy(
+                        update = when (result) {
+                            UpdateCheckResult.UpToDate -> UpdateUiState.UpToDate
+                            is UpdateCheckResult.Available -> UpdateUiState.Available(result.update)
+                        }
+                    )
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        update = UpdateUiState.Failed(AppError.from(e).message)
+                    )
+                }
+        }
+    }
+
+    fun downloadAndInstall(update: AppUpdate) {
+        viewModelScope.launch {
+            appUpdateRepository.downloadUpdate(update).collect { progress ->
+                when (progress) {
+                    is DownloadProgress.InProgress -> {
+                        _uiState.value = _uiState.value.copy(
+                            update = UpdateUiState.Downloading(progress.bytesDownloaded, progress.totalBytes)
+                        )
+                    }
+                    is DownloadProgress.Done -> {
+                        appUpdateRepository.installUpdate(progress.apkFile)
+                            .onSuccess {
+                                _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
+                            }
+                            .onFailure { e ->
+                                _uiState.value = _uiState.value.copy(
+                                    update = UpdateUiState.Failed(AppError.from(e).message)
+                                )
+                            }
+                    }
+                    is DownloadProgress.Failed -> {
+                        _uiState.value = _uiState.value.copy(
+                            update = UpdateUiState.Failed(progress.message)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun dismissUpdateState() {
+        _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
     }
 }

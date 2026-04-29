@@ -31,6 +31,29 @@ val gitHeadMeta: List<String> = git("log", "-1", "--format=%h%n%cI", "HEAD").spl
 val gitShortSha: String = gitHeadMeta.getOrNull(0)?.takeIf { it.isNotEmpty() } ?: "unknown"
 val commitTimestamp: String = gitHeadMeta.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: "unknown"
 
+// Release signing: env vars (CI) or local.properties (developer machines). When
+// absent, release builds fall back to the debug keystore so `assembleRelease`
+// still works locally — but APKs from such builds cannot in-place upgrade an
+// installation produced by the CI keystore. See docs/RELEASING.md.
+val localProps = java.util.Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
+}
+fun secret(envName: String, propName: String): String? =
+    System.getenv(envName)?.takeIf { it.isNotEmpty() } ?: localProps.getProperty(propName)
+
+val releaseStoreFile = secret("RELEASE_STORE_FILE", "releaseStoreFile")
+val releaseStorePassword = secret("RELEASE_STORE_PASSWORD", "releaseStorePassword")
+val releaseKeyAlias = secret("RELEASE_KEY_ALIAS", "releaseKeyAlias")
+val releaseKeyPassword = secret("RELEASE_KEY_PASSWORD", "releaseKeyPassword")
+val hasReleaseSigning = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword)
+    .all { !it.isNullOrEmpty() }
+
+// GitHub repo slug "owner/repo" for the latest-release alias URL embedded in
+// BuildConfig.UPDATE_MANIFEST_URL. Override via -PgithubReleaseRepo=foo/bar.
+val githubReleaseRepo: String =
+    (project.findProperty("githubReleaseRepo") as? String) ?: "gomorra/fire-stream-chat"
+
 android {
     namespace = "com.firestream.chat"
     compileSdk = 35
@@ -59,6 +82,11 @@ android {
             isDefault = true
             buildConfigField("Boolean", "SUPPORTS_SIGNAL", "true")
             buildConfigField("String", "POCKETBASE_URL", "\"\"")
+            buildConfigField(
+                "String",
+                "UPDATE_MANIFEST_URL",
+                "\"https://github.com/$githubReleaseRepo/releases/latest/download/latest-firebase.json\""
+            )
         }
         create("pocketbase") {
             dimension = "backend"
@@ -69,6 +97,22 @@ android {
             // or by adding `pocketbaseUrl=...` to local.properties.
             val pbUrl = (project.findProperty("pocketbaseUrl") as? String) ?: "http://10.0.2.2:8090"
             buildConfigField("String", "POCKETBASE_URL", "\"$pbUrl\"")
+            buildConfigField(
+                "String",
+                "UPDATE_MANIFEST_URL",
+                "\"https://github.com/$githubReleaseRepo/releases/latest/download/latest-pocketbase.json\""
+            )
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
@@ -88,7 +132,7 @@ android {
             // which silently broke release-build encryption.
         }
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName(if (hasReleaseSigning) "release" else "debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(

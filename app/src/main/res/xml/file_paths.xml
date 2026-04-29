@@ -2,4 +2,5 @@
 <paths>
     <cache-path name="camera_photos" path="camera/" />
     <cache-path name="shared_media" path="shared_media/" />
+    <cache-path name="apk_updates" path="apk_updates/" />
 </paths>

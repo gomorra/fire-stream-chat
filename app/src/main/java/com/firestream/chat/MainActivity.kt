@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         val initialChatId = intent.getStringExtra("chatId")
         val initialSenderId = intent.getStringExtra("senderId")
+        val openSettings = intent.getBooleanExtra("openSettings", false)
         val isShareIntent = intent?.action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)
         if (isShareIntent) {
             sharedContentHolder.pendingIntent = intent
@@ -65,6 +66,7 @@ class MainActivity : ComponentActivity() {
                     initialChatId = initialChatId,
                     initialSenderId = initialSenderId,
                     isShareIntent = isShareIntent,
+                    openSettings = openSettings,
                     preferencesDataStore = preferencesDataStore
                 )
             }

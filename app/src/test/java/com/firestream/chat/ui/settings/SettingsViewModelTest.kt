@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.UserRepository
 import io.mockk.coEvery
@@ -40,6 +41,7 @@ class SettingsViewModelTest {
     private lateinit var authRepository: AuthRepository
     private lateinit var userRepository: UserRepository
     private lateinit var preferencesDataStore: PreferencesDataStore
+    private lateinit var appUpdateRepository: AppUpdateRepository
     private lateinit var appContext: Context
     private lateinit var viewModel: SettingsViewModel
 
@@ -56,6 +58,7 @@ class SettingsViewModelTest {
         authRepository = mockk()
         userRepository = mockk()
         preferencesDataStore = mockk()
+        appUpdateRepository = mockk(relaxed = true)
         appContext = mockk(relaxed = true)
 
         stubDefaultPreferences()
@@ -67,6 +70,7 @@ class SettingsViewModelTest {
             authRepository = authRepository,
             userRepository = userRepository,
             preferencesDataStore = preferencesDataStore,
+            appUpdateRepository = appUpdateRepository,
             appContext = appContext
         )
     }
@@ -124,7 +128,7 @@ class SettingsViewModelTest {
     @Test
     fun `init with no current user id skips user load`() = runTest {
         every { authRepository.currentUserId } returns null
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -134,7 +138,7 @@ class SettingsViewModelTest {
     @Test
     fun `init sets error state when user flow throws`() = runTest {
         every { userRepository.observeUser("user1") } returns flow { throw RuntimeException("network error") }
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -150,7 +154,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(false)
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 
@@ -386,7 +390,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted dictation language`() = runTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
 
         advanceUntilIdle()
 

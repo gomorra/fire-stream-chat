@@ -1,0 +1,164 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v1.5.0). Required for manual runs.'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Resolve tag
+        id: tag
+        env:
+          GH_REF: ${{ github.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_TAG:-}" ]; then
+            tag="$INPUT_TAG"
+          else
+            tag="${GH_REF#refs/tags/}"
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$tag' does not match vX.Y.Z."
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - name: Verify versionName in build.gradle.kts matches tag
+        env:
+          EXPECTED: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual=$(grep -E '^\s*versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          if [ "$actual" != "$EXPECTED" ]; then
+            echo "::error::Tag is v$EXPECTED but app/build.gradle.kts versionName is $actual."
+            exit 1
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Decode release keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::RELEASE_KEYSTORE_B64 secret is not set. See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: ./gradlew test
+
+      - name: Assemble release APKs
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew assembleFirebaseRelease assemblePocketbaseRelease
+
+      - name: Stage release artifacts and render manifests
+        id: stage
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+
+          firebase_src="app/build/outputs/apk/firebase/release/app-firebase-release.apk"
+          pocketbase_src="app/build/outputs/apk/pocketbase/release/app-pocketbase-release.apk"
+          firebase_apk="firestream-firebase-release-v${VERSION}.apk"
+          pocketbase_apk="firestream-pocketbase-release-v${VERSION}.apk"
+
+          cp "$firebase_src" "release-artifacts/$firebase_apk"
+          cp "$pocketbase_src" "release-artifacts/$pocketbase_apk"
+
+          firebase_sha=$(sha256sum "release-artifacts/$firebase_apk" | awk '{print $1}')
+          pocketbase_sha=$(sha256sum "release-artifacts/$pocketbase_apk" | awk '{print $1}')
+          version_code=$(git rev-list --count HEAD)
+          published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # Extract release notes for this version from CHANGELOG.md (the lines
+          # between "## [VERSION]" and the next "## [" heading).
+          notes=$(awk -v v="$VERSION" '
+            $0 ~ "^## \\["v"\\]" { capture=1; next }
+            capture && /^## \[/ { exit }
+            capture { print }
+          ' CHANGELOG.md | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}')
+          if [ -z "$notes" ]; then
+            notes="Release v${VERSION}"
+          fi
+
+          render_manifest() {
+            local apk_name="$1" sha="$2" out="$3"
+            jq -n \
+              --argjson versionCode "$version_code" \
+              --arg versionName "$VERSION" \
+              --arg apkUrl "https://github.com/${REPO}/releases/download/v${VERSION}/${apk_name}" \
+              --arg sha256 "$sha" \
+              --arg releaseNotes "$notes" \
+              --arg publishedAt "$published_at" \
+              '{
+                versionCode: $versionCode,
+                versionName: $versionName,
+                apkUrl: $apkUrl,
+                sha256: $sha256,
+                minSupportedVersionCode: 1,
+                releaseNotes: $releaseNotes,
+                publishedAt: $publishedAt,
+                mandatory: false
+              }' > "$out"
+          }
+
+          render_manifest "$firebase_apk" "$firebase_sha" "release-artifacts/latest-firebase.json"
+          render_manifest "$pocketbase_apk" "$pocketbase_sha" "release-artifacts/latest-pocketbase.json"
+
+          {
+            echo "## FireStream Chat v${VERSION}"
+            echo
+            echo "$notes"
+            echo
+            echo "### Checksums"
+            echo "- \`$firebase_apk\` — sha256 \`$firebase_sha\`"
+            echo "- \`$pocketbase_apk\` — sha256 \`$pocketbase_sha\`"
+          } > release-artifacts/RELEASE_NOTES.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: v${{ steps.tag.outputs.version }}
+          body_path: release-artifacts/RELEASE_NOTES.md
+          files: |
+            release-artifacts/firestream-firebase-release-v${{ steps.tag.outputs.version }}.apk
+            release-artifacts/firestream-pocketbase-release-v${{ steps.tag.outputs.version }}.apk
+            release-artifacts/latest-firebase.json
+            release-artifacts/latest-pocketbase.json
