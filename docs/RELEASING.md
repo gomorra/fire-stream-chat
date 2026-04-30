@@ -41,7 +41,7 @@ Back up the keystore file and both passwords to a password manager **before** co
 base64 -w 0 firestream-release.jks > firestream-release.jks.b64
 ```
 
-### 3. Add four repository secrets
+### 3. Add five repository secrets
 
 Settings → Secrets and variables → Actions → New repository secret:
 
@@ -51,6 +51,7 @@ Settings → Secrets and variables → Actions → New repository secret:
 | `RELEASE_STORE_PASSWORD` | Keystore store password |
 | `RELEASE_KEY_ALIAS` | `firestream` (or whatever alias you used) |
 | `RELEASE_KEY_PASSWORD` | Key password |
+| `GOOGLE_SERVICES_JSON_B64` | Base64-encoded contents of `app/google-services.json` (`base64 -w 0 app/google-services.json`). Required because the file is gitignored and the Firebase Gradle plugin fails the build without it. |
 
 ## Local release builds
 
