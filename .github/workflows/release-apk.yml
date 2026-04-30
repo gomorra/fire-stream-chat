@@ -87,7 +87,7 @@ jobs:
           echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
 
       - name: Run unit tests
-        run: ./gradlew test
+        run: ./gradlew testFirebaseDebugUnitTest testPocketbaseDebugUnitTest
 
       - name: Assemble release APKs
         env:
