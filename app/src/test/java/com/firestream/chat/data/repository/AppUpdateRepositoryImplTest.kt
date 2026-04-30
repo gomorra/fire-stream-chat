@@ -1,6 +1,7 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.BuildConfig
+import com.firestream.chat.data.remote.update.NoReleasePublishedException
 import com.firestream.chat.data.remote.update.UpdateManifestSource
 import com.firestream.chat.data.util.ApkDownloader
 import com.firestream.chat.data.util.ApkInstaller
@@ -73,5 +74,14 @@ class AppUpdateRepositoryImplTest {
 
         assertTrue(result.isFailure)
         assertEquals("offline", result.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `checkForUpdate returns UpToDate when no release has been published yet`() = runTest {
+        coEvery { manifestSource.fetchLatest() } throws NoReleasePublishedException
+
+        val result = repository.checkForUpdate().getOrThrow()
+
+        assertEquals(UpdateCheckResult.UpToDate, result)
     }
 }

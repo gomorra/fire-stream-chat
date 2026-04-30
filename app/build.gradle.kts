@@ -64,7 +64,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = gitCommitCount
-        versionName = "1.5.0"
+        versionName = "1.5.1"
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
         buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")

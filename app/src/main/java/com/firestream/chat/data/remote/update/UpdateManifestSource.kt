@@ -13,6 +13,13 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * Signals that the GitHub repo has no published release yet, so the manifest
+ * URL returned 404. Distinct from a real network failure so the repo can
+ * surface "up to date" instead of "Network unavailable".
+ */
+internal object NoReleasePublishedException : RuntimeException("No release published yet")
+
+/**
  * Fetches `latest-{flavor}.json` from `BuildConfig.UPDATE_MANIFEST_URL` and
  * parses it into an [AppUpdate]. The URL points at GitHub's "latest release"
  * alias so the response always reflects the most recent published release.
@@ -29,6 +36,9 @@ class UpdateManifestSource @Inject constructor(
             .build()
 
         okHttpClient.newCall(request).execute().use { response ->
+            if (response.code == 404) {
+                throw NoReleasePublishedException
+            }
             if (!response.isSuccessful) {
                 throw IOException("Manifest fetch failed: HTTP ${response.code}")
             }

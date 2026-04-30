@@ -4,6 +4,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-04-30
+
+### Fixed
+- **Updater no longer surfaces "Network unavailable" before the first release.** The GitHub `/releases/latest/download/` alias returns HTTP 404 until at least one tag has been published; the manifest fetcher previously treated this as a network failure. Now it returns `UpdateCheckResult.UpToDate`, so Settings → Check for updates shows "You're on the latest version" cleanly during the bootstrap window.
+
 ## [1.5.0] — 2026-04-29
 
 ### Added

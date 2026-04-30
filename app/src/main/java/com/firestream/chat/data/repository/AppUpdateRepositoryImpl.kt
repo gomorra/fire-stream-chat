@@ -1,6 +1,7 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.BuildConfig
+import com.firestream.chat.data.remote.update.NoReleasePublishedException
 import com.firestream.chat.data.remote.update.UpdateManifestSource
 import com.firestream.chat.data.util.ApkDownloader
 import com.firestream.chat.data.util.ApkInstaller
@@ -21,7 +22,11 @@ class AppUpdateRepositoryImpl @Inject constructor(
 ) : AppUpdateRepository {
 
     override suspend fun checkForUpdate(): Result<UpdateCheckResult> = runCatching {
-        val latest = manifestSource.fetchLatest()
+        val latest = try {
+            manifestSource.fetchLatest()
+        } catch (_: NoReleasePublishedException) {
+            return@runCatching UpdateCheckResult.UpToDate
+        }
         if (latest.versionCode > BuildConfig.VERSION_CODE) {
             UpdateCheckResult.Available(latest)
         } else {
