@@ -77,14 +77,14 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.meta.outputs.tag }}
 
-      - name: Verify versionName in build.gradle.kts matches tag
+      - name: Verify HEAD is the tag commit (versionName auto-derives from it)
         env:
           EXPECTED: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          actual=$(grep -E '^\s*versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          actual=$(git describe --tags --exact-match HEAD 2>/dev/null | sed 's/^v//')
           if [ "$actual" != "$EXPECTED" ]; then
-            echo "::error::Tag is v$EXPECTED but app/build.gradle.kts versionName is $actual."
+            echo "::error::HEAD does not match tag v$EXPECTED (got '$actual'). versionName is derived from 'git describe --tags' — see app/build.gradle.kts."
             exit 1
           fi
 
