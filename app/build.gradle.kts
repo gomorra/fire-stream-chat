@@ -55,6 +55,15 @@ val hasReleaseSigning = listOf(releaseStoreFile, releaseStorePassword, releaseKe
 val githubReleaseRepo: String =
     (project.findProperty("githubReleaseRepo") as? String) ?: "gomorra/fire-stream-chat"
 
+// Updater testing knobs: build a "fake older" APK so the in-app updater finds
+// the live manifest as a newer version. Both must use the release keystore so
+// the system installer accepts the in-place upgrade to the GitHub release APK.
+//   ./gradlew assembleFirebaseRelease -PversionCodeOverride=408 -PversionNameOverride=1.5.0
+val versionCodeOverride: Int? =
+    (project.findProperty("versionCodeOverride") as? String)?.toIntOrNull()
+val versionNameOverride: String? =
+    (project.findProperty("versionNameOverride") as? String)?.takeIf { it.isNotEmpty() }
+
 android {
     namespace = "com.firestream.chat"
     compileSdk = 35
@@ -63,8 +72,8 @@ android {
         applicationId = "com.firestream.chat"
         minSdk = 29
         targetSdk = 35
-        versionCode = gitCommitCount
-        versionName = "1.5.1"
+        versionCode = versionCodeOverride ?: gitCommitCount
+        versionName = versionNameOverride ?: "1.5.1"
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
         buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")
@@ -406,6 +415,7 @@ dependencies {
     testImplementation(libs.org.json)
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
+    testImplementation(libs.mockwebserver)
     // Compose UI test on JVM (Robolectric); the BOM aligns versions across artifacts.
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)

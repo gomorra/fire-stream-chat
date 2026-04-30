@@ -9,7 +9,12 @@ import dagger.hilt.components.SingletonComponent
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import javax.inject.Qualifier
 import javax.inject.Singleton
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class DownloadClient
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -25,4 +30,19 @@ object NetworkModule {
             .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
+
+    // Long-stream download client: 5-minute read timeout for the 96 MB APK
+    // transfer over lossy mobile networks. No call timeout — coroutine
+    // cancellation in ApkDownloadWorker handles user-cancel and lifecycle.
+    @Provides
+    @Singleton
+    @DownloadClient
+    fun provideDownloadOkHttpClient(): OkHttpClient =
+        OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(5, TimeUnit.MINUTES)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
 }

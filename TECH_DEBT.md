@@ -151,6 +151,26 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### APK self-updater: parallel chunked downloads
+
+**The smell.** `ApkDownloader` uses a single HTTP stream for the ~96 MB release APK. On high-bandwidth, high-latency links 2–4 parallel `Range:` requests would shave ~30 % off transfer time.
+
+**Why we haven't fixed it.** Mobile connections rarely benefit — physical-layer head-of-line blocking caps gain across parallel TCP streams. GitHub's release-asset CDN also throttles per-IP rather than per-connection, which further caps the win. The implementation cost is real: ~200 lines, breaks streaming SHA-256 (chunks arrive out of order so the file must be fully reassembled before hashing), and the new race conditions (one chunk fails, retry just that chunk) are easy to get wrong.
+
+**When to revisit.** Only if user reports of slow downloads persist after the foreground-worker + resumable fix lands and median download time stays > 3 minutes on Wi-Fi. The better first move is fronting GitHub Releases with CloudFlare R2 / Bunny so throughput is fixed at the source.
+
+---
+
+### APK self-updater: install hand-off when app is backgrounded
+
+**The smell.** When `ApkDownloadWorker` reaches `SUCCEEDED` while the app is not foreground, `SettingsViewModel.handleDownloadProgress` calls `apkInstaller.install(...)` which uses `context.startActivity(intent)` with `FLAG_ACTIVITY_NEW_TASK`. On API 29+ this can be silently suppressed as a background-activity-launch — the user sees the notification disappear but no installer prompt.
+
+**Why we haven't fixed it.** The simple fix (replace auto-install with a "Tap to install" `PendingIntent` on the foreground notification's terminal state) requires another notification path + UI tweak; in practice the user is usually in Settings while watching the dialog, so the BAL-restriction case is uncommon.
+
+**When to revisit.** When users report that downloads complete silently with no install prompt. Surface the install via a tap-to-install notification on `WorkInfo.SUCCEEDED`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

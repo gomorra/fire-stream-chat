@@ -96,6 +96,7 @@ class SettingsViewModel @Inject constructor(
         observePreferences()
         calculateCacheSize()
         observeBackfillProgress()
+        observeInFlightUpdateDownload()
     }
 
     private fun loadCurrentUser() {
@@ -355,35 +356,53 @@ class SettingsViewModel @Inject constructor(
 
     fun downloadAndInstall(update: AppUpdate) {
         viewModelScope.launch {
-            appUpdateRepository.downloadUpdate(update).collect { progress ->
-                when (progress) {
-                    is DownloadProgress.InProgress -> {
-                        _uiState.value = _uiState.value.copy(
-                            update = UpdateUiState.Downloading(progress.bytesDownloaded, progress.totalBytes)
-                        )
-                    }
-                    is DownloadProgress.Done -> {
-                        appUpdateRepository.installUpdate(progress.apkFile)
-                            .onSuccess {
-                                _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
-                            }
-                            .onFailure { e ->
-                                _uiState.value = _uiState.value.copy(
-                                    update = UpdateUiState.Failed(AppError.from(e).message)
-                                )
-                            }
-                    }
-                    is DownloadProgress.Failed -> {
-                        _uiState.value = _uiState.value.copy(
-                            update = UpdateUiState.Failed(progress.message)
-                        )
-                    }
-                }
-            }
+            appUpdateRepository.downloadUpdate(update).collect(::handleDownloadProgress)
         }
+    }
+
+    fun cancelUpdateDownload() {
+        appUpdateRepository.cancelUpdateDownload()
+        _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
     }
 
     fun dismissUpdateState() {
         _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
+    }
+
+    /**
+     * On Settings re-entry during an in-flight download, snap the dialog back
+     * to its current byte count instead of restarting from byte 0. The flow
+     * stays empty when no worker is running.
+     */
+    private fun observeInFlightUpdateDownload() {
+        viewModelScope.launch {
+            appUpdateRepository.observeUpdateDownload().collect(::handleDownloadProgress)
+        }
+    }
+
+    private suspend fun handleDownloadProgress(progress: DownloadProgress) {
+        when (progress) {
+            is DownloadProgress.InProgress -> {
+                _uiState.value = _uiState.value.copy(
+                    update = UpdateUiState.Downloading(progress.bytesDownloaded, progress.totalBytes)
+                )
+            }
+            is DownloadProgress.Done -> {
+                appUpdateRepository.installUpdate(progress.apkFile)
+                    .onSuccess {
+                        _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
+                    }
+                    .onFailure { e ->
+                        _uiState.value = _uiState.value.copy(
+                            update = UpdateUiState.Failed(AppError.from(e).message)
+                        )
+                    }
+            }
+            is DownloadProgress.Failed -> {
+                _uiState.value = _uiState.value.copy(
+                    update = UpdateUiState.Failed(progress.message)
+                )
+            }
+        }
     }
 }

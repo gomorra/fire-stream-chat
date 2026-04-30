@@ -4,6 +4,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [Unreleased]
 
+### Fixed
+- **APK self-updater survives a locked screen and resumes on retry.** The 96 MB release-APK download used to run inline in `viewModelScope` over OkHttp blocking I/O, so locking the phone mid-download stalled the read under Doze and surfaced "Network error" — forcing a restart from byte 0. Downloads now run in a foreground `ApkDownloadWorker` (`FOREGROUND_SERVICE_DATA_SYNC`) on a long-stream `OkHttpClient` (5 min read timeout, no call timeout), with a low-importance "Downloading update" progress notification reusing the existing `fire_stream_app_updates` channel. The downloader is also resumable: on retry it sends `Range: bytes=N-`, seeds the SHA-256 digest from the existing prefix, and handles 200/206/416/IOException paths without losing progress. The progress dialog gains a Cancel button, and re-entering Settings during a download rehydrates the dialog at the current byte count instead of restarting from 0.
+
 ## [1.5.1] — 2026-04-30
 
 ### Fixed

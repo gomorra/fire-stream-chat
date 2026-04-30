@@ -623,7 +623,11 @@ fun SettingsScreen(
                     )
                 }
             },
-            confirmButton = {}
+            confirmButton = {
+                TextButton(onClick = { viewModel.cancelUpdateDownload() }) {
+                    Text("Cancel")
+                }
+            }
         )
         is UpdateUiState.Failed -> AlertDialog(
             onDismissRequest = { viewModel.dismissUpdateState() },
