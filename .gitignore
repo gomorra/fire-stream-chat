@@ -15,7 +15,9 @@ google-services.json
 *.apk
 *.aab
 *.jks
+*.jks.b64
 *.keystore
+keystore/
 
 # Firebase / Cloud Functions
 firebase-debug.log
