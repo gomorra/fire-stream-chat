@@ -208,6 +208,18 @@ androidComponents {
     }
 }
 
+// KSP 2.1.0 leaves intermediate per-round outputs in `byRounds/N/` under each
+// generated source dir. These duplicate the final output, and javac walks the
+// whole tree — yielding "duplicate class" errors during incremental rebuilds.
+// Excluding the pattern at the compile-task level is the standard workaround
+// until KSP cleans byRounds/ between rounds.
+tasks.withType<JavaCompile>().configureEach {
+    exclude("**/byRounds/**")
+}
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    exclude("**/byRounds/**")
+}
+
 baselineProfile {
     // Explicit opt-in: profile regeneration is a maintenance task, not part of every assembleRelease.
     automaticGenerationDuringBuild = false

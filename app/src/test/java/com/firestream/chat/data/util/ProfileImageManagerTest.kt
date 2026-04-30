@@ -3,7 +3,9 @@ package com.firestream.chat.data.util
 import android.content.Context
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.Call
 import okhttp3.OkHttpClient
@@ -83,26 +85,44 @@ class ProfileImageManagerTest {
     }
 
     @Test
-    fun `concurrent downloads for same id are deduplicated`() = runTest {
+    fun `concurrent downloads for same id are deduplicated`() = runBlocking {
+        // Hold coroutine 1's mocked download open via `releaseDownload`, so the
+        // dedup slot in inFlightDownloads is still occupied when coroutine 2
+        // calls putIfAbsent. Without this, the mocked download completes in
+        // microseconds and coroutine 1 may finish (and clear its slot) before
+        // coroutine 2 is dispatched — racing the dedup check.
         var callCount = 0
         val imageBytes = "image".toByteArray()
+        val downloadStarted = CompletableDeferred<Unit>()
+        val releaseDownload = CompletableDeferred<Unit>()
 
         every { httpClient.newCall(any()) } answers {
             callCount++
+            val request = firstArg<Request>()
             val call = mockk<Call>()
-            val response = Response.Builder()
-                .code(200)
-                .message("OK")
-                .protocol(Protocol.HTTP_1_1)
-                .request(firstArg<Request>())
-                .body(imageBytes.toResponseBody())
-                .build()
-            every { call.execute() } returns response
+            every { call.execute() } answers {
+                downloadStarted.complete(Unit)
+                runBlocking { releaseDownload.await() }
+                Response.Builder()
+                    .code(200)
+                    .message("OK")
+                    .protocol(Protocol.HTTP_1_1)
+                    .request(request)
+                    .body(imageBytes.toResponseBody())
+                    .build()
+            }
             call
         }
 
         val deferred1 = async { manager.downloadAvatar("user1", "https://example.com/a.jpg") }
+        downloadStarted.await()
+        // Coroutine 1 is now blocked inside execute() with the slot held.
         val deferred2 = async { manager.downloadAvatar("user1", "https://example.com/a.jpg") }
+        // Give coroutine 2 time to dispatch and reach putIfAbsent — it's a
+        // microsecond op; 50ms is generous on any runner. After this, it's
+        // suspended on existing.await() and the dedup is observable.
+        Thread.sleep(50)
+        releaseDownload.complete(Unit)
 
         deferred1.await()
         deferred2.await()
