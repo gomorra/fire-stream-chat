@@ -1,4 +1,5 @@
 import java.io.ByteArrayOutputStream
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -35,7 +36,7 @@ val commitTimestamp: String = gitHeadMeta.getOrNull(1)?.takeIf { it.isNotEmpty()
 // absent, release builds fall back to the debug keystore so `assembleRelease`
 // still works locally — but APKs from such builds cannot in-place upgrade an
 // installation produced by the CI keystore. See docs/RELEASING.md.
-val localProps = java.util.Properties().apply {
+val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
