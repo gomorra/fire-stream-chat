@@ -10,6 +10,11 @@ on:
         description: 'Tag to publish (e.g. v1.5.0). Required for manual runs.'
         required: true
         type: string
+      flavors:
+        description: 'Which flavors to build (comma-separated: firebase, pocketbase, or both).'
+        required: false
+        default: 'firebase'
+        type: string
 
 permissions:
   contents: write
@@ -20,11 +25,13 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Resolve tag
-        id: tag
+      - name: Resolve tag and flavors
+        id: meta
         env:
           GH_REF: ${{ github.ref }}
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_FLAVORS: ${{ inputs.flavors }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
           if [ -n "${INPUT_TAG:-}" ]; then
@@ -37,17 +44,42 @@ jobs:
             exit 1
           fi
           version="${tag#v}"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Tag pushes always build both flavors (production release).
+          # Manual dispatch follows `flavors` input (default: firebase only,
+          # for fast iteration when testing the build pipeline).
+          if [ "$EVENT_NAME" = "push" ]; then
+            flavors="firebase,pocketbase"
+          else
+            flavors="${INPUT_FLAVORS:-firebase}"
+          fi
+
+          build_firebase=false
+          build_pocketbase=false
+          [[ "$flavors" == *firebase* ]] && build_firebase=true
+          [[ "$flavors" == *pocketbase* ]] && build_pocketbase=true
+
+          if [ "$build_firebase" = "false" ] && [ "$build_pocketbase" = "false" ]; then
+            echo "::error::No flavors selected (got '$flavors'). Use 'firebase', 'pocketbase', or 'firebase,pocketbase'."
+            exit 1
+          fi
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "flavors=$flavors"
+            echo "build_firebase=$build_firebase"
+            echo "build_pocketbase=$build_pocketbase"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ steps.meta.outputs.tag }}
 
       - name: Verify versionName in build.gradle.kts matches tag
         env:
-          EXPECTED: ${{ steps.tag.outputs.version }}
+          EXPECTED: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
           actual=$(grep -E '^\s*versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
@@ -63,6 +95,21 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Override CachyOS-specific JVM workarounds in project gradle.properties.
+      # `-Xshare:off` and `-XX:TieredStopAtLevel=1` are local fixes for two
+      # bugs in OpenJDK 17.0.18 on CachyOS; Ubuntu Temurin 17 has neither.
+      # User-level gradle.properties takes precedence over project-level for
+      # `org.gradle.jvmargs` / `kotlin.daemon.jvmargs`, so this overrides
+      # cleanly without touching the committed file.
+      - name: Override JVM args for Ubuntu CI
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8
+          kotlin.daemon.jvmargs=-Xmx3g
+          EOF
+
       - name: Decode release keystore
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
@@ -75,6 +122,36 @@ jobs:
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           echo "RELEASE_STORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
 
+      # Validate signing credentials before the long compile. A throwaway jar
+      # exercises the full signing path (store password + alias + key
+      # password) so any secret mismatch fails in seconds instead of at
+      # packageRelease.
+      - name: Verify keystore credentials
+        env:
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for var in RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD; do
+            if [ -z "${!var:-}" ]; then
+              echo "::error::$var secret is not set. See docs/RELEASING.md."
+              exit 1
+            fi
+          done
+          printf 'verify' > "$RUNNER_TEMP/probe.txt"
+          (cd "$RUNNER_TEMP" && jar cf probe.jar probe.txt)
+          if ! jarsigner \
+              -keystore "$RELEASE_STORE_FILE" \
+              -storepass "$RELEASE_STORE_PASSWORD" \
+              -keypass "$RELEASE_KEY_PASSWORD" \
+              "$RUNNER_TEMP/probe.jar" \
+              "$RELEASE_KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::Keystore credential check failed. One of RELEASE_STORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD does not match the keystore. Re-encode the keystore with 'base64 -w0' and re-set the secrets per docs/RELEASING.md."
+            exit 1
+          fi
+          rm -f "$RUNNER_TEMP/probe.jar" "$RUNNER_TEMP/probe.txt"
+
       - name: Decode google-services.json
         env:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
@@ -86,40 +163,42 @@ jobs:
           fi
           echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
 
-      - name: Run unit tests
-        run: ./gradlew testFirebaseDebugUnitTest testPocketbaseDebugUnitTest
-
-      - name: Assemble release APKs
+      # One Gradle invocation: tests + assemble share daemon warmup, configure
+      # phase, and Kotlin compiler classpath analysis. Tasks selected from
+      # the resolved flavor set.
+      - name: Build (test + assemble)
         env:
           RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
-        run: ./gradlew assembleFirebaseRelease assemblePocketbaseRelease
+          BUILD_FIREBASE: ${{ steps.meta.outputs.build_firebase }}
+          BUILD_POCKETBASE: ${{ steps.meta.outputs.build_pocketbase }}
+        run: |
+          set -euo pipefail
+          tasks=()
+          if [ "$BUILD_FIREBASE" = "true" ]; then
+            tasks+=(testFirebaseDebugUnitTest assembleFirebaseRelease)
+          fi
+          if [ "$BUILD_POCKETBASE" = "true" ]; then
+            tasks+=(testPocketbaseDebugUnitTest assemblePocketbaseRelease)
+          fi
+          ./gradlew "${tasks[@]}"
 
       - name: Stage release artifacts and render manifests
         id: stage
         env:
-          VERSION: ${{ steps.tag.outputs.version }}
+          VERSION: ${{ steps.meta.outputs.version }}
           REPO: ${{ github.repository }}
+          BUILD_FIREBASE: ${{ steps.meta.outputs.build_firebase }}
+          BUILD_POCKETBASE: ${{ steps.meta.outputs.build_pocketbase }}
         run: |
           set -euo pipefail
           mkdir -p release-artifacts
 
-          firebase_src="app/build/outputs/apk/firebase/release/app-firebase-release.apk"
-          pocketbase_src="app/build/outputs/apk/pocketbase/release/app-pocketbase-release.apk"
-          firebase_apk="firestream-firebase-release-v${VERSION}.apk"
-          pocketbase_apk="firestream-pocketbase-release-v${VERSION}.apk"
-
-          cp "$firebase_src" "release-artifacts/$firebase_apk"
-          cp "$pocketbase_src" "release-artifacts/$pocketbase_apk"
-
-          firebase_sha=$(sha256sum "release-artifacts/$firebase_apk" | awk '{print $1}')
-          pocketbase_sha=$(sha256sum "release-artifacts/$pocketbase_apk" | awk '{print $1}')
           version_code=$(git rev-list --count HEAD)
           published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-          # Extract release notes for this version from CHANGELOG.md (the lines
-          # between "## [VERSION]" and the next "## [" heading).
+          # Extract release notes for this version from CHANGELOG.md.
           notes=$(awk -v v="$VERSION" '
             $0 ~ "^## \\["v"\\]" { capture=1; next }
             capture && /^## \[/ { exit }
@@ -150,8 +229,25 @@ jobs:
               }' > "$out"
           }
 
-          render_manifest "$firebase_apk" "$firebase_sha" "release-artifacts/latest-firebase.json"
-          render_manifest "$pocketbase_apk" "$pocketbase_sha" "release-artifacts/latest-pocketbase.json"
+          checksums=""
+
+          if [ "$BUILD_FIREBASE" = "true" ]; then
+            firebase_src="app/build/outputs/apk/firebase/release/app-firebase-release.apk"
+            firebase_apk="firestream-firebase-release-v${VERSION}.apk"
+            cp "$firebase_src" "release-artifacts/$firebase_apk"
+            firebase_sha=$(sha256sum "release-artifacts/$firebase_apk" | awk '{print $1}')
+            render_manifest "$firebase_apk" "$firebase_sha" "release-artifacts/latest-firebase.json"
+            checksums+="- \`$firebase_apk\` — sha256 \`$firebase_sha\`"$'\n'
+          fi
+
+          if [ "$BUILD_POCKETBASE" = "true" ]; then
+            pocketbase_src="app/build/outputs/apk/pocketbase/release/app-pocketbase-release.apk"
+            pocketbase_apk="firestream-pocketbase-release-v${VERSION}.apk"
+            cp "$pocketbase_src" "release-artifacts/$pocketbase_apk"
+            pocketbase_sha=$(sha256sum "release-artifacts/$pocketbase_apk" | awk '{print $1}')
+            render_manifest "$pocketbase_apk" "$pocketbase_sha" "release-artifacts/latest-pocketbase.json"
+            checksums+="- \`$pocketbase_apk\` — sha256 \`$pocketbase_sha\`"$'\n'
+          fi
 
           {
             echo "## FireStream Chat v${VERSION}"
@@ -159,17 +255,16 @@ jobs:
             echo "$notes"
             echo
             echo "### Checksums"
-            echo "- \`$firebase_apk\` — sha256 \`$firebase_sha\`"
-            echo "- \`$pocketbase_apk\` — sha256 \`$pocketbase_sha\`"
+            printf '%s' "$checksums"
           } > release-artifacts/RELEASE_NOTES.md
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: v${{ steps.tag.outputs.version }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: v${{ steps.meta.outputs.version }}
           body_path: release-artifacts/RELEASE_NOTES.md
+          # Globs pick up only the flavors actually built. Existing release
+          # assets from prior runs are preserved by softprops on re-upload.
           files: |
-            release-artifacts/firestream-firebase-release-v${{ steps.tag.outputs.version }}.apk
-            release-artifacts/firestream-pocketbase-release-v${{ steps.tag.outputs.version }}.apk
-            release-artifacts/latest-firebase.json
-            release-artifacts/latest-pocketbase.json
+            release-artifacts/firestream-*.apk
+            release-artifacts/latest-*.json
