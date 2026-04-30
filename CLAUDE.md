@@ -278,7 +278,7 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 
 ### Cutting a release
 
-Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. To ship a release: bump `versionName` in `app/build.gradle.kts`, rename `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD`, commit, then `git tag vX.Y.Z && git push origin vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
+Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. **`versionName` is auto-derived from `git describe --tags`** — exact tag → `X.Y.Z`, untagged HEAD → `X.Y.Z-dev+<sha>` — so the tag is the single source of truth. To ship a release: rename `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD`, commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Sensitive Files
 

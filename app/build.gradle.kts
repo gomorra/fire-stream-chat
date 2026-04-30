@@ -18,9 +18,11 @@ plugins {
 // invalidate BuildConfig every invocation and cascade recompiles through Compose.
 fun git(vararg args: String): String = try {
     val out = ByteArrayOutputStream()
+    val err = ByteArrayOutputStream()
     exec {
         commandLine(listOf("git") + args.toList())
         standardOutput = out
+        errorOutput = err
         isIgnoreExitValue = true
     }
     out.toString().trim()
@@ -31,6 +33,20 @@ val gitCommitCount: Int = git("rev-list", "--count", "HEAD").toIntOrNull() ?: 1
 val gitHeadMeta: List<String> = git("log", "-1", "--format=%h%n%cI", "HEAD").split("\n")
 val gitShortSha: String = gitHeadMeta.getOrNull(0)?.takeIf { it.isNotEmpty() } ?: "unknown"
 val commitTimestamp: String = gitHeadMeta.getOrNull(1)?.takeIf { it.isNotEmpty() } ?: "unknown"
+
+// versionName is derived from git tags so the source of truth is the tag, not a
+// hand-edited string. Tagging `vX.Y.Z` is what a release IS — there's no second
+// place to keep in sync. Builds at an exact tag report `X.Y.Z`; commits past the
+// last tag get a `-dev+<sha>` suffix so debug builds don't masquerade as the
+// last release. No tags yet → `0.0.0`. Override with `-PversionNameOverride=…`
+// for the fake-old-version updater test flow.
+val gitLatestTag: String = git("describe", "--tags", "--abbrev=0")
+val gitHeadExactTag: String = git("describe", "--tags", "--exact-match", "HEAD")
+val gitTagVersionName: String = when {
+    gitHeadExactTag.isNotEmpty() -> gitHeadExactTag.removePrefix("v")
+    gitLatestTag.isNotEmpty() -> "${gitLatestTag.removePrefix("v")}-dev+$gitShortSha"
+    else -> "0.0.0"
+}
 
 // Release signing: env vars (CI) or local.properties (developer machines). When
 // absent, release builds fall back to the debug keystore so `assembleRelease`
@@ -73,7 +89,7 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = versionCodeOverride ?: gitCommitCount
-        versionName = versionNameOverride ?: "1.5.1"
+        versionName = versionNameOverride ?: gitTagVersionName
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
         buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")

@@ -70,18 +70,26 @@ If none of these properties are set, release builds fall back to the debug keyst
 
 ## Cutting a release
 
+`versionName` is derived from `git describe --tags` — the tag IS the version, no source edit required. `versionCode` is derived from the commit count.
+
 1. Verify `CHANGELOG.md` has an `[Unreleased]` section with entries.
 2. Decide the new version (SemVer, per `CLAUDE.md` rules).
 3. Rename the `[Unreleased]` heading to `[X.Y.Z] — YYYY-MM-DD` and add a fresh empty `[Unreleased]` block above it.
-4. Bump `versionName` in `app/build.gradle.kts` to `X.Y.Z`. (`versionCode` auto-increments from the commit count.)
-5. Commit, push to `main`, then tag and push:
+4. Commit, then tag and push both:
 
 ```bash
-git tag v1.5.0
-git push origin v1.5.0
+git commit -m "chore(release): vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
 ```
 
-The workflow runs and publishes the release. Existing installs will pick it up via the in-app updater within 24 hours (or immediately when the user taps "Check for updates" in Settings).
+The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings.
+
+To build a "fake older" APK locally for testing the in-app updater, override at the command line:
+
+```bash
+./gradlew assembleFirebaseRelease -PversionCodeOverride=408 -PversionNameOverride=1.5.0
+```
 
 ## Verifying a release locally
 
