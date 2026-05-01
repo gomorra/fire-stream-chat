@@ -418,6 +418,22 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * Called from a lifecycle ON_RESUME observer in SettingsScreen. When the
+     * user returns from the system "Install unknown apps" screen, this
+     * re-checks the permission and transitions from [NeedsInstallPermission]
+     * → [ReadyToInstall] so the row immediately offers tap-to-install
+     * instead of staying stuck on "Allow installs…".
+     */
+    fun recheckInstallPermission() {
+        val state = _uiState.value.update
+        if (state is UpdateUiState.NeedsInstallPermission && apkInstaller.canRequestInstall()) {
+            _uiState.value = _uiState.value.copy(
+                update = UpdateUiState.ReadyToInstall(state.apkFile)
+            )
+        }
+    }
+
+    /**
      * On Settings re-entry during an in-flight download, snap the dialog back
      * to its current byte count instead of restarting from byte 0. The flow
      * stays empty when no worker is running.

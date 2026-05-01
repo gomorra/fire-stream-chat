@@ -114,6 +114,20 @@ fun SettingsScreen(
     // doesn't need to survive process death.
     var showCancelConfirm by remember { mutableStateOf(false) }
     val appContext = LocalContext.current.applicationContext
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+
+    // Re-check "Install unknown apps" permission when the user returns from
+    // the system settings screen. Without this the row stays stuck on
+    // "Allow installs…" until the user leaves and re-enters Settings.
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.recheckInstallPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     Scaffold(
         topBar = {
