@@ -20,9 +20,9 @@ import javax.inject.Singleton
 class ApkInstaller @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    val authority: String = "${context.packageName}.fileprovider"
 
     fun install(apkFile: File) {
-        val authority = "${context.packageName}.fileprovider"
         val uri = FileProvider.getUriForFile(context, authority, apkFile)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")

@@ -17,6 +17,7 @@ import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.firestream.chat.data.util.ApkDownloader
+import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.repository.DownloadProgress
 import dagger.assisted.Assisted
@@ -46,8 +47,11 @@ import java.io.File
 class ApkDownloadWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted params: WorkerParameters,
-    private val apkDownloader: ApkDownloader
+    private val apkDownloader: ApkDownloader,
+    private val apkInstaller: ApkInstaller
 ) : CoroutineWorker(context, params) {
+
+    private var channelCreated = false
 
     override suspend fun doWork(): Result = try {
         runDownload()
@@ -153,8 +157,7 @@ class ApkDownloadWorker @AssistedInject constructor(
 
     private fun postInstallReadyNotification(apkFile: File) {
         ensureChannel()
-        val authority = "${context.packageName}.fileprovider"
-        val uri: Uri = FileProvider.getUriForFile(context, authority, apkFile)
+        val uri: Uri = FileProvider.getUriForFile(context, apkInstaller.authority, apkFile)
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -187,14 +190,11 @@ class ApkDownloadWorker @AssistedInject constructor(
     }
 
     private fun ensureChannel() {
-        val nm = context.getSystemService(NotificationManager::class.java)
-        nm.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "App updates",
-                NotificationManager.IMPORTANCE_LOW
-            )
+        if (channelCreated) return
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "App updates", NotificationManager.IMPORTANCE_LOW)
         )
+        channelCreated = true
     }
 
     private fun friendlyMessage(t: Throwable): String =

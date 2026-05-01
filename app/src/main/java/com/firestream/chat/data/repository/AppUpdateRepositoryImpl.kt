@@ -100,7 +100,8 @@ class AppUpdateRepositoryImpl @Inject constructor(
         apkInstaller.install(apkFile)
         // We've handed off to the system installer. Prune so the row clears
         // and we don't keep re-presenting Done on every Settings re-entry.
-        WorkManager.getInstance(context).pruneWork()
+        val wm = WorkManager.getInstance(context)
+        wm.pruneWork()
     }
 
     private fun progressFlow(): Flow<DownloadProgress> =
