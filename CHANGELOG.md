@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.6.2] — 2026-05-01
+
+### Fixed
+- **Debug builds now use the release keystore so they can self-update over release APKs.** Without a local `releaseStoreFile` in `local.properties` (or `RELEASE_STORE_FILE` in the env), debug builds previously used the auto-generated debug keystore, while release builds used the release keystore from CI. This mismatch caused the system installer to reject in-place upgrades when the APK signature changed, resulting in "App not installed" errors during self-updates. The fix makes both build types use the same release keystore when available, ensuring consistent signatures and seamless upgrades across debug and release installs. When the release keystore is not configured, both builds fall back to the debug keystore as before. (`65fa6f3`)
+
 ## [1.6.1] — 2026-05-01
 
 ### Fixed
