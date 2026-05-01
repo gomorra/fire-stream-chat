@@ -11,13 +11,18 @@ import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.EOFException
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.ProtocolException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.SSLHandshakeException
 
 /**
  * Streaming download of an APK to `cacheDir/apk_updates/`, with SHA-256
@@ -134,9 +139,18 @@ class ApkDownloader @Inject constructor(
             }
         } catch (e: IOException) {
             // Keep the partial file — the next attempt will resume from where we stopped.
-            emit(DownloadProgress.Failed(e.message ?: "Network error"))
+            emit(DownloadProgress.Failed(friendlyMessage(e)))
         }
     }.flowOn(Dispatchers.IO)
+
+    private fun friendlyMessage(e: IOException): String = when (e) {
+        is UnknownHostException -> "No internet connection"
+        is SocketTimeoutException -> "Connection timed out — try again on Wi-Fi"
+        is SSLHandshakeException -> "Couldn't verify update server"
+        is EOFException -> "Connection dropped — please retry"
+        is ProtocolException -> "Server returned malformed response"
+        else -> e.message?.takeIf { it.isNotBlank() } ?: "Network error"
+    }
 
     private fun ByteArray.toHexString(): String =
         joinToString("") { "%02x".format(it) }

@@ -32,8 +32,12 @@ object NetworkModule {
     }
 
     // Long-stream download client: 5-minute read timeout for the 96 MB APK
-    // transfer over lossy mobile networks. No call timeout — coroutine
-    // cancellation in ApkDownloadWorker handles user-cancel and lifecycle.
+    // transfer over lossy mobile networks. The pingInterval surfaces dead
+    // sockets in seconds (the read timeout alone leaves the worker hung
+    // indefinitely on a half-open TCP connection). The 30-minute callTimeout
+    // is a hard backstop covering worst-case 100 MB APKs on slow cellular —
+    // without it, a stuck connection that survives keepalive could keep the
+    // worker pinned forever.
     @Provides
     @Singleton
     @DownloadClient
@@ -42,7 +46,8 @@ object NetworkModule {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.MINUTES)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(0, TimeUnit.MILLISECONDS)
+            .callTimeout(30, TimeUnit.MINUTES)
+            .pingInterval(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(true)
             .build()
 }
