@@ -6,16 +6,18 @@ This document covers everything needed to cut a signed release: keystore generat
 
 Releases are produced by `.github/workflows/release-apk.yml` on every push of a `v*` git tag (or via manual `workflow_dispatch`). The workflow:
 
-1. Builds `firebase` and `pocketbase` release APKs.
+1. Builds the selected flavor(s) — `firebase` only by default; pocketbase requires manual dispatch (see [Selecting flavors](#selecting-flavors)).
 2. Signs each APK with the release keystore stored in GitHub Secrets.
 3. Computes SHA-256 for each APK.
-4. Renders one update manifest per flavor (`latest-firebase.json`, `latest-pocketbase.json`).
-5. Creates a GitHub Release with all four files attached.
+4. Renders one update manifest per built flavor (`latest-firebase.json` and/or `latest-pocketbase.json`).
+5. Creates a GitHub Release with the resulting files attached.
 
 The app fetches its manifest from a flavor-specific "latest" alias URL baked into `BuildConfig.UPDATE_MANIFEST_URL` at compile time:
 
 - `https://github.com/<owner>/<repo>/releases/latest/download/latest-firebase.json`
 - `https://github.com/<owner>/<repo>/releases/latest/download/latest-pocketbase.json`
+
+> Because the in-app updater reads `releases/latest/download/latest-<flavor>.json`, a release that only ships one flavor leaves the other flavor's installs without a manifest *at that tag* — the URL 404s until you publish a release that includes that flavor. Plan flavor coverage per release accordingly.
 
 ## One-time keystore setup
 
@@ -85,11 +87,40 @@ git push origin main vX.Y.Z
 
 The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings.
 
+By default a tag push builds **firebase only**. To include pocketbase, see the next section.
+
 To build a "fake older" APK locally for testing the in-app updater, override at the command line:
 
 ```bash
 ./gradlew assembleFirebaseRelease -PversionCodeOverride=408 -PversionNameOverride=1.5.0
 ```
+
+## Selecting flavors
+
+The workflow accepts a `flavors` input on manual `workflow_dispatch` runs:
+
+| Trigger | Flavors built |
+|---|---|
+| Tag push (`git push origin vX.Y.Z`) | `firebase` only |
+| `workflow_dispatch` with no `flavors` input | `firebase` only |
+| `workflow_dispatch` with `flavors=pocketbase` | `pocketbase` only |
+| `workflow_dispatch` with `flavors=firebase,pocketbase` | both |
+
+The `flavors` input is a comma-separated list; case-sensitive substring match against `firebase` and `pocketbase`.
+
+### Adding pocketbase to an existing release
+
+The tag must already exist (the workflow checks out the tagged commit and verifies HEAD matches). Then:
+
+```bash
+gh workflow run release-apk.yml -f tag=vX.Y.Z -f flavors=pocketbase
+# or to (re-)build both flavors
+gh workflow run release-apk.yml -f tag=vX.Y.Z -f flavors=firebase,pocketbase
+```
+
+`softprops/action-gh-release` preserves prior assets when re-uploading to the same release tag, so the existing firebase APK and manifest stay attached and the pocketbase artifacts are added alongside them.
+
+You can also trigger this from the GitHub UI: **Actions → Release APK → Run workflow**, then fill in the tag and flavors fields.
 
 ## Verifying a release locally
 

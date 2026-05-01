@@ -45,14 +45,14 @@ jobs:
           fi
           version="${tag#v}"
 
-          # Tag pushes always build both flavors (production release).
-          # Manual dispatch follows `flavors` input (default: firebase only,
-          # for fast iteration when testing the build pipeline).
-          if [ "$EVENT_NAME" = "push" ]; then
-            flavors="firebase,pocketbase"
-          else
-            flavors="${INPUT_FLAVORS:-firebase}"
-          fi
+          # Tag pushes default to firebase only (the production flavor).
+          # To also build pocketbase — or pocketbase only — re-run the
+          # workflow via manual `workflow_dispatch` with `flavors` set.
+          # Caveat: pocketbase installs read `latest-pocketbase.json` from
+          # the latest release; a firebase-only tag push leaves them
+          # without a manifest at this tag until you dispatch with
+          # `flavors=firebase,pocketbase`.
+          flavors="${INPUT_FLAVORS:-firebase}"
 
           build_firebase=false
           build_pocketbase=false
