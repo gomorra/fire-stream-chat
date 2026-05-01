@@ -155,6 +155,27 @@ class ApkDownloaderTest {
     }
 
     @Test
+    fun `unresolvable host maps to friendly No internet connection message`() = runTest {
+        // Hijack the apkUrl to point at a TLD that won't resolve.
+        val unresolvable = AppUpdate(
+            versionCode = 1,
+            versionName = "1.0",
+            apkUrl = "https://this-host-does-not-exist.invalid/firestream.apk",
+            sha256 = apkSha,
+            minSupportedVersionCode = 0,
+            releaseNotes = "",
+            publishedAt = "",
+            mandatory = false
+        )
+
+        val emissions = downloader.download(unresolvable).toList()
+
+        val terminal = emissions.last()
+        assertTrue("Expected Failed but got $terminal", terminal is DownloadProgress.Failed)
+        assertEquals("No internet connection", (terminal as DownloadProgress.Failed).message)
+    }
+
+    @Test
     fun `IOException mid-stream keeps the partial file for resume`() = runTest {
         // Server promises a full body but disconnects mid-stream — OkHttp's read
         // throws IOException; the downloader must preserve whatever was already

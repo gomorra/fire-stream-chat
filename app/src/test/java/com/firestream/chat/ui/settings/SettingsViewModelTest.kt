@@ -6,6 +6,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.model.User
@@ -17,6 +18,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flow
@@ -45,6 +47,7 @@ class SettingsViewModelTest {
     private lateinit var userRepository: UserRepository
     private lateinit var preferencesDataStore: PreferencesDataStore
     private lateinit var appUpdateRepository: AppUpdateRepository
+    private lateinit var apkInstaller: ApkInstaller
     private lateinit var appContext: Context
     private lateinit var viewModel: SettingsViewModel
 
@@ -62,6 +65,7 @@ class SettingsViewModelTest {
         userRepository = mockk()
         preferencesDataStore = mockk()
         appUpdateRepository = mockk(relaxed = true)
+        apkInstaller = mockk(relaxed = true)
         appContext = mockk(relaxed = true)
 
         stubDefaultPreferences()
@@ -74,6 +78,7 @@ class SettingsViewModelTest {
             userRepository = userRepository,
             preferencesDataStore = preferencesDataStore,
             appUpdateRepository = appUpdateRepository,
+            apkInstaller = apkInstaller,
             appContext = appContext
         )
     }
@@ -131,7 +136,7 @@ class SettingsViewModelTest {
     @Test
     fun `init with no current user id skips user load`() = runTest {
         every { authRepository.currentUserId } returns null
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
 
         advanceUntilIdle()
 
@@ -141,7 +146,7 @@ class SettingsViewModelTest {
     @Test
     fun `init sets error state when user flow throws`() = runTest {
         every { userRepository.observeUser("user1") } returns flow { throw RuntimeException("network error") }
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
 
         advanceUntilIdle()
 
@@ -157,7 +162,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(false)
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
 
         advanceUntilIdle()
 
@@ -393,7 +398,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted dictation language`() = runTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
 
         advanceUntilIdle()
 
@@ -559,21 +564,23 @@ class SettingsViewModelTest {
     }
 
     @Test
-    fun `downloadAndInstall progresses through Downloading then triggers install`() = runTest {
+    fun `downloadAndInstall transitions through Downloading and ends in ReadyToInstall, no auto-install`() = runTest {
         val update = manifest()
         val tmpFile = java.io.File.createTempFile("test", ".apk")
         coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
             DownloadProgress.InProgress(50, 100),
             DownloadProgress.Done(tmpFile)
         )
-        coEvery { appUpdateRepository.installUpdate(tmpFile) } returns Result.success(Unit)
         advanceUntilIdle()
 
         viewModel.downloadAndInstall(update)
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { appUpdateRepository.installUpdate(tmpFile) }
-        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+        // Critical: install is NOT auto-triggered. User must tap installNow().
+        coVerify(exactly = 0) { appUpdateRepository.installUpdate(any()) }
+        val state = viewModel.uiState.value.update
+        assertTrue("Expected ReadyToInstall, got $state", state is UpdateUiState.ReadyToInstall)
+        assertEquals(tmpFile, (state as UpdateUiState.ReadyToInstall).apkFile)
         tmpFile.delete()
     }
 
@@ -591,5 +598,94 @@ class SettingsViewModelTest {
         val state = viewModel.uiState.value.update
         assertTrue(state is UpdateUiState.Failed)
         assertEquals("checksum mismatch", (state as UpdateUiState.Failed).message)
+    }
+
+    @Test
+    fun `installNow with permission granted calls installUpdate and returns to Idle`() = runTest {
+        val update = manifest()
+        val tmpFile = java.io.File.createTempFile("test", ".apk")
+        coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
+            DownloadProgress.Done(tmpFile)
+        )
+        coEvery { appUpdateRepository.installUpdate(tmpFile) } returns Result.success(Unit)
+        every { apkInstaller.canRequestInstall() } returns true
+        advanceUntilIdle()
+
+        viewModel.downloadAndInstall(update)
+        advanceUntilIdle()
+        // Pre-check: state is ReadyToInstall (no auto-install).
+        assertTrue(viewModel.uiState.value.update is UpdateUiState.ReadyToInstall)
+
+        viewModel.installNow()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { appUpdateRepository.installUpdate(tmpFile) }
+        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+        tmpFile.delete()
+    }
+
+    @Test
+    fun `installNow without permission transitions to NeedsInstallPermission and skips installUpdate`() = runTest {
+        val update = manifest()
+        val tmpFile = java.io.File.createTempFile("test", ".apk")
+        coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
+            DownloadProgress.Done(tmpFile)
+        )
+        every { apkInstaller.canRequestInstall() } returns false
+        advanceUntilIdle()
+
+        viewModel.downloadAndInstall(update)
+        advanceUntilIdle()
+
+        viewModel.installNow()
+        advanceUntilIdle()
+
+        val state = viewModel.uiState.value.update
+        assertTrue("Expected NeedsInstallPermission, got $state", state is UpdateUiState.NeedsInstallPermission)
+        assertEquals(tmpFile, (state as UpdateUiState.NeedsInstallPermission).apkFile)
+        coVerify(exactly = 0) { appUpdateRepository.installUpdate(any()) }
+        tmpFile.delete()
+    }
+
+    @Test
+    fun `installNow does nothing when state is not ReadyToInstall or NeedsInstallPermission`() = runTest {
+        // State is Idle; installNow should be a no-op.
+        advanceUntilIdle()
+        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+
+        viewModel.installNow()
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { appUpdateRepository.installUpdate(any()) }
+        verify(exactly = 0) { apkInstaller.canRequestInstall() }
+        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+    }
+
+    @Test
+    fun `installNow can recover from NeedsInstallPermission once user grants the permission`() = runTest {
+        val update = manifest()
+        val tmpFile = java.io.File.createTempFile("test", ".apk")
+        coEvery { appUpdateRepository.downloadUpdate(update) } returns kotlinx.coroutines.flow.flowOf(
+            DownloadProgress.Done(tmpFile)
+        )
+        coEvery { appUpdateRepository.installUpdate(tmpFile) } returns Result.success(Unit)
+        // First tap: permission revoked.
+        every { apkInstaller.canRequestInstall() } returns false
+        advanceUntilIdle()
+
+        viewModel.downloadAndInstall(update)
+        advanceUntilIdle()
+        viewModel.installNow()
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.update is UpdateUiState.NeedsInstallPermission)
+
+        // User goes to system settings, grants the permission, comes back, taps again.
+        every { apkInstaller.canRequestInstall() } returns true
+        viewModel.installNow()
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { appUpdateRepository.installUpdate(tmpFile) }
+        assertEquals(UpdateUiState.Idle, viewModel.uiState.value.update)
+        tmpFile.delete()
     }
 }

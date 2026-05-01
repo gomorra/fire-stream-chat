@@ -42,8 +42,8 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.NotificationsActive
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
@@ -741,7 +741,7 @@ private fun UpdateRow(
                     tint = MaterialTheme.colorScheme.primary
                 )
                 is UpdateUiState.NeedsInstallPermission -> Icon(
-                    Icons.Default.OpenInNew,
+                    Icons.AutoMirrored.Filled.OpenInNew,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
