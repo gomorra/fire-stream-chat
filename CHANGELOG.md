@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.6.3] — 2026-05-01
+
+### Fixed
+- **Update row auto-refreshes after granting "Install unknown apps" permission.** Previously, returning from the system permission screen left the Settings update row stuck on "Allow installs from FireStream to continue" — the user had to leave and re-enter Settings for the row to update. A lifecycle `ON_RESUME` observer now calls `recheckInstallPermission()` which detects the granted permission and transitions the row to "Update ready — tap to install" immediately. (`02d35d1`)
+
 ## [1.6.2] — 2026-05-01
 
 ### Fixed
