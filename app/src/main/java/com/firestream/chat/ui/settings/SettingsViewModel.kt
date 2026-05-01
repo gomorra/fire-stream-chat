@@ -11,6 +11,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import android.content.Intent
+import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -42,6 +44,8 @@ sealed interface UpdateUiState {
     data object UpToDate : UpdateUiState
     data class Available(val update: AppUpdate) : UpdateUiState
     data class Downloading(val bytesDownloaded: Long, val totalBytes: Long) : UpdateUiState
+    data class ReadyToInstall(val apkFile: File) : UpdateUiState
+    data class NeedsInstallPermission(val apkFile: File) : UpdateUiState
     data class Failed(val message: String) : UpdateUiState
 }
 
@@ -82,6 +86,7 @@ class SettingsViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val appUpdateRepository: AppUpdateRepository,
+    private val apkInstaller: ApkInstaller,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
@@ -370,6 +375,49 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
+     * Tap-to-install entry point used by the row when state is
+     * [UpdateUiState.ReadyToInstall] or [UpdateUiState.NeedsInstallPermission].
+     * Re-checks the install-unknown-apps permission each time so a user who
+     * just granted it via the system settings screen can return and install
+     * without having to retrigger the download.
+     */
+    fun installNow() {
+        val apkFile = when (val s = _uiState.value.update) {
+            is UpdateUiState.ReadyToInstall -> s.apkFile
+            is UpdateUiState.NeedsInstallPermission -> s.apkFile
+            else -> return
+        }
+        if (!apkInstaller.canRequestInstall()) {
+            _uiState.value = _uiState.value.copy(
+                update = UpdateUiState.NeedsInstallPermission(apkFile)
+            )
+            return
+        }
+        viewModelScope.launch {
+            appUpdateRepository.installUpdate(apkFile)
+                .onSuccess {
+                    _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
+                }
+                .onFailure { e ->
+                    _uiState.value = _uiState.value.copy(
+                        update = UpdateUiState.Failed(AppError.from(e).message)
+                    )
+                }
+        }
+    }
+
+    /**
+     * Open the system "Install unknown apps" screen for this package.
+     * `appContext.startActivity` requires `FLAG_ACTIVITY_NEW_TASK` since we're
+     * launching from a non-activity context.
+     */
+    fun requestInstallPermission() {
+        val intent = apkInstaller.installPermissionIntent()
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        appContext.startActivity(intent)
+    }
+
+    /**
      * On Settings re-entry during an in-flight download, snap the dialog back
      * to its current byte count instead of restarting from byte 0. The flow
      * stays empty when no worker is running.
@@ -380,7 +428,7 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private suspend fun handleDownloadProgress(progress: DownloadProgress) {
+    private fun handleDownloadProgress(progress: DownloadProgress) {
         when (progress) {
             is DownloadProgress.InProgress -> {
                 _uiState.value = _uiState.value.copy(
@@ -388,15 +436,11 @@ class SettingsViewModel @Inject constructor(
                 )
             }
             is DownloadProgress.Done -> {
-                appUpdateRepository.installUpdate(progress.apkFile)
-                    .onSuccess {
-                        _uiState.value = _uiState.value.copy(update = UpdateUiState.Idle)
-                    }
-                    .onFailure { e ->
-                        _uiState.value = _uiState.value.copy(
-                            update = UpdateUiState.Failed(AppError.from(e).message)
-                        )
-                    }
+                // No auto-install — user explicitly confirms via the row tap
+                // (or the persistent notification's tap-to-install action).
+                _uiState.value = _uiState.value.copy(
+                    update = UpdateUiState.ReadyToInstall(progress.apkFile)
+                )
             }
             is DownloadProgress.Failed -> {
                 _uiState.value = _uiState.value.copy(

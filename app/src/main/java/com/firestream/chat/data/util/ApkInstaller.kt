@@ -2,6 +2,8 @@ package com.firestream.chat.data.util
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -32,4 +34,14 @@ class ApkInstaller @Inject constructor(
 
     fun canRequestInstall(): Boolean =
         context.packageManager.canRequestPackageInstalls()
+
+    /**
+     * Intent that opens the per-app "Install unknown apps" settings screen so
+     * the user can grant the permission. Caller is responsible for adding
+     * `FLAG_ACTIVITY_NEW_TASK` if launching from a non-activity context.
+     */
+    fun installPermissionIntent(): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+            data = Uri.parse("package:${context.packageName}")
+        }
 }

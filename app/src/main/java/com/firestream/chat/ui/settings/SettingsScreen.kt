@@ -27,6 +27,8 @@ import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -41,7 +43,9 @@ import androidx.compose.material.icons.filled.AlternateEmail
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.RemoveRedEye
+import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.SettingsBrightness
@@ -50,6 +54,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -104,6 +109,10 @@ fun SettingsScreen(
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showDisableEncryptionDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
+    // Ephemeral confirm dialog for cancelling an in-flight APK download. Lives
+    // here rather than in SettingsUiState because it's pure UI intent and
+    // doesn't need to survive process death.
+    var showCancelConfirm by remember { mutableStateOf(false) }
     val appContext = LocalContext.current.applicationContext
 
     Scaffold(
@@ -410,18 +419,13 @@ fun SettingsScreen(
                 }
             )
 
-            SettingsItem(
-                icon = Icons.Default.SystemUpdate,
-                title = "Check for updates",
-                subtitle = updateRowSubtitle(uiState.update),
-                onClick = {
-                    when (val s = uiState.update) {
-                        is UpdateUiState.Available -> viewModel.downloadAndInstall(s.update)
-                        UpdateUiState.Checking,
-                        is UpdateUiState.Downloading -> Unit
-                        else -> viewModel.checkForUpdate()
-                    }
-                }
+            UpdateRow(
+                state = uiState.update,
+                onCheckForUpdate = viewModel::checkForUpdate,
+                onShowAvailable = { /* handled by the Available dialog below */ },
+                onRequestCancel = { showCancelConfirm = true },
+                onInstall = viewModel::installNow,
+                onRequestPermission = viewModel::requestInstallPermission
             )
 
             SettingsItem(
@@ -579,6 +583,11 @@ fun SettingsScreen(
         )
     }
 
+    // Modal dialogs survive only for two states now: Available (user must
+    // confirm before kicking off the download) and Failed (a recap with an OK
+    // dismiss). The Downloading state is rendered inline in the row so the
+    // app stays usable during the download. ReadyToInstall and
+    // NeedsInstallPermission are also row-only.
     when (val s = uiState.update) {
         is UpdateUiState.Available -> AlertDialog(
             onDismissRequest = { viewModel.dismissUpdateState() },
@@ -603,32 +612,6 @@ fun SettingsScreen(
                 }
             }
         )
-        is UpdateUiState.Downloading -> AlertDialog(
-            onDismissRequest = {},
-            title = { Text("Downloading update") },
-            text = {
-                Column {
-                    val progress = if (s.totalBytes > 0) {
-                        s.bytesDownloaded.toFloat() / s.totalBytes.toFloat()
-                    } else 0f
-                    LinearProgressIndicator(
-                        progress = { progress.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "${s.bytesDownloaded / 1024 / 1024} MB" +
-                            if (s.totalBytes > 0) " / ${s.totalBytes / 1024 / 1024} MB" else "",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.cancelUpdateDownload() }) {
-                    Text("Cancel")
-                }
-            }
-        )
         is UpdateUiState.Failed -> AlertDialog(
             onDismissRequest = { viewModel.dismissUpdateState() },
             title = { Text("Update failed") },
@@ -641,15 +624,137 @@ fun SettingsScreen(
         )
         else -> Unit
     }
+
+    if (showCancelConfirm) {
+        AlertDialog(
+            onDismissRequest = { showCancelConfirm = false },
+            title = { Text("Cancel download?") },
+            text = { Text("Partial progress will be kept. You can resume later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.cancelUpdateDownload()
+                    showCancelConfirm = false
+                }) {
+                    Text("Cancel download")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelConfirm = false }) {
+                    Text("Keep downloading")
+                }
+            }
+        )
+    }
 }
 
-private fun updateRowSubtitle(state: UpdateUiState): String = when (state) {
+internal fun updateRowSubtitle(state: UpdateUiState): String = when (state) {
     UpdateUiState.Idle -> "Tap to check for a newer version"
     UpdateUiState.Checking -> "Checking…"
     UpdateUiState.UpToDate -> "You're on the latest version"
     is UpdateUiState.Available -> "Version ${state.update.versionName} ready to install"
-    is UpdateUiState.Downloading -> "Downloading…"
-    is UpdateUiState.Failed -> state.message
+    is UpdateUiState.Downloading -> {
+        val mbDone = state.bytesDownloaded / 1024 / 1024
+        if (state.totalBytes > 0) {
+            val mbTotal = state.totalBytes / 1024 / 1024
+            val pct = ((state.bytesDownloaded * 100) / state.totalBytes).toInt()
+            "Downloading $mbDone MB / $mbTotal MB · $pct%"
+        } else {
+            "Downloading $mbDone MB…"
+        }
+    }
+    is UpdateUiState.ReadyToInstall -> "Update ready — tap to install"
+    is UpdateUiState.NeedsInstallPermission -> "Allow installs from FireStream to continue"
+    is UpdateUiState.Failed -> "${state.message} — tap to retry"
+}
+
+/**
+ * Settings row for "Check for updates". Renders inline progress + cancel ✕
+ * during download, "Update ready — tap to install" when finished, and a
+ * permission-prompt fallback when "Install unknown apps" is revoked. Replaces
+ * the previous modal Downloading dialog so the user can keep using the app
+ * during the download.
+ */
+@Composable
+private fun UpdateRow(
+    state: UpdateUiState,
+    onCheckForUpdate: () -> Unit,
+    onShowAvailable: () -> Unit,
+    onRequestCancel: () -> Unit,
+    onInstall: () -> Unit,
+    onRequestPermission: () -> Unit
+) {
+    val rowOnClick: () -> Unit = when (state) {
+        is UpdateUiState.Downloading -> ({})
+        is UpdateUiState.Available -> onShowAvailable
+        is UpdateUiState.ReadyToInstall -> onInstall
+        is UpdateUiState.NeedsInstallPermission -> onRequestPermission
+        else -> onCheckForUpdate
+    }
+
+    ListItem(
+        headlineContent = { Text("Check for updates") },
+        supportingContent = {
+            Column {
+                Text(
+                    updateRowSubtitle(state),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (state is UpdateUiState.Downloading) {
+                    Spacer(Modifier.height(6.dp))
+                    if (state.totalBytes > 0) {
+                        val progress = (state.bytesDownloaded.toFloat() / state.totalBytes)
+                            .coerceIn(0f, 1f)
+                        LinearProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        // Indeterminate: total content-length not yet known.
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        },
+        leadingContent = {
+            Icon(
+                Icons.Default.SystemUpdate,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        trailingContent = {
+            when (state) {
+                is UpdateUiState.Checking -> CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+                is UpdateUiState.Downloading -> IconButton(onClick = onRequestCancel) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Cancel download",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                is UpdateUiState.ReadyToInstall -> Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                is UpdateUiState.NeedsInstallPermission -> Icon(
+                    Icons.Default.OpenInNew,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                is UpdateUiState.Failed -> Icon(
+                    Icons.Default.Replay,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error
+                )
+                else -> {}
+            }
+        },
+        modifier = Modifier.clickable(onClick = rowOnClick)
+    )
 }
 
 @Composable
