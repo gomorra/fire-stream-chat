@@ -40,5 +40,8 @@ data class Message(
     val isPinned: Boolean = false,
     // Location sharing
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    // Image was sent without compression (Settings → "Send images in full quality").
+    // Drives the HD badge on image bubbles; false for any other message type.
+    val isHd: Boolean = false
 )

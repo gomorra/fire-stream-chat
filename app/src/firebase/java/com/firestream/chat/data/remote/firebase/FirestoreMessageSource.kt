@@ -102,7 +102,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaWidth: Int?,
         mediaHeight: Int?,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        isHd: Boolean
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -123,6 +124,7 @@ class FirestoreMessageSource @Inject constructor(
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
+        if (isHd) data["isHd"] = true
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -155,7 +157,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaWidth: Int?,
         mediaHeight: Int?,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        isHd: Boolean
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -175,6 +178,7 @@ class FirestoreMessageSource @Inject constructor(
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
+        if (isHd) data["isHd"] = true
         val docRef = firestore
             .collection("chats").document(chatId)
             .collection("messages")
@@ -476,7 +480,8 @@ class FirestoreMessageSource @Inject constructor(
             mediaWidth = (data["mediaWidth"] as? Long)?.toInt(),
             mediaHeight = (data["mediaHeight"] as? Long)?.toInt(),
             latitude = (data["latitude"] as? Number)?.toDouble(),
-            longitude = (data["longitude"] as? Number)?.toDouble()
+            longitude = (data["longitude"] as? Number)?.toDouble(),
+            isHd = data["isHd"] as? Boolean ?: false
         )
     }
 

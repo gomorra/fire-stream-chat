@@ -46,7 +46,8 @@ data class MessageEntity(
     val listDiff: String? = null,
     val isPinned: Boolean = false,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    val isHd: Boolean = false
 ) {
     fun toDomain() = Message(
         id = id,
@@ -77,7 +78,8 @@ data class MessageEntity(
         listDiff = listDiff?.let { parseListDiffJson(it) },
         isPinned = isPinned,
         latitude = latitude,
-        longitude = longitude
+        longitude = longitude,
+        isHd = isHd
     )
 
     companion object {
@@ -110,7 +112,8 @@ data class MessageEntity(
             listDiff = message.listDiff?.let { listDiffToJson(it) },
             isPinned = message.isPinned,
             latitude = message.latitude,
-            longitude = message.longitude
+            longitude = message.longitude,
+            isHd = message.isHd
         )
 
         private fun pollToJson(poll: Poll): String {

@@ -181,7 +181,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 mediaWidth = raw.mediaWidth,
                                 mediaHeight = raw.mediaHeight,
                                 latitude = raw.latitude,
-                                longitude = raw.longitude
+                                longitude = raw.longitude,
+                                isHd = raw.isHd
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -254,7 +255,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 mediaWidth = raw.mediaWidth,
                                 mediaHeight = raw.mediaHeight,
                                 latitude = raw.latitude,
-                                longitude = raw.longitude
+                                longitude = raw.longitude,
+                                isHd = raw.isHd
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 
@@ -310,6 +312,7 @@ class MessageRepositoryImpl @Inject constructor(
         latitude: Double? = null,
         longitude: Double? = null,
         isForwarded: Boolean = false,
+        isHd: Boolean = false,
     ): String {
         return if (
             recipientId.isNotEmpty() &&
@@ -337,6 +340,7 @@ class MessageRepositoryImpl @Inject constructor(
                 mediaHeight = mediaHeight,
                 latitude = latitude,
                 longitude = longitude,
+                isHd = isHd,
             )
         } else {
             messageSource.sendPlainMessage(
@@ -355,6 +359,7 @@ class MessageRepositoryImpl @Inject constructor(
                 mediaHeight = mediaHeight,
                 latitude = latitude,
                 longitude = longitude,
+                isHd = isHd,
             )
         }
     }
@@ -459,11 +464,13 @@ class MessageRepositoryImpl @Inject constructor(
         val uploadUri: Uri
         val uploadMimeType: String
         var tempCompressedFile: File? = null
+        var isHd = false
 
         if (isImage) {
             val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
             val result = imageCompressor.processImage(parsedUri, fullQuality)
             tempCompressedFile = result.file
+            isHd = fullQuality
 
             // Copy processed image to permanent local storage
             localFile = mediaFileManager.copyToLocal(
@@ -491,7 +498,8 @@ class MessageRepositoryImpl @Inject constructor(
             timestamp = timestamp,
             localUri = localFile?.absolutePath ?: uri,
             mediaWidth = mediaWidth,
-            mediaHeight = mediaHeight
+            mediaHeight = mediaHeight,
+            isHd = isHd
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
@@ -515,6 +523,7 @@ class MessageRepositoryImpl @Inject constructor(
             mediaUrl = downloadUrl,
             mediaWidth = mediaWidth,
             mediaHeight = mediaHeight,
+            isHd = isHd,
         )
 
         val sentMessage = optimisticMessage.copy(
@@ -523,7 +532,8 @@ class MessageRepositoryImpl @Inject constructor(
             mediaUrl = downloadUrl,
             localUri = localFile?.absolutePath,
             mediaWidth = mediaWidth,
-            mediaHeight = mediaHeight
+            mediaHeight = mediaHeight,
+            isHd = isHd
         )
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
         chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
@@ -987,7 +997,8 @@ class MessageRepositoryImpl @Inject constructor(
                     emojiSizes = raw.emojiSizes, listId = raw.listId,
                     listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                     isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
-                    latitude = raw.latitude, longitude = raw.longitude
+                    latitude = raw.latitude, longitude = raw.longitude,
+                    isHd = raw.isHd
                 )
                 messageDao.insertMessage(MessageEntity.fromDomain(message))
                 continue
@@ -1033,7 +1044,8 @@ class MessageRepositoryImpl @Inject constructor(
                 emojiSizes = raw.emojiSizes, listId = raw.listId,
                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                 isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
-                latitude = raw.latitude, longitude = raw.longitude
+                latitude = raw.latitude, longitude = raw.longitude,
+                isHd = raw.isHd
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
         }

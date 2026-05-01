@@ -43,5 +43,6 @@ data class RawMessage(
     val mediaWidth: Int? = null,
     val mediaHeight: Int? = null,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    val isHd: Boolean = false
 )

@@ -39,7 +39,8 @@ interface MessageSource {
         mediaWidth: Int? = null,
         mediaHeight: Int? = null,
         latitude: Double? = null,
-        longitude: Double? = null
+        longitude: Double? = null,
+        isHd: Boolean = false
     ): String
 
     suspend fun sendPlainMessage(
@@ -57,7 +58,8 @@ interface MessageSource {
         mediaWidth: Int? = null,
         mediaHeight: Int? = null,
         latitude: Double? = null,
-        longitude: Double? = null
+        longitude: Double? = null,
+        isHd: Boolean = false
     ): String
 
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long)

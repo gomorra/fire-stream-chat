@@ -110,7 +110,8 @@ class PocketBaseMessageSource @Inject constructor(
         mediaWidth: Int?,
         mediaHeight: Int?,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        isHd: Boolean
     ): String {
         val body = JSONObject().apply {
             put("chat_id", chatId)
@@ -161,7 +162,8 @@ class PocketBaseMessageSource @Inject constructor(
         mediaWidth: Int?,
         mediaHeight: Int?,
         latitude: Double?,
-        longitude: Double?
+        longitude: Double?,
+        isHd: Boolean
     ): String = throw NotImplementedError(
         "encryption gated off in pocketbase flavor — MessageRepositoryImpl should not reach here"
     )

@@ -622,7 +622,29 @@ internal fun MessageBubble(
                     }
 
                     if (showTail) {
-                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.End,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (message.type == MessageType.IMAGE && message.isHd) {
+                            Text(
+                                text = "HD",
+                                color = textColor.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                                    letterSpacing = 0.5.sp
+                                ),
+                                modifier = Modifier
+                                    .border(
+                                        width = 1.dp,
+                                        color = textColor.copy(alpha = 0.4f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                        }
                         if (message.type != MessageType.CALL) {
                             Text(
                                 text = formatTimestamp(message.timestamp),
