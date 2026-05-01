@@ -5,7 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.6.3] — 2026-05-01
 
 ### Fixed
-- **Update row auto-refreshes after granting "Install unknown apps" permission.** Previously, returning from the system permission screen left the Settings update row stuck on "Allow installs from FireStream to continue" — the user had to leave and re-enter Settings for the row to update. A lifecycle `ON_RESUME` observer now calls `recheckInstallPermission()` which detects the granted permission and transitions the row to "Update ready — tap to install" immediately. (`02d35d1`)
+- **Update row auto-refreshes after granting "Install unknown apps" permission.** Previously, returning from the system permission screen left the Settings update row stuck on "Allow installs from FireStream to continue" — the user had to leave and re-enter Settings for the row to update. A lifecycle `ON_RESUME` observer now calls `recheckInstallPermission()` which detects the granted permission and transitions the row to "Update ready — tap to install" immediately. (`02d35d1`) 
 
 ## [1.6.2] — 2026-05-01
 
