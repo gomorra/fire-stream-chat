@@ -104,6 +104,17 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <!-- WorkManager's SystemForegroundService ships without a
+             foregroundServiceType attribute. On Android 14+ that makes
+             startForeground(type=DATA_SYNC) throw IllegalArgumentException
+             ("0x1 is not a subset of 0x0"). Merging in the attribute here
+             lets ApkDownloadWorker (and any future dataSync worker) call
+             setForeground() with FOREGROUND_SERVICE_TYPE_DATA_SYNC. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+
     </application>
 
 </manifest>

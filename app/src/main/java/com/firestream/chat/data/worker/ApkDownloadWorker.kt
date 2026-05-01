@@ -2,10 +2,15 @@ package com.firestream.chat.data.worker
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.Uri
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
@@ -16,11 +21,21 @@ import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.repository.DownloadProgress
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
+import java.io.File
 
 /**
  * Foreground download of the release APK. Lives in a service so the OS does
  * not throttle network I/O while the screen is locked — the original
  * inline-in-`viewModelScope` flow stalled mid-stream during Doze.
+ *
+ * The whole `doWork()` is wrapped in a catch-all so any unexpected throwable
+ * surfaces as `Result.failure` with a real `KEY_FAILURE_MESSAGE` instead of
+ * crashing the host process. `setForeground` itself is wrapped because on
+ * Android 14+ the call can be rejected (FGS-from-background restrictions or
+ * manifest-merger gaps in WorkManager); when that happens we degrade to a
+ * plain background worker — the download still completes, the user just
+ * doesn't see the persistent notification.
  *
  * Notification channel `fire_stream_app_updates` was created at
  * `IMPORTANCE_LOW` by [UpdateCheckWorker]; importance is sticky, so this
@@ -34,7 +49,16 @@ class ApkDownloadWorker @AssistedInject constructor(
     private val apkDownloader: ApkDownloader
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = try {
+        runDownload()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        Log.e(TAG, "ApkDownloadWorker crashed", t)
+        Result.failure(workDataOf(KEY_FAILURE_MESSAGE to friendlyMessage(t)))
+    }
+
+    private suspend fun runDownload(): Result {
         val update = AppUpdate(
             versionCode = inputData.getInt(KEY_VERSION_CODE, 0),
             versionName = inputData.getString(KEY_VERSION_NAME).orEmpty(),
@@ -45,10 +69,14 @@ class ApkDownloadWorker @AssistedInject constructor(
             publishedAt = "",
             mandatory = false
         )
-        if (update.apkUrl.isBlank() || update.sha256.isBlank()) return Result.failure()
+        if (update.apkUrl.isBlank() || update.sha256.isBlank()) {
+            return Result.failure(workDataOf(KEY_FAILURE_MESSAGE to "Invalid update manifest"))
+        }
 
-        // Must complete inside ~10 s of enqueue to avoid ForegroundServiceDidNotStartInTime.
-        setForeground(buildForegroundInfo(0L, -1L))
+        // Try to promote to foreground service so the OS doesn't kill us during
+        // Doze or backgrounding. If FGS start is rejected, we fall back to a
+        // regular background worker — the download still completes.
+        var fgsActive = tryPromoteForeground(0L, -1L)
 
         var terminal: DownloadProgress = DownloadProgress.Failed("No progress emitted")
         apkDownloader.download(update).collect { progress ->
@@ -58,19 +86,36 @@ class ApkDownloadWorker @AssistedInject constructor(
                     KEY_BYTES to progress.bytesDownloaded,
                     KEY_TOTAL to progress.totalBytes
                 ))
-                setForeground(buildForegroundInfo(progress.bytesDownloaded, progress.totalBytes))
+                if (fgsActive) {
+                    fgsActive = tryPromoteForeground(progress.bytesDownloaded, progress.totalBytes)
+                }
             }
         }
         return when (val t = terminal) {
-            is DownloadProgress.Done -> Result.success(workDataOf(
-                KEY_VERSION_CODE to update.versionCode,
-                KEY_VERSION_NAME to update.versionName
-            ))
+            is DownloadProgress.Done -> {
+                postInstallReadyNotification(t.apkFile)
+                Result.success(workDataOf(
+                    KEY_VERSION_CODE to update.versionCode,
+                    KEY_VERSION_NAME to update.versionName
+                ))
+            }
             is DownloadProgress.Failed -> Result.failure(
                 workDataOf(KEY_FAILURE_MESSAGE to t.message)
             )
-            is DownloadProgress.InProgress -> Result.failure()
+            is DownloadProgress.InProgress -> Result.failure(
+                workDataOf(KEY_FAILURE_MESSAGE to "Download ended without completion")
+            )
         }
+    }
+
+    private suspend fun tryPromoteForeground(bytes: Long, total: Long): Boolean = try {
+        setForeground(buildForegroundInfo(bytes, total))
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        Log.w(TAG, "setForeground rejected — continuing as background worker", t)
+        false
     }
 
     private fun buildForegroundInfo(bytes: Long, total: Long): ForegroundInfo {
@@ -93,6 +138,36 @@ class ApkDownloadWorker @AssistedInject constructor(
         }
     }
 
+    private fun postInstallReadyNotification(apkFile: File) {
+        ensureChannel()
+        val authority = "${context.packageName}.fileprovider"
+        val uri: Uri = FileProvider.getUriForFile(context, authority, apkFile)
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        // PendingIntent.getActivity from a notification tap qualifies for the
+        // background-activity-launch exemption; broadcasts do not. Using the
+        // activity PI lets the user install even when the app is backgrounded.
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            REQUEST_INSTALL,
+            installIntent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val notif = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("Update ready")
+            .setContentText("Tap to install")
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        context.getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notif)
+    }
+
     private fun progressText(bytes: Long, total: Long): String {
         val mbDone = bytes / 1024 / 1024
         return if (total > 0) "$mbDone MB / ${total / 1024 / 1024} MB" else "$mbDone MB"
@@ -109,7 +184,11 @@ class ApkDownloadWorker @AssistedInject constructor(
         )
     }
 
+    private fun friendlyMessage(t: Throwable): String =
+        t.message?.takeIf { it.isNotBlank() } ?: t.javaClass.simpleName
+
     companion object {
+        private const val TAG = "ApkDownloadWorker"
         const val WORK_APK_DOWNLOAD = "apk_download"
         const val KEY_VERSION_CODE = "versionCode"
         const val KEY_VERSION_NAME = "versionName"
@@ -120,5 +199,6 @@ class ApkDownloadWorker @AssistedInject constructor(
         const val KEY_FAILURE_MESSAGE = "failureMessage"
         private const val CHANNEL_ID = "fire_stream_app_updates"
         private const val NOTIF_ID = 0xFC_5A_DF
+        private const val REQUEST_INSTALL = 0xFC_5A_E0
     }
 }
