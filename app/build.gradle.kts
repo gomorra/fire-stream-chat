@@ -49,7 +49,9 @@ val gitTagVersionName: String = when {
 }
 
 // Release signing: env vars (CI) or local.properties (developer machines). When
-// absent, release builds fall back to the debug keystore so `assembleRelease`
+// present, BOTH debug and release builds use this keystore so the system
+// installer accepts in-place upgrades between build types. When absent,
+// both fall back to the debug keystore so assembleRelease / assembleDebug
 // still works locally — but APKs from such builds cannot in-place upgrade an
 // installation produced by the CI keystore. See docs/RELEASING.md.
 val localProps = Properties().apply {
@@ -144,6 +146,14 @@ android {
 
     buildTypes {
         debug {
+            // Use the release keystore for debug builds when credentials are
+            // available. This lets debug ↔ release in-place upgrades succeed
+            // (the system installer rejects cross-key updates with "App not
+            // installed"). Without credentials the default debug keystore is
+            // used — same as before.
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             // Include x86_64 in debug so the app runs natively on x86_64 emulators.
             // Without this, only arm64-v8a ships and the emulator falls back to
             // Berberis (ARM→x86 translator), which produces spurious VerifyError /

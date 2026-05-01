@@ -68,7 +68,7 @@ releaseKeyPassword=...
 
 Then `./gradlew assembleFirebaseRelease` produces a signed APK at `app/build/outputs/apk/firebase/release/`.
 
-If none of these properties are set, release builds fall back to the debug keystore so `assembleRelease` still works for quick local checks. APKs built that way **cannot** in-place upgrade any installation produced by the CI keystore.
+> **Important:** When these credentials are present, **debug builds are also signed with the release keystore**. This ensures `installDebug` → release update (via the in-app updater) works without "App not installed" failures. Without these credentials, both build types fall back to the default debug keystore — but APKs built that way cannot in-place upgrade any installation produced by the CI keystore. After adding the credentials for the first time, uninstall the existing debug-signed app and reinstall.
 
 ## Cutting a release
 
