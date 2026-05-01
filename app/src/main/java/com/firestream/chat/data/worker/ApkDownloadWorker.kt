@@ -99,9 +99,22 @@ class ApkDownloadWorker @AssistedInject constructor(
                     KEY_VERSION_NAME to update.versionName
                 ))
             }
-            is DownloadProgress.Failed -> Result.failure(
-                workDataOf(KEY_FAILURE_MESSAGE to t.message)
-            )
+            is DownloadProgress.Failed -> {
+                // On the first checksum mismatch the downloader has already
+                // wiped the partial file; let WorkManager retry once with
+                // backoff so a stale-CDN or mid-write-truncation case
+                // self-heals before we surface a hard error to the user.
+                val isChecksumMismatch = t.message.startsWith("Checksum mismatch")
+                if (isChecksumMismatch && runAttemptCount < 1) {
+                    Result.retry()
+                } else if (isChecksumMismatch) {
+                    Result.failure(workDataOf(
+                        KEY_FAILURE_MESSAGE to "Update file is corrupt — please report to the team"
+                    ))
+                } else {
+                    Result.failure(workDataOf(KEY_FAILURE_MESSAGE to t.message))
+                }
+            }
             is DownloadProgress.InProgress -> Result.failure(
                 workDataOf(KEY_FAILURE_MESSAGE to "Download ended without completion")
             )

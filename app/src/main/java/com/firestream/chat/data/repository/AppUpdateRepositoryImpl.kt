@@ -1,10 +1,12 @@
 package com.firestream.chat.data.repository
 
 import android.content.Context
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -31,6 +33,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import java.io.File
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -68,6 +71,14 @@ class AppUpdateRepositoryImpl @Inject constructor(
                     .setRequiredNetworkType(NetworkType.CONNECTED)
                     .build()
             )
+            // Expedited: WorkManager handles the FGS lifecycle. If quota is
+            // exhausted, RUN_AS_NON_EXPEDITED_WORK_REQUEST falls back to a
+            // regular background worker rather than failing.
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            // Linear 10s backoff bounds the checksum-mismatch retry path
+            // (worker returns Result.retry() on first attempt; second attempt
+            // surfaces a clear error).
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 10, TimeUnit.SECONDS)
             .build()
         // KEEP — re-entry to Settings during a download must rejoin the existing
         // worker, not cancel it and restart from byte 0.
@@ -78,11 +89,18 @@ class AppUpdateRepositoryImpl @Inject constructor(
     override fun observeUpdateDownload(): Flow<DownloadProgress> = progressFlow()
 
     override fun cancelUpdateDownload() {
-        WorkManager.getInstance(context).cancelUniqueWork(WORK_APK_DOWNLOAD)
+        val wm = WorkManager.getInstance(context)
+        wm.cancelUniqueWork(WORK_APK_DOWNLOAD)
+        // Drop the cancelled WorkInfo so the next Settings re-entry doesn't
+        // rehydrate a stale Cancelled state on the row.
+        wm.pruneWork()
     }
 
     override suspend fun installUpdate(apkFile: File): Result<Unit> = runCatching {
         apkInstaller.install(apkFile)
+        // We've handed off to the system installer. Prune so the row clears
+        // and we don't keep re-presenting Done on every Settings re-entry.
+        WorkManager.getInstance(context).pruneWork()
     }
 
     private fun progressFlow(): Flow<DownloadProgress> =
@@ -96,8 +114,13 @@ class AppUpdateRepositoryImpl @Inject constructor(
         /**
          * Pure translator from `WorkInfo` to `DownloadProgress`. Pulled out so the
          * state machine is testable without `WorkManager`. Reads version metadata
-         * from `wi.inputData` so the same flow rehydrates a download started in a
+         * from `wi.outputData` so the same flow rehydrates a download started in a
          * prior VM lifetime.
+         *
+         * On `SUCCEEDED`, stats the APK file: cache eviction between the worker
+         * finishing and the user reopening Settings is real on low-storage devices,
+         * and we don't want the row to claim "Update ready" pointing at a deleted
+         * file.
          */
         internal fun translate(wi: WorkInfo, cacheDir: File): DownloadProgress = when (wi.state) {
             WorkInfo.State.ENQUEUED, WorkInfo.State.BLOCKED ->
@@ -109,9 +132,12 @@ class AppUpdateRepositoryImpl @Inject constructor(
             WorkInfo.State.SUCCEEDED -> {
                 val versionName = wi.outputData.getString(KEY_VERSION_NAME).orEmpty()
                 val versionCode = wi.outputData.getInt(KEY_VERSION_CODE, 0)
-                DownloadProgress.Done(
-                    File(cacheDir, "apk_updates/firestream-v$versionName-$versionCode.apk")
-                )
+                val file = File(cacheDir, "apk_updates/firestream-v$versionName-$versionCode.apk")
+                if (file.exists() && file.length() > 0) {
+                    DownloadProgress.Done(file)
+                } else {
+                    DownloadProgress.Failed("Update file expired — please retry")
+                }
             }
             WorkInfo.State.FAILED -> DownloadProgress.Failed(
                 wi.outputData.getString(KEY_FAILURE_MESSAGE) ?: "Network error"

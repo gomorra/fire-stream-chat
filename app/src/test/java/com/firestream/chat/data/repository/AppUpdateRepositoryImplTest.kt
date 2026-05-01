@@ -97,7 +97,10 @@ class AppUpdateRepositoryImplTest {
 
     // --- translate(WorkInfo) -> DownloadProgress ---
 
-    private val cacheDir = File("/tmp/firestream-cache-test")
+    private val cacheDir = File(
+        System.getProperty("java.io.tmpdir") ?: "/tmp",
+        "firestream-cache-test-${UUID.randomUUID()}"
+    ).apply { mkdirs() }
 
     private fun workInfo(
         state: WorkInfo.State,
@@ -144,17 +147,55 @@ class AppUpdateRepositoryImplTest {
     }
 
     @Test
-    fun `translate SUCCEEDED maps to Done with deterministic file path`() {
+    fun `translate SUCCEEDED with file present maps to Done with deterministic file path`() {
         val output = Data.Builder()
             .putString(KEY_VERSION_NAME, "1.5.0")
             .putInt(KEY_VERSION_CODE, 408)
             .build()
+        val expectedFile = File(cacheDir, "apk_updates/firestream-v1.5.0-408.apk").apply {
+            parentFile?.mkdirs()
+            writeBytes(ByteArray(64))
+        }
+
         val result = AppUpdateRepositoryImpl.translate(
             workInfo(WorkInfo.State.SUCCEEDED, outputData = output), cacheDir
         )
+
         assertTrue(result is DownloadProgress.Done)
         val done = result as DownloadProgress.Done
-        assertEquals(File(cacheDir, "apk_updates/firestream-v1.5.0-408.apk"), done.apkFile)
+        assertEquals(expectedFile, done.apkFile)
+    }
+
+    @Test
+    fun `translate SUCCEEDED with missing apk file maps to Failed expired retry`() {
+        val output = Data.Builder()
+            .putString(KEY_VERSION_NAME, "1.5.0")
+            .putInt(KEY_VERSION_CODE, 408)
+            .build()
+
+        val result = AppUpdateRepositoryImpl.translate(
+            workInfo(WorkInfo.State.SUCCEEDED, outputData = output), cacheDir
+        )
+
+        assertEquals(DownloadProgress.Failed("Update file expired — please retry"), result)
+    }
+
+    @Test
+    fun `translate SUCCEEDED with empty apk file maps to Failed expired retry`() {
+        val output = Data.Builder()
+            .putString(KEY_VERSION_NAME, "2.0.0")
+            .putInt(KEY_VERSION_CODE, 500)
+            .build()
+        File(cacheDir, "apk_updates/firestream-v2.0.0-500.apk").apply {
+            parentFile?.mkdirs()
+            createNewFile()
+        }
+
+        val result = AppUpdateRepositoryImpl.translate(
+            workInfo(WorkInfo.State.SUCCEEDED, outputData = output), cacheDir
+        )
+
+        assertEquals(DownloadProgress.Failed("Update file expired — please retry"), result)
     }
 
     @Test
