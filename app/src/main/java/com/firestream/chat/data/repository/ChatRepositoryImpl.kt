@@ -51,21 +51,8 @@ class ChatRepositoryImpl @Inject constructor(
             try {
                 val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
                 chatSource.observeChatsForUser(uid).collectLatest { chats ->
-                    val existingMap = chatDao.getChatsByIds(chats.map { it.id }).associateBy { it.id }
-                    val entities = chats.map { chat ->
-                        val existing = existingMap[chat.id]
-                        val entity = ChatEntity.fromDomain(chat)
-                        if (existing != null) {
-                            entity.copy(
-                                isPinned = existing.isPinned,
-                                isArchived = existing.isArchived,
-                                muteUntil = existing.muteUntil,
-                                cachedAvatarUrl = existing.cachedAvatarUrl,
-                                localAvatarPath = existing.localAvatarPath
-                            )
-                        } else entity
-                    }
-                    chatDao.insertChats(entities)
+                    // Atomic read+merge+write inside Room — see ChatDao.upsertRemote KDoc.
+                    val existingMap = chatDao.upsertRemote(chats.map { ChatEntity.fromDomain(it) })
 
                     // Download avatars for group/broadcast chats whose URL changed
                     for (chat in chats.filter { it.type != ChatType.INDIVIDUAL }) {
