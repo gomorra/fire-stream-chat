@@ -22,8 +22,24 @@ tool=$(printf '%s' "$input" | jq -r '.tool_name // empty')
 cmd=$(printf '%s' "$input" | jq -r '.tool_input.command // empty')
 [ -n "$cmd" ] || exit 0
 
-# Fast path: not a commit — allow.
-case "$cmd" in
+# Real-commit detection: strip heredoc bodies and single-quoted string literals
+# before asking "is this a real `git commit` invocation?". Avoids false positives
+# on diagnostic scripts that mention "git commit" inside a python heredoc, jq
+# filter, or sed pattern. Falls back to the raw command if python3 is missing.
+real_cmd=$(printf '%s' "$cmd" | python3 -c '
+import sys, re
+s = sys.stdin.read()
+s = re.sub(
+    r"""<<-?\s*(?:["\x27]?)([A-Za-z_]\w*)(?:["\x27]?)[^\n]*\n.*?^\s*\1\s*$""",
+    "",
+    s,
+    flags=re.DOTALL | re.MULTILINE,
+)
+s = re.sub(r"\x27[^\x27]*\x27", "", s)
+sys.stdout.write(s)
+' 2>/dev/null) || real_cmd="$cmd"
+
+case "$real_cmd" in
     *"git commit"*) ;;
     *) exit 0 ;;
 esac
