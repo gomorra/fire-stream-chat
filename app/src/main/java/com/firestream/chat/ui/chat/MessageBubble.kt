@@ -80,7 +80,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -968,20 +967,16 @@ internal fun ReplyImageThumbnail(
 }
 
 // Resolves a Message's display image: local file if present on disk, else
-// remote URL, else null. File.exists() runs on IO to avoid blocking composition.
+// remote URL, else null. The check is synchronous so we never hand AsyncImage
+// the remote URL during a transient "don't know yet" window — that race made
+// the cold-start path always start a network load and show a spinner before
+// switching to the local file. stat() on a local path is cheap (<1ms warm).
+// canRead() guards against EACCES on MediaStore files written by a prior install.
 @Composable
 private fun rememberMessageImageModel(message: Message): Any? {
     val localUri = message.localUri
-    val localFileExists by produceState(initialValue = false, localUri) {
-        value = localUri != null &&
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val f = File(localUri)
-                f.exists() && f.isFile && f.canRead()
-            }
+    val localFile = remember(localUri) {
+        localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
-    return when {
-        localFileExists && localUri != null -> File(localUri)
-        message.mediaUrl != null -> message.mediaUrl
-        else -> null
-    }
+    return localFile ?: message.mediaUrl
 }

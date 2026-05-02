@@ -31,7 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,23 +54,21 @@ internal fun FullscreenImageViewer(
     onSaveToDownloads: (() -> Unit)? = null,
 ) {
     // Prefer local file for faster loading, fall back to remote URL.
+    // The check is synchronous so we never hand Coil the remote URL during a
+    // transient "don't know yet" window — that race made cold-restart taps
+    // always start a network load before swapping to the local file.
     // canRead() catches MediaStore files written by a previous install of this
-    // app — they exist but EACCES on direct open. Without this check we'd
-    // hand Coil an unreadable path and silently render a broken image.
-    val localFileExists by produceState(initialValue = false, localUri) {
-        value = localUri != null &&
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val f = File(localUri)
-                f.exists() && f.isFile && f.canRead()
-            }
+    // app — they exist but EACCES on direct open.
+    val localFile = remember(localUri) {
+        localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
     val imageModel: Any? = when {
-        localFileExists && localUri != null -> File(localUri)
+        localFile != null -> localFile
         !imageUrl.isNullOrBlank() -> imageUrl
         else -> {
             Log.w(
                 "FullscreenImageViewer",
-                "No model — localUri=$localUri (exists=$localFileExists), imageUrl=$imageUrl",
+                "No model — localUri=$localUri, imageUrl=$imageUrl",
             )
             null
         }

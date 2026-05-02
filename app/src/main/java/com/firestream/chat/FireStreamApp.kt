@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.firestream.chat.data.util.CurrentActivityHolder
+import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.FlavorBootstrap
 import dagger.hilt.android.HiltAndroidApp
@@ -49,6 +50,7 @@ class FireStreamApp : Application(), Configuration.Provider {
         currentActivityHolder.register(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
         scheduleUpdateCheck()
+        scheduleMediaBackfill()
     }
 
     private fun scheduleUpdateCheck() {
@@ -62,6 +64,26 @@ class FireStreamApp : Application(), Configuration.Provider {
             .build()
         WorkManager.getInstance(this).enqueueUniquePeriodicWork(
             UpdateCheckWorker.UNIQUE_NAME,
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
+    }
+
+    // Daily backfill clears stale localUri rows whose underlying file is gone
+    // and re-downloads anything still missing. The auto-download path on
+    // message receive covers the happy case; this catches the long tail where
+    // a file got deleted out from under us or an earlier download failed.
+    private fun scheduleMediaBackfill() {
+        val request = PeriodicWorkRequestBuilder<MediaBackfillWorker>(24, TimeUnit.HOURS)
+            .setInitialDelay(1, TimeUnit.HOURS)
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+            )
+            .build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "media_backfill_periodic",
             ExistingPeriodicWorkPolicy.KEEP,
             request
         )

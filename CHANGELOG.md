@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.6.4] — 2026-05-02
+
+### Fixed
+- **Cold-start image spinner.** Tapping an image after closing and reopening the app showed the loading spinner again even when the file was already on local storage. `MessageBubble` and `FullscreenImageViewer` resolved the local-vs-remote choice asynchronously via `produceState(initialValue = false)`, so on every fresh composition `AsyncImage` was handed the remote URL first and only swapped to the local file once the IO check completed — long enough that Coil started a network request whose visible spinner never went away (memory cache was empty post-restart, and Firebase Storage `?token=` rotation makes disk-cache hits unreliable). Replaced with a synchronous `remember(localUri)` `File.exists() && canRead()` check (microseconds on a warm filesystem), so the model is decided before `AsyncImage` ever sees it. Also scheduled `MediaBackfillWorker` as a daily periodic job from `FireStreamApp.onCreate()` (24h, NetworkType.CONNECTED, 1h initial delay) — it was previously only reachable via the manual Settings tap, so the existing "clear stale localUri / re-download missing" pass never ran in the background.
+
 ## [1.6.3] — 2026-05-01
 
 ### Fixed
