@@ -4,6 +4,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [1.6.6] — 2026-05-03
 
+### Added
+- **"Image saved" snackbar with Open action in fullscreen viewer.** Tapping the download button while viewing a fullscreen image now shows a "Image saved to Downloads" snackbar at the bottom of the viewer with an "Open" button that launches the file directly. Previously the confirmation snackbar was hidden behind the viewer.
+
 ### Changed
 - **Fullscreen image viewer zooms up to 10×.** Pinch-to-zoom ceiling raised from 5× to 10×. Double-tap now cycles through three steps — 1× → 3× → 6× → 1× — so you can reach deep zoom without pinching.
 

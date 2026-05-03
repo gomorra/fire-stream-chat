@@ -41,6 +41,12 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+internal data class SnackbarEvent(
+    val message: String,
+    val actionLabel: String? = null,
+    val actionUri: Uri? = null,
+)
+
 internal data class ChatUiState(
     val messages: MessagesState = MessagesState(),
     val composer: ComposerState = ComposerState(),
@@ -108,8 +114,8 @@ class ChatViewModel @Inject constructor(
 
     val uploadProgress: StateFlow<Map<String, Float>> = messageRepository.uploadProgress
 
-    private val _snackbarEvent = MutableSharedFlow<String>()
-    val snackbarEvent: SharedFlow<String> = _snackbarEvent.asSharedFlow()
+    private val _snackbarEvent = MutableSharedFlow<SnackbarEvent>()
+    val snackbarEvent: SharedFlow<SnackbarEvent> = _snackbarEvent.asSharedFlow()
 
     // Managers
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
@@ -210,10 +216,10 @@ class ChatViewModel @Inject constructor(
                     mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
                     else -> throw Exception("No image source available")
                 }
-                mediaFileManager.saveToDownloads(file, mimeType)
-                _snackbarEvent.emit("Saved to Downloads")
+                val uri = mediaFileManager.saveToDownloads(file, mimeType)
+                _snackbarEvent.emit(SnackbarEvent("Image saved to Downloads", actionLabel = "Open", actionUri = uri))
             } catch (e: Exception) {
-                _snackbarEvent.emit("Failed to save: ${e.message}")
+                _snackbarEvent.emit(SnackbarEvent("Failed to save: ${e.message}"))
             }
         }
     }
