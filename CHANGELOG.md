@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.6.6] — 2026-05-03
+
+### Changed
+- **Fullscreen image viewer zooms up to 10×.** Pinch-to-zoom ceiling raised from 5× to 10×. Double-tap now cycles through three steps — 1× → 3× → 6× → 1× — so you can reach deep zoom without pinching.
+
 ## [1.6.5] — 2026-05-03
 
 ### Added
