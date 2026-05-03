@@ -94,6 +94,7 @@ class ChatViewModelBlockedStateTest {
         activeChatTracker = activeChatTracker,
         speechRecognizerManager = speechRecognizerManager,
         callStateHolder = callStateHolder,
+        commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,
     )
@@ -154,7 +155,7 @@ class ChatViewModelBlockedStateTest {
 
         vm.snackbarEvent.test {
             vm.saveImageToDownloads(localUri = null, mediaUrl = "https://cdn/img.jpg")
-            assertEquals("Saved to Downloads", awaitItem())
+            assertEquals("Image saved to Downloads", awaitItem().message)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -165,10 +166,10 @@ class ChatViewModelBlockedStateTest {
 
         vm.snackbarEvent.test {
             vm.saveImageToDownloads(localUri = null, mediaUrl = null)
-            val msg = awaitItem()
+            val event = awaitItem()
             assertTrue(
-                "expected error snackbar, got '$msg'",
-                msg.startsWith("Failed to save"),
+                "expected error snackbar, got '${event.message}'",
+                event.message.startsWith("Failed to save"),
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -182,10 +183,10 @@ class ChatViewModelBlockedStateTest {
 
         vm.snackbarEvent.test {
             vm.saveImageToDownloads(localUri = null, mediaUrl = "https://cdn/img.jpg")
-            val msg = awaitItem()
+            val event = awaitItem()
             assertTrue(
-                "expected error snackbar, got '$msg'",
-                msg.contains("Failed to save") && msg.contains("disk full"),
+                "expected error snackbar, got '${event.message}'",
+                event.message.contains("Failed to save") && event.message.contains("disk full"),
             )
             cancelAndIgnoreRemainingEvents()
         }

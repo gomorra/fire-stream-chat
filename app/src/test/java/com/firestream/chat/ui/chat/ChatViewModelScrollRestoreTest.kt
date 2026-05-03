@@ -92,6 +92,7 @@ class ChatViewModelScrollRestoreTest {
         activeChatTracker = activeChatTracker,
         speechRecognizerManager = speechRecognizerManager,
         callStateHolder = callStateHolder,
+        commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,
     )

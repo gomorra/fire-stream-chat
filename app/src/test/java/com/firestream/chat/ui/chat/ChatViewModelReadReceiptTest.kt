@@ -216,6 +216,7 @@ class ChatViewModelReadReceiptTest {
         activeChatTracker = activeChatTracker,
         speechRecognizerManager = speechRecognizerManager,
         callStateHolder = callStateHolder,
+        commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         appScope = TestScope(testDispatcher),
         context = context
     )

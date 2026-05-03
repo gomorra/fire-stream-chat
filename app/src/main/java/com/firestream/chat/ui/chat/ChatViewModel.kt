@@ -10,6 +10,8 @@ import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.ScrollPos
 import com.firestream.chat.di.ApplicationScope
+import com.firestream.chat.domain.command.CommandPayload
+import com.firestream.chat.domain.command.CommandRegistry
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
@@ -53,6 +55,7 @@ internal data class ChatUiState(
     val overlays: OverlaysState = OverlaysState(),
     val session: SessionState = SessionState(),
     val dictation: DictationState = DictationState(),
+    val commands: CommandsState = CommandsState(),
 ) {
     val broadcastRecipientCount: Int get() = session.broadcastRecipientIds.size
     val avatarUrl: String? get() = session.recipientAvatarUrl ?: session.chatAvatarUrl
@@ -77,6 +80,7 @@ class ChatViewModel @Inject constructor(
     private val activeChatTracker: ActiveChatTracker,
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val callStateHolder: CallStateHolder,
+    private val commandRegistry: CommandRegistry,
     @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -115,7 +119,7 @@ class ChatViewModel @Inject constructor(
     val uploadProgress: StateFlow<Map<String, Float>> = messageRepository.uploadProgress
 
     private val _snackbarEvent = MutableSharedFlow<SnackbarEvent>()
-    val snackbarEvent: SharedFlow<SnackbarEvent> = _snackbarEvent.asSharedFlow()
+    internal val snackbarEvent: SharedFlow<SnackbarEvent> = _snackbarEvent.asSharedFlow()
 
     // Managers
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
@@ -134,6 +138,7 @@ class ChatViewModel @Inject constructor(
     private val dictationManager = ChatDictationManager(
         speechRecognizerManager, callStateHolder, context, _uiState, viewModelScope
     )
+    private val commandsManager = ChatCommandsManager(commandRegistry, _uiState)
 
     // Latest persisted dictation language. Updated via collect of dictationLanguageFlow
     // so startDictation() can synchronously read it from the IconButton onClick path.
@@ -233,6 +238,25 @@ class ChatViewModel @Inject constructor(
     fun clearDictationError() = dictationManager.clearError()
     internal val dictationCommits: SharedFlow<DictationCommit> get() = dictationManager.commits
     internal val dictationAudioLevel: StateFlow<Float> get() = dictationManager.audioLevel
+
+    // ── Commands (.command palette + widgets) ──
+    fun onComposerTextChangedForCommands(text: String) = commandsManager.onComposerTextChanged(text)
+    fun openCommandPalette() = commandsManager.openPalette()
+    fun closeCommandPalette() = commandsManager.closePalette()
+    fun navigateIntoCommand(commandId: String) = commandsManager.navigateInto(commandId)
+    fun navigateBackInCommands() = commandsManager.navigateBack()
+    fun updateCommandFilter(text: String) = commandsManager.updateFilter(text)
+    fun dismissCommandWidget() = commandsManager.dismissWidget()
+
+    fun onCommandSubmit(payload: CommandPayload) {
+        when (payload) {
+            is CommandPayload.Timer -> {
+                // Wired up in Step 3 once MessageRepository.sendTimerMessage exists.
+                // For now the dispatch hook is here so widgets can submit during step 1/2 dev.
+            }
+        }
+        commandsManager.dismissWidget()
+    }
 
     // ── Error ──
     fun clearError() { _uiState.update { it.copy(session = it.session.copy(error = null)) } }
