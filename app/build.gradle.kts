@@ -232,7 +232,18 @@ android {
     }
 }
 
+val copyChangelogAsset = tasks.register<Copy>("copyChangelogAsset") {
+    from(rootProject.file("CHANGELOG.md"))
+    into(layout.buildDirectory.dir("generated/changelogAsset"))
+}
+
 androidComponents {
+    // Bundle CHANGELOG.md into every variant's assets so the app can read it at runtime.
+    onVariants { variant ->
+        variant.sources.assets?.addStaticSourceDirectory(
+            layout.buildDirectory.dir("generated/changelogAsset").get().asFile.absolutePath
+        )
+    }
     // Exclude libsignal_jni.so only from the debug variant. Encryption is
     // disabled in debug (BuildConfig.DEBUG guard in MessageRepositoryImpl),
     // so shipping the ~70 MB native lib is wasted space during dev iteration.
@@ -354,6 +365,7 @@ tasks.register("checkComposableParamCount") {
 
 tasks.named("preBuild") {
     dependsOn("checkComposableParamCount")
+    dependsOn(copyChangelogAsset)
 }
 
 dependencies {

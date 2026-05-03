@@ -72,6 +72,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -79,8 +80,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
@@ -89,6 +93,10 @@ import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
+import com.firestream.chat.data.util.ChangelogParser
+import com.firestream.chat.data.util.ChangelogVersion
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -834,6 +842,18 @@ private fun buildInfoPlaintext(): String =
 
 @Composable
 private fun BuildInfoDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val current by produceState<ChangelogVersion?>(initialValue = null) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                ChangelogParser.selectCurrentVersion(
+                    ChangelogParser.parse(ChangelogParser.loadFromAssets(context)),
+                    BuildConfig.VERSION_NAME
+                )
+            }.getOrNull()
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
@@ -841,7 +861,10 @@ private fun BuildInfoDialog(onDismiss: () -> Unit) {
         },
         title = { Text("Build info") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.verticalScroll(rememberScrollState())
+            ) {
                 buildInfoFields().forEach { (label, value) ->
                     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
@@ -854,6 +877,51 @@ private fun BuildInfoDialog(onDismiss: () -> Unit) {
                             style = MaterialTheme.typography.bodyMedium,
                             fontFamily = FontFamily.Monospace
                         )
+                    }
+                }
+                if (current != null) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    val title = if (current!!.version == "Unreleased") "What's new — Unreleased"
+                                else "What's new in ${current!!.version}"
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    current!!.sections.forEach { section ->
+                        Text(
+                            text = section.heading,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        section.entries.forEach { entry ->
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(top = 4.dp)
+                            ) {
+                                Text(
+                                    text = "•",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    text = buildAnnotatedString {
+                                        if (entry.boldLabel != null) {
+                                            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) {
+                                                append(entry.boldLabel)
+                                            }
+                                            if (entry.body.isNotEmpty()) {
+                                                append(" ")
+                                                append(entry.body)
+                                            }
+                                        } else {
+                                            append(entry.body)
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
                     }
                 }
             }
