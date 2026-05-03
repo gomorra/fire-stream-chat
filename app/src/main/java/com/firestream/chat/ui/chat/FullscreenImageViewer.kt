@@ -103,18 +103,17 @@ internal fun FullscreenImageViewer(
                 detectTapGestures(
                     onTap = { if (scale == 1f) onDismiss() },
                     onDoubleTap = {
-                        if (scale > 1f) {
-                            scale = 1f
-                            offset = Offset.Zero
-                        } else {
-                            scale = 3f
+                        when {
+                            scale >= 6f -> { scale = 1f; offset = Offset.Zero }
+                            scale >= 2f -> scale = 6f
+                            else -> scale = 3f
                         }
                     }
                 )
             }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 5f)
+                    scale = (scale * zoom).coerceIn(1f, 10f)
                     if (scale > 1f) {
                         offset += pan
                     } else {
