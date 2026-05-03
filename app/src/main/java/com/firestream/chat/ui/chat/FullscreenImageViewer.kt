@@ -26,6 +26,9 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,6 +55,7 @@ internal fun FullscreenImageViewer(
     localUri: String? = null,
     onDismiss: () -> Unit,
     onSaveToDownloads: (() -> Unit)? = null,
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     // Prefer local file for faster loading, fall back to remote URL.
     // The check is synchronous so we never hand Coil the remote URL during a
@@ -186,6 +190,19 @@ internal fun FullscreenImageViewer(
                     modifier = Modifier.size(20.dp)
                 )
             }
+        }
+        if (snackbarHostState != null) {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter),
+                snackbar = { data ->
+                    Snackbar(
+                        snackbarData = data,
+                        containerColor = Color(0xFF323232),
+                        contentColor = Color.White,
+                    )
+                }
+            )
         }
     }
 }

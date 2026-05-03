@@ -93,6 +93,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
@@ -242,6 +243,8 @@ fun ChatScreen(
 
     // Snackbar host state
     val snackbarHostState = remember { SnackbarHostState() }
+    // Separate host for snackbars shown while the fullscreen image viewer is covering the Scaffold.
+    val fullscreenSnackbarHostState = remember { SnackbarHostState() }
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -398,10 +401,24 @@ fun ChatScreen(
         }
     }
 
-    // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the host.
+    // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the correct host.
+    // When the fullscreen viewer is covering the Scaffold, route to fullscreenSnackbarHostState
+    // so the message appears on top of the viewer rather than being hidden behind it.
     LaunchedEffect(Unit) {
-        viewModel.snackbarEvent.collect { message ->
-            snackbarHostState.showSnackbar(message, duration = SnackbarDuration.Short)
+        viewModel.snackbarEvent.collect { event ->
+            val host = if (fullscreenImage != null) fullscreenSnackbarHostState else snackbarHostState
+            val result = host.showSnackbar(
+                message = event.message,
+                actionLabel = event.actionLabel,
+                duration = SnackbarDuration.Short,
+            )
+            if (result == SnackbarResult.ActionPerformed && event.actionUri != null) {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, event.actionUri).apply {
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                )
+            }
         }
     }
 
@@ -1614,6 +1631,7 @@ fun ChatScreen(
                 localUri = req.localUri,
                 onDismiss = { fullscreenImage = null },
                 onSaveToDownloads = req.onSaveToDownloads,
+                snackbarHostState = fullscreenSnackbarHostState,
             )
         }
     }
