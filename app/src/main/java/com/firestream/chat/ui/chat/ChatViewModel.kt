@@ -12,6 +12,7 @@ import com.firestream.chat.data.local.ScrollPos
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.command.CommandPayload
 import com.firestream.chat.domain.command.CommandRegistry
+import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
@@ -249,13 +250,33 @@ class ChatViewModel @Inject constructor(
     fun dismissCommandWidget() = commandsManager.dismissWidget()
 
     fun onCommandSubmit(payload: CommandPayload) {
-        when (payload) {
-            is CommandPayload.Timer -> {
-                // Wired up in Step 3 once MessageRepository.sendTimerMessage exists.
-                // For now the dispatch hook is here so widgets can submit during step 1/2 dev.
-            }
-        }
         commandsManager.dismissWidget()
+        when (payload) {
+            is CommandPayload.Timer -> sendTimerCommand(payload)
+        }
+    }
+
+    private fun sendTimerCommand(payload: CommandPayload.Timer) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
+            messageRepository.sendTimerMessage(chatId, payload.durationMs, payload.caption, recipientId)
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e)),
+                        )
+                    }
+                }
+                .onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1),
+                        )
+                    }
+                }
+        }
     }
 
     // ── Error ──

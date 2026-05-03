@@ -1,11 +1,8 @@
 package com.firestream.chat.ui.chat.command
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
 import com.firestream.chat.domain.command.ChatCommand
 import com.firestream.chat.domain.command.ChatCommandWidget
-import com.firestream.chat.domain.command.CommandPayload
+import com.firestream.chat.ui.chat.widget.TimerSetWidget
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,11 +21,7 @@ class TimerCommand @Inject constructor(
     override val widget: ChatCommandWidget? = null
 }
 
-/**
- * Leaf `.timer.set` — mounts the picker widget. Step 4 swaps in the real
- * hh:mm:ss wheel; for now a placeholder so the framework compiles and the
- * end-to-end command dispatch can be exercised.
- */
+/** Leaf `.timer.set` — mounts the hh:mm:ss wheel picker. */
 @Singleton
 class TimerSetCommand @Inject constructor(
     private val widgetImpl: TimerSetWidget,
@@ -38,26 +31,4 @@ class TimerSetCommand @Inject constructor(
     override val description: String = "Pick a duration"
     override val children: List<ChatCommand> = emptyList()
     override val widget: ChatCommandWidget = widgetImpl
-}
-
-/**
- * Step-3 placeholder widget. Step 4 replaces this with the hh:mm:ss wheel
- * picker; the placeholder mounts so the framework wiring can be verified
- * end-to-end without the full UI yet.
- */
-@Singleton
-class TimerSetWidget @Inject constructor() : ChatCommandWidget {
-    @Composable
-    override fun Render(
-        chatId: String,
-        composerText: String,
-        onSend: (CommandPayload) -> Unit,
-        onCancel: () -> Unit,
-    ) {
-        Text(
-            text = "Timer picker — coming in Step 4",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
 }
