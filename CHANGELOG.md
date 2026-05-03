@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.6.5] — 2026-05-03
+
+### Added
+- **"What's new" in Build info dialog.** Settings → Help → "App Version" now shows a scrollable "What's new in X.Y.Z" section below the existing build fields. Entries are parsed from CHANGELOG.md (bundled as an APK asset via a Gradle copy task) using a pure-Kotlin line-based parser — no markdown library. Bold entry names render in SemiBold, commit-hash trailers are stripped, and dev builds fall back to the `[Unreleased]` section when available.
+
 ## [1.6.4] — 2026-05-02
 
 ### Fixed
