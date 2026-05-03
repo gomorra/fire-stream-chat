@@ -1266,6 +1266,46 @@ fun ChatScreen(
                 )
             }
 
+            // .command palette — appears above the composer when the user types
+            // `.` at message start. Tapping a row navigates into a parent or
+            // mounts a leaf widget. State is owned by ChatCommandsManager and
+            // driven by the LaunchedEffect(messageText) below.
+            CommandPalette(
+                visible = uiState.commands.isPaletteOpen,
+                currentPath = uiState.commands.currentPath,
+                candidates = uiState.commands.candidates,
+                onCommandTap = { cmd ->
+                    val newPath = uiState.commands.currentPath.append(cmd.id)
+                    val mirrorText = if (cmd.children.isEmpty()) newPath.displayString()
+                                     else newPath.displayString() + "."
+                    messageText = mirrorText
+                    inputCursor = TextRange(mirrorText.length)
+                    pendingEmojiSizes = emptyMap()
+                    viewModel.onComposerTextChangedForCommands(mirrorText)
+                },
+            )
+
+            // Active command widget mounted above the composer (e.g. timer
+            // picker once Step 4 lands).
+            uiState.commands.activeWidget?.let { widget ->
+                widget.Render(
+                    chatId = viewModel.chatId,
+                    composerText = messageText,
+                    onSend = { payload ->
+                        viewModel.onCommandSubmit(payload)
+                        messageText = ""
+                        inputCursor = TextRange(0)
+                        pendingEmojiSizes = emptyMap()
+                    },
+                    onCancel = {
+                        viewModel.dismissCommandWidget()
+                        messageText = ""
+                        inputCursor = TextRange(0)
+                        pendingEmojiSizes = emptyMap()
+                    },
+                )
+            }
+
             // Input row — hidden when the user has blocked the recipient; the
             // "You blocked this contact" banner above replaces it.
             if (uiState.composer.canSendMessages && !uiState.session.isRecipientBlocked) Row(
@@ -1325,6 +1365,7 @@ fun ChatScreen(
                                 pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
                                 messageText = newText
                                 if (uiState.composer.editingMessage == null) viewModel.onTypingWithMentions(newText)
+                                viewModel.onComposerTextChangedForCommands(newText)
                             }
                         },
                         modifier = Modifier

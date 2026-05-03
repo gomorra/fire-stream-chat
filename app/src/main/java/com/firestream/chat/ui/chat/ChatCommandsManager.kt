@@ -19,6 +19,7 @@ import com.firestream.chat.domain.command.ChatCommand
 import com.firestream.chat.domain.command.ChatCommandWidget
 import com.firestream.chat.domain.command.CommandPath
 import com.firestream.chat.domain.command.CommandRegistry
+import com.firestream.chat.domain.command.parseCommandText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
@@ -126,8 +127,10 @@ internal class ChatCommandsManager(
      *  - ".timer.set" (leaf)          → mount widget, palette closed.
      */
     fun onComposerTextChanged(text: String) {
-        if (!text.startsWith(".")) {
-            if (_uiState.value.commands.isPaletteOpen || _uiState.value.commands.activeWidget != null) {
+        val parsed = parseCommandText(text)
+        if (parsed == null) {
+            val current = _uiState.value.commands
+            if (current.isPaletteOpen || current.activeWidget != null) {
                 _uiState.update {
                     it.copy(
                         commands = it.commands.copy(
@@ -143,36 +146,28 @@ internal class ChatCommandsManager(
             return
         }
 
-        val tail = text.substring(1)
-        val rawSegments = tail.split('.')
-        val completedSegments = rawSegments.dropLast(1)
-        val pendingFilter = rawSegments.last()
-
         var path: CommandPath = CommandPath.ROOT
-        for (segment in completedSegments) {
-            val resolved = registry.resolve(path.append(segment))
-            if (resolved == null) {
+        for (segment in parsed.completedSegments) {
+            if (registry.resolve(path.append(segment)) == null) {
                 closePalette()
                 return
             }
             path = path.append(segment)
         }
 
-        val active = registry.resolve(path)
-        val activeIsLeafWithWidget = active != null && active.children.isEmpty() && active.widget != null
-        val widgetReadyByExactMatch = pendingFilter.isEmpty() && activeIsLeafWithWidget
-
-        if (pendingFilter.isNotEmpty()) {
-            val matched = registry.filterChildren(path, pendingFilter).firstOrNull { it.id == pendingFilter }
-            if (matched != null && matched.children.isEmpty() && matched.widget != null) {
-                mountWidget(matched.widget, path.append(matched.id))
+        if (parsed.pendingFilter.isNotEmpty()) {
+            val exactLeaf = registry.filterChildren(path, parsed.pendingFilter)
+                .firstOrNull { it.id == parsed.pendingFilter && it.children.isEmpty() && it.widget != null }
+            if (exactLeaf != null) {
+                mountWidget(exactLeaf.widget, path.append(exactLeaf.id))
                 return
             }
-        }
-
-        if (widgetReadyByExactMatch) {
-            mountWidget(active!!.widget, path)
-            return
+        } else {
+            val activeLeaf = registry.resolve(path)
+            if (activeLeaf != null && activeLeaf.children.isEmpty() && activeLeaf.widget != null) {
+                mountWidget(activeLeaf.widget, path)
+                return
+            }
         }
 
         _uiState.update {
@@ -180,8 +175,8 @@ internal class ChatCommandsManager(
                 commands = it.commands.copy(
                     isPaletteOpen = true,
                     currentPath = path,
-                    filter = pendingFilter,
-                    candidates = registry.filterChildren(path, pendingFilter),
+                    filter = parsed.pendingFilter,
+                    candidates = registry.filterChildren(path, parsed.pendingFilter),
                     activeWidget = null,
                 )
             )
