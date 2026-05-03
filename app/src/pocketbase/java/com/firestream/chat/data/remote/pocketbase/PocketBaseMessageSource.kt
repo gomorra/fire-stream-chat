@@ -236,6 +236,18 @@ class PocketBaseMessageSource @Inject constructor(
     override suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>) =
         throw NotImplementedError("PB v0: reactions deferred")
 
+    override suspend fun sendTimerMessage(
+        chatId: String,
+        senderId: String,
+        durationMs: Long,
+        caption: String?,
+        timestamp: Long,
+    ): com.firestream.chat.data.remote.source.TimerSendResult =
+        throw NotImplementedError("PB v0: timers deferred")
+
+    override suspend fun updateTimerState(chatId: String, messageId: String, state: String) =
+        throw NotImplementedError("PB v0: timers deferred")
+
     // ── PB record → RawMessage ──────────────────────────────────────────────
 
     /**

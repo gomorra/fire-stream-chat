@@ -47,4 +47,8 @@ interface MessageRepository {
     suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
     // Background sync
     suspend fun syncAllChatMessages(chatIds: List<String>)
+    // Timers (.timer.set)
+    suspend fun sendTimerMessage(chatId: String, durationMs: Long, caption: String?, recipientId: String): Result<Message>
+    suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit>
+    suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit>
 }

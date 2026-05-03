@@ -44,5 +44,8 @@ data class RawMessage(
     val mediaHeight: Int? = null,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val isHd: Boolean = false
+    val isHd: Boolean = false,
+    val timerDurationMs: Long? = null,
+    val timerStartedAtMs: Long? = null,
+    val timerState: String? = null
 )

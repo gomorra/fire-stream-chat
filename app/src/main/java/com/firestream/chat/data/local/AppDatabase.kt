@@ -37,7 +37,7 @@ import com.firestream.chat.data.local.entity.UserEntity
         ContactEntity::class,
         ListEntity::class
     ],
-    version = 20,
+    version = 21,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

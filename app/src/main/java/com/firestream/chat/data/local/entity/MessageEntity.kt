@@ -10,6 +10,7 @@ import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Poll
 import com.firestream.chat.domain.model.PollOption
+import com.firestream.chat.domain.model.TimerState
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -47,7 +48,10 @@ data class MessageEntity(
     val isPinned: Boolean = false,
     val latitude: Double? = null,
     val longitude: Double? = null,
-    val isHd: Boolean = false
+    val isHd: Boolean = false,
+    val timerDurationMs: Long? = null,
+    val timerStartedAtMs: Long? = null,
+    val timerState: String? = null
 ) {
     fun toDomain() = Message(
         id = id,
@@ -79,7 +83,10 @@ data class MessageEntity(
         isPinned = isPinned,
         latitude = latitude,
         longitude = longitude,
-        isHd = isHd
+        isHd = isHd,
+        timerDurationMs = timerDurationMs,
+        timerStartedAtMs = timerStartedAtMs,
+        timerState = timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
     )
 
     companion object {
@@ -113,7 +120,10 @@ data class MessageEntity(
             isPinned = message.isPinned,
             latitude = message.latitude,
             longitude = message.longitude,
-            isHd = message.isHd
+            isHd = message.isHd,
+            timerDurationMs = message.timerDurationMs,
+            timerStartedAtMs = message.timerStartedAtMs,
+            timerState = message.timerState?.name
         )
 
         private fun pollToJson(poll: Poll): String {

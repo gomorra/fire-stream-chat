@@ -43,5 +43,11 @@ data class Message(
     val longitude: Double? = null,
     // Image was sent without compression (Settings → "Send images in full quality").
     // Drives the HD badge on image bubbles; false for any other message type.
-    val isHd: Boolean = false
+    val isHd: Boolean = false,
+    // Timer (.timer.set) — set together when the message is a TIMER. Fire time
+    // is timerStartedAtMs + timerDurationMs (server-stamped on the sender's
+    // write so both devices schedule against the same instant).
+    val timerDurationMs: Long? = null,
+    val timerStartedAtMs: Long? = null,
+    val timerState: TimerState? = null,
 )

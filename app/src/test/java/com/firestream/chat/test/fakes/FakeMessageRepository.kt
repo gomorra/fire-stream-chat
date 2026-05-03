@@ -279,4 +279,34 @@ internal class FakeMessageRepository : MessageRepository {
     }
 
     override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
+
+    override suspend fun sendTimerMessage(
+        chatId: String,
+        durationMs: Long,
+        caption: String?,
+        recipientId: String,
+    ): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(),
+            chatId = chatId,
+            type = com.firestream.chat.domain.model.MessageType.TIMER,
+            content = caption.orEmpty(),
+            timerDurationMs = durationMs,
+            timerStartedAtMs = System.currentTimeMillis(),
+            timerState = com.firestream.chat.domain.model.TimerState.RUNNING,
+        )
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
+
+    override suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
+
+    override suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
 }

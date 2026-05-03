@@ -40,6 +40,7 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -182,7 +183,10 @@ class MessageRepositoryImpl @Inject constructor(
                                 mediaHeight = raw.mediaHeight,
                                 latitude = raw.latitude,
                                 longitude = raw.longitude,
-                                isHd = raw.isHd
+                                isHd = raw.isHd,
+                                timerDurationMs = raw.timerDurationMs,
+                                timerStartedAtMs = raw.timerStartedAtMs,
+                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -256,7 +260,10 @@ class MessageRepositoryImpl @Inject constructor(
                                 mediaHeight = raw.mediaHeight,
                                 latitude = raw.latitude,
                                 longitude = raw.longitude,
-                                isHd = raw.isHd
+                                isHd = raw.isHd,
+                                timerDurationMs = raw.timerDurationMs,
+                                timerStartedAtMs = raw.timerStartedAtMs,
+                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 
@@ -921,6 +928,73 @@ class MessageRepositoryImpl @Inject constructor(
         sentMessage
     }
 
+    override suspend fun sendTimerMessage(
+        chatId: String,
+        durationMs: Long,
+        caption: String?,
+        recipientId: String,
+    ): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
+        }
+        require(durationMs > 0L) { "Timer duration must be positive" }
+
+        val tempId = UUID.randomUUID().toString()
+        val timestamp = System.currentTimeMillis()
+        val content = caption.orEmpty()
+
+        val optimistic = Message(
+            id = tempId,
+            chatId = chatId,
+            senderId = senderId,
+            content = content,
+            type = MessageType.TIMER,
+            status = MessageStatus.SENDING,
+            timestamp = timestamp,
+            timerDurationMs = durationMs,
+            timerStartedAtMs = timestamp,
+            timerState = TimerState.RUNNING,
+        )
+        messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
+
+        val result = messageSource.sendTimerMessage(
+            chatId = chatId,
+            senderId = senderId,
+            durationMs = durationMs,
+            caption = caption,
+            timestamp = timestamp,
+        )
+
+        val sent = optimistic.copy(
+            id = result.messageId,
+            status = MessageStatus.SENT,
+            timerStartedAtMs = result.startedAtMs,
+        )
+        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
+        chatDao.updateLastMessage(
+            chatId,
+            result.messageId,
+            messageSource.lastContentFor(MessageType.TIMER, content),
+            timestamp,
+        )
+        sent
+    }
+
+    override suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit> = resultOf {
+        messageSource.updateTimerState(chatId, messageId, TimerState.CANCELLED.name)
+        messageDao.getMessageById(messageId)?.let { existing ->
+            messageDao.insertMessage(existing.copy(timerState = TimerState.CANCELLED.name))
+        }
+    }
+
+    override suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit> = resultOf {
+        messageSource.updateTimerState(chatId, messageId, TimerState.COMPLETED.name)
+        messageDao.getMessageById(messageId)?.let { existing ->
+            messageDao.insertMessage(existing.copy(timerState = TimerState.COMPLETED.name))
+        }
+    }
+
     override fun getCallLog(): Flow<List<Message>> =
         messageDao.getCallMessages().map { entities -> entities.map { it.toDomain() } }
 
@@ -998,7 +1072,10 @@ class MessageRepositoryImpl @Inject constructor(
                     listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                     isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
                     latitude = raw.latitude, longitude = raw.longitude,
-                    isHd = raw.isHd
+                    isHd = raw.isHd,
+                    timerDurationMs = raw.timerDurationMs,
+                    timerStartedAtMs = raw.timerStartedAtMs,
+                    timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
                 )
                 messageDao.insertMessage(MessageEntity.fromDomain(message))
                 continue
@@ -1045,7 +1122,10 @@ class MessageRepositoryImpl @Inject constructor(
                 listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
                 isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
                 latitude = raw.latitude, longitude = raw.longitude,
-                isHd = raw.isHd
+                isHd = raw.isHd,
+                timerDurationMs = raw.timerDurationMs,
+                timerStartedAtMs = raw.timerStartedAtMs,
+                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
         }

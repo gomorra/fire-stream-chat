@@ -114,4 +114,24 @@ interface MessageSource {
     suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean)
 
     suspend fun updateReactions(chatId: String, messageId: String, reactions: Map<String, String>)
+
+    /**
+     * Send a TIMER message. The remote impl writes timerStartedAtMs as
+     * server-stamped (e.g. Firestore `FieldValue.serverTimestamp()`) and reads
+     * it back so both devices schedule against the same instant.
+     */
+    suspend fun sendTimerMessage(
+        chatId: String,
+        senderId: String,
+        durationMs: Long,
+        caption: String?,
+        timestamp: Long,
+    ): TimerSendResult
+
+    suspend fun updateTimerState(chatId: String, messageId: String, state: String)
 }
+
+data class TimerSendResult(
+    val messageId: String,
+    val startedAtMs: Long,
+)

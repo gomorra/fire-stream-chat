@@ -17,6 +17,7 @@ package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
+import com.firestream.chat.data.remote.source.TimerSendResult
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.google.firebase.firestore.FieldValue
@@ -33,6 +34,7 @@ import javax.inject.Singleton
 private const val POLL_CONTENT = "📊 Poll"
 private const val LIST_CONTENT = "📋 List"
 private const val CALL_CONTENT = "📞 Voice call"
+private const val TIMER_CONTENT = "⏱ Timer"
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
@@ -53,6 +55,7 @@ class FirestoreMessageSource @Inject constructor(
         MessageType.LIST -> LIST_CONTENT.takeIf { plain.isBlank() } ?: plain
         MessageType.LOCATION -> "📍 Location"
         MessageType.CALL -> CALL_CONTENT
+        MessageType.TIMER -> if (plain.isNotBlank()) "⏱ $plain" else TIMER_CONTENT
         else -> plain.ifBlank { "Message" }
     }
     override fun observeMessages(chatId: String): Flow<List<RawMessage>> = callbackFlow {
@@ -440,6 +443,57 @@ class FirestoreMessageSource @Inject constructor(
             .await()
     }
 
+    override suspend fun sendTimerMessage(
+        chatId: String,
+        senderId: String,
+        durationMs: Long,
+        caption: String?,
+        timestamp: Long,
+    ): TimerSendResult {
+        val content = caption.orEmpty()
+        val data = hashMapOf<String, Any?>(
+            "senderId" to senderId,
+            "content" to content,
+            "type" to MessageType.TIMER.name,
+            "status" to MessageStatus.SENT.name,
+            "timestamp" to timestamp,
+            "timerDurationMs" to durationMs,
+            "timerStartedAtMs" to FieldValue.serverTimestamp(),
+            "timerState" to com.firestream.chat.domain.model.TimerState.RUNNING.name,
+        )
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages")
+            .add(data)
+            .await()
+
+        // Read back the resolved server timestamp so the sender's alarm
+        // schedule lines up with the recipient's. Without the read-back, the
+        // sender would key off System.currentTimeMillis() (skewed) while the
+        // recipient sees the server-resolved value via the listener.
+        val snapshot = docRef.get().await()
+        val resolvedStartedAtMs = (snapshot.getTimestamp("timerStartedAtMs"))?.toDate()?.time
+            ?: timestamp
+
+        firestore.collection("chats").document(chatId).update(
+            mapOf(
+                "lastMessageContent" to lastContentFor(MessageType.TIMER, content),
+                "lastMessageTimestamp" to timestamp,
+                "lastMessageSenderId" to senderId,
+            )
+        ).await()
+
+        return TimerSendResult(messageId = docRef.id, startedAtMs = resolvedStartedAtMs)
+    }
+
+    override suspend fun updateTimerState(chatId: String, messageId: String, state: String) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update("timerState", state)
+            .await()
+    }
+
     @Suppress("UNCHECKED_CAST")
     private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawMessage {
         val rawReactions = (data["reactions"] as? Map<*, *>)
@@ -481,7 +535,11 @@ class FirestoreMessageSource @Inject constructor(
             mediaHeight = (data["mediaHeight"] as? Long)?.toInt(),
             latitude = (data["latitude"] as? Number)?.toDouble(),
             longitude = (data["longitude"] as? Number)?.toDouble(),
-            isHd = data["isHd"] as? Boolean ?: false
+            isHd = data["isHd"] as? Boolean ?: false,
+            timerDurationMs = (data["timerDurationMs"] as? Number)?.toLong(),
+            timerStartedAtMs = (data["timerStartedAtMs"] as? com.google.firebase.Timestamp)?.toDate()?.time
+                ?: (data["timerStartedAtMs"] as? Number)?.toLong(),
+            timerState = data["timerState"] as? String
         )
     }
 
