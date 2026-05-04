@@ -180,6 +180,8 @@ internal data class MessageBubbleCallbacks(
     // to both sender and recipient — cancellation propagates via the message
     // observer in ChatViewModel (see TIMER reactor wiring).
     val onCancelTimer: (() -> Unit)? = null,
+    val onPauseTimer: ((Long) -> Unit)? = null,
+    val onResumeTimer: (() -> Unit)? = null,
 )
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)

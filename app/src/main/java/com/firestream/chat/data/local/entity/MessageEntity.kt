@@ -51,7 +51,9 @@ data class MessageEntity(
     val isHd: Boolean = false,
     val timerDurationMs: Long? = null,
     val timerStartedAtMs: Long? = null,
-    val timerState: String? = null
+    val timerState: String? = null,
+    val timerRemainingMs: Long? = null,
+    val timerSilent: Boolean = false,
 ) {
     fun toDomain() = Message(
         id = id,
@@ -86,7 +88,9 @@ data class MessageEntity(
         isHd = isHd,
         timerDurationMs = timerDurationMs,
         timerStartedAtMs = timerStartedAtMs,
-        timerState = timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
+        timerState = timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+        timerRemainingMs = timerRemainingMs,
+        timerSilent = timerSilent,
     )
 
     companion object {
@@ -123,7 +127,9 @@ data class MessageEntity(
             isHd = message.isHd,
             timerDurationMs = message.timerDurationMs,
             timerStartedAtMs = message.timerStartedAtMs,
-            timerState = message.timerState?.name
+            timerState = message.timerState?.name,
+            timerRemainingMs = message.timerRemainingMs,
+            timerSilent = message.timerSilent,
         )
 
         private fun pollToJson(poll: Poll): String {

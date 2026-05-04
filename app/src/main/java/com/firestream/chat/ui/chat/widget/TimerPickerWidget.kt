@@ -51,7 +51,9 @@ import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.command.ChatCommandWidget
 import com.firestream.chat.domain.command.CommandPayload
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlin.math.abs
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -89,7 +91,7 @@ class TimerSetWidget @Inject constructor() : ChatCommandWidget {
                 isSendEnabled = state.isSendEnabled,
                 onCancel = onCancel,
                 onSend = {
-                    onSend(CommandPayload.Timer(durationMs = state.durationMs, caption = captionForSend))
+                    onSend(CommandPayload.Timer(durationMs = state.durationMs, caption = captionForSend, silent = state.silent))
                 },
             )
         }
@@ -147,6 +149,22 @@ private fun WheelRow(state: TimerSetWidgetState) {
             modifier = Modifier.weight(1f),
         )
     }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.Switch(
+            checked = state.silent,
+            onCheckedChange = { state.silent = it }
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = "Silent (no alarm)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
 }
 
 private val WheelHeight = 144.dp     // 3 visible items × 48.dp
@@ -164,16 +182,18 @@ private fun TimerWheel(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = selected)
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
-    // Emit the new selection only after the fling has settled. snapshotFlow on
-    // isScrollInProgress avoids spamming onSelected during the scroll itself,
-    // which would clamp/jitter the value mid-gesture.
+    // Emit the new selection only after the fling has settled. distinctUntilChanged
+    // must come BEFORE filter — otherwise the filter strips every `true`, leaving
+    // distinctUntilChanged to see only `false` values and emit exactly once at launch
+    // (so subsequent scroll-then-snap cycles never fire onSelected). drop(1) skips
+    // the initial pre-scroll `false`.
     LaunchedEffect(listState, values) {
         snapshotFlow { listState.isScrollInProgress }
-            .filter { !it }
             .distinctUntilChanged()
+            .drop(1)
+            .filter { !it }
             .collect {
-                val centered = listState.firstVisibleItemIndex
-                val value = values.getOrNull(centered) ?: return@collect
+                val value = values.getOrNull(centeredIndex(listState)) ?: return@collect
                 if (value != selected) onSelected(value)
             }
     }
@@ -256,6 +276,20 @@ private fun ActionRow(
 
 private fun formatPreview(hours: Int, minutes: Int, seconds: Int): String =
     "%02d:%02d:%02d".format(hours, minutes, seconds)
+
+/**
+ * Returns the index whose centre is closest to the viewport centre. Robust
+ * against the contentPadding offset that makes `firstVisibleItemIndex` lag the
+ * snapped item by one.
+ */
+private fun centeredIndex(listState: androidx.compose.foundation.lazy.LazyListState): Int {
+    val info = listState.layoutInfo
+    val viewportCenter = (info.viewportStartOffset + info.viewportEndOffset) / 2
+    return info.visibleItemsInfo
+        .minByOrNull { abs((it.offset + it.size / 2) - viewportCenter) }
+        ?.index
+        ?: listState.firstVisibleItemIndex
+}
 
 /**
  * Strips the leading `.command.subcommand` chip text from the composer string

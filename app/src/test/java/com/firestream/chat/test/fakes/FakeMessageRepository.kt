@@ -285,6 +285,7 @@ internal class FakeMessageRepository : MessageRepository {
         durationMs: Long,
         caption: String?,
         recipientId: String,
+        silent: Boolean,
     ): Result<Message> {
         consumeFailure()?.let { return it }
         val msg = Message(
@@ -306,6 +307,20 @@ internal class FakeMessageRepository : MessageRepository {
     }
 
     override suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
+
+    override suspend fun pauseTimer(
+        chatId: String,
+        messageId: String,
+        remainingMs: Long,
+    ): Result<Unit> {
+        consumeFailure()?.let { return it }
+        return Result.success(Unit)
+    }
+
+    override suspend fun resumeTimer(chatId: String, messageId: String): Result<Unit> {
         consumeFailure()?.let { return it }
         return Result.success(Unit)
     }

@@ -276,7 +276,7 @@ class ChatViewModel @Inject constructor(
     private fun sendTimerCommand(payload: CommandPayload.Timer) {
         viewModelScope.launch {
             _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
-            messageRepository.sendTimerMessage(chatId, payload.durationMs, payload.caption, recipientId)
+            messageRepository.sendTimerMessage(chatId, payload.durationMs, payload.caption, recipientId, payload.silent)
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(
@@ -309,6 +309,33 @@ class ChatViewModel @Inject constructor(
             // ChatTimerReactor observes the resulting CANCELLED state and cancels
             // the local AlarmManager entry; the recipient's reactor does the same
             // when Firestore syncs the state change.
+        }
+    }
+
+    /**
+     * Pause a running timer. [remainingMs] is computed by the caller (the bubble's
+     * live countdown) so the repo can snapshot the exact frozen value.
+     */
+    fun pauseTimer(messageId: String, remainingMs: Long) {
+        viewModelScope.launch {
+            messageRepository.pauseTimer(chatId, messageId, remainingMs)
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(session = it.session.copy(error = AppError.from(e)))
+                    }
+                }
+        }
+    }
+
+    /** Resume a paused timer from its stored [timerRemainingMs]. */
+    fun resumeTimer(messageId: String) {
+        viewModelScope.launch {
+            messageRepository.resumeTimer(chatId, messageId)
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(session = it.session.copy(error = AppError.from(e)))
+                    }
+                }
         }
     }
 

@@ -43,10 +43,14 @@ class TimerAlarmReceiver : BroadcastReceiver() {
         val chatId = intent.getStringExtra(TimerAlarmScheduler.EXTRA_CHAT_ID) ?: return
         val caption = intent.getStringExtra(TimerAlarmScheduler.EXTRA_CAPTION)
         val otherUserId = intent.getStringExtra(TimerAlarmScheduler.EXTRA_OTHER_USER_ID)
+        val silent = intent.getBooleanExtra(TimerAlarmScheduler.EXTRA_SILENT, false)
 
         // Post the notification synchronously — it's the user-visible primary
         // effect and we don't want to lose it if the suspend call below stalls.
-        postAlarmNotification(context, messageId, chatId, otherUserId, caption)
+        // Silent timers skip the notification but still flip to COMPLETED.
+        if (!silent) {
+            postAlarmNotification(context, messageId, chatId, otherUserId, caption)
+        }
 
         // The state flip is best-effort: if the network is down, the next
         // observer reconciliation on either device will catch up because the

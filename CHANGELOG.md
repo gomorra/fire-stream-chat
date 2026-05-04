@@ -7,6 +7,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Added
 - **`.command` grammar + `.timer` (synchronized timers).** Type `.` at message start in any chat composer to open a vertical palette of available commands. `.timer.set` mounts an hh:mm:ss wheel-picker widget; sending it persists a TIMER message that schedules an exact `AlarmManager` alarm on **both** devices against a server-stamped fire time, so sender and recipient ring together. The bubble shows a live countdown that flips to "Timer ended" when the alarm fires (alarm-style notification, system default alarm sound, full-screen intent) or to a struck-through "Cancelled" when either side long-presses → Cancel timer. Cancellation propagates through the message observer, so cancelling on either device unschedules the other's pending alarm. Permissions and notification channel are gated by an in-app banner that deep-links to system "Alarms & reminders" when SCHEDULE_EXACT_ALARM is denied on Android 12+. Survives process death and device reboot via `BootCompletedReceiver`. (`c0589d2`, `0d76af6`, `6dd6ea2`, `645c583`, `66540e5`)
 
+### Fixed
+- **`.timer.set` wheel picker now actually registers selections.** Dialing 1 hour (or any non-zero duration) in the hh:mm:ss wheel left the Send button greyed out: the `snapshotFlow` chain ordered `filter { !it }` *before* `distinctUntilChanged`, so once the filter stripped every `true`, the dedup operator saw only `false` values and emitted exactly once at launch — subsequent scroll-then-snap cycles never reached `onSelected`. Reordered the operators (`distinctUntilChanged().drop(1).filter { !it }`) and swapped the brittle `firstVisibleItemIndex` lookup for a `layoutInfo`-based "closest item to viewport center" calculation that's robust against the contentPadding offset.
+
 ## [1.6.6] — 2026-05-03
 
 ### Added

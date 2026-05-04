@@ -29,6 +29,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessAlarm
 import androidx.compose.material.icons.filled.AlarmOff
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PauseCircleOutline
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -78,6 +82,8 @@ internal fun formatTimerDuration(ms: Long): String {
 internal fun TimerBubbleContent(
     message: Message,
     textColor: Color,
+    onPauseTimer: ((Long) -> Unit)? = null,
+    onResumeTimer: (() -> Unit)? = null,
 ) {
     val state = message.timerState ?: TimerState.RUNNING
     val durationMs = message.timerDurationMs ?: 0L
@@ -102,11 +108,13 @@ internal fun TimerBubbleContent(
 
     val accentColor = when (state) {
         TimerState.RUNNING -> textColor
+        TimerState.PAUSED -> textColor.copy(alpha = 0.8f)
         TimerState.COMPLETED -> textColor.copy(alpha = 0.7f)
         TimerState.CANCELLED -> textColor.copy(alpha = 0.6f)
     }
     val icon = when (state) {
         TimerState.RUNNING -> Icons.Default.AccessAlarm
+        TimerState.PAUSED -> Icons.Default.PauseCircleOutline
         TimerState.COMPLETED, TimerState.CANCELLED -> Icons.Default.AlarmOff
     }
 
@@ -128,11 +136,46 @@ internal fun TimerBubbleContent(
                             color = accentColor,
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                         )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Timer · ${formatTimerDuration(durationMs)}",
+                                color = accentColor.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            if (message.timerSilent) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsOff,
+                                    contentDescription = "Silent timer",
+                                    tint = accentColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
+                    }
+                    TimerState.PAUSED -> {
+                        val display = message.timerRemainingMs ?: 0L
                         Text(
-                            text = "Timer · ${formatTimerDuration(durationMs)}",
-                            color = accentColor.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.labelSmall,
+                            text = formatTimerDuration(display),
+                            color = accentColor,
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.SemiBold),
                         )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Paused · ${formatTimerDuration(durationMs)}",
+                                color = accentColor.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            if (message.timerSilent) {
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(
+                                    imageVector = Icons.Default.NotificationsOff,
+                                    contentDescription = "Silent timer",
+                                    tint = accentColor.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        }
                     }
                     TimerState.COMPLETED -> {
                         Text(
@@ -160,6 +203,31 @@ internal fun TimerBubbleContent(
                             ),
                         )
                     }
+                }
+            }
+            if (state == TimerState.RUNNING && onPauseTimer != null) {
+                Spacer(modifier = Modifier.width(16.dp))
+                androidx.compose.material3.IconButton(
+                    onClick = { onPauseTimer(remainingMs) },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Pause,
+                        contentDescription = "Pause timer",
+                        tint = accentColor
+                    )
+                }
+            } else if (state == TimerState.PAUSED && onResumeTimer != null) {
+                Spacer(modifier = Modifier.width(16.dp))
+                androidx.compose.material3.IconButton(
+                    onClick = { onResumeTimer() },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = "Resume timer",
+                        tint = accentColor
+                    )
                 }
             }
         }

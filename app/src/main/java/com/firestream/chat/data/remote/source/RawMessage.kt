@@ -47,5 +47,7 @@ data class RawMessage(
     val isHd: Boolean = false,
     val timerDurationMs: Long? = null,
     val timerStartedAtMs: Long? = null,
-    val timerState: String? = null
+    val timerState: String? = null,
+    val timerRemainingMs: Long? = null,
+    val timerSilent: Boolean = false,
 )

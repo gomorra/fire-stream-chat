@@ -186,7 +186,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 isHd = raw.isHd,
                                 timerDurationMs = raw.timerDurationMs,
                                 timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
+                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                                timerRemainingMs = raw.timerRemainingMs,
+                                timerSilent = raw.timerSilent,
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -263,7 +265,9 @@ class MessageRepositoryImpl @Inject constructor(
                                 isHd = raw.isHd,
                                 timerDurationMs = raw.timerDurationMs,
                                 timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
+                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                                timerRemainingMs = raw.timerRemainingMs,
+                                timerSilent = raw.timerSilent,
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 
@@ -933,6 +937,7 @@ class MessageRepositoryImpl @Inject constructor(
         durationMs: Long,
         caption: String?,
         recipientId: String,
+        silent: Boolean,
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
@@ -955,6 +960,7 @@ class MessageRepositoryImpl @Inject constructor(
             timerDurationMs = durationMs,
             timerStartedAtMs = timestamp,
             timerState = TimerState.RUNNING,
+            timerSilent = silent,
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
 
@@ -964,12 +970,14 @@ class MessageRepositoryImpl @Inject constructor(
             durationMs = durationMs,
             caption = caption,
             timestamp = timestamp,
+            silent = silent,
         )
 
         val sent = optimistic.copy(
             id = result.messageId,
             status = MessageStatus.SENT,
             timerStartedAtMs = result.startedAtMs,
+            timerSilent = silent,
         )
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
         chatDao.updateLastMessage(
@@ -993,6 +1001,40 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.getMessageById(messageId)?.let { existing ->
             messageDao.insertMessage(existing.copy(timerState = TimerState.COMPLETED.name))
         }
+    }
+
+    override suspend fun pauseTimer(
+        chatId: String,
+        messageId: String,
+        remainingMs: Long,
+    ): Result<Unit> = resultOf {
+        messageSource.pauseTimer(chatId, messageId, remainingMs)
+        messageDao.getMessageById(messageId)?.let { existing ->
+            messageDao.insertMessage(
+                existing.copy(
+                    timerState = TimerState.PAUSED.name,
+                    timerRemainingMs = remainingMs,
+                )
+            )
+        }
+    }
+
+    override suspend fun resumeTimer(
+        chatId: String,
+        messageId: String,
+    ): Result<Unit> = resultOf {
+        val existing = messageDao.getMessageById(messageId) ?: return@resultOf
+        val remaining = existing.timerRemainingMs
+            ?: throw IllegalStateException("Cannot resume: timerRemainingMs is null for $messageId")
+        val newStartedAtMs = messageSource.resumeTimer(chatId, messageId, remaining)
+        messageDao.insertMessage(
+            existing.copy(
+                timerState = TimerState.RUNNING.name,
+                timerDurationMs = remaining,
+                timerStartedAtMs = newStartedAtMs,
+                timerRemainingMs = null,
+            )
+        )
     }
 
     override fun getCallLog(): Flow<List<Message>> =
@@ -1075,7 +1117,9 @@ class MessageRepositoryImpl @Inject constructor(
                     isHd = raw.isHd,
                     timerDurationMs = raw.timerDurationMs,
                     timerStartedAtMs = raw.timerStartedAtMs,
-                    timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
+                    timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                    timerRemainingMs = raw.timerRemainingMs,
+                    timerSilent = raw.timerSilent,
                 )
                 messageDao.insertMessage(MessageEntity.fromDomain(message))
                 continue
@@ -1125,7 +1169,9 @@ class MessageRepositoryImpl @Inject constructor(
                 isHd = raw.isHd,
                 timerDurationMs = raw.timerDurationMs,
                 timerStartedAtMs = raw.timerStartedAtMs,
-                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() }
+                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                timerRemainingMs = raw.timerRemainingMs,
+                timerSilent = raw.timerSilent,
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
         }

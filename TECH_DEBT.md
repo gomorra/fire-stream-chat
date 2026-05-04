@@ -113,7 +113,7 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ### PocketBase: deferred `MessageSource` methods throw `NotImplementedError`
 
-**The smell.** ~18 methods on `PocketBaseMessageSource` throw `NotImplementedError` in v0: reactions (`addReaction`, `removeReaction`), polls (`updatePollVote`, `closePoll`), lists (`sendListMessage`, `applyListDiff`), edits/deletes (`editMessage`, `deleteMessage`), forwards, pin/unpin, ephemeral receipts (`markRead`, `markDelivered` — no-op for v0 since the schema has a single `status` field), and the Signal-only `sendMessage(ciphertext, ...)`. The corresponding Firebase impls cover all of these.
+**The smell.** ~20 methods on `PocketBaseMessageSource` throw `NotImplementedError` in v0: reactions (`addReaction`, `removeReaction`), polls (`updatePollVote`, `closePoll`), lists (`sendListMessage`, `applyListDiff`), edits/deletes (`editMessage`, `deleteMessage`), forwards, pin/unpin, ephemeral receipts (`markRead`, `markDelivered` — no-op for v0 since the schema has a single `status` field), timers (`sendTimerMessage`, `updateTimerState`, `pauseTimer`, `resumeTimer`), and the Signal-only `sendMessage(ciphertext, ...)`. The corresponding Firebase impls cover all of these.
 
 **Why we haven't fixed it.** Each requires a schema change to `messages` (or, for polls, a new `polls` collection with realtime ACLs) plus a JS hook to enforce sender-only writes on edit/delete. The walking skeleton's success criterion was 1:1 text + presence + push — bolting on the rest before someone needs the variant for real chat is overbuilding.
 

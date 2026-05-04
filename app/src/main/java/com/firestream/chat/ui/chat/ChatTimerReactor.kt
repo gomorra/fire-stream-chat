@@ -73,7 +73,9 @@ internal class ChatTimerReactor(
     private fun reactTo(msg: Message) {
         when (msg.timerState) {
             TimerState.RUNNING -> scheduleIfPending(msg)
-            TimerState.CANCELLED, TimerState.COMPLETED -> scheduler.cancel(msg.id)
+            TimerState.PAUSED,
+            TimerState.CANCELLED,
+            TimerState.COMPLETED -> scheduler.cancel(msg.id)
             null -> Unit
         }
     }
@@ -93,15 +95,17 @@ internal class ChatTimerReactor(
             caption = msg.content.takeIf { it.isNotBlank() },
             chatId = chatId,
             otherUserId = recipientId.takeIf { it.isNotEmpty() },
+            silent = msg.timerSilent,
         )
         onScheduleResult(result)
     }
 
-    private data class TimerSnapshot(val state: TimerState?, val fireAtMs: Long) {
+    private data class TimerSnapshot(val state: TimerState?, val fireAtMs: Long, val remainingMs: Long?) {
         companion object {
             fun of(msg: Message): TimerSnapshot = TimerSnapshot(
                 state = msg.timerState,
                 fireAtMs = (msg.timerStartedAtMs ?: 0L) + (msg.timerDurationMs ?: 0L),
+                remainingMs = msg.timerRemainingMs,
             )
         }
     }

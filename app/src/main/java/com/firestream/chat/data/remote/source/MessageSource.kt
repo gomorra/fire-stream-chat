@@ -126,9 +126,21 @@ interface MessageSource {
         durationMs: Long,
         caption: String?,
         timestamp: Long,
+        silent: Boolean = false,
     ): TimerSendResult
 
     suspend fun updateTimerState(chatId: String, messageId: String, state: String)
+
+    /** Freeze a running timer at [remainingMs] ms remaining. */
+    suspend fun pauseTimer(chatId: String, messageId: String, remainingMs: Long)
+
+    /**
+     * Resume a paused timer. Writes a new server-stamped [timerStartedAtMs] and
+     * sets [timerDurationMs] = [remainingMs] so fire-time math still works.
+     * Returns the server-resolved new [timerStartedAtMs] so the repo can persist
+     * it without a second round-trip.
+     */
+    suspend fun resumeTimer(chatId: String, messageId: String, remainingMs: Long): Long
 }
 
 data class TimerSendResult(

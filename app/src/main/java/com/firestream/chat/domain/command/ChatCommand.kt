@@ -22,5 +22,5 @@ interface ChatCommandWidget {
 }
 
 sealed interface CommandPayload {
-    data class Timer(val durationMs: Long, val caption: String?) : CommandPayload
+    data class Timer(val durationMs: Long, val caption: String?, val silent: Boolean = false) : CommandPayload
 }

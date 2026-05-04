@@ -50,4 +50,8 @@ data class Message(
     val timerDurationMs: Long? = null,
     val timerStartedAtMs: Long? = null,
     val timerState: TimerState? = null,
+    // Frozen remaining ms when state = PAUSED; null while RUNNING or in a terminal state.
+    val timerRemainingMs: Long? = null,
+    // When true the alarm notification is suppressed on completion (bubble still flips to COMPLETED).
+    val timerSilent: Boolean = false,
 )

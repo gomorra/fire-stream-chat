@@ -449,6 +449,7 @@ class FirestoreMessageSource @Inject constructor(
         durationMs: Long,
         caption: String?,
         timestamp: Long,
+        silent: Boolean,
     ): TimerSendResult {
         val content = caption.orEmpty()
         val data = hashMapOf<String, Any?>(
@@ -460,6 +461,7 @@ class FirestoreMessageSource @Inject constructor(
             "timerDurationMs" to durationMs,
             "timerStartedAtMs" to FieldValue.serverTimestamp(),
             "timerState" to com.firestream.chat.domain.model.TimerState.RUNNING.name,
+            "timerSilent" to silent,
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -492,6 +494,34 @@ class FirestoreMessageSource @Inject constructor(
             .collection("messages").document(messageId)
             .update("timerState", state)
             .await()
+    }
+
+    override suspend fun pauseTimer(chatId: String, messageId: String, remainingMs: Long) {
+        firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+            .update(mapOf(
+                "timerState" to com.firestream.chat.domain.model.TimerState.PAUSED.name,
+                "timerRemainingMs" to remainingMs,
+            ))
+            .await()
+    }
+
+    override suspend fun resumeTimer(chatId: String, messageId: String, remainingMs: Long): Long {
+        val docRef = firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        docRef.update(mapOf(
+            "timerState" to com.firestream.chat.domain.model.TimerState.RUNNING.name,
+            "timerStartedAtMs" to FieldValue.serverTimestamp(),
+            "timerDurationMs" to remainingMs,
+            "timerRemainingMs" to null,
+        )).await()
+        // Read back the server-stamped start time so both devices schedule
+        // against the same instant (mirrors the pattern in sendTimerMessage).
+        val snapshot = docRef.get().await()
+        return (snapshot.getTimestamp("timerStartedAtMs"))?.toDate()?.time
+            ?: System.currentTimeMillis()
     }
 
     @Suppress("UNCHECKED_CAST")
@@ -539,7 +569,9 @@ class FirestoreMessageSource @Inject constructor(
             timerDurationMs = (data["timerDurationMs"] as? Number)?.toLong(),
             timerStartedAtMs = (data["timerStartedAtMs"] as? com.google.firebase.Timestamp)?.toDate()?.time
                 ?: (data["timerStartedAtMs"] as? Number)?.toLong(),
-            timerState = data["timerState"] as? String
+            timerState = data["timerState"] as? String,
+            timerRemainingMs = (data["timerRemainingMs"] as? Number)?.toLong(),
+            timerSilent = data["timerSilent"] as? Boolean ?: false,
         )
     }
 

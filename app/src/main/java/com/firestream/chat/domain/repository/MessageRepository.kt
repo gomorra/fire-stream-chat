@@ -48,7 +48,11 @@ interface MessageRepository {
     // Background sync
     suspend fun syncAllChatMessages(chatIds: List<String>)
     // Timers (.timer.set)
-    suspend fun sendTimerMessage(chatId: String, durationMs: Long, caption: String?, recipientId: String): Result<Message>
+    suspend fun sendTimerMessage(chatId: String, durationMs: Long, caption: String?, recipientId: String, silent: Boolean = false): Result<Message>
     suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit>
     suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit>
+    /** Freeze a running timer; [remainingMs] is snapshotted from the live countdown. */
+    suspend fun pauseTimer(chatId: String, messageId: String, remainingMs: Long): Result<Unit>
+    /** Resume a paused timer from its frozen [timerRemainingMs]. */
+    suspend fun resumeTimer(chatId: String, messageId: String): Result<Unit>
 }

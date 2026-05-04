@@ -1022,6 +1022,12 @@ fun ChatScreen(
                                                 onCancelTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.RUNNING) {
                                                     { viewModel.cancelTimer(message.id) }
                                                 } else null,
+                                                onPauseTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.RUNNING && !isOwn) {
+                                                    { remainingMs -> viewModel.pauseTimer(message.id, remainingMs) }
+                                                } else null,
+                                                onResumeTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.PAUSED && !isOwn) {
+                                                    { viewModel.resumeTimer(message.id) }
+                                                } else null,
                                             ),
                                             state = MessageBubbleState(
                                                 uploadProgress = uploadProgressMap[message.id],

@@ -38,10 +38,16 @@ internal class TimerSetWidgetState {
     val isSendEnabled: Boolean
         get() = durationMs > 0L
 
+    private val _silent = androidx.compose.runtime.mutableStateOf(false)
+    var silent: Boolean
+        get() = _silent.value
+        set(value) { _silent.value = value }
+
     fun reset() {
         _hours.intValue = 0
         _minutes.intValue = 0
         _seconds.intValue = 0
+        _silent.value = false
     }
 
     companion object {

@@ -56,12 +56,14 @@ class TimerAlarmScheduler @Inject constructor(
         caption: String?,
         chatId: String,
         otherUserId: String?,
+        silent: Boolean = false,
     ): ScheduleResult {
         val pendingIntent = buildPendingIntent(
             messageId = messageId,
             caption = caption,
             chatId = chatId,
             otherUserId = otherUserId,
+            silent = silent,
             flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         ) ?: return ScheduleResult.INEXACT_FALLBACK
 
@@ -100,20 +102,17 @@ class TimerAlarmScheduler @Inject constructor(
         caption: String?,
         chatId: String?,
         otherUserId: String?,
+        silent: Boolean = false,
         flags: Int,
     ): PendingIntent? {
         val intent = Intent(context, TimerAlarmReceiver::class.java).apply {
-            // Action included so equality checks (which ignore extras but
-            // consider action+component+data) line up across schedule/cancel.
             action = ACTION_TIMER_FIRED
             putExtra(EXTRA_MESSAGE_ID, messageId)
             if (caption != null) putExtra(EXTRA_CAPTION, caption)
             if (chatId != null) putExtra(EXTRA_CHAT_ID, chatId)
             if (otherUserId != null) putExtra(EXTRA_OTHER_USER_ID, otherUserId)
+            if (silent) putExtra(EXTRA_SILENT, true)
         }
-        // messageId.hashCode() as request code: collisions in the 2^32 space are
-        // negligible (~1% birthday at 9k concurrent timers); same-id collisions
-        // are deliberate so re-scheduling replaces the prior alarm.
         return PendingIntent.getBroadcast(context, messageId.hashCode(), intent, flags)
     }
 
@@ -123,5 +122,6 @@ class TimerAlarmScheduler @Inject constructor(
         const val EXTRA_CAPTION: String = "caption"
         const val EXTRA_CHAT_ID: String = "chat_id"
         const val EXTRA_OTHER_USER_ID: String = "other_user_id"
+        const val EXTRA_SILENT: String = "silent"
     }
 }
