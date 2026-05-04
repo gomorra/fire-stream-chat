@@ -143,6 +143,18 @@ class ChatViewModel @Inject constructor(
         speechRecognizerManager, callStateHolder, context, _uiState, viewModelScope
     )
     private val commandsManager = ChatCommandsManager(commandRegistry, _uiState)
+    private val timerReactor = ChatTimerReactor(
+        chatId = chatId,
+        recipientId = recipientId,
+        scheduler = timerAlarmScheduler,
+        _uiState = _uiState,
+        scope = viewModelScope,
+        onScheduleResult = { result ->
+            if (result == ScheduleResult.INEXACT_FALLBACK) {
+                commandsManager.setExactAlarmBannerVisible(true)
+            }
+        },
+    )
 
     // Latest persisted dictation language. Updated via collect of dictationLanguageFlow
     // so startDictation() can synchronously read it from the IconButton onClick path.
@@ -154,6 +166,7 @@ class ChatViewModel @Inject constructor(
         messageLoader.start()
         infoManager.start()
         dictationManager.init()
+        timerReactor.start()
         viewModelScope.launch {
             preferencesDataStore.dictationLanguageFlow.collect { language ->
                 dictationLanguageTag = language.tag
@@ -272,28 +285,30 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                 }
-                .onSuccess { sent ->
+                .onSuccess {
+                    // ChatTimerReactor sees the new RUNNING TIMER message via the
+                    // Room flow and schedules the alarm — no inline scheduling here.
                     _uiState.update {
                         it.copy(
                             composer = it.composer.copy(isSending = false),
                             messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1),
                         )
                     }
-                    val startedAt = sent.timerStartedAtMs
-                    val duration = sent.timerDurationMs
-                    if (startedAt != null && duration != null) {
-                        val result = timerAlarmScheduler.schedule(
-                            messageId = sent.id,
-                            fireAtMs = startedAt + duration,
-                            caption = sent.content.takeIf { it.isNotBlank() },
-                            chatId = chatId,
-                            otherUserId = recipientId.takeIf { it.isNotEmpty() },
-                        )
-                        if (result == ScheduleResult.INEXACT_FALLBACK) {
-                            commandsManager.setExactAlarmBannerVisible(true)
-                        }
+                }
+        }
+    }
+
+    fun cancelTimer(messageId: String) {
+        viewModelScope.launch {
+            messageRepository.cancelTimer(chatId, messageId)
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(session = it.session.copy(error = AppError.from(e)))
                     }
                 }
+            // ChatTimerReactor observes the resulting CANCELLED state and cancels
+            // the local AlarmManager entry; the recipient's reactor does the same
+            // when Firestore syncs the state change.
         }
     }
 

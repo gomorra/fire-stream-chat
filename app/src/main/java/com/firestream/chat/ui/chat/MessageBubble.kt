@@ -45,6 +45,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
@@ -174,6 +175,11 @@ internal data class MessageBubbleCallbacks(
     val onCall: (() -> Unit)? = null,
     // Tapping the quoted-reply preview inside the bubble — jumps to the source.
     val onReplyPreviewClick: () -> Unit = {},
+    // Cancel a RUNNING timer. Null when the bubble is not a TIMER, or when the
+    // timer is no longer cancellable (already COMPLETED / CANCELLED). Visible
+    // to both sender and recipient — cancellation propagates via the message
+    // observer in ChatViewModel (see TIMER reactor wiring).
+    val onCancelTimer: (() -> Unit)? = null,
 )
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
@@ -545,6 +551,12 @@ internal fun MessageBubble(
                                 isOwnMessage = isOwnMessage
                             )
                         }
+                        MessageType.TIMER -> {
+                            TimerBubbleContent(
+                                message = message,
+                                textColor = textColor,
+                            )
+                        }
                         else -> {
                             val isEmojiOnlyMsg = remember(message.content) { isEmojiOnly(message.content) }
                             if (isEmojiOnlyMsg) {
@@ -760,6 +772,15 @@ internal fun MessageBubble(
                     ) {
                         Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
                         Text(if (message.isPinned) "Unpin" else "Pin")
+                    }
+                    callbacks.onCancelTimer?.let {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; it() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.AlarmOff, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Cancel timer")
+                        }
                     }
                     callbacks.onEdit?.let {
                         FilledTonalButton(

@@ -139,6 +139,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.ui.theme.FsSurface3
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
@@ -1017,6 +1018,9 @@ fun ChatScreen(
                                                         }
                                                         context.startActivity(callIntent)
                                                     }
+                                                } else null,
+                                                onCancelTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.RUNNING) {
+                                                    { viewModel.cancelTimer(message.id) }
                                                 } else null,
                                             ),
                                             state = MessageBubbleState(
