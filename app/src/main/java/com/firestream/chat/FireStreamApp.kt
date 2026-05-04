@@ -9,6 +9,7 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.UpdateCheckWorker
@@ -48,6 +49,7 @@ class FireStreamApp : Application(), Configuration.Provider {
         // realtime lifecycle hook; firebase contributes nothing in v0).
         flavorBootstraps.forEach { it.start() }
         currentActivityHolder.register(this)
+        TimerNotificationChannel.ensureCreated(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
         scheduleUpdateCheck()
         scheduleMediaBackfill()

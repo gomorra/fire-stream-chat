@@ -27,6 +27,11 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    companion object {
+        const val EXTRA_CHAT_ID: String = "chatId"
+        const val EXTRA_SENDER_ID: String = "senderId"
+    }
+
     @Inject
     lateinit var preferencesDataStore: PreferencesDataStore
 
@@ -47,8 +52,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
-        val initialChatId = intent.getStringExtra("chatId")
-        val initialSenderId = intent.getStringExtra("senderId")
+        val initialChatId = intent.getStringExtra(EXTRA_CHAT_ID)
+        val initialSenderId = intent.getStringExtra(EXTRA_SENDER_ID)
         val openSettings = intent.getBooleanExtra("openSettings", false)
         val isShareIntent = intent?.action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)
         if (isShareIntent) {

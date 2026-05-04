@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".FireStreamApp"
@@ -103,6 +106,23 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Timer alarms: fired by AlarmManager at the user's chosen wall-clock
+             time. Not exported — only this app's PendingIntent triggers it. -->
+        <receiver
+            android:name=".data.timer.TimerAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Boot-restore: re-arms running timers after a device reboot. Without
+             this, every running timer's AlarmManager registration is dropped at
+             shutdown. Exported because the system fires BOOT_COMPLETED. -->
+        <receiver
+            android:name=".data.timer.BootCompletedReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- WorkManager's SystemForegroundService ships without a
              foregroundServiceType attribute. On Android 14+ that makes

@@ -171,6 +171,16 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### Timer alarms: dual schedule path (sender VM + step-6 observer)
+
+**The smell.** `ChatViewModel.sendTimerCommand` calls `TimerAlarmScheduler.schedule()` on send success (`app/src/main/java/com/firestream/chat/ui/chat/ChatViewModel.kt:284`). Step 6 of the dot-commands-timer plan adds a message observer that also schedules whenever a TIMER message arrives — including the local optimistic insert from the same send. Both paths converge to the same alarm thanks to `FLAG_UPDATE_CURRENT`, so it's idempotent, but every send burns two AlarmManager binder transactions when one would do.
+
+**Why we haven't fixed it.** The sender-side schedule predates the observer — without it, step 5 wasn't testable end-to-end on a single device. Once step 6's observer lands and is verified to fire on the local insert too, the sender path is dead code.
+
+**When to revisit.** As part of step 6: rip out the `timerAlarmScheduler.schedule()` block in `sendTimerCommand` and let the observer be the single owner. The banner-flip on `INEXACT_FALLBACK` moves to the observer alongside.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

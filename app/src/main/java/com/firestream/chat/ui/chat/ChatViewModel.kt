@@ -9,6 +9,8 @@ import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.ScrollPos
+import com.firestream.chat.data.timer.ScheduleResult
+import com.firestream.chat.data.timer.TimerAlarmScheduler
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.command.CommandPayload
 import com.firestream.chat.domain.command.CommandRegistry
@@ -82,6 +84,7 @@ class ChatViewModel @Inject constructor(
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val callStateHolder: CallStateHolder,
     private val commandRegistry: CommandRegistry,
+    private val timerAlarmScheduler: TimerAlarmScheduler,
     @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -248,6 +251,7 @@ class ChatViewModel @Inject constructor(
     fun navigateBackInCommands() = commandsManager.navigateBack()
     fun updateCommandFilter(text: String) = commandsManager.updateFilter(text)
     fun dismissCommandWidget() = commandsManager.dismissWidget()
+    fun dismissExactAlarmBanner() = commandsManager.setExactAlarmBannerVisible(false)
 
     fun onCommandSubmit(payload: CommandPayload) {
         commandsManager.dismissWidget()
@@ -268,12 +272,26 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                 }
-                .onSuccess {
+                .onSuccess { sent ->
                     _uiState.update {
                         it.copy(
                             composer = it.composer.copy(isSending = false),
                             messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1),
                         )
+                    }
+                    val startedAt = sent.timerStartedAtMs
+                    val duration = sent.timerDurationMs
+                    if (startedAt != null && duration != null) {
+                        val result = timerAlarmScheduler.schedule(
+                            messageId = sent.id,
+                            fireAtMs = startedAt + duration,
+                            caption = sent.content.takeIf { it.isNotBlank() },
+                            chatId = chatId,
+                            otherUserId = recipientId.takeIf { it.isNotEmpty() },
+                        )
+                        if (result == ScheduleResult.INEXACT_FALLBACK) {
+                            commandsManager.setExactAlarmBannerVisible(true)
+                        }
                     }
                 }
         }

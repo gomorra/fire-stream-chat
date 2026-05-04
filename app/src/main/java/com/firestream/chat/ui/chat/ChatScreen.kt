@@ -1266,6 +1266,14 @@ fun ChatScreen(
                 )
             }
 
+            // Exact-alarm permission banner — shown after a timer was scheduled
+            // with the inexact fallback because the user denied SCHEDULE_EXACT_ALARM
+            // on Android 12+. Tap "Allow" deep-links to system settings.
+            ExactAlarmBanner(
+                visible = uiState.commands.exactAlarmBannerVisible,
+                onDismiss = { viewModel.dismissExactAlarmBanner() },
+            )
+
             // .command palette — appears above the composer when the user types
             // `.` at message start. Tapping a row navigates into a parent or
             // mounts a leaf widget. State is owned by ChatCommandsManager and

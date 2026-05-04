@@ -1,5 +1,6 @@
 package com.firestream.chat.di
 
+import android.app.AlarmManager
 import android.content.Context
 import android.net.ConnectivityManager
 import com.firestream.chat.data.repository.AppUpdateRepositoryImpl
@@ -80,6 +81,11 @@ object SystemModule {
     fun provideConnectivityManager(@ApplicationContext context: Context): ConnectivityManager {
         return context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     }
+
+    @Provides
+    @Singleton
+    fun provideAlarmManager(@ApplicationContext context: Context): AlarmManager =
+        context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 }
 
 /**

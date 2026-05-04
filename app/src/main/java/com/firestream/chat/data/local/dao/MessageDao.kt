@@ -92,4 +92,8 @@ interface MessageDao {
     // Call log
     @Query("SELECT * FROM messages WHERE type = 'CALL' ORDER BY timestamp DESC")
     fun getCallMessages(): Flow<List<MessageEntity>>
+
+    // Boot-restore: re-arm or auto-complete after device reboot.
+    @Query("SELECT * FROM messages WHERE type = 'TIMER' AND timerState = 'RUNNING'")
+    suspend fun getRunningTimers(): List<MessageEntity>
 }

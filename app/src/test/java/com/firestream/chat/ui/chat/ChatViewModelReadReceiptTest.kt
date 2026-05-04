@@ -217,6 +217,7 @@ class ChatViewModelReadReceiptTest {
         speechRecognizerManager = speechRecognizerManager,
         callStateHolder = callStateHolder,
         commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
+        timerAlarmScheduler = mockk(relaxed = true),
         appScope = TestScope(testDispatcher),
         context = context
     )

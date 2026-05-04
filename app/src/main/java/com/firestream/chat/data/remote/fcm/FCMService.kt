@@ -167,8 +167,8 @@ class FCMService : FirebaseMessagingService() {
         style.addMessage(notificationText, System.currentTimeMillis(), sender)
 
         val intent = Intent(this, MainActivity::class.java).apply {
-            putExtra("chatId", chatId)
-            putExtra("senderId", senderId)
+            putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
+            putExtra(MainActivity.EXTRA_SENDER_ID, senderId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
