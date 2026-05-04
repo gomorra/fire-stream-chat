@@ -557,6 +557,8 @@ internal fun MessageBubble(
                             TimerBubbleContent(
                                 message = message,
                                 textColor = textColor,
+                                onPauseTimer = callbacks.onPauseTimer,
+                                onResumeTimer = callbacks.onResumeTimer,
                             )
                         }
                         else -> {
