@@ -8,10 +8,13 @@ import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.repository.MessageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
@@ -46,14 +49,19 @@ class BootCompletedReceiver : BroadcastReceiver() {
             try {
                 val now = System.currentTimeMillis()
                 val running = messageDao.getRunningTimers()
-                // Parallelise: each MarkCompleted is a Firestore RPC and the
-                // receiver only has ~10s before Android tears the process back
-                // down. Sequential iteration of N stale timers easily blows that
-                // budget on a slow network.
-                coroutineScope {
-                    running.map { entity ->
-                        async { dispatch(entity, now) }
-                    }.awaitAll()
+                // Run on IO and bound the whole batch by 8s — under goAsync()'s
+                // ~10s ceiling. A slow network with N stale timers would otherwise
+                // blow past the budget; survivors at least get re-armed for the
+                // future-fire case before forced finish, since scheduler.schedule
+                // is a local AlarmManager call and runs first per dispatch().
+                withContext(Dispatchers.IO) {
+                    withTimeoutOrNull(8_000L) {
+                        coroutineScope {
+                            running.map { entity ->
+                                async { dispatch(entity, now) }
+                            }.awaitAll()
+                        }
+                    }
                 }
             } finally {
                 pendingResult.finish()

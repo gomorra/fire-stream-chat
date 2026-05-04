@@ -8,9 +8,8 @@
 //   schedule() with the same messageId replaces the previous PendingIntent
 //   (FLAG_UPDATE_CURRENT) so re-scheduling on receipt is idempotent.
 // Collaborators: AlarmManager (Hilt-provided in SystemModule), TimerAlarmReceiver
-//   (the BroadcastReceiver woken by the PendingIntent), Step 6's observer in
-//   ChatViewModel that calls schedule()/cancel() in response to message-state
-//   changes.
+//   (the BroadcastReceiver woken by the PendingIntent), and ChatTimerReactor
+//   which calls schedule()/cancel() in response to TIMER message-state changes.
 // Don't put here: notification posting (that's TimerAlarmReceiver), Room writes
 //   (the receiver invokes MessageRepository.markTimerCompleted), or banner UI
 //   (the result enum is plumbed back to ChatCommandsManager.setExactAlarmBannerVisible).

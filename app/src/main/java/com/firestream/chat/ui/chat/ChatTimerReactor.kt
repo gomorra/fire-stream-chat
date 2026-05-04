@@ -25,7 +25,6 @@ import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
@@ -39,12 +38,35 @@ internal class ChatTimerReactor(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
 ) {
 
+    // Last reacted (state, fireAtMs) per messageId. Diffing against this on each
+    // emission keeps AlarmManager IPCs O(changed-timers) rather than O(timers):
+    // a chat with 5 RUNNING timers used to issue 5 schedule() calls every time
+    // any one changed.
+    private val lastReacted = mutableMapOf<String, TimerSnapshot>()
+
     fun start() {
         scope.launch {
             _uiState
                 .map { it.messages.messages.filter { msg -> msg.type == MessageType.TIMER } }
-                .distinctUntilChanged { old, new -> old.fingerprint() == new.fingerprint() }
-                .collect { timers -> timers.forEach { reactTo(it) } }
+                .collect { timers -> reconcile(timers) }
+        }
+    }
+
+    private fun reconcile(timers: List<Message>) {
+        val seen = HashSet<String>(timers.size)
+        for (msg in timers) {
+            seen.add(msg.id)
+            val current = TimerSnapshot.of(msg)
+            if (lastReacted[msg.id] == current) continue
+            lastReacted[msg.id] = current
+            reactTo(msg)
+        }
+        // Messages that disappeared (delete-for-everyone, chat reload). Cancel
+        // their alarm so a stale RUNNING entry can't fire after deletion.
+        val removed = lastReacted.keys - seen
+        for (id in removed) {
+            lastReacted.remove(id)
+            scheduler.cancel(id)
         }
     }
 
@@ -75,6 +97,12 @@ internal class ChatTimerReactor(
         onScheduleResult(result)
     }
 
-    private fun List<Message>.fingerprint(): List<Triple<String, TimerState?, Long>> =
-        map { Triple(it.id, it.timerState, (it.timerStartedAtMs ?: 0L) + (it.timerDurationMs ?: 0L)) }
+    private data class TimerSnapshot(val state: TimerState?, val fireAtMs: Long) {
+        companion object {
+            fun of(msg: Message): TimerSnapshot = TimerSnapshot(
+                state = msg.timerState,
+                fireAtMs = (msg.timerStartedAtMs ?: 0L) + (msg.timerDurationMs ?: 0L),
+            )
+        }
+    }
 }

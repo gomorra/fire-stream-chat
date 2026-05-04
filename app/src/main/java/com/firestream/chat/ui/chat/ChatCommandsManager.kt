@@ -28,31 +28,9 @@ internal class ChatCommandsManager(
     private val _uiState: MutableStateFlow<ChatUiState>,
 ) {
 
-    fun openPalette() {
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    isPaletteOpen = true,
-                    currentPath = CommandPath.ROOT,
-                    candidates = registry.filterChildren(CommandPath.ROOT, ""),
-                    filter = "",
-                )
-            )
-        }
-    }
+    fun openPalette() = showAt(CommandPath.ROOT, filter = "")
 
-    fun closePalette() {
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    isPaletteOpen = false,
-                    currentPath = CommandPath.ROOT,
-                    candidates = emptyList(),
-                    filter = "",
-                )
-            )
-        }
-    }
+    fun closePalette() = reset(closeWidget = false)
 
     /**
      * Navigate into a command. If the command has children, the palette stays
@@ -65,16 +43,7 @@ internal class ChatCommandsManager(
         val command: ChatCommand = registry.resolve(newPath) ?: return
 
         if (command.children.isNotEmpty()) {
-            _uiState.update {
-                it.copy(
-                    commands = it.commands.copy(
-                        isPaletteOpen = true,
-                        currentPath = newPath,
-                        candidates = registry.filterChildren(newPath, ""),
-                        filter = "",
-                    )
-                )
-            }
+            showAt(newPath, filter = "")
         } else {
             mountWidget(command.widget, newPath)
         }
@@ -86,30 +55,13 @@ internal class ChatCommandsManager(
             dismissWidget()
             return
         }
-        val parent = current.currentPath.parent()
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    currentPath = parent,
-                    candidates = registry.filterChildren(parent, ""),
-                    filter = "",
-                    isPaletteOpen = true,
-                )
-            )
-        }
+        showAt(current.currentPath.parent(), filter = "")
     }
 
     fun updateFilter(text: String) {
         val current = _uiState.value.commands
         if (!current.isPaletteOpen) return
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    filter = text,
-                    candidates = registry.filterChildren(current.currentPath, text),
-                )
-            )
-        }
+        showAt(current.currentPath, filter = text)
     }
 
     /**
@@ -129,20 +81,7 @@ internal class ChatCommandsManager(
     fun onComposerTextChanged(text: String) {
         val parsed = parseCommandText(text)
         if (parsed == null) {
-            val current = _uiState.value.commands
-            if (current.isPaletteOpen || current.activeWidget != null) {
-                _uiState.update {
-                    it.copy(
-                        commands = it.commands.copy(
-                            isPaletteOpen = false,
-                            currentPath = CommandPath.ROOT,
-                            candidates = emptyList(),
-                            filter = "",
-                            activeWidget = null,
-                        )
-                    )
-                }
-            }
+            reset(closeWidget = true)
             return
         }
 
@@ -170,17 +109,7 @@ internal class ChatCommandsManager(
             }
         }
 
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    isPaletteOpen = true,
-                    currentPath = path,
-                    filter = parsed.pendingFilter,
-                    candidates = registry.filterChildren(path, parsed.pendingFilter),
-                    activeWidget = null,
-                )
-            )
-        }
+        showAt(path, filter = parsed.pendingFilter)
     }
 
     fun mountWidget(widget: ChatCommandWidget?, path: CommandPath) {
@@ -198,23 +127,55 @@ internal class ChatCommandsManager(
         }
     }
 
-    fun dismissWidget() {
-        _uiState.update {
-            it.copy(
-                commands = it.commands.copy(
-                    isPaletteOpen = false,
-                    currentPath = CommandPath.ROOT,
-                    candidates = emptyList(),
-                    filter = "",
-                    activeWidget = null,
-                )
-            )
-        }
-    }
+    fun dismissWidget() = reset(closeWidget = true)
 
     fun setExactAlarmBannerVisible(visible: Boolean) {
         _uiState.update {
             it.copy(commands = it.commands.copy(exactAlarmBannerVisible = visible))
+        }
+    }
+
+    private fun showAt(path: CommandPath, filter: String) {
+        val newCandidates = registry.filterChildren(path, filter)
+        _uiState.update { state ->
+            val current = state.commands
+            // StateFlow only emits on inequality; returning the unchanged
+            // CommandsState here skips downstream recomposition when the user
+            // types a keystroke that doesn't actually change the palette
+            // (e.g. the same filter prefix yielding the same candidates).
+            if (current.isPaletteOpen &&
+                current.currentPath == path &&
+                current.filter == filter &&
+                current.candidates == newCandidates &&
+                current.activeWidget == null
+            ) {
+                state
+            } else {
+                state.copy(
+                    commands = current.copy(
+                        isPaletteOpen = true,
+                        currentPath = path,
+                        filter = filter,
+                        candidates = newCandidates,
+                        activeWidget = null,
+                    )
+                )
+            }
+        }
+    }
+
+    private fun reset(closeWidget: Boolean) {
+        _uiState.update { state ->
+            val current = state.commands
+            state.copy(
+                commands = current.copy(
+                    isPaletteOpen = false,
+                    currentPath = CommandPath.ROOT,
+                    candidates = emptyList(),
+                    filter = "",
+                    activeWidget = if (closeWidget) null else current.activeWidget,
+                )
+            )
         }
     }
 }

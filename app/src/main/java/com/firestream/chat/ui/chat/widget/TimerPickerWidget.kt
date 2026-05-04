@@ -9,10 +9,10 @@
 //   the ChatCommand registry); ChatScreen (renders the widget when
 //   uiState.commands.activeWidget is non-null and routes onSend to
 //   ChatViewModel.onCommandSubmit).
-// Don't put here: alarm scheduling (that's data/timer/TimerAlarmScheduler in
-//   Step 5), repository calls (live in ChatViewModel.onCommandSubmit), or
-//   navigation. Per chat-manager slice-ownership pattern, the widget never reads
-//   or mutates ChatUiState directly — it only emits CommandPayload via onSend.
+// Don't put here: alarm scheduling (that's data/timer/TimerAlarmScheduler),
+//   repository calls (live in ChatViewModel.onCommandSubmit), or navigation.
+//   Per chat-manager slice-ownership pattern, the widget never reads or mutates
+//   ChatUiState directly — it only emits CommandPayload via onSend.
 // endregion
 
 package com.firestream.chat.ui.chat.widget

@@ -1297,8 +1297,8 @@ fun ChatScreen(
                 },
             )
 
-            // Active command widget mounted above the composer (e.g. timer
-            // picker once Step 4 lands).
+            // Active command widget mounted above the composer (e.g. the timer
+            // hh:mm:ss picker when `.timer.set` is the active leaf).
             uiState.commands.activeWidget?.let { widget ->
                 widget.Render(
                     chatId = viewModel.chatId,
