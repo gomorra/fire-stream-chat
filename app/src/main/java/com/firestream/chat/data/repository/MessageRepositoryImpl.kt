@@ -467,39 +467,13 @@ class MessageRepositoryImpl @Inject constructor(
         val timestamp = System.currentTimeMillis()
         val isImage = mimeType.startsWith("image/")
         val messageType = if (isImage) MessageType.IMAGE else MessageType.DOCUMENT
+        val isHd = if (isImage) preferencesDataStore.sendImagesFullQualityFlow.first() else false
 
-        // For images: compress/process and store locally
-        val localFile: File?
-        val mediaWidth: Int?
-        val mediaHeight: Int?
-        val uploadUri: Uri
-        val uploadMimeType: String
-        var tempCompressedFile: File? = null
-        var isHd = false
-
-        if (isImage) {
-            val fullQuality = preferencesDataStore.sendImagesFullQualityFlow.first()
-            val result = imageCompressor.processImage(parsedUri, fullQuality)
-            tempCompressedFile = result.file
-            isHd = fullQuality
-
-            // Copy processed image to permanent local storage
-            localFile = mediaFileManager.copyToLocal(
-                chatId, tempId, Uri.fromFile(result.file), "jpg"
-            )
-            mediaWidth = result.width
-            mediaHeight = result.height
-            uploadUri = Uri.fromFile(localFile)
-            uploadMimeType = result.mimeType
-        } else {
-            localFile = null
-            mediaWidth = null
-            mediaHeight = null
-            uploadUri = parsedUri
-            uploadMimeType = mimeType
-        }
-
-        val optimisticMessage = Message(
+        // Insert the optimistic row BEFORE any IO so the bubble appears immediately
+        // and survives a downstream failure (e.g. concurrent-compression OOM when
+        // sending two images rapidly). Coil/AsyncImage renders content:// URIs, so
+        // the original picked URI works as `localUri` until compression finishes.
+        val placeholder = Message(
             id = tempId,
             chatId = chatId,
             senderId = senderId,
@@ -507,60 +481,106 @@ class MessageRepositoryImpl @Inject constructor(
             type = messageType,
             status = MessageStatus.SENDING,
             timestamp = timestamp,
-            localUri = localFile?.absolutePath ?: uri,
-            mediaWidth = mediaWidth,
-            mediaHeight = mediaHeight,
+            localUri = uri,
+            mediaWidth = null,
+            mediaHeight = null,
             isHd = isHd
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+        messageDao.insertMessage(MessageEntity.fromDomain(placeholder))
 
-        val downloadUrl = try {
-            storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
-                _uploadProgress.update { map -> map + (tempId to progress) }
+        var tempCompressedFile: File? = null
+        try {
+            // For images: compress/process and store locally
+            val localFile: File?
+            val mediaWidth: Int?
+            val mediaHeight: Int?
+            val uploadUri: Uri
+            val uploadMimeType: String
+
+            if (isImage) {
+                val result = imageCompressor.processImage(parsedUri, isHd)
+                tempCompressedFile = result.file
+
+                localFile = mediaFileManager.copyToLocal(
+                    chatId, tempId, Uri.fromFile(result.file), "jpg"
+                )
+                mediaWidth = result.width
+                mediaHeight = result.height
+                uploadUri = Uri.fromFile(localFile)
+                uploadMimeType = result.mimeType
+            } else {
+                localFile = null
+                mediaWidth = null
+                mediaHeight = null
+                uploadUri = parsedUri
+                uploadMimeType = mimeType
             }
+
+            // Swap placeholder for an entity pointing at the compressed local file,
+            // now that we know the real dimensions.
+            val optimisticMessage = placeholder.copy(
+                localUri = localFile?.absolutePath ?: uri,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight
+            )
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(optimisticMessage))
+
+            val downloadUrl = try {
+                storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
+                    _uploadProgress.update { map -> map + (tempId to progress) }
+                }
+            } finally {
+                _uploadProgress.update { it - tempId }
+            }
+
+            val remoteId = sendEncryptedOrPlain(
+                chatId = chatId,
+                senderId = senderId,
+                recipientId = recipientId,
+                plaintext = caption,
+                type = messageType,
+                timestamp = timestamp,
+                mediaUrl = downloadUrl,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                isHd = isHd,
+            )
+
+            val sentMessage = optimisticMessage.copy(
+                id = remoteId,
+                status = MessageStatus.SENT,
+                mediaUrl = downloadUrl,
+                localUri = localFile?.absolutePath,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                isHd = isHd
+            )
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
+
+            // Rename local file from tempId to remoteId to prevent orphaned files
+            val finalLocalUri: String? = if (localFile != null) {
+                val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
+                if (localFile.renameTo(newFile)) {
+                    messageDao.updateLocalUri(remoteId, newFile.absolutePath)
+                    newFile.absolutePath
+                } else {
+                    localFile.absolutePath
+                }
+            } else null
+
+            sentMessage.copy(localUri = finalLocalUri)
+        } catch (t: Throwable) {
+            // Cancellation is a control-flow signal; leave the row as SENDING so a
+            // re-entry of the chat doesn't show the message as having failed.
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+            }
+            throw t
         } finally {
-            _uploadProgress.update { it - tempId }
             // Clean up temp compressed file from cacheDir/compressed/
             tempCompressedFile?.let { if (it.exists()) it.delete() }
         }
-
-        val remoteId = sendEncryptedOrPlain(
-            chatId = chatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            plaintext = caption,
-            type = messageType,
-            timestamp = timestamp,
-            mediaUrl = downloadUrl,
-            mediaWidth = mediaWidth,
-            mediaHeight = mediaHeight,
-            isHd = isHd,
-        )
-
-        val sentMessage = optimisticMessage.copy(
-            id = remoteId,
-            status = MessageStatus.SENT,
-            mediaUrl = downloadUrl,
-            localUri = localFile?.absolutePath,
-            mediaWidth = mediaWidth,
-            mediaHeight = mediaHeight,
-            isHd = isHd
-        )
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
-
-        // Rename local file from tempId to remoteId to prevent orphaned files
-        val finalLocalUri: String? = if (localFile != null) {
-            val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
-            if (localFile.renameTo(newFile)) {
-                messageDao.updateLocalUri(remoteId, newFile.absolutePath)
-                newFile.absolutePath
-            } else {
-                localFile.absolutePath
-            }
-        } else null
-
-        sentMessage.copy(localUri = finalLocalUri)
     }
 
     override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> = resultOf {

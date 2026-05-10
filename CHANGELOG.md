@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.7.2] — 2026-05-10
+
+### Fixed
+- **Second image no longer silently dropped when sending two pictures rapidly.** Sending two photos back-to-back sometimes left only the first bubble visible — the second send call vanished without a snackbar or FAILED indicator. `MessageRepositoryImpl.sendMediaMessage` was running `ImageCompressor.processImage` and `MediaFileManager.copyToLocal` *before* the optimistic `messageDao.insertMessage`, so any throw from those steps (typically `BitmapFactory.decodeStream` returning null when two large bitmaps decode concurrently on `Dispatchers.IO`) bubbled up through `resultOf { }` without ever writing a Room row. The optimistic insert now runs first with the original `content://` URI as `localUri` (Coil renders it directly), and a `replaceMessage` swaps in the compressed local file once it's ready. Compression / upload / network failures now leave the bubble visible with `MessageStatus.FAILED` instead of disappearing — matching the existing text-message contract.
+
 ## [1.7.1] — 2026-05-04
 
 ### Fixed
