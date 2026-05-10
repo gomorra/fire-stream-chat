@@ -160,6 +160,35 @@ class MessageBubbleSmokeTest {
     }
 
     @Test
+    fun `renders failed image with retry overlay`() {
+        var retryClicks = 0
+        val retryCallbacks = emptyCallbacks.copy(onRetrySend = { retryClicks++ })
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "m1",
+                        senderId = "uid1",
+                        content = "",
+                        type = MessageType.IMAGE,
+                        status = MessageStatus.FAILED,
+                    ).copy(
+                        localUri = "/storage/local/m1.jpg",
+                        mediaWidth = 800,
+                        mediaHeight = 600,
+                    ),
+                    isOwnMessage = true,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = retryCallbacks,
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Failed to send").assertIsDisplayed()
+    }
+
+    @Test
     fun `renders forwarded message with reply context without crash`() {
         composeTestRule.setContent {
             MaterialTheme {

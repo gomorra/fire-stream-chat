@@ -62,6 +62,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Share
@@ -182,6 +183,9 @@ internal data class MessageBubbleCallbacks(
     val onCancelTimer: (() -> Unit)? = null,
     val onPauseTimer: ((Long) -> Unit)? = null,
     val onResumeTimer: (() -> Unit)? = null,
+    // Retry a previously-failed send. Wired only when status == FAILED — null
+    // for any other state, so callers don't need to gate the call site.
+    val onRetrySend: (() -> Unit)? = null,
 )
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
@@ -438,6 +442,45 @@ internal fun MessageBubble(
                                             )
                                         }
                                     }
+
+                                    // Failed-send retry overlay. Suppressed while a retry is in
+                                    // flight (uploadProgress != null) so it doesn't fight the
+                                    // progress spinner.
+                                    val onRetry = callbacks.onRetrySend
+                                    if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .background(Color.Black.copy(alpha = 0.35f))
+                                                .clickable { onRetry() },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .background(
+                                                            color = Color.Black.copy(alpha = 0.6f),
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = "Retry sending",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(28.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    text = "Failed to send",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    }
                                 } else {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
@@ -683,6 +726,14 @@ internal fun MessageBubble(
                                 },
                                 label = "receiptStatus"
                             ) { status ->
+                                val retryHandler = callbacks.onRetrySend
+                                val iconModifier = if (status == MessageStatus.FAILED && retryHandler != null) {
+                                    Modifier
+                                        .size(16.dp)
+                                        .clickable { retryHandler.invoke() }
+                                } else {
+                                    Modifier.size(16.dp)
+                                }
                                 Icon(
                                     imageVector = when (status) {
                                         MessageStatus.SENDING -> Icons.Default.Schedule
@@ -696,14 +747,14 @@ internal fun MessageBubble(
                                         MessageStatus.SENT -> "Sent"
                                         MessageStatus.DELIVERED -> "Delivered"
                                         MessageStatus.READ -> "Read"
-                                        MessageStatus.FAILED -> "Failed"
+                                        MessageStatus.FAILED -> if (retryHandler != null) "Retry sending" else "Failed"
                                     },
                                     tint = when (status) {
                                         MessageStatus.READ -> MaterialTheme.colorScheme.primary
                                         MessageStatus.FAILED -> MaterialTheme.colorScheme.error
                                         else -> textColor.copy(alpha = 0.7f)
                                     },
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = iconModifier
                                 )
                             }
                         }

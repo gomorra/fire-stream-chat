@@ -138,6 +138,7 @@ import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.components.UserAvatar
+import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.ui.theme.FsSurface3
@@ -1027,6 +1028,9 @@ fun ChatScreen(
                                                 } else null,
                                                 onResumeTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.PAUSED && !isOwn) {
                                                     { viewModel.resumeTimer(message.id) }
+                                                } else null,
+                                                onRetrySend = if (isOwn && message.status == MessageStatus.FAILED) {
+                                                    { viewModel.retrySend(message) }
                                                 } else null,
                                             ),
                                             state = MessageBubbleState(

@@ -415,22 +415,29 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        val remoteId = sendEncryptedOrPlain(
-            chatId = chatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            plaintext = content,
-            type = MessageType.TEXT,
-            timestamp = timestamp,
-            replyToId = replyToId,
-            mentions = mentions,
-            emojiSizes = emojiSizes,
-        )
+        try {
+            val remoteId = sendEncryptedOrPlain(
+                chatId = chatId,
+                senderId = senderId,
+                recipientId = recipientId,
+                plaintext = content,
+                type = MessageType.TEXT,
+                timestamp = timestamp,
+                replyToId = replyToId,
+                mentions = mentions,
+                emojiSizes = emojiSizes,
+            )
 
-        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
-        sentMessage
+            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
+            sentMessage
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+            }
+            throw t
+        }
     }
 
     override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> = resultOf {
@@ -583,6 +590,253 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> = resultOf {
+        val entity = messageDao.getMessageById(messageId)
+            ?: throw IllegalStateException("Cannot retry unknown message $messageId")
+        val message = entity.toDomain()
+        if (message.status != MessageStatus.FAILED) {
+            throw IllegalStateException("Cannot retry message in state ${message.status}")
+        }
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
+        }
+        val chatId = message.chatId
+        // Flip the row back to SENDING so the bubble updates immediately while
+        // we re-run the pipeline. We revert to FAILED in the catch block if the
+        // retry itself errors.
+        messageDao.updateMessageStatus(messageId, MessageStatus.SENDING.name)
+
+        try {
+            when (message.type) {
+                MessageType.TEXT -> retrySendTextLike(message, senderId, recipientId)
+                MessageType.IMAGE, MessageType.DOCUMENT -> retrySendMedia(message, senderId, recipientId)
+                MessageType.VOICE -> retrySendVoice(message, senderId, recipientId)
+                MessageType.LOCATION -> retrySendLocation(message, senderId)
+                else -> throw IllegalStateException("Retry not supported for message type ${message.type}")
+            }
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(messageId, MessageStatus.FAILED.name) }
+            }
+            throw t
+        }
+    }
+
+    private suspend fun retrySendTextLike(
+        message: Message,
+        senderId: String,
+        recipientId: String,
+    ): Message {
+        val remoteId = sendEncryptedOrPlain(
+            chatId = message.chatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = message.content,
+            type = MessageType.TEXT,
+            timestamp = message.timestamp,
+            replyToId = message.replyToId,
+            mentions = message.mentions,
+            emojiSizes = message.emojiSizes,
+        )
+        val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
+        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
+        rebindLastMessageRefIfMatches(
+            chatId = message.chatId,
+            oldMessageId = message.id,
+            newMessageId = remoteId,
+            previewContent = messageSource.lastContentFor(MessageType.TEXT, message.content),
+            timestamp = message.timestamp,
+        )
+        return sent
+    }
+
+    private suspend fun retrySendMedia(
+        message: Message,
+        senderId: String,
+        recipientId: String,
+    ): Message {
+        val source = message.localUri
+            ?: throw IllegalStateException("Cannot retry media message ${message.id}: local file is missing")
+        val isImage = message.type == MessageType.IMAGE
+        var tempCompressedFile: File? = null
+        try {
+            val uploadUri: Uri
+            val uploadMimeType: String
+            val mediaWidth: Int?
+            val mediaHeight: Int?
+            // Tracks the on-disk path of the compressed local file as we move
+            // through the pipeline. After a fresh compression this points at the
+            // new file in Pictures/FireStream; if we skip compression it stays at
+            // the original failed-attempt path. Used to rename to the remote id
+            // after a successful send.
+            var localFilePath: String? = if (isImage) source else null
+
+            if (isImage && message.mediaWidth == null) {
+                val result = imageCompressor.processImage(Uri.parse(source), message.isHd)
+                tempCompressedFile = result.file
+                val localFile = mediaFileManager.copyToLocal(
+                    message.chatId, message.id, Uri.fromFile(result.file), "jpg"
+                )
+                mediaWidth = result.width
+                mediaHeight = result.height
+                uploadUri = Uri.fromFile(localFile)
+                uploadMimeType = result.mimeType
+                localFilePath = localFile.absolutePath
+                messageDao.replaceMessage(
+                    message.id,
+                    MessageEntity.fromDomain(
+                        message.copy(
+                            status = MessageStatus.SENDING,
+                            localUri = localFilePath,
+                            mediaWidth = mediaWidth,
+                            mediaHeight = mediaHeight,
+                        )
+                    )
+                )
+            } else {
+                mediaWidth = message.mediaWidth
+                mediaHeight = message.mediaHeight
+                val parsed = Uri.parse(source)
+                val asFile = if (parsed.scheme == null) File(source) else null
+                uploadUri = if (asFile != null) Uri.fromFile(asFile) else parsed
+                uploadMimeType = if (isImage) "image/jpeg" else "application/octet-stream"
+            }
+
+            val downloadUrl = try {
+                storageSource.uploadMedia(message.chatId, message.id, uploadUri, uploadMimeType) { progress ->
+                    _uploadProgress.update { it + (message.id to progress) }
+                }
+            } finally {
+                _uploadProgress.update { it - message.id }
+            }
+
+            val remoteId = sendEncryptedOrPlain(
+                chatId = message.chatId,
+                senderId = senderId,
+                recipientId = recipientId,
+                plaintext = message.content,
+                type = message.type,
+                timestamp = message.timestamp,
+                mediaUrl = downloadUrl,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                isHd = message.isHd,
+            )
+
+            val sent = message.copy(
+                id = remoteId,
+                status = MessageStatus.SENT,
+                mediaUrl = downloadUrl,
+                mediaWidth = mediaWidth,
+                mediaHeight = mediaHeight,
+                localUri = localFilePath,
+            )
+            messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
+            rebindLastMessageRefIfMatches(
+                chatId = message.chatId,
+                oldMessageId = message.id,
+                newMessageId = remoteId,
+                previewContent = messageSource.lastContentFor(message.type, message.content),
+                timestamp = message.timestamp,
+            )
+
+            val finalLocalUri: String? = if (isImage) {
+                val currentFile = localFilePath?.let { File(it) }
+                if (currentFile != null && currentFile.exists()) {
+                    val newFile = mediaFileManager.getLocalFile(message.chatId, remoteId, "jpg")
+                    if (currentFile.absolutePath == newFile.absolutePath) {
+                        currentFile.absolutePath
+                    } else if (currentFile.renameTo(newFile)) {
+                        messageDao.updateLocalUri(remoteId, newFile.absolutePath)
+                        newFile.absolutePath
+                    } else {
+                        currentFile.absolutePath
+                    }
+                } else null
+            } else null
+            sent.copy(localUri = finalLocalUri)
+        } finally {
+            tempCompressedFile?.let { if (it.exists()) it.delete() }
+        }
+    }
+
+    private suspend fun retrySendVoice(
+        message: Message,
+        senderId: String,
+        recipientId: String,
+    ): Message {
+        val source = message.localUri
+            ?: throw IllegalStateException("Cannot retry voice message ${message.id}: local file is missing")
+        val parsed = Uri.parse(source)
+        val uploadUri = if (parsed.scheme == null) Uri.fromFile(File(source)) else parsed
+        val downloadUrl = storageSource.uploadMedia(message.chatId, message.id, uploadUri, "audio/aac")
+
+        val remoteId = sendEncryptedOrPlain(
+            chatId = message.chatId,
+            senderId = senderId,
+            recipientId = recipientId,
+            plaintext = VOICE_MESSAGE_CONTENT,
+            type = MessageType.VOICE,
+            timestamp = message.timestamp,
+            mediaUrl = downloadUrl,
+            duration = message.duration,
+        )
+        val sent = message.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
+        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
+        rebindLastMessageRefIfMatches(
+            chatId = message.chatId,
+            oldMessageId = message.id,
+            newMessageId = remoteId,
+            previewContent = messageSource.lastContentFor(MessageType.VOICE),
+            timestamp = message.timestamp,
+        )
+        return sent
+    }
+
+    private suspend fun retrySendLocation(
+        message: Message,
+        senderId: String,
+    ): Message {
+        val remoteId = messageSource.sendPlainMessage(
+            chatId = message.chatId,
+            senderId = senderId,
+            content = message.content,
+            type = MessageType.LOCATION,
+            replyToId = null,
+            timestamp = message.timestamp,
+            latitude = message.latitude,
+            longitude = message.longitude,
+        )
+        val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
+        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
+        rebindLastMessageRefIfMatches(
+            chatId = message.chatId,
+            oldMessageId = message.id,
+            newMessageId = remoteId,
+            previewContent = messageSource.lastContentFor(MessageType.LOCATION),
+            timestamp = message.timestamp,
+        )
+        return sent
+    }
+
+    // After a retry replaces the row at [oldMessageId] with a new [newMessageId],
+    // the chat's lastMessageId may still point at the deleted id. Only rebind it
+    // when the chat's lastMessage was this row — otherwise a newer message
+    // exists and we'd downgrade the preview.
+    private suspend fun rebindLastMessageRefIfMatches(
+        chatId: String,
+        oldMessageId: String,
+        newMessageId: String,
+        previewContent: String?,
+        timestamp: Long,
+    ) {
+        val chat = chatDao.getChatById(chatId) ?: return
+        if (chat.lastMessageId == oldMessageId) {
+            chatDao.updateLastMessage(chatId, newMessageId, previewContent, timestamp)
+        }
+    }
+
     override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> = resultOf {
         val existing = messageDao.getMessageById(messageId)
         val updatedReactions = (existing?.reactions ?: emptyMap()).toMutableMap()
@@ -661,27 +915,35 @@ class MessageRepositoryImpl @Inject constructor(
             type = MessageType.VOICE,
             status = MessageStatus.SENDING,
             timestamp = timestamp,
+            localUri = uri,
             duration = durationSeconds
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
+        try {
+            val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
 
-        val remoteId = sendEncryptedOrPlain(
-            chatId = chatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            plaintext = VOICE_MESSAGE_CONTENT,
-            type = MessageType.VOICE,
-            timestamp = timestamp,
-            mediaUrl = downloadUrl,
-            duration = durationSeconds,
-        )
+            val remoteId = sendEncryptedOrPlain(
+                chatId = chatId,
+                senderId = senderId,
+                recipientId = recipientId,
+                plaintext = VOICE_MESSAGE_CONTENT,
+                type = MessageType.VOICE,
+                timestamp = timestamp,
+                mediaUrl = downloadUrl,
+                duration = durationSeconds,
+            )
 
-        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.VOICE), timestamp)
-        sentMessage
+            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.VOICE), timestamp)
+            sentMessage
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+            }
+            throw t
+        }
     }
 
     override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> = resultOf {
@@ -935,21 +1197,28 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        val remoteId = messageSource.sendPlainMessage(
-            chatId = chatId,
-            senderId = senderId,
-            content = content,
-            type = MessageType.LOCATION,
-            replyToId = null,
-            timestamp = timestamp,
-            latitude = latitude,
-            longitude = longitude
-        )
+        try {
+            val remoteId = messageSource.sendPlainMessage(
+                chatId = chatId,
+                senderId = senderId,
+                content = content,
+                type = MessageType.LOCATION,
+                replyToId = null,
+                timestamp = timestamp,
+                latitude = latitude,
+                longitude = longitude
+            )
 
-        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LOCATION), timestamp)
-        sentMessage
+            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LOCATION), timestamp)
+            sentMessage
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+            }
+            throw t
+        }
     }
 
     override suspend fun sendTimerMessage(
@@ -984,29 +1253,36 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
 
-        val result = messageSource.sendTimerMessage(
-            chatId = chatId,
-            senderId = senderId,
-            durationMs = durationMs,
-            caption = caption,
-            timestamp = timestamp,
-            silent = silent,
-        )
+        try {
+            val result = messageSource.sendTimerMessage(
+                chatId = chatId,
+                senderId = senderId,
+                durationMs = durationMs,
+                caption = caption,
+                timestamp = timestamp,
+                silent = silent,
+            )
 
-        val sent = optimistic.copy(
-            id = result.messageId,
-            status = MessageStatus.SENT,
-            timerStartedAtMs = result.startedAtMs,
-            timerSilent = silent,
-        )
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
-        chatDao.updateLastMessage(
-            chatId,
-            result.messageId,
-            messageSource.lastContentFor(MessageType.TIMER, content),
-            timestamp,
-        )
-        sent
+            val sent = optimistic.copy(
+                id = result.messageId,
+                status = MessageStatus.SENT,
+                timerStartedAtMs = result.startedAtMs,
+                timerSilent = silent,
+            )
+            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
+            chatDao.updateLastMessage(
+                chatId,
+                result.messageId,
+                messageSource.lastContentFor(MessageType.TIMER, content),
+                timestamp,
+            )
+            sent
+        } catch (t: Throwable) {
+            if (t !is kotlinx.coroutines.CancellationException) {
+                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+            }
+            throw t
+        }
     }
 
     override suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit> = resultOf {

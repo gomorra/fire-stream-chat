@@ -14,6 +14,14 @@ interface MessageRepository {
     suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit>
     /** @param uri URI string (e.g. `content://...` or `file://...`). Parsed in the data layer. */
     suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String = ""): Result<Message>
+    /**
+     * Re-drive the send pipeline for a previously-failed message, mutating the
+     * existing Room row in place (no new optimistic placeholder, no duplicate
+     * bubble). The [messageId] must reference a row whose status is
+     * [com.firestream.chat.domain.model.MessageStatus.FAILED]; any other state
+     * fails fast. Supported types: TEXT, IMAGE, DOCUMENT, VOICE, LOCATION.
+     */
+    suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message>
     // Phase 1: reactions
     suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit>
     suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit>

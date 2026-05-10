@@ -191,6 +191,7 @@ class ChatViewModel @Inject constructor(
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") = messageSender.sendMediaMessage(uri, mimeType, caption)
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
     fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") = messageSender.sendLocationMessage(latitude, longitude, comment)
+    fun retrySend(message: Message) = messageSender.retrySend(message)
 
     // ── Message actions ──
     fun deleteMessage(messageId: String) = messageActions.deleteMessage(messageId)
