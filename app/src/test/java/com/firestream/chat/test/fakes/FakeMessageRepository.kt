@@ -24,6 +24,7 @@ internal class FakeMessageRepository : MessageRepository {
 
     val markAsReadCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
     val markAsDeliveredCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
+    val retryCalls: MutableList<Pair<String, String>> = mutableListOf()
     var lastSentMessage: Message? = null
     var lastSentRecipientId: String? = null
 
@@ -38,6 +39,7 @@ internal class FakeMessageRepository : MessageRepository {
         nextFailure = null
         markAsReadCalls.clear()
         markAsDeliveredCalls.clear()
+        retryCalls.clear()
         lastSentMessage = null
         lastSentRecipientId = null
     }
@@ -323,5 +325,25 @@ internal class FakeMessageRepository : MessageRepository {
     override suspend fun resumeTimer(chatId: String, messageId: String): Result<Unit> {
         consumeFailure()?.let { return it }
         return Result.success(Unit)
+    }
+
+    override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> {
+        retryCalls.add(messageId to recipientId)
+        consumeFailure()?.let { return it }
+        // Find the failed message across all chats; flip it to SENT in place.
+        val matching = messagesByChat.value
+            .asSequence()
+            .flatMap { (cid, msgs) -> msgs.asSequence().map { cid to it } }
+            .firstOrNull { (_, msg) -> msg.id == messageId }
+            ?: return Result.failure(IllegalStateException("Cannot retry unknown message $messageId"))
+        val (chatId, original) = matching
+        if (original.status != MessageStatus.FAILED) {
+            return Result.failure(IllegalStateException("Cannot retry message in state ${original.status}"))
+        }
+        val sent = original.copy(status = MessageStatus.SENT)
+        messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
+            map[chatId] = map[chatId].orEmpty().map { if (it.id == messageId) sent else it }
+        }
+        return Result.success(sent)
     }
 }

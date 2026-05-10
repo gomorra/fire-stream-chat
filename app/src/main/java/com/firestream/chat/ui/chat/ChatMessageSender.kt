@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.MentionParser
@@ -124,6 +125,22 @@ internal class ChatMessageSender(
                 )
             }
             messageRepository.sendLocationMessage(chatId, latitude, longitude, recipientId, comment)
+                .onFailure { e ->
+                    _uiState.update {
+                        it.copy(
+                            composer = it.composer.copy(isSending = false),
+                            session = it.session.copy(error = AppError.from(e))
+                        )
+                    }
+                }
+                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
+        }
+    }
+
+    fun retrySend(message: Message) {
+        scope.launch {
+            _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
+            messageRepository.retryFailedMessage(message.id, recipientId)
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(
