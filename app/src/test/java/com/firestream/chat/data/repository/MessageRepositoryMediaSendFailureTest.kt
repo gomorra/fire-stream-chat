@@ -87,7 +87,7 @@ class MessageRepositoryMediaSendFailureTest {
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
 
         coEvery { messageDao.insertMessage(any()) } answers {
-            insertedEntities += firstArg()
+            insertedEntities += firstArg<MessageEntity>()
         }
         coEvery { messageDao.replaceMessage(any(), any()) } answers {
             replaceArgs += (firstArg<String>() to secondArg())

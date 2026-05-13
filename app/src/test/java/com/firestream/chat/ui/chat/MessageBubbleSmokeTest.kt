@@ -12,6 +12,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * Smoke tests for [MessageBubble] — the regression guard for the VerifyError
@@ -163,6 +164,9 @@ class MessageBubbleSmokeTest {
     fun `renders failed image with retry overlay`() {
         var retryClicks = 0
         val retryCallbacks = emptyCallbacks.copy(onRetrySend = { retryClicks++ })
+        // rememberMessageImageModel filters out localUri whose file doesn't exist; the
+        // retry overlay is gated behind imageModel != null, so the test needs a real file.
+        val localFile = File.createTempFile("m1-fail", ".jpg").apply { deleteOnExit() }
         composeTestRule.setContent {
             MaterialTheme {
                 MessageBubble(
@@ -173,7 +177,7 @@ class MessageBubbleSmokeTest {
                         type = MessageType.IMAGE,
                         status = MessageStatus.FAILED,
                     ).copy(
-                        localUri = "/storage/local/m1.jpg",
+                        localUri = localFile.absolutePath,
                         mediaWidth = 800,
                         mediaHeight = 600,
                     ),

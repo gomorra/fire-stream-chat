@@ -106,11 +106,23 @@ internal fun FullscreenImageViewer(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { if (scale == 1f) onDismiss() },
-                    onDoubleTap = {
-                        when {
-                            scale >= 6f -> { scale = 1f; offset = Offset.Zero }
-                            scale >= 2f -> scale = 6f
-                            else -> scale = 3f
+                    onDoubleTap = { tapPos ->
+                        val targetScale = when {
+                            scale >= 6f -> 1f
+                            scale >= 2f -> 6f
+                            else -> 3f
+                        }
+                        if (targetScale == 1f) {
+                            scale = 1f
+                            offset = Offset.Zero
+                        } else {
+                            // graphicsLayer pivots on the composable center, so to keep the
+                            // tapped content point under the finger we solve for newOffset in:
+                            //   tap = center + (content - center) * newScale + newOffset
+                            // where content = center + (tap - center - offset) / scale.
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            offset = tapPos - center - (tapPos - center - offset) * (targetScale / scale)
+                            scale = targetScale
                         }
                     }
                 )

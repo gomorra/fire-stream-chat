@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.9.0] — 2026-05-13
+
+### Changed
+- **Double-tap zoom centers on the tap position in the fullscreen image viewer.** Previously every double-tap zoomed around the image center, forcing a pan afterwards to inspect anything off-axis. The handler now translates so the content point under the finger stays anchored across the 1× → 3× → 6× → 1× cycle, matching the gesture model users expect from gallery apps.
+
 ## [1.8.0] — 2026-05-10
 
 ### Added
