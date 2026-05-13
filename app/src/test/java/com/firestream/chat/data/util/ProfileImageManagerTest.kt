@@ -5,6 +5,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.Call
@@ -118,10 +119,12 @@ class ProfileImageManagerTest {
         downloadStarted.await()
         // Coroutine 1 is now blocked inside execute() with the slot held.
         val deferred2 = async { manager.downloadAvatar("user1", "https://example.com/a.jpg") }
-        // Give coroutine 2 time to dispatch and reach putIfAbsent — it's a
-        // microsecond op; 50ms is generous on any runner. After this, it's
-        // suspended on existing.await() and the dedup is observable.
-        Thread.sleep(50)
+        // `delay` (not Thread.sleep) so the runBlocking event loop releases the
+        // main thread and can dispatch coroutine 2 — Thread.sleep parks the
+        // event loop, leaving coroutine 2 unscheduled until after we release
+        // coroutine 1, by which point its finally block has already cleared
+        // the dedup slot. Failed on single-vCPU CI runners; see run 25820151152.
+        delay(200)
         releaseDownload.complete(Unit)
 
         deferred1.await()
