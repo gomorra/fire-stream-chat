@@ -4,6 +4,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [1.9.0] — 2026-05-13
 
+### Added
+- **React to shared-list bubbles.** List-update bubbles (shares, item add/remove, checks, renames, deletions) gained the same reaction affordance as text messages: long-press the bubble — or tap an existing reaction chip — to open the full emoji picker, and grouped reactions render beneath the bubble with your own choice highlighted in the primary color. Previously `ListBubble` was display-only with no long-press menu, so list-share moments couldn't be acknowledged with a 👍 or ❤️ inline. The picker, repository plumbing, and Firestore sync are the existing reaction path — only the bubble is new.
+
 ### Changed
 - **Double-tap zoom centers on the tap position in the fullscreen image viewer.** Previously every double-tap zoomed around the image center, forcing a pan afterwards to inspect anything off-axis. The handler now translates so the content point under the finger stays anchored across the 1× → 3× → 6× → 1× cycle, matching the gesture model users expect from gallery apps.
 

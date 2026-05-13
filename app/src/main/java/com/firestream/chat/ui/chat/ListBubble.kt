@@ -1,10 +1,13 @@
 package com.firestream.chat.ui.chat
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,13 +25,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.ListType
@@ -40,14 +46,17 @@ import com.firestream.chat.ui.theme.SentBubbleDark
 private val DiffGreen = Color(0xFF388E3C)
 private val DiffRed = Color(0xFFD32F2F)
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ListBubble(
     message: Message,
     listData: ListData?,
     isOwnMessage: Boolean,
     chatId: String,
+    currentUserId: String,
     onClick: () -> Unit,
-    onUnsharedListClick: () -> Unit = {}
+    onUnsharedListClick: () -> Unit = {},
+    onLongPress: () -> Unit = {}
 ) {
     val isDark = LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
@@ -55,6 +64,11 @@ internal fun ListBubble(
     } else MaterialTheme.colorScheme.surfaceVariant
     val textColor = MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
+    val groupedReactions = remember(message.reactions) {
+        message.reactions.values
+            .groupBy { it }
+            .mapValues { it.value.size }
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -72,23 +86,23 @@ internal fun ListBubble(
                         bottomEnd = if (isOwnMessage) 4.dp else 16.dp
                     )
                 )
-            .then(
-                    run {
+                .combinedClickable(
+                    onClick = {
                         val diff = message.listDiff
                         when {
                             // Terminal states — list is gone from this chat, tapping can't help
-                            diff?.deleted == true || diff?.unshared == true -> Modifier
+                            diff?.deleted == true || diff?.unshared == true -> {}
                             // "This list was deleted" placeholder — listData gone, no diff context
-                            listData == null && diff == null -> Modifier
+                            listData == null && diff == null -> {}
                             // List exists but no longer shared to this chat — show snackbar
                             listData != null && chatId !in listData.sharedChatIds ->
-                                Modifier.clickable(onClick = onUnsharedListClick)
+                                onUnsharedListClick()
                             // Otherwise navigate; listData may still be loading on the receiver —
                             // ListDetailScreen handles the loading/access-denied states itself.
-                            message.listId != null -> Modifier.clickable(onClick = onClick)
-                            else -> Modifier
+                            message.listId != null -> onClick()
                         }
-                    }
+                    },
+                    onLongClick = onLongPress
                 )
                 .padding(12.dp)
         ) {
@@ -123,6 +137,31 @@ internal fun ListBubble(
                     timestamp = message.timestamp,
                     isShared = chatId in listData.sharedChatIds
                 )
+            }
+        }
+
+        if (groupedReactions.isNotEmpty()) {
+            val reactionFontSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.2f
+            FlowRow(
+                modifier = Modifier.padding(top = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                groupedReactions.forEach { (emoji, count) ->
+                    val myReaction = message.reactions[currentUserId] == emoji
+                    Text(
+                        text = if (count > 1) "$emoji $count" else emoji,
+                        fontSize = reactionFontSize.value.sp,
+                        color = if (myReaction) MaterialTheme.colorScheme.primary
+                            else Color.Unspecified,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .combinedClickable(
+                                onClick = onLongPress,
+                                onLongClick = onLongPress
+                            )
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }

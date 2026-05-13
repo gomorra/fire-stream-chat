@@ -944,6 +944,7 @@ fun ChatScreen(
                                         listData = uiState.overlays.listDataCache[message.listId],
                                         isOwnMessage = isOwn,
                                         chatId = viewModel.chatId,
+                                        currentUserId = uiState.session.currentUserId,
                                         onClick = {
                                             message.listId?.let { onListClick(it) }
                                         },
@@ -954,7 +955,8 @@ fun ChatScreen(
                                                     duration = SnackbarDuration.Short
                                                 )
                                             }
-                                        }
+                                        },
+                                        onLongPress = { reactionTargetMessage = message }
                                     )
                                 } else {
                                     Box {
