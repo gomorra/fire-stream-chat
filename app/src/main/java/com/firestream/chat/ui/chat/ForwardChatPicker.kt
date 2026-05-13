@@ -51,6 +51,7 @@ internal fun ForwardChatPicker(
                             ?: resolvedUser?.displayName
                             ?: "Chat"
                         val avatarUrl = chat.avatarUrl ?: resolvedUser?.avatarUrl
+                        val localAvatarPath = chat.localAvatarPath ?: resolvedUser?.localAvatarPath
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -63,7 +64,8 @@ internal fun ForwardChatPicker(
                                 contentDescription = displayName,
                                 icon = Icons.Default.Person,
                                 size = 40.dp,
-                                modifier = Modifier.size(40.dp)
+                                modifier = Modifier.size(40.dp),
+                                localAvatarPath = localAvatarPath
                             )
                             Spacer(modifier = Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {

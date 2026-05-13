@@ -34,7 +34,8 @@ internal fun AvatarStack(users: List<User>, overflow: Int, modifier: Modifier = 
                 size = AVATAR_SIZE,
                 modifier = Modifier
                     .size(AVATAR_SIZE)
-                    .offset(x = AVATAR_STEP * index)
+                    .offset(x = AVATAR_STEP * index),
+                localAvatarPath = user.localAvatarPath
             )
         }
         if (overflow > 0) {

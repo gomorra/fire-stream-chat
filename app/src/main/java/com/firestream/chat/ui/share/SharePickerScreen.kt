@@ -500,6 +500,7 @@ private fun ShareChatRow(
         ?: recipientId
         ?: "Chat"
     val avatarUrl = chat.avatarUrl ?: profile?.avatarUrl
+    val localAvatarPath = chat.localAvatarPath ?: profile?.localAvatarPath
 
     Row(
         modifier = Modifier
@@ -517,7 +518,8 @@ private fun ShareChatRow(
                 else -> Icons.Default.Person
             },
             size = 48.dp,
-            modifier = Modifier.size(48.dp)
+            modifier = Modifier.size(48.dp),
+            localAvatarPath = localAvatarPath
         )
 
         Spacer(modifier = Modifier.width(16.dp))

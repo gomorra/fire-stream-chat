@@ -7,21 +7,24 @@ sealed interface CallState {
         val callId: String,
         val calleeId: String,
         val calleeName: String,
-        val calleeAvatarUrl: String?
+        val calleeAvatarUrl: String?,
+        val calleeLocalAvatarPath: String? = null
     ) : CallState
 
     data class IncomingRinging(
         val callId: String,
         val callerId: String,
         val callerName: String,
-        val callerAvatarUrl: String?
+        val callerAvatarUrl: String?,
+        val callerLocalAvatarPath: String? = null
     ) : CallState
 
     data class Connecting(
         val callId: String,
         val remoteUserId: String,
         val remoteName: String,
-        val remoteAvatarUrl: String?
+        val remoteAvatarUrl: String?,
+        val remoteLocalAvatarPath: String? = null
     ) : CallState
 
     data class Connected(
@@ -29,7 +32,8 @@ sealed interface CallState {
         val remoteUserId: String,
         val remoteName: String,
         val remoteAvatarUrl: String?,
-        val startTime: Long
+        val startTime: Long,
+        val remoteLocalAvatarPath: String? = null
     ) : CallState
 
     data class Ended(

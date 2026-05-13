@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
@@ -87,7 +88,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
 import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
@@ -95,6 +95,7 @@ import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.util.ChangelogParser
 import com.firestream.chat.data.util.ChangelogVersion
+import com.firestream.chat.ui.components.UserAvatar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -169,12 +170,13 @@ fun SettingsScreen(
                         .padding(16.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    AsyncImage(
-                        model = user.avatarUrl,
+                    UserAvatar(
+                        avatarUrl = user.avatarUrl,
                         contentDescription = "Avatar",
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
+                        icon = Icons.Default.Person,
+                        size = 56.dp,
+                        modifier = Modifier.size(56.dp),
+                        localAvatarPath = user.localAvatarPath
                     )
                     Spacer(Modifier.width(16.dp))
                     Column {

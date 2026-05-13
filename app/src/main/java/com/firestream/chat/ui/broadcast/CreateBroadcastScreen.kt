@@ -45,8 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Contact
+import com.firestream.chat.ui.components.UserAvatar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -203,29 +203,14 @@ private fun SelectableContactItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        if (contact.avatarUrl != null) {
-            AsyncImage(
-                model = contact.avatarUrl,
-                contentDescription = contact.displayName,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-            )
-        } else {
-            Surface(
-                modifier = Modifier.size(48.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.primaryContainer
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Default.Person,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
-                }
-            }
-        }
+        UserAvatar(
+            avatarUrl = contact.avatarUrl,
+            contentDescription = contact.displayName,
+            icon = Icons.Default.Person,
+            size = 48.dp,
+            modifier = Modifier.size(48.dp),
+            localAvatarPath = contact.localAvatarPath
+        )
 
         Spacer(modifier = Modifier.width(16.dp))
 

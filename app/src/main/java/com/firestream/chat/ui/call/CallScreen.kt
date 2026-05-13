@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import coil.compose.AsyncImage
+import com.firestream.chat.ui.components.resolveAvatarModel
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -71,22 +72,26 @@ internal fun CallScreen(
             is CallState.IncomingRinging -> IncomingRingingContent(
                 callerName = state.callerName,
                 callerAvatarUrl = state.callerAvatarUrl,
+                callerLocalAvatarPath = state.callerLocalAvatarPath,
                 onAnswer = viewModel::answer,
                 onDecline = viewModel::decline
             )
             is CallState.OutgoingRinging -> OutgoingRingingContent(
                 calleeName = state.calleeName,
                 calleeAvatarUrl = state.calleeAvatarUrl,
+                calleeLocalAvatarPath = state.calleeLocalAvatarPath,
                 onCancel = viewModel::hangup
             )
             is CallState.Connecting -> ConnectingContent(
                 remoteName = state.remoteName,
                 remoteAvatarUrl = state.remoteAvatarUrl,
+                remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 onHangup = viewModel::hangup
             )
             is CallState.Connected -> ConnectedContent(
                 remoteName = state.remoteName,
                 remoteAvatarUrl = state.remoteAvatarUrl,
+                remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 startTime = state.startTime,
                 isMuted = uiControls.isMuted,
                 isSpeakerOn = uiControls.isSpeakerOn,
@@ -104,6 +109,7 @@ internal fun CallScreen(
 private fun IncomingRingingContent(
     callerName: String,
     callerAvatarUrl: String?,
+    callerLocalAvatarPath: String?,
     onAnswer: () -> Unit,
     onDecline: () -> Unit
 ) {
@@ -121,7 +127,7 @@ private fun IncomingRingingContent(
         modifier = Modifier.padding(32.dp)
     ) {
         Box(modifier = Modifier.alpha(alpha)) {
-            CallUserAvatar(callerName, callerAvatarUrl)
+            CallUserAvatar(callerName, callerAvatarUrl, callerLocalAvatarPath)
         }
         Spacer(Modifier.height(24.dp))
         Text(callerName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
@@ -151,6 +157,7 @@ private fun IncomingRingingContent(
 private fun OutgoingRingingContent(
     calleeName: String,
     calleeAvatarUrl: String?,
+    calleeLocalAvatarPath: String?,
     onCancel: () -> Unit
 ) {
     Column(
@@ -158,7 +165,7 @@ private fun OutgoingRingingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        CallUserAvatar(calleeName, calleeAvatarUrl)
+        CallUserAvatar(calleeName, calleeAvatarUrl, calleeLocalAvatarPath)
         Spacer(Modifier.height(24.dp))
         Text(calleeName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -178,6 +185,7 @@ private fun OutgoingRingingContent(
 private fun ConnectingContent(
     remoteName: String,
     remoteAvatarUrl: String?,
+    remoteLocalAvatarPath: String?,
     onHangup: () -> Unit
 ) {
     Column(
@@ -185,7 +193,7 @@ private fun ConnectingContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        CallUserAvatar(remoteName, remoteAvatarUrl)
+        CallUserAvatar(remoteName, remoteAvatarUrl, remoteLocalAvatarPath)
         Spacer(Modifier.height(24.dp))
         Text(remoteName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(16.dp))
@@ -207,6 +215,7 @@ private fun ConnectingContent(
 private fun ConnectedContent(
     remoteName: String,
     remoteAvatarUrl: String?,
+    remoteLocalAvatarPath: String?,
     startTime: Long,
     isMuted: Boolean,
     isSpeakerOn: Boolean,
@@ -227,7 +236,7 @@ private fun ConnectedContent(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.padding(32.dp)
     ) {
-        CallUserAvatar(remoteName, remoteAvatarUrl)
+        CallUserAvatar(remoteName, remoteAvatarUrl, remoteLocalAvatarPath)
         Spacer(Modifier.height(24.dp))
         Text(remoteName, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Spacer(Modifier.height(8.dp))
@@ -275,7 +284,10 @@ private fun EndedContent() {
 }
 
 @Composable
-private fun CallUserAvatar(name: String, avatarUrl: String?) {
+private fun CallUserAvatar(name: String, avatarUrl: String?, localAvatarPath: String?) {
+    val model = remember(localAvatarPath, avatarUrl) {
+        resolveAvatarModel(localAvatarPath, avatarUrl)
+    }
     Box(
         modifier = Modifier
             .size(100.dp)
@@ -283,9 +295,9 @@ private fun CallUserAvatar(name: String, avatarUrl: String?) {
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
     ) {
-        if (avatarUrl != null) {
+        if (model != null) {
             AsyncImage(
-                model = avatarUrl,
+                model = model,
                 contentDescription = name,
                 modifier = Modifier.fillMaxSize()
             )

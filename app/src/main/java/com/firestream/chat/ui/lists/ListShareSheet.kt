@@ -92,6 +92,7 @@ internal fun ListShareSheet(
                     val resolvedUser = chatParticipants[recipientId]
                     val name = displayName(chat)
                     val avatarUrl = chat.avatarUrl ?: resolvedUser?.avatarUrl
+                    val localAvatarPath = chat.localAvatarPath ?: resolvedUser?.localAvatarPath
                     val isShared = chat.id in sharedChatIdSet
 
                     Row(
@@ -108,7 +109,8 @@ internal fun ListShareSheet(
                             contentDescription = name,
                             icon = if (isGroup) Icons.Default.Group else Icons.Default.Person,
                             size = 40.dp,
-                            modifier = Modifier.size(40.dp)
+                            modifier = Modifier.size(40.dp),
+                            localAvatarPath = localAvatarPath
                         )
                         Spacer(Modifier.width(12.dp))
                         Text(

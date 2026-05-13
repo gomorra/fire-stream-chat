@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.9.1] — 2026-05-13
+
+### Fixed
+- **Profile pictures no longer re-fetch from the cloud every time a screen opens.** The avatar download-and-cache pipeline (`ProfileImageManager` → Room `localAvatarPath`) was already in place and auto-downloading on URL change, but eight UI surfaces bypassed it — four called `UserAvatar` without passing `localAvatarPath` (AvatarStack, ForwardChatPicker, ListShareSheet, SharePickerScreen) and four reached for the remote `avatarUrl` directly via `AsyncImage` (Settings, CallScreen, CreateBroadcast, CreateGroup). Each open paid a network round-trip even when a current local copy was on disk. All eight now resolve via `resolveAvatarModel(localAvatarPath, avatarUrl)`, preferring the cached file. `CallService` now also stamps a `localAvatarPath` onto each `CallState` so the call UI's letter-fallback layout reads from disk too.
+
 ## [1.9.0] — 2026-05-13
 
 ### Added

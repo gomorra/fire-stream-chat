@@ -11,6 +11,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
@@ -105,6 +106,7 @@ class CallService : Service() {
 
     @Inject lateinit var callRepository: CallRepository
     @Inject lateinit var callStateHolder: CallStateHolder
+    @Inject lateinit var profileImageManager: ProfileImageManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -184,7 +186,7 @@ class CallService : Service() {
         callMessageWritten = false
 
         callStateHolder.updateState(
-            CallState.OutgoingRinging(callId, userId, name, avatar)
+            CallState.OutgoingRinging(callId, userId, name, avatar, localAvatarPathFor(userId))
         )
 
         val notification = notificationManager!!.buildOutgoingCallNotification(name)
@@ -235,7 +237,7 @@ class CallService : Service() {
         isCaller = false
 
         callStateHolder.updateState(
-            CallState.IncomingRinging(callId, userId, name, avatar)
+            CallState.IncomingRinging(callId, userId, name, avatar, localAvatarPathFor(userId))
         )
 
         val notification = notificationManager!!.buildIncomingCallNotification(name)
@@ -259,7 +261,7 @@ class CallService : Service() {
         ringTimeoutJob?.cancel()
 
         callStateHolder.updateState(
-            CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl)
+            CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId))
         )
 
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
@@ -383,7 +385,7 @@ class CallService : Service() {
         ringTimeoutJob?.cancel()
 
         callStateHolder.updateState(
-            CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl)
+            CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId))
         )
 
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
@@ -476,7 +478,8 @@ class CallService : Service() {
                             remoteUserId ?: "",
                             remoteName ?: "",
                             remoteAvatarUrl,
-                            System.currentTimeMillis()
+                            System.currentTimeMillis(),
+                            localAvatarPathFor(remoteUserId)
                         )
                     )
                 }
@@ -593,6 +596,12 @@ class CallService : Service() {
     // ──────────────────────────────────────────────────────────────────────────
     // Cleanup
     // ──────────────────────────────────────────────────────────────────────────
+
+    private fun localAvatarPathFor(userId: String?): String? {
+        if (userId.isNullOrEmpty()) return null
+        val file = profileImageManager.getLocalFile(userId)
+        return if (file.exists()) file.absolutePath else null
+    }
 
     private fun endCallWithReason(reason: EndReason) {
         val callId = currentCallId
