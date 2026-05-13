@@ -660,7 +660,7 @@ class MessageRepositoryImpl @Inject constructor(
             ?: throw IllegalStateException("Cannot retry media message ${message.id}: local file is missing")
         val isImage = message.type == MessageType.IMAGE
         var tempCompressedFile: File? = null
-        try {
+        return try {
             val uploadUri: Uri
             val uploadMimeType: String
             val mediaWidth: Int?
