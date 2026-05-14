@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.9.2] — 2026-05-14
+## [1.9.2] — 2026-05-14
 
 ### Fixed
 - **Chat list ordering is now owned by `ChatListViewModel` instead of the Composable.** The sort key (`lastMessage?.timestamp ?: createdAt`, descending) was duplicated in `ChatListScreen` and `ChatDao.getAllChats`, with no ViewModel-level test to catch a drift between them — a regression in either layer could ship without unit-test coverage. The ViewModel now sorts the chat flow upfront and the screen relies on `filter` preserving that order, so the "newest activity at the top" guarantee is a single, testable contract. Added `ChatListViewModelTest` cases for out-of-order emissions, an incoming message bubbling its chat to the top, and the `createdAt` fallback for empty chats.
