@@ -120,6 +120,7 @@ fun FireStreamNavGraph(
     initialSenderId: String? = null,
     isShareIntent: Boolean = false,
     openSettings: Boolean = false,
+    focusUpdate: Boolean = false,
     preferencesDataStore: PreferencesDataStore? = null
 ) {
     val navController = rememberNavController()
@@ -140,6 +141,10 @@ fun FireStreamNavGraph(
     val pendingFromNotification = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId != null) }
     val pendingListId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf<String?>(null) }
     val pendingOpenSettings = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(openSettings) }
+    val pendingFocusUpdate = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(focusUpdate) }
+    // Separate state read by the Settings composable block. Set to true just
+    // before navigating, then consumed inside SettingsScreen.
+    val settingsFocusUpdate = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
 
     // Restore last open chat when no deep link or share intent is pending. If no
     // chat was persisted, fall back to restoring the last open list detail — chat
@@ -237,12 +242,15 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value, pendingOpenSettings.value) {
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value, pendingOpenSettings.value, pendingFocusUpdate.value) {
                 if (pendingShare.value) {
                     pendingShare.value = false
                     navController.navigate(Routes.SHARE_PICKER)
                 } else if (pendingOpenSettings.value) {
+                    val shouldFocusUpdate = pendingFocusUpdate.value
                     pendingOpenSettings.value = false
+                    pendingFocusUpdate.value = false
+                    settingsFocusUpdate.value = shouldFocusUpdate
                     navController.navigate(Routes.SETTINGS)
                 } else {
                     val chatId = pendingChatId.value
@@ -377,7 +385,8 @@ fun FireStreamNavGraph(
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(0) { inclusive = true }
                     }
-                }
+                },
+                focusUpdate = settingsFocusUpdate.value
             )
         }
 

@@ -97,6 +97,7 @@ import com.firestream.chat.data.util.ChangelogParser
 import com.firestream.chat.data.util.ChangelogVersion
 import com.firestream.chat.ui.components.UserAvatar
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -107,6 +108,7 @@ fun SettingsScreen(
     onArchivedChatsClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
     onSignedOut: () -> Unit = {},
+    focusUpdate: Boolean = false,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -124,6 +126,20 @@ fun SettingsScreen(
     var showCancelConfirm by remember { mutableStateOf(false) }
     val appContext = LocalContext.current.applicationContext
     val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    val scrollState = rememberScrollState()
+
+    // Consumed-once flag: auto-scroll to the update row and trigger the check
+    // exactly once when arriving from the update notification.
+    var focusUpdateConsumed by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(focusUpdate, focusUpdateConsumed) {
+        if (focusUpdate && !focusUpdateConsumed) {
+            focusUpdateConsumed = true
+            // Wait for the Column to be measured so maxValue > 0
+            androidx.compose.runtime.snapshotFlow { scrollState.maxValue }.first { it > 0 }
+            scrollState.animateScrollTo(scrollState.maxValue)
+            viewModel.checkForUpdate()
+        }
+    }
 
     // Re-check "Install unknown apps" permission when the user returns from
     // the system settings screen. Without this the row stays stuck on
@@ -159,7 +175,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scrollState)
         ) {
             // Account section
             uiState.currentUser?.let { user ->

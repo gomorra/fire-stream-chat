@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.9.4] — 2026-05-14
+
+### Changed
+- **Update notification now taps directly into download.** Previously tapping the \"update available\" notification opened Settings at the top, requiring the user to scroll to the bottom, tap \"Check for updates\", wait for the network check, and then confirm the download. The notification now carries a `focusUpdate` flag that makes Settings auto-scroll to the update row and immediately fire the update check on arrival — the \"Update available\" dialog appears automatically and the user only needs to tap \"Update now\" to start the download. Notification copy updated from \"Open Settings → Check for updates to install\" to \"Tap to download and install\" to reflect this.
+
 ## [1.9.3] — 2026-05-14
 
 ### Fixed

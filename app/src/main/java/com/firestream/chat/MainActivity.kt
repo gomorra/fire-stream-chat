@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
         val initialChatId = intent.getStringExtra(EXTRA_CHAT_ID)
         val initialSenderId = intent.getStringExtra(EXTRA_SENDER_ID)
         val openSettings = intent.getBooleanExtra("openSettings", false)
+        val focusUpdate = intent.getBooleanExtra("focusUpdate", false)
         val isShareIntent = intent?.action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)
         if (isShareIntent) {
             sharedContentHolder.pendingIntent = intent
@@ -72,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     initialSenderId = initialSenderId,
                     isShareIntent = isShareIntent,
                     openSettings = openSettings,
+                    focusUpdate = focusUpdate,
                     preferencesDataStore = preferencesDataStore
                 )
             }

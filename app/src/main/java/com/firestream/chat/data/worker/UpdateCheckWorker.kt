@@ -52,6 +52,7 @@ class UpdateCheckWorker @AssistedInject constructor(
         )
         val intent = Intent(context, MainActivity::class.java).apply {
             putExtra("openSettings", true)
+            putExtra("focusUpdate", true)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(
@@ -61,10 +62,10 @@ class UpdateCheckWorker @AssistedInject constructor(
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("FireStream Chat $versionName available")
-            .setContentText("Open Settings → Check for updates to install.")
+            .setContentText("Tap to download and install.")
             .setStyle(
                 NotificationCompat.BigTextStyle()
-                    .bigText("A new version is ready to install. Open Settings → Check for updates.")
+                    .bigText("A new version is ready to install. Tap to download.")
             )
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setContentIntent(pendingIntent)
