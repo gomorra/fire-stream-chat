@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.9.5] — 2026-05-14
+
+### Fixed
+- **`ChatInfoManagerRecentEmojiDebounceTest` failing in CI.** The test `subsequent emission does not update before 5 seconds` was asserting that state remained unchanged after 4,999 ms, but `ChatInfoManager.observeRecentEmojis` uses `delay(3_000L)` — so the update had already fired by 3 s and the assertion at ~5 s always failed. Aligned all four debounce test cases to the 3-second window: the guard threshold is now `advanceTimeBy(2_999L)` and the success paths remain unchanged.
+
 ## [1.9.4] — 2026-05-14
 
 ### Changed

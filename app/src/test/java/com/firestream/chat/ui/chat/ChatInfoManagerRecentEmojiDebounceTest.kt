@@ -57,7 +57,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
     }
 
     @Test
-    fun `subsequent emission does not update before 5 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
+    fun `subsequent emission does not update before 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
         val mgr = manager()
         mgr.start()
 
@@ -65,13 +65,13 @@ class ChatInfoManagerRecentEmojiDebounceTest {
         advanceUntilIdle()
 
         recentsFlow.emit(listOf("❤️", "😀"))
-        advanceTimeBy(4_999L)
+        advanceTimeBy(2_999L)
 
         assertEquals(listOf("😀"), uiState.value.overlays.recentEmojis)
     }
 
     @Test
-    fun `subsequent emission updates after 5 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
+    fun `subsequent emission updates after 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
         val mgr = manager()
         mgr.start()
 
@@ -86,7 +86,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
     }
 
     @Test
-    fun `rapid emissions debounce — only last value applied after 5 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
+    fun `rapid emissions debounce — only last value applied after 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
         val mgr = manager()
         mgr.start()
 
@@ -104,7 +104,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
         // Still mid-debounce — state must not have changed yet
         assertEquals(listOf("😀"), uiState.value.overlays.recentEmojis)
 
-        // Let the final 5-second window expire
+        // Let the final 3-second window expire
         advanceTimeBy(3_000L)
         advanceUntilIdle()
 
