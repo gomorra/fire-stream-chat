@@ -2,6 +2,7 @@ package com.firestream.chat.ui.chatlist
 
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.UserRepository
@@ -183,5 +184,113 @@ class ChatListViewModelTest {
         viewModel.clearError()
 
         assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `chats are sorted by latest communication regardless of repository emission order`() = runTest {
+        // Emit chats out of order — the chat with the newest lastMessage should
+        // surface at the top of uiState.chats, not the position it was emitted in.
+        val older = Chat(
+            id = "older",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u2"),
+            createdAt = 100L,
+            lastMessage = Message(id = "m1", chatId = "older", senderId = "u2", content = "old", timestamp = 1_000L),
+        )
+        val newer = Chat(
+            id = "newer",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u3"),
+            createdAt = 100L,
+            lastMessage = Message(id = "m2", chatId = "newer", senderId = "u3", content = "new", timestamp = 5_000L),
+        )
+        chatRepository.reset()
+        chatRepository.emit(listOf(older, newer))
+
+        val vm = ChatListViewModel(
+            searchMessagesUseCase = searchMessagesUseCase,
+            authRepository = authRepository,
+            chatRepository = chatRepository,
+            messageRepository = messageRepository,
+            contactRepository = contactRepository,
+            userRepository = userRepository
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf("newer", "older"), vm.uiState.value.chats.map { it.id })
+    }
+
+    @Test
+    fun `incoming message bumps its chat to the top of the list`() = runTest {
+        val chatA = Chat(
+            id = "a",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u2"),
+            createdAt = 100L,
+            lastMessage = Message(id = "ma", chatId = "a", senderId = "u2", content = "hi", timestamp = 2_000L),
+        )
+        val chatB = Chat(
+            id = "b",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u3"),
+            createdAt = 100L,
+            lastMessage = Message(id = "mb", chatId = "b", senderId = "u3", content = "hey", timestamp = 3_000L),
+        )
+        chatRepository.reset()
+        chatRepository.emit(listOf(chatA, chatB))
+
+        val vm = ChatListViewModel(
+            searchMessagesUseCase = searchMessagesUseCase,
+            authRepository = authRepository,
+            chatRepository = chatRepository,
+            messageRepository = messageRepository,
+            contactRepository = contactRepository,
+            userRepository = userRepository
+        )
+        advanceUntilIdle()
+        assertEquals(listOf("b", "a"), vm.uiState.value.chats.map { it.id })
+
+        // A new message lands in chat A — it must move above chat B.
+        val chatANewer = chatA.copy(
+            lastMessage = Message(id = "ma2", chatId = "a", senderId = "u2", content = "newer", timestamp = 9_000L),
+        )
+        chatRepository.emit(listOf(chatANewer, chatB))
+        advanceUntilIdle()
+
+        assertEquals(listOf("a", "b"), vm.uiState.value.chats.map { it.id })
+    }
+
+    @Test
+    fun `chat with no messages falls back to createdAt for ordering`() = runTest {
+        val emptyRecent = Chat(
+            id = "empty-recent",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u2"),
+            createdAt = 5_000L,
+            lastMessage = null,
+        )
+        val olderWithMessage = Chat(
+            id = "old-msg",
+            type = ChatType.INDIVIDUAL,
+            participants = listOf("user1", "u3"),
+            createdAt = 100L,
+            lastMessage = Message(id = "m", chatId = "old-msg", senderId = "u3", content = "hi", timestamp = 1_000L),
+        )
+        chatRepository.reset()
+        chatRepository.emit(listOf(olderWithMessage, emptyRecent))
+
+        val vm = ChatListViewModel(
+            searchMessagesUseCase = searchMessagesUseCase,
+            authRepository = authRepository,
+            chatRepository = chatRepository,
+            messageRepository = messageRepository,
+            contactRepository = contactRepository,
+            userRepository = userRepository
+        )
+        advanceUntilIdle()
+
+        // emptyRecent has createdAt 5000 > olderWithMessage's lastMessage 1000,
+        // so it sorts above per the "mix by recency" rule.
+        assertEquals(listOf("empty-recent", "old-msg"), vm.uiState.value.chats.map { it.id })
     }
 }

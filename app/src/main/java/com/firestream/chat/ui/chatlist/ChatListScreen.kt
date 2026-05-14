@@ -114,12 +114,12 @@ fun ChatListScreen(
         }
     }
 
+    // uiState.chats is pre-sorted by ChatListViewModel (newest activity first),
+    // so filter preserves that order — never re-sort here.
     val allChats = uiState.chats
     val activeChats = allChats.filter { !it.isArchived }
     val pinnedChats = activeChats.filter { it.isPinned }
-        .sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
     val regularChats = activeChats.filter { !it.isPinned }
-        .sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
     val archivedChats = allChats.filter { it.isArchived }
 
     // Wrap the screen in a Box so the fullscreen avatar viewer (composed at
