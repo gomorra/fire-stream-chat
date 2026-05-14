@@ -5,6 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [UNRELEASED] [1.9.1] — 2026-05-13
 
 ### Fixed
+- **Recent emojis no longer jump immediately on tap.** Every tap was calling `addRecentEmoji`, which triggered an instant DataStore write → `recentEmojisFlow` re-emission → recomposition, causing the grid to reorder mid-interaction. The observer now uses `collectLatest` with a 5-second `delay` as a trailing-edge debounce: rapid taps keep resetting the clock, and the grid only reorders once tapping pauses for 5 seconds. The initial load when the picker opens remains immediate.
 - **Profile pictures no longer re-fetch from the cloud every time a screen opens.** The avatar download-and-cache pipeline (`ProfileImageManager` → Room `localAvatarPath`) was already in place and auto-downloading on URL change, but eight UI surfaces bypassed it — four called `UserAvatar` without passing `localAvatarPath` (AvatarStack, ForwardChatPicker, ListShareSheet, SharePickerScreen) and four reached for the remote `avatarUrl` directly via `AsyncImage` (Settings, CallScreen, CreateBroadcast, CreateGroup). Each open paid a network round-trip even when a current local copy was on disk. All eight now resolve via `resolveAvatarModel(localAvatarPath, avatarUrl)`, preferring the cached file. `CallService` now also stamps a `localAvatarPath` onto each `CallState` so the call UI's letter-fallback layout reads from disk too.
 
 ## [1.9.0] — 2026-05-13
