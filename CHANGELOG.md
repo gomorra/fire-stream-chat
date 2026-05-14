@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.9.3] — 2026-05-14
+
+### Fixed
+- **Flaky `ChatInfoManagerRecentEmojiDebounceTest` in CI.** The two tests asserting state after a 5-second debounce window (`subsequent emission updates after 5 seconds`, `rapid emissions debounce — only last value applied after 5 seconds`) were failing non-deterministically on the GitHub Actions runner. With `StandardTestDispatcher`, `advanceTimeBy(5_000L)` completes the `delay` but the coroutine continuation (`_uiState.update`) is queued for the next dispatch cycle — the assertions ran before the state was applied. Added `advanceUntilIdle()` after each `advanceTimeBy` call so all pending coroutines are drained before asserting.
+
 ## [1.9.2] — 2026-05-14
 
 ### Fixed
