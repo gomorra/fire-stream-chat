@@ -199,7 +199,7 @@ internal class ChatInfoManager(
                     if (!recentsInitialized) {
                         recentsInitialized = true
                     } else {
-                        delay(5_000L)
+                        delay(3_000L)
                     }
                     _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
                 }
