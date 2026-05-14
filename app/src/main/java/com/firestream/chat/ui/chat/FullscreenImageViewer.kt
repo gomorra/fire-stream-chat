@@ -128,13 +128,20 @@ internal fun FullscreenImageViewer(
                 )
             }
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 10f)
-                    if (scale > 1f) {
-                        offset += pan
+                detectTransformGestures { centroid, pan, zoom, _ ->
+                    val newScale = (scale * zoom).coerceIn(1f, 10f)
+                    if (newScale > 1f) {
+                        // Keep the content point under the centroid fixed:
+                        // translate so centroid maps to the same content point
+                        // at the new scale.
+                        val center = Offset(size.width / 2f, size.height / 2f)
+                        val newOffset = centroid - center -
+                            (centroid - center - offset) * (newScale / scale) + pan
+                        offset = newOffset
                     } else {
                         offset = Offset.Zero
                     }
+                    scale = newScale
                 }
             },
         contentAlignment = Alignment.Center

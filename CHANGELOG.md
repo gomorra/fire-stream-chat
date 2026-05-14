@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.9.6] — 2026-05-14
+
+### Fixed
+- **Pinch-to-zoom now anchors at the pinch centroid in both image viewers.** Previously, zooming with two fingers always scaled around the image center regardless of where the fingers were placed, requiring a manual pan afterwards to inspect the intended region. `detectTransformGestures` exposes the midpoint between both fingers (`centroid`), which was being discarded (`_`). The offset is now computed so the content point under the centroid stays fixed as scale changes — `newOffset = centroid − center − (centroid − center − oldOffset) × (newScale / oldScale) + pan` — the same formula already used for double-tap zoom. Fixed in both `FullscreenImageViewer` (full-quality viewer) and `ImagePreviewScreen` (pre-send preview).
+
 ## [1.9.5] — 2026-05-14
 
 ### Fixed

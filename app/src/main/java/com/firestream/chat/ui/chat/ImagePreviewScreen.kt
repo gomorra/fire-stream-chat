@@ -105,13 +105,17 @@ internal fun ImagePreviewScreen(
                     )
                 }
                 .pointerInput(Unit) {
-                    detectTransformGestures { _, pan, zoom, _ ->
-                        scale = (scale * zoom).coerceIn(1f, 5f)
-                        if (scale > 1f) {
-                            offset += pan
+                    detectTransformGestures { centroid, pan, zoom, _ ->
+                        val newScale = (scale * zoom).coerceIn(1f, 5f)
+                        if (newScale > 1f) {
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            val newOffset = centroid - center -
+                                (centroid - center - offset) * (newScale / scale) + pan
+                            offset = newOffset
                         } else {
                             offset = Offset.Zero
                         }
+                        scale = newScale
                     }
                 }
                 .graphicsLayer(
