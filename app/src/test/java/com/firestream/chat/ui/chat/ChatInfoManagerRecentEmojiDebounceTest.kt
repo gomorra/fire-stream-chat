@@ -80,6 +80,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
 
         recentsFlow.emit(listOf("❤️", "😀"))
         advanceTimeBy(5_000L)
+        advanceUntilIdle()
 
         assertEquals(listOf("❤️", "😀"), uiState.value.overlays.recentEmojis)
     }
@@ -105,6 +106,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
 
         // Let the final 5-second window expire
         advanceTimeBy(5_000L)
+        advanceUntilIdle()
 
         assertEquals(listOf("❤️", "😮", "😂", "😀"), uiState.value.overlays.recentEmojis)
     }
