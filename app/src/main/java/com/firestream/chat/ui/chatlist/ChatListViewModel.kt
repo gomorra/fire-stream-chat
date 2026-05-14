@@ -98,16 +98,17 @@ class ChatListViewModel @Inject constructor(
                     )
                 }
                 .collect { chats ->
+                    val sorted = chats.sortedByDescending { it.lastMessage?.timestamp ?: it.createdAt }
                     _uiState.value = _uiState.value.copy(
-                        chats = chats,
+                        chats = sorted,
                         isLoading = false
                     )
-                    observeRecipientAvatars(chats)
-                    markAllChatsAsDelivered(chats)
-                    if (!hasSyncedMessages && chats.isNotEmpty()) {
+                    observeRecipientAvatars(sorted)
+                    markAllChatsAsDelivered(sorted)
+                    if (!hasSyncedMessages && sorted.isNotEmpty()) {
                         hasSyncedMessages = true
                         launch {
-                            try { messageRepository.syncAllChatMessages(chats.map { it.id }) } catch (_: Exception) { }
+                            try { messageRepository.syncAllChatMessages(sorted.map { it.id }) } catch (_: Exception) { }
                         }
                     }
                 }
