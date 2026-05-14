@@ -16,8 +16,10 @@ package com.firestream.chat.ui.chat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -47,6 +49,7 @@ internal class ChatInfoManager(
     private var allGroupParticipants: List<User> = emptyList()
     private var localReadReceipts: Boolean = true
     private var recipientReadReceipts: Boolean = true
+    private var recentsInitialized = false
 
     fun start() {
         loadAvailableChats()
@@ -192,7 +195,12 @@ internal class ChatInfoManager(
         scope.launch {
             preferencesDataStore.recentEmojisFlow
                 .distinctUntilChanged()
-                .collect { recents ->
+                .collectLatest { recents ->
+                    if (!recentsInitialized) {
+                        recentsInitialized = true
+                    } else {
+                        delay(5_000L)
+                    }
                     _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
                 }
         }
