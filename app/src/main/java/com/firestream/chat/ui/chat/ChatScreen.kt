@@ -905,9 +905,6 @@ fun ChatScreen(
                                 // at `index + 1`; `index == reversed.lastIndex` is the very oldest.
                                 val showSeparator = index == reversed.lastIndex ||
                                     !isSameDay(message.timestamp, reversed[index + 1].timestamp)
-                                if (showSeparator) {
-                                    DateSeparator(formatDateSeparator(message.timestamp))
-                                }
                                 // computeGroupPosition expects (message, chronologically-previous,
                                 // chronologically-next). In the reversed view, chronologically-prev
                                 // is the older neighbour at `index + 1` and chronologically-next
@@ -929,7 +926,17 @@ fun ChatScreen(
                                     }?.value
                                 } else null
 
-                                Column(modifier = Modifier.animateItem().padding(top = topPadding)) {
+                                // Keep the date separator and the bubble inside ONE lazy-item node.
+                                // With reverseLayout=true, multiple sibling composables emitted
+                                // directly by a single item are placed bottom-to-top, which would
+                                // render the separator *below* its message — landing it between two
+                                // consecutive same-day messages instead of above the first. Wrapping
+                                // them in one Column pins the separator above the day's first message.
+                                Column(modifier = Modifier.animateItem().fillMaxWidth()) {
+                                if (showSeparator) {
+                                    DateSeparator(formatDateSeparator(message.timestamp))
+                                }
+                                Column(modifier = Modifier.padding(top = topPadding)) {
                                 if (message.type == MessageType.POLL) {
                                     PollBubble(
                                         message = message,
@@ -1069,7 +1076,8 @@ fun ChatScreen(
                                         }
                                     }
                                 }
-                                } // Column with group spacing
+                                } // inner Column with group spacing
+                                } // outer Column wrapping separator + bubble
                             }
                         }
 
