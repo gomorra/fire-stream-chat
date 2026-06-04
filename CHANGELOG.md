@@ -5,7 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.9.7] — 2026-06-04
 
 ### Fixed
-- **Date separator no longer slips between two consecutive messages.** When two messages were sent in quick succession, the day label (e.g. "Today") could render *between* them instead of above the first. The separator and the message bubble were emitted as two sibling composables inside a single `reverseLayout` `LazyColumn` item, and Compose places an item's sibling nodes bottom-to-top under reverse layout — flipping the separator below its bubble. Both are now wrapped in one `Column`, so the separator stays pinned above the day's first message. (`717c3b9`)
+- **Date separator no longer slips between two consecutive messages.** When two messages were sent in quick succession, the day label (e.g. "Today") could render *between* them instead of above the first. The separator and the message bubble were emitted as two sibling composables inside a single `reverseLayout` `LazyColumn` item, and Compose places an item's sibling nodes bottom-to-top under reverse layout — flipping the separator below its bubble. Both are now wrapped in one `Column`, so the separator stays pinned above the day's first message. (`97c06df`)
 
 ## [1.9.6] — 2026-05-14
 
