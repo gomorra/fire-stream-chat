@@ -62,7 +62,7 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-private const val GRID_COLUMNS = 8
+private const val GRID_COLUMNS = 7
 private const val RECENTS_ICON = "⏱"
 private const val RECENTS_MAX_ROWS = 3
 private const val SIZE_MIN = 0.8f
