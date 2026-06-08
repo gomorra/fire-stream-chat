@@ -5,12 +5,12 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.10.1] — 2026-06-08
 
 ### Changed
-- **Emoji picker glyphs now scale to fill their cells.** Instead of a fixed `22.sp` size, each emoji is sized to ~80% of its (square) grid cell via `BoxWithConstraints`, so emojis appear as large as the space allows while keeping a small gap between neighbours — matching the WhatsApp picker. (`1401f22`)
+- **Emoji picker glyphs now scale to fill their cells.** Instead of a fixed `22.sp` size, each emoji is sized to ~80% of its (square) grid cell via `BoxWithConstraints`, so emojis appear as large as the space allows while keeping a small gap between neighbours — matching the WhatsApp picker. (`a7ff5b7`)
 
 ## [1.10.0] — 2026-06-08
 
 ### Changed
-- **Emoji picker now shows 7 columns instead of 8.** Dropping one column widens each grid cell, so emojis render larger and are easier to identify at a glance. (`ee01efb`)
+- **Emoji picker now shows 7 columns instead of 8.** Dropping one column widens each grid cell, so emojis render larger and are easier to identify at a glance. (`3138678`)
 
 ## [1.9.7] — 2026-06-04
 
