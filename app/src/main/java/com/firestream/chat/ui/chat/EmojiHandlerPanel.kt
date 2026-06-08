@@ -67,7 +67,7 @@ import kotlin.math.roundToInt
 private const val GRID_COLUMNS = 8
 // Glyph fills this fraction of the (square) cell, leaving a small gap on
 // every side so neighbouring emojis stay visually separated (WhatsApp-style).
-private const val EMOJI_FILL_FRACTION = 0.8f
+private const val EMOJI_FILL_FRACTION = 0.7f
 private const val RECENTS_ICON = "⏱"
 private const val RECENTS_MAX_ROWS = 3
 private const val SIZE_MIN = 0.8f

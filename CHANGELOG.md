@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.10.3] — 2026-06-08
+
+### Changed
+- **Emoji picker glyphs scaled down slightly.** Reduced `EMOJI_FILL_FRACTION` from 0.8 to 0.7, so each emoji fills 70% of its cell instead of 80% — a bit more breathing room between emojis in the picker grid. (`PLACEHOLDER`)
+
 ## [1.10.2] — 2026-06-08
 
 ### Changed
