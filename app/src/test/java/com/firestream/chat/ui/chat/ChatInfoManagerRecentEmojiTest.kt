@@ -13,14 +13,19 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 
-class ChatInfoManagerRecentEmojiDebounceTest {
+/**
+ * The recent-emoji order is published live from DataStore — there is no debounce in
+ * the manager. Order-freezing while the picker is open is a presentation concern owned
+ * by [EmojiHandlerPanel] (it snapshots the list once per open session), so the manager
+ * simply forwards every distinct emission immediately.
+ */
+class ChatInfoManagerRecentEmojiTest {
 
     @get:Rule
     val mainDispatcherRule = MainDispatcherRule(StandardTestDispatcher())
@@ -57,7 +62,7 @@ class ChatInfoManagerRecentEmojiDebounceTest {
     }
 
     @Test
-    fun `subsequent emission does not update before 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
+    fun `subsequent emission updates immediately without debounce`() = runTest(mainDispatcherRule.testDispatcher) {
         val mgr = manager()
         mgr.start()
 
@@ -65,49 +70,26 @@ class ChatInfoManagerRecentEmojiDebounceTest {
         advanceUntilIdle()
 
         recentsFlow.emit(listOf("❤️", "😀"))
-        advanceTimeBy(2_999L)
-
-        assertEquals(listOf("😀"), uiState.value.overlays.recentEmojis)
-    }
-
-    @Test
-    fun `subsequent emission updates after 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
-        val mgr = manager()
-        mgr.start()
-
-        recentsFlow.emit(listOf("😀"))
-        advanceUntilIdle()
-
-        recentsFlow.emit(listOf("❤️", "😀"))
-        advanceTimeBy(3_000L)
         advanceUntilIdle()
 
         assertEquals(listOf("❤️", "😀"), uiState.value.overlays.recentEmojis)
     }
 
     @Test
-    fun `rapid emissions debounce — only last value applied after 3 seconds`() = runTest(mainDispatcherRule.testDispatcher) {
+    fun `each rapid emission is applied in order`() = runTest(mainDispatcherRule.testDispatcher) {
         val mgr = manager()
         mgr.start()
 
         recentsFlow.emit(listOf("😀"))
         advanceUntilIdle()
-
-        // Rapid-fire three more updates
-        recentsFlow.emit(listOf("😂", "😀"))
-        advanceTimeBy(1_000L)
-        recentsFlow.emit(listOf("😮", "😂", "😀"))
-        advanceTimeBy(1_000L)
-        recentsFlow.emit(listOf("❤️", "😮", "😂", "😀"))
-        advanceTimeBy(1_000L)
-
-        // Still mid-debounce — state must not have changed yet
         assertEquals(listOf("😀"), uiState.value.overlays.recentEmojis)
 
-        // Let the final 3-second window expire
-        advanceTimeBy(3_000L)
+        recentsFlow.emit(listOf("😂", "😀"))
         advanceUntilIdle()
+        assertEquals(listOf("😂", "😀"), uiState.value.overlays.recentEmojis)
 
-        assertEquals(listOf("❤️", "😮", "😂", "😀"), uiState.value.overlays.recentEmojis)
+        recentsFlow.emit(listOf("❤️", "😂", "😀"))
+        advanceUntilIdle()
+        assertEquals(listOf("❤️", "😂", "😀"), uiState.value.overlays.recentEmojis)
     }
 }

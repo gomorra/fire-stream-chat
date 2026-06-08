@@ -277,8 +277,15 @@ internal fun EmojiHandlerPanel(
     var searchQuery by remember { mutableStateOf("") }
     val isSearching = searchQuery.isNotBlank()
 
-    val gridItems = remember(recentEmojis, searchQuery) {
-        if (isSearching) buildSearchResults(searchQuery) else buildCategoryGrid(recentEmojis)
+    // Freeze the Recents order for the lifetime of this open picker session: snapshot
+    // the list once when the panel enters composition so the grid never reorders under
+    // the user's finger as taps stream into DataStore. Every call site disposes the
+    // panel on close (AnimatedVisibility / ModalBottomSheet / conditional), so each
+    // fresh open re-captures the latest order.
+    val sessionRecents = remember { recentEmojis }
+
+    val gridItems = remember(sessionRecents, searchQuery) {
+        if (isSearching) buildSearchResults(searchQuery) else buildCategoryGrid(sessionRecents)
     }
 
     val categoryHeaderIndices = remember(gridItems) {

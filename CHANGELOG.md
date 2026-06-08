@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.10.4] — 2026-06-08
+
+### Fixed
+- **Recents row no longer feels stuck while the emoji picker is open.** Previously the recently-used row only reordered after the picker closed — a 3-second tap-idle debounce in `ChatInfoManager` that, in reaction mode, always fired after the sheet was already gone. The picker now snapshots the Recents order once when it opens and keeps it stable for that session (no reflow under your finger), while the data layer stays live so each fresh open reflects your latest taps immediately. (`PENDING`)
+
 ## [1.10.3] — 2026-06-08
 
 ### Changed
