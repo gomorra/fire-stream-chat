@@ -5,7 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.10.2] — 2026-06-08
 
 ### Changed
-- **Emoji picker reverted to 8 columns.** The grid goes back to 8 columns; the relative glyph scaling stays, so emojis are simply a little smaller per cell while still filling the available space with a small gap. (`PLACEHOLDER`)
+- **Emoji picker reverted to 8 columns.** The grid goes back to 8 columns; the relative glyph scaling stays, so emojis are simply a little smaller per cell while still filling the available space with a small gap. (`c032109`)
 
 ## [1.10.1] — 2026-06-08
 
