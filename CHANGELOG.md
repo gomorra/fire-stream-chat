@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.10.5] — 2026-06-08
+
+### Fixed
+- **Messages no longer get stuck "sending" forever after you leave a chat mid-send.** A send whose coroutine was cancelled when you navigated away from the chat was left in the sending state indefinitely — never retried, never marked failed — so the message was silently dropped with no way to recover it. Orphaned sends are now flipped to the failed state on app start and on chat re-entry, restoring the tap-to-retry button on the bubble. (Auto-retry, reconnect flush and an offline banner are tracked as the deferred durable-outbox follow-up in `TECH_DEBT.md`.) (`TBDHASH`)
+
 ## [1.10.4] — 2026-06-08
 
 ### Fixed

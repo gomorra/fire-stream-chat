@@ -22,8 +22,29 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :messageId")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND timestamp = :timestamp AND senderId = :senderId AND status = 'SENDING' LIMIT 1")
+    // Echo-dedupe lookup for an optimistic self-message that hasn't been replaced
+    // by its remote row yet. Matches FAILED as well as SENDING so that a row the
+    // orphan-recovery flip turned to FAILED (see failStuckSendingMessages) — but
+    // which had actually reached the backend before the local replace ran — is
+    // still recognised when its remote echo arrives, instead of being inserted a
+    // second time as a duplicate.
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND timestamp = :timestamp AND senderId = :senderId AND status IN ('SENDING', 'FAILED') LIMIT 1")
     suspend fun getPendingSendingMessage(chatId: String, timestamp: Long, senderId: String): MessageEntity?
+
+    // Orphan recovery: a send whose coroutine was cancelled mid-flight (e.g. the
+    // user navigated away from the chat before it completed) leaves its optimistic
+    // row stuck at SENDING forever — never retried, never marked FAILED. Flipping
+    // it to FAILED restores the existing manual-retry affordance on the bubble.
+    // Called on app start (all chats) and on chat (re)entry (one chat); at both
+    // points the user has not initiated a new send, so no live SENDING row exists
+    // and only genuine orphans are caught. Returns the number of rows recovered.
+    // The deferred auto-retry/durable-outbox follow-up is logged in TECH_DEBT.md
+    // ("Durable offline-send outbox").
+    @Query("UPDATE messages SET status = 'FAILED' WHERE status = 'SENDING'")
+    suspend fun failStuckSendingMessages(): Int
+
+    @Query("UPDATE messages SET status = 'FAILED' WHERE chatId = :chatId AND status = 'SENDING'")
+    suspend fun failStuckSendingMessagesForChat(chatId: String): Int
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)

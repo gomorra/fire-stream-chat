@@ -110,6 +110,12 @@ class MessageRepositoryImpl @Inject constructor(
         val currentUid = authSource.currentUserId ?: ""
 
         return channelFlow {
+            // Orphan recovery on chat (re)entry: a send cancelled mid-flight when
+            // the user previously left this chat leaves its row stuck at SENDING.
+            // Flip it to FAILED before we start observing so the retry button is
+            // back the moment the chat opens. Safe here — the user has not started
+            // a new send in this chat yet, so no live SENDING row is in flight.
+            runCatching { messageDao.failStuckSendingMessagesForChat(chatId) }
             downloadPendingMediaForChat(chatId)
             launch {
                 try {

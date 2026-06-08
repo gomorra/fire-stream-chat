@@ -73,6 +73,18 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Durable offline-send outbox — auto-retry, reconnect flush, reboot survival
+
+**The smell.** A failed send is a dead end: the user must manually tap each `FAILED` bubble to retry, only while the app is alive. There's no durable queue, no connectivity monitoring, no auto-retry on reconnect, and no offline UX — a message composed with no network just fails. The *silent-loss* half of this was fixed on 2026-06-08: a send cancelled mid-flight (user leaves the chat) used to leave its row stuck at `SENDING` forever — never retried, never failed. `MessageDao.failStuckSendingMessages()` now flips those orphans to `FAILED` on app start (all chats, via `FireStreamApp.recoverOrphanedSends`) and on chat re-entry (one chat, via `MessageRepositoryImpl.getMessages`), so the existing manual-retry button reappears. `getPendingSendingMessage` was widened to match `FAILED` as well as `SENDING` so a row flipped to `FAILED` that had actually reached the backend is still de-duplicated when its remote echo arrives. What remains deferred is the full "send works offline and catches up automatically" experience.
+
+**The deferred design (Option C).** A backend-agnostic Room-backed outbox: a new `QUEUED` status, an `OutboxSender` engine extracted from `MessageRepositoryImpl`, a WorkManager `OutboxWorker` draining the queue (per-chat ordering, exponential backoff, `MAX_ATTEMPTS`), a `ConnectivityMonitor` that flushes on reconnect, reboot re-enqueue via `BootCompletedReceiver`, and a "Waiting for network" bubble state + chat-level offline banner. Full plan (8 steps, model/effort table, correctness-risk analysis) at `~/.claude/plans/what-happens-currently-if-cheeky-pony.md`.
+
+**Why we haven't done it.** It's a large cross-cutting change (schema migration + DAO + a new send engine + worker + connectivity infra + UI, across both `firebase` and `pocketbase` flavors) whose correctness hinges on subtle concurrency: per-chat ordering vs head-of-line blocking, duplicate-send across process death (needs client-set idempotent doc-ids plus the widened echo-dedupe), and the cancellation-semantics flip from moving sends off the chat's `viewModelScope`. The user scoped this down on 2026-06-08 to the cheap orphan-recovery fix above, which removes the only *silent message loss* path — the rest is quality-of-life (auto-retry, offline banner) layered on top, not correctness. Note the plan explicitly rejects the one-line `FirebaseFirestore.setPersistenceEnabled(true)` shortcut: Firestore offline persistence covers neither Cloud Storage uploads (the dominant image-failure mode) nor the `pocketbase` flavor nor the compression/Signal pre-steps, and would add a second divergent code path.
+
+**When to revisit.** When "send offline, catch up later" (WhatsApp-grade) becomes a product requirement, or when manual-retry friction shows up in dogfooding / user reports. The shipped `failStuckSendingMessages` is the natural first brick — it becomes `requeueStuckSending` in the full plan. Pick the plan up from step 1; the orphan-recovery query and the widened `getPendingSendingMessage` are already in place.
+
+---
+
 ## Declined — not worth the churn
 
 ### Split `ChatRepository` (30 methods) and `MessageRepository` (25 methods) into smaller interfaces

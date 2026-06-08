@@ -9,12 +9,16 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.UpdateCheckWorker
+import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.di.FlavorBootstrap
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -35,6 +39,13 @@ class FireStreamApp : Application(), Configuration.Provider {
     @Inject
     lateinit var flavorBootstraps: @JvmSuppressWildcards Set<FlavorBootstrap>
 
+    @Inject
+    lateinit var messageDao: MessageDao
+
+    @Inject
+    @ApplicationScope
+    lateinit var appScope: CoroutineScope
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -51,8 +62,18 @@ class FireStreamApp : Application(), Configuration.Provider {
         currentActivityHolder.register(this)
         TimerNotificationChannel.ensureCreated(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
+        recoverOrphanedSends()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
+    }
+
+    // A message left at SENDING by a process that died or was killed mid-send is
+    // never retried and never marked failed. On startup, flip any such orphan to
+    // FAILED so it regains the manual-retry affordance. At this point no send is
+    // in flight (the process just started), so only genuine orphans are caught.
+    // The deferred auto-retry/durable-outbox follow-up is in TECH_DEBT.md.
+    private fun recoverOrphanedSends() {
+        appScope.launch { runCatching { messageDao.failStuckSendingMessages() } }
     }
 
     private fun scheduleUpdateCheck() {
