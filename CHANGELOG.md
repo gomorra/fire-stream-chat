@@ -5,7 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.10.3] — 2026-06-08
 
 ### Changed
-- **Emoji picker glyphs scaled down slightly.** Reduced `EMOJI_FILL_FRACTION` from 0.8 to 0.7, so each emoji fills 70% of its cell instead of 80% — a bit more breathing room between emojis in the picker grid. (`PLACEHOLDER`)
+- **Emoji picker glyphs scaled down slightly.** Reduced `EMOJI_FILL_FRACTION` from 0.8 to 0.7, so each emoji fills 70% of its cell instead of 80% — a bit more breathing room between emojis in the picker grid. (`81728d3`)
 
 ## [1.10.2] — 2026-06-08
 
