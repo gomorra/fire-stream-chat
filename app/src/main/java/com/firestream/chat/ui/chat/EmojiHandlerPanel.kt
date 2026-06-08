@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -63,6 +65,9 @@ import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 private const val GRID_COLUMNS = 7
+// Glyph fills this fraction of the (square) cell, leaving a small gap on
+// every side so neighbouring emojis stay visually separated (WhatsApp-style).
+private const val EMOJI_FILL_FRACTION = 0.8f
 private const val RECENTS_ICON = "⏱"
 private const val RECENTS_MAX_ROWS = 3
 private const val SIZE_MIN = 0.8f
@@ -363,7 +368,6 @@ internal fun EmojiHandlerPanel(
                                 )
                                 EmojiCell(
                                     emoji = item.emoji,
-                                    fontSize = 22.sp,
                                     modifier = Modifier
                                         .alpha(alpha)
                                         .onGloballyPositioned { coords ->
@@ -627,18 +631,20 @@ private fun CategoryHeader(icon: String, title: String) {
 @Composable
 private fun EmojiCell(
     emoji: String,
-    fontSize: TextUnit = 22.sp,
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .aspectRatio(1f)
             .clip(RoundedCornerShape(4.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        Text(text = emoji, fontSize = fontSize)
+        // Scale the glyph to the cell so emojis are as large as the space
+        // allows while keeping a small gap between neighbours.
+        val emojiSize = with(LocalDensity.current) { (maxWidth * EMOJI_FILL_FRACTION).toSp() }
+        Text(text = emoji, fontSize = emojiSize)
     }
 }
 
