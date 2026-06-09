@@ -1,5 +1,7 @@
 package com.firestream.chat.data.util
 
+import kotlinx.coroutines.CancellationException
+
 /**
  * Runs [block] and wraps the outcome in a [Result]. Any thrown [Exception] is
  * caught and returned as [Result.failure]. Replaces the
@@ -19,3 +21,12 @@ internal inline fun <T> resultOf(block: () -> T): Result<T> =
     } catch (e: Exception) {
         Result.failure(e)
     }
+
+/**
+ * Rethrows this throwable if it is a [CancellationException]. Call it first in
+ * catch blocks that swallow-and-log an error, so they don't also swallow
+ * coroutine cancellation (which must propagate for structured concurrency).
+ */
+internal fun Throwable.rethrowIfCancellation() {
+    if (this is CancellationException) throw this
+}

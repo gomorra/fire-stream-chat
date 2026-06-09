@@ -5,12 +5,12 @@ import androidx.room.PrimaryKey
 import androidx.room.TypeConverters
 import com.firestream.chat.data.local.Converters
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.model.MessageStatus
-import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.data.util.parseMessageStatus
+import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Poll
 import com.firestream.chat.domain.model.PollOption
-import com.firestream.chat.domain.model.TimerState
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -60,13 +60,13 @@ data class MessageEntity(
         chatId = chatId,
         senderId = senderId,
         content = content,
-        type = runCatching { MessageType.valueOf(type) }.getOrDefault(MessageType.TEXT),
+        type = parseMessageType(type),
         mediaUrl = mediaUrl,
         mediaThumbnailUrl = mediaThumbnailUrl,
         localUri = localUri,
         mediaWidth = mediaWidth,
         mediaHeight = mediaHeight,
-        status = runCatching { MessageStatus.valueOf(status) }.getOrDefault(MessageStatus.SENT),
+        status = parseMessageStatus(status),
         replyToId = replyToId,
         timestamp = timestamp,
         editedAt = editedAt,
@@ -88,7 +88,7 @@ data class MessageEntity(
         isHd = isHd,
         timerDurationMs = timerDurationMs,
         timerStartedAtMs = timerStartedAtMs,
-        timerState = timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+        timerState = timerState?.let { parseTimerState(it) },
         timerRemainingMs = timerRemainingMs,
         timerSilent = timerSilent,
     )

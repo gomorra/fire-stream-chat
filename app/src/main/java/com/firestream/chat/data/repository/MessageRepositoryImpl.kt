@@ -35,7 +35,11 @@ import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.parseMessageStatus
+import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
+import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
@@ -44,6 +48,7 @@ import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -116,14 +121,26 @@ class MessageRepositoryImpl @Inject constructor(
             // back the moment the chat opens. Safe here — the user has not started
             // a new send in this chat yet, so no live SENDING row is in flight.
             runCatching { messageDao.failStuckSendingMessagesForChat(chatId) }
+                .onFailure { Log.w(TAG, "getMessages: stuck-SENDING recovery failed for chat=$chatId", it) }
             downloadPendingMediaForChat(chatId)
             launch {
                 try {
-                try { signalManager.ensureInitialized() } catch (_: Throwable) { }
+                try {
+                    signalManager.ensureInitialized()
+                } catch (t: Throwable) {
+                    t.rethrowIfCancellation()
+                    Log.w(TAG, "observeMessages: Signal init failed — incoming encrypted messages may not decrypt", t)
+                }
                 messageSource.observeMessages(chatId).collectLatest { rawList ->
                     val blockedUserIds = try {
                         if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
-                    } catch (_: Exception) { emptySet() }
+                    } catch (e: Exception) {
+                        e.rethrowIfCancellation()
+                        // Fail open: a transient fetch error must not hide every message,
+                        // but it means blocked senders may render until the next emission.
+                        Log.w(TAG, "observeMessages: block-list fetch failed for chat=$chatId — block filtering degraded", e)
+                        emptySet()
+                    }
                     for (raw in rawList) {
                         // Skip messages from users the current user has blocked.
                         // Log so "message isn't appearing" scenarios are diagnosable via logcat.
@@ -151,7 +168,7 @@ class MessageRepositoryImpl @Inject constructor(
                         if (raw.senderId == currentUid) {
                             if (existing != null) {
                                 // Update status from remote if it changed (e.g. DELIVERED, READ)
-                                val remoteStatus = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT)
+                                val remoteStatus = parseMessageStatus(raw.status)
                                 if (existing.status != remoteStatus.name) {
                                     messageDao.updateMessageStatus(raw.id, remoteStatus.name)
                                 }
@@ -166,10 +183,10 @@ class MessageRepositoryImpl @Inject constructor(
                                 chatId = raw.chatId,
                                 senderId = raw.senderId,
                                 content = content,
-                                type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                                type = parseMessageType(raw.type),
                                 mediaUrl = raw.mediaUrl,
                                 mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                                status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                                status = parseMessageStatus(raw.status),
                                 replyToId = raw.replyToId,
                                 timestamp = raw.timestamp,
                                 editedAt = raw.editedAt,
@@ -192,7 +209,7 @@ class MessageRepositoryImpl @Inject constructor(
                                 isHd = raw.isHd,
                                 timerDurationMs = raw.timerDurationMs,
                                 timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                                timerState = raw.timerState?.let { parseTimerState(it) },
                                 timerRemainingMs = raw.timerRemainingMs,
                                 timerSilent = raw.timerSilent,
                             )
@@ -229,7 +246,8 @@ class MessageRepositoryImpl @Inject constructor(
                                             )
                                         else -> raw.content!!
                                     }
-                                } catch (_: Exception) {
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "observeMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", e)
                                     "[Encrypted message — unable to decrypt]"
                                 }
                             }
@@ -243,12 +261,12 @@ class MessageRepositoryImpl @Inject constructor(
                                 chatId = raw.chatId,
                                 senderId = raw.senderId,
                                 content = content,
-                                type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                                type = parseMessageType(raw.type),
                                 mediaUrl = raw.mediaUrl,
                                 mediaThumbnailUrl = raw.mediaThumbnailUrl,
                                 localUri = preservedLocalUri,
                                 isStarred = preservedIsStarred,
-                                status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                                status = parseMessageStatus(raw.status),
                                 replyToId = raw.replyToId,
                                 timestamp = raw.timestamp,
                                 editedAt = raw.editedAt,
@@ -271,7 +289,7 @@ class MessageRepositoryImpl @Inject constructor(
                                 isHd = raw.isHd,
                                 timerDurationMs = raw.timerDurationMs,
                                 timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                                timerState = raw.timerState?.let { parseTimerState(it) },
                                 timerRemainingMs = raw.timerRemainingMs,
                                 timerSilent = raw.timerSilent,
                             )
@@ -293,7 +311,10 @@ class MessageRepositoryImpl @Inject constructor(
                         }
                     }
                 }
-            } catch (_: Throwable) { }
+            } catch (t: Throwable) {
+                t.rethrowIfCancellation()
+                Log.e(TAG, "observeMessages: remote pipeline failed for chat=$chatId — serving cached messages only", t)
+            }
             }
 
             messageDao.getMessagesByChatId(chatId)
@@ -382,6 +403,26 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     /**
+     * Wraps a send pipeline so any failure flips the optimistic row at
+     * [messageId] to FAILED (restoring the retry affordance) before rethrowing.
+     * Cancellation is a control-flow signal — e.g. the user left the chat
+     * mid-send — so the row is left at SENDING; orphan recovery in
+     * [getMessages] flips stuck rows to FAILED on the next chat entry.
+     */
+    private suspend fun <T> failSendOnError(messageId: String, block: suspend () -> T): T {
+        try {
+            return block()
+        } catch (t: Throwable) {
+            if (t !is CancellationException) {
+                Log.w(TAG, "Send failed for msg=$messageId — marking FAILED", t)
+                runCatching { messageDao.updateMessageStatus(messageId, MessageStatus.FAILED.name) }
+                    .onFailure { Log.w(TAG, "Could not mark msg=$messageId as FAILED", it) }
+            }
+            throw t
+        }
+    }
+
+    /**
      * Send a text message to a chat.
      *
      * @param recipientId The 1:1 peer user id for INDIVIDUAL chats, used by the
@@ -421,7 +462,7 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        try {
+        failSendOnError(tempId) {
             val remoteId = sendEncryptedOrPlain(
                 chatId = chatId,
                 senderId = senderId,
@@ -438,11 +479,6 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
             sentMessage
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
-            }
-            throw t
         }
     }
 
@@ -503,93 +539,88 @@ class MessageRepositoryImpl @Inject constructor(
 
         var tempCompressedFile: File? = null
         try {
-            // For images: compress/process and store locally
-            val localFile: File?
-            val mediaWidth: Int?
-            val mediaHeight: Int?
-            val uploadUri: Uri
-            val uploadMimeType: String
+            failSendOnError(tempId) {
+                // For images: compress/process and store locally
+                val localFile: File?
+                val mediaWidth: Int?
+                val mediaHeight: Int?
+                val uploadUri: Uri
+                val uploadMimeType: String
 
-            if (isImage) {
-                val result = imageCompressor.processImage(parsedUri, isHd)
-                tempCompressedFile = result.file
+                if (isImage) {
+                    val result = imageCompressor.processImage(parsedUri, isHd)
+                    tempCompressedFile = result.file
 
-                localFile = mediaFileManager.copyToLocal(
-                    chatId, tempId, Uri.fromFile(result.file), "jpg"
-                )
-                mediaWidth = result.width
-                mediaHeight = result.height
-                uploadUri = Uri.fromFile(localFile)
-                uploadMimeType = result.mimeType
-            } else {
-                localFile = null
-                mediaWidth = null
-                mediaHeight = null
-                uploadUri = parsedUri
-                uploadMimeType = mimeType
-            }
-
-            // Swap placeholder for an entity pointing at the compressed local file,
-            // now that we know the real dimensions.
-            val optimisticMessage = placeholder.copy(
-                localUri = localFile?.absolutePath ?: uri,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight
-            )
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(optimisticMessage))
-
-            val downloadUrl = try {
-                storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
-                    _uploadProgress.update { map -> map + (tempId to progress) }
-                }
-            } finally {
-                _uploadProgress.update { it - tempId }
-            }
-
-            val remoteId = sendEncryptedOrPlain(
-                chatId = chatId,
-                senderId = senderId,
-                recipientId = recipientId,
-                plaintext = caption,
-                type = messageType,
-                timestamp = timestamp,
-                mediaUrl = downloadUrl,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                isHd = isHd,
-            )
-
-            val sentMessage = optimisticMessage.copy(
-                id = remoteId,
-                status = MessageStatus.SENT,
-                mediaUrl = downloadUrl,
-                localUri = localFile?.absolutePath,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                isHd = isHd
-            )
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
-
-            // Rename local file from tempId to remoteId to prevent orphaned files
-            val finalLocalUri: String? = if (localFile != null) {
-                val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
-                if (localFile.renameTo(newFile)) {
-                    messageDao.updateLocalUri(remoteId, newFile.absolutePath)
-                    newFile.absolutePath
+                    localFile = mediaFileManager.copyToLocal(
+                        chatId, tempId, Uri.fromFile(result.file), "jpg"
+                    )
+                    mediaWidth = result.width
+                    mediaHeight = result.height
+                    uploadUri = Uri.fromFile(localFile)
+                    uploadMimeType = result.mimeType
                 } else {
-                    localFile.absolutePath
+                    localFile = null
+                    mediaWidth = null
+                    mediaHeight = null
+                    uploadUri = parsedUri
+                    uploadMimeType = mimeType
                 }
-            } else null
 
-            sentMessage.copy(localUri = finalLocalUri)
-        } catch (t: Throwable) {
-            // Cancellation is a control-flow signal; leave the row as SENDING so a
-            // re-entry of the chat doesn't show the message as having failed.
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
+                // Swap placeholder for an entity pointing at the compressed local file,
+                // now that we know the real dimensions.
+                val optimisticMessage = placeholder.copy(
+                    localUri = localFile?.absolutePath ?: uri,
+                    mediaWidth = mediaWidth,
+                    mediaHeight = mediaHeight
+                )
+                messageDao.replaceMessage(tempId, MessageEntity.fromDomain(optimisticMessage))
+
+                val downloadUrl = try {
+                    storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
+                        _uploadProgress.update { map -> map + (tempId to progress) }
+                    }
+                } finally {
+                    _uploadProgress.update { it - tempId }
+                }
+
+                val remoteId = sendEncryptedOrPlain(
+                    chatId = chatId,
+                    senderId = senderId,
+                    recipientId = recipientId,
+                    plaintext = caption,
+                    type = messageType,
+                    timestamp = timestamp,
+                    mediaUrl = downloadUrl,
+                    mediaWidth = mediaWidth,
+                    mediaHeight = mediaHeight,
+                    isHd = isHd,
+                )
+
+                val sentMessage = optimisticMessage.copy(
+                    id = remoteId,
+                    status = MessageStatus.SENT,
+                    mediaUrl = downloadUrl,
+                    localUri = localFile?.absolutePath,
+                    mediaWidth = mediaWidth,
+                    mediaHeight = mediaHeight,
+                    isHd = isHd
+                )
+                messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+                chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
+
+                // Rename local file from tempId to remoteId to prevent orphaned files
+                val finalLocalUri: String? = if (localFile != null) {
+                    val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
+                    if (localFile.renameTo(newFile)) {
+                        messageDao.updateLocalUri(remoteId, newFile.absolutePath)
+                        newFile.absolutePath
+                    } else {
+                        localFile.absolutePath
+                    }
+                } else null
+
+                sentMessage.copy(localUri = finalLocalUri)
             }
-            throw t
         } finally {
             // Clean up temp compressed file from cacheDir/compressed/
             tempCompressedFile?.let { if (it.exists()) it.delete() }
@@ -613,7 +644,7 @@ class MessageRepositoryImpl @Inject constructor(
         // retry itself errors.
         messageDao.updateMessageStatus(messageId, MessageStatus.SENDING.name)
 
-        try {
+        failSendOnError(messageId) {
             when (message.type) {
                 MessageType.TEXT -> retrySendTextLike(message, senderId, recipientId)
                 MessageType.IMAGE, MessageType.DOCUMENT -> retrySendMedia(message, senderId, recipientId)
@@ -621,11 +652,6 @@ class MessageRepositoryImpl @Inject constructor(
                 MessageType.LOCATION -> retrySendLocation(message, senderId)
                 else -> throw IllegalStateException("Retry not supported for message type ${message.type}")
             }
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(messageId, MessageStatus.FAILED.name) }
-            }
-            throw t
         }
     }
 
@@ -926,7 +952,7 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        try {
+        failSendOnError(tempId) {
             val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
 
             val remoteId = sendEncryptedOrPlain(
@@ -944,11 +970,6 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.VOICE), timestamp)
             sentMessage
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
-            }
-            throw t
         }
     }
 
@@ -966,7 +987,9 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.searchMessages(query)
                 .filter { regex.containsMatchIn(it.content) }
                 .map { it.toDomain() }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w(TAG, "searchMessages failed (query length=${query.length})", e)
             emptyList()
         }
     }
@@ -977,7 +1000,9 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.searchMessagesInChat(chatId, query)
                 .filter { regex.containsMatchIn(it.content) }
                 .map { it.toDomain() }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w(TAG, "searchMessagesInChat failed for chat=$chatId (query length=${query.length})", e)
             emptyList()
         }
     }
@@ -992,7 +1017,10 @@ class MessageRepositoryImpl @Inject constructor(
         for (id in undeliveredIds) {
             try {
                 messageSource.markDelivered(chatId, id, userId, now)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "markDelivered failed for msg=$id chat=$chatId", e)
+            }
         }
     }
 
@@ -1002,7 +1030,10 @@ class MessageRepositoryImpl @Inject constructor(
         for (id in messageIds) {
             try {
                 messageSource.markDelivered(chatId, id, userId, now)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "markDelivered failed for msg=$id chat=$chatId", e)
+            }
         }
         // Batch-update Room in one shot so the DAO flow emits only once
         messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
@@ -1014,7 +1045,10 @@ class MessageRepositoryImpl @Inject constructor(
         for (id in messageIds) {
             try {
                 messageSource.markRead(chatId, id, userId, now)
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "markRead failed for msg=$id chat=$chatId", e)
+            }
         }
         // Batch-update Room in one shot so the DAO flow emits only once
         messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
@@ -1077,8 +1111,10 @@ class MessageRepositoryImpl @Inject constructor(
                             timestamp = timestamp,
                         )
                         chatDao.updateLastMessage(individualChat.id, fanOutRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
-                    } catch (_: Exception) {
+                    } catch (e: Exception) {
+                        e.rethrowIfCancellation()
                         // Best-effort delivery to each recipient
+                        Log.w(TAG, "sendBroadcastMessage: fan-out failed for recipient=$recipientId", e)
                     } finally {
                         semaphore.release()
                     }
@@ -1203,7 +1239,7 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        try {
+        failSendOnError(tempId) {
             val remoteId = messageSource.sendPlainMessage(
                 chatId = chatId,
                 senderId = senderId,
@@ -1219,11 +1255,6 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LOCATION), timestamp)
             sentMessage
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
-            }
-            throw t
         }
     }
 
@@ -1259,7 +1290,7 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
 
-        try {
+        failSendOnError(tempId) {
             val result = messageSource.sendTimerMessage(
                 chatId = chatId,
                 senderId = senderId,
@@ -1283,11 +1314,6 @@ class MessageRepositoryImpl @Inject constructor(
                 timestamp,
             )
             sent
-        } catch (t: Throwable) {
-            if (t !is kotlinx.coroutines.CancellationException) {
-                runCatching { messageDao.updateMessageStatus(tempId, MessageStatus.FAILED.name) }
-            }
-            throw t
         }
     }
 
@@ -1346,11 +1372,22 @@ class MessageRepositoryImpl @Inject constructor(
         val currentUid = authSource.currentUserId ?: return
         if (chatIds.isEmpty()) return
 
-        try { signalManager.ensureInitialized() } catch (_: Throwable) { }
+        try {
+            signalManager.ensureInitialized()
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            Log.w(TAG, "syncAllChatMessages: Signal init failed — incoming encrypted messages may not decrypt", t)
+        }
 
         val blockedUserIds = try {
             userSource.getBlockedUserIds(currentUid)
-        } catch (_: Exception) { emptySet() }
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            // Fail open: a transient fetch error must not hide every message,
+            // but it means blocked senders may sync until the next pass.
+            Log.w(TAG, "syncAllChatMessages: block-list fetch failed — block filtering degraded", e)
+            emptySet()
+        }
 
         val semaphore = Semaphore(3)
         coroutineScope {
@@ -1359,7 +1396,10 @@ class MessageRepositoryImpl @Inject constructor(
                     semaphore.withPermit {
                         try {
                             syncChatMessages(chatId, currentUid, blockedUserIds)
-                        } catch (_: Throwable) { }
+                        } catch (t: Throwable) {
+                            t.rethrowIfCancellation()
+                            Log.w(TAG, "syncAllChatMessages: sync failed for chat=$chatId", t)
+                        }
                     }
                 }
             }.awaitAll()
@@ -1394,7 +1434,7 @@ class MessageRepositoryImpl @Inject constructor(
 
             if (raw.senderId == currentUid) {
                 if (existing != null) {
-                    val remoteStatus = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT)
+                    val remoteStatus = parseMessageStatus(raw.status)
                     if (existing.status != remoteStatus.name) {
                         messageDao.updateMessageStatus(raw.id, remoteStatus.name)
                     }
@@ -1404,9 +1444,9 @@ class MessageRepositoryImpl @Inject constructor(
                 val message = Message(
                     id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
                     content = content,
-                    type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                    type = parseMessageType(raw.type),
                     mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                    status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                    status = parseMessageStatus(raw.status),
                     replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
                     reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
                     readBy = raw.readBy, deliveredTo = raw.deliveredTo,
@@ -1419,7 +1459,7 @@ class MessageRepositoryImpl @Inject constructor(
                     isHd = raw.isHd,
                     timerDurationMs = raw.timerDurationMs,
                     timerStartedAtMs = raw.timerStartedAtMs,
-                    timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                    timerState = raw.timerState?.let { parseTimerState(it) },
                     timerRemainingMs = raw.timerRemainingMs,
                     timerSilent = raw.timerSilent,
                 )
@@ -1444,7 +1484,8 @@ class MessageRepositoryImpl @Inject constructor(
                         )
                         else -> raw.content!!
                     }
-                } catch (_: Throwable) {
+                } catch (t: Throwable) {
+                    Log.e(TAG, "syncChatMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
                     "[Encrypted message — unable to decrypt]"
                 }
             }
@@ -1455,10 +1496,10 @@ class MessageRepositoryImpl @Inject constructor(
             val message = Message(
                 id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
                 content = content,
-                type = runCatching { MessageType.valueOf(raw.type) }.getOrDefault(MessageType.TEXT),
+                type = parseMessageType(raw.type),
                 mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
                 localUri = preservedLocalUri, isStarred = preservedIsStarred,
-                status = runCatching { MessageStatus.valueOf(raw.status) }.getOrDefault(MessageStatus.SENT),
+                status = parseMessageStatus(raw.status),
                 replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
                 reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
                 readBy = raw.readBy, deliveredTo = raw.deliveredTo,
@@ -1471,7 +1512,7 @@ class MessageRepositoryImpl @Inject constructor(
                 isHd = raw.isHd,
                 timerDurationMs = raw.timerDurationMs,
                 timerStartedAtMs = raw.timerStartedAtMs,
-                timerState = raw.timerState?.let { runCatching { TimerState.valueOf(it) }.getOrNull() },
+                timerState = raw.timerState?.let { parseTimerState(it) },
                 timerRemainingMs = raw.timerRemainingMs,
                 timerSilent = raw.timerSilent,
             )
@@ -1492,9 +1533,15 @@ class MessageRepositoryImpl @Inject constructor(
                         val url = entity.mediaUrl ?: continue
                         val file = mediaFileManager.downloadAndSave(chatId, entity.id, url)
                         messageDao.updateLocalUri(entity.id, file.absolutePath)
-                    } catch (_: Exception) { }
+                    } catch (e: Exception) {
+                        e.rethrowIfCancellation()
+                        Log.w(TAG, "downloadPendingMediaForChat: download failed for msg=${entity.id} chat=$chatId", e)
+                    }
                 }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "downloadPendingMediaForChat: scan failed for chat=$chatId", e)
+            }
         }
     }
 
@@ -1509,8 +1556,10 @@ class MessageRepositoryImpl @Inject constructor(
                     message.chatId, message.id, message.mediaUrl!!
                 )
                 messageDao.updateLocalUri(message.id, file.absolutePath)
-            } catch (_: Exception) {
-                // Best-effort download; failures are silently ignored
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                // Best-effort download; the user can still download manually from the bubble.
+                Log.w(TAG, "tryAutoDownload: download failed for msg=${message.id} chat=${message.chatId}", e)
             }
         }
     }
