@@ -46,21 +46,23 @@ When creating implementation plans, include a model/effort recommendation per st
 
 | Task Characteristics | Model | Effort |
 |---------------------|-------|--------|
-| Foundation/architecture work, new patterns, complex state management | Opus | High |
-| Extends existing patterns with moderate complexity | Opus | Medium |
-| New features following established patterns, multiple files | Sonnet | High |
-| Straightforward feature work, well-scoped changes | Sonnet | Medium |
-| Simple bug fixes, typos, single-file changes | Sonnet | Low |
+| Foundation/architecture work, new patterns, complex state management; anything security-adjacent or concurrency-heavy | Fable 5 (or Opus 4.8) | High |
+| Extends existing patterns with moderate complexity | Fable 5 (or Opus 4.8) | Medium |
+| New features following established patterns, multiple files | Sonnet 4.6 | High |
+| Straightforward feature work, well-scoped changes | Sonnet 4.6 | Medium |
+| Simple bug fixes, typos, single-file changes | Sonnet 4.6 | Low |
+
+> **Model generation (current as of 2026-06):** Fable 5 and Opus 4.8 are the top-tier models — use either for security-adjacent, concurrency-heavy, or architecture-defining work. Sonnet 4.6 is listed only where the task is trivial and fully specified and you want to save cost/latency; using the stronger model on a small step is always safe (just slower/pricier). Quality on the small steps is enforced by the test+build gate, not the model choice.
 
 **Defaults:**
-- **Planning** — always Opus, High effort (unless the plan is trivial/single-step)
-- **Implementation** — Sonnet, Medium effort (override per the table above when warranted)
+- **Planning** — always Fable 5 (or Opus 4.8), High effort (unless the plan is trivial/single-step)
+- **Implementation** — Sonnet 4.6, Medium effort (override per the table above when warranted)
 
 **Per-step model selection:** For each implementation step, automatically apply the model/effort from the table above based on the step's characteristics. The defaults (Sonnet/Medium) are the fallback only when no table row clearly applies. If the table suggests a different model/effort than the default, apply it automatically — but if the choice is ambiguous, ask the user before deviating.
 
 **Decision factors:**
-- **Opus** when: defining architecture others build on, complex permission/security logic, multiple interacting systems
-- **Sonnet** when: following patterns already in the codebase, isolated features, UI components
+- **Fable 5 / Opus 4.8** when: defining architecture others build on, complex permission/security logic, concurrency/state machines, multiple interacting systems
+- **Sonnet 4.6** when: following patterns already in the codebase, isolated features, UI components
 - **High effort** when: many new files (>5), critical infrastructure, cross-cutting changes
 - **Medium effort** when: extending existing patterns, moderate file count (2–5)
 
@@ -83,7 +85,7 @@ Plans must include an **Order** line that defines the build sequence:
 ### Per-step display
 
 **At the start of each implementation step, display:**
-> **Step X — Model: [Opus|Sonnet] / Effort: [High|Medium|Low]**
+> **Step X — Model: [Fable 5|Opus 4.8|Sonnet 4.6] / Effort: [High|Medium|Low]**
 
 This must appear before any code changes are made for that step.
 

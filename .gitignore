@@ -29,6 +29,10 @@ functions/node_modules/
 hs_err_pid*.log
 replay_pid*.log
 
+# Claude Code auto-memory pointer (local symlink into ~/.claude/projects/.../memory/;
+# the real store lives there and is harness-loaded — the link is non-portable).
+MEMORY.md
+
 # Misc scripts
 login_script.py
 firebase_login.log
