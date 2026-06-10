@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.10.6] — 2026-06-10
+
+### Changed
+- **Send-path failures are handled consistently and no longer swallowed silently.** Internal refactor of `MessageRepositoryImpl` (code-quality review item #1): the six copy-pasted send-failure handlers collapse into one wrapper that logs the error, flips the message to FAILED so tap-to-retry reappears, and still leaves a coroutine-cancelled row in the sending state for orphan recovery. Previously-silent catches across the Signal-init, block-list, decrypt, sync, receipt, search, broadcast-fan-out and media-download paths now log instead of swallowing, and unknown backend enum values are logged before defaulting. No behaviour change beyond more reliable failure reporting. (`a0bdb5c`)
+
 ## [1.10.5] — 2026-06-08
 
 ### Fixed
