@@ -40,11 +40,19 @@ jobs:
           fi
 
           changed=$(git diff --name-only "$base" "$head")
-          app_changed=$(echo "$changed" | grep -E '^(app/src/|functions/)' || true)
+          # Require a CHANGELOG entry only for production code. Test-only changes are
+          # exempt per the documented "skip for test-only" policy, so strip Gradle test
+          # source sets — including flavor/build-type variants (testFirebase/,
+          # testPocketbaseDebug/, androidTest*/). The authoritative gate that every
+          # *shipped* version is documented runs at release time in release-apk.yml.
+          app_changed=$(echo "$changed" \
+            | grep -E '^(app/src/|functions/)' \
+            | grep -vE '^app/src/(test|androidTest)[^/]*/' \
+            || true)
           changelog_changed=$(echo "$changed" | grep -E '^CHANGELOG\.md$' || true)
 
           if [ -z "$app_changed" ]; then
-            echo "No app/ or functions/ changes — CHANGELOG update not required."
+            echo "No production app/ or functions/ changes — CHANGELOG update not required."
             exit 0
           fi
 
@@ -58,6 +66,6 @@ jobs:
             exit 0
           fi
 
-          echo "::error::App changes detected but CHANGELOG.md was not updated."
-          echo "Add an entry under ## [Unreleased] in CHANGELOG.md, or apply the 'no-changelog' label for exempt PRs (docs-only, test-only, refactors)."
+          echo "::error::Production app/functions changes detected but CHANGELOG.md was not updated."
+          echo "Add an entry to CHANGELOG.md, or apply the 'no-changelog' label for exempt PRs (refactors with no user-visible effect). Test-only changes are auto-exempt."
           exit 1

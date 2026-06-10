@@ -88,6 +88,22 @@ jobs:
             exit 1
           fi
 
+      - name: Verify CHANGELOG documents this release
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Authoritative CHANGELOG gate: a vX.Y.Z release must have a matching section
+          # in CHANGELOG.md. This is the real backstop (the push-time changelog-check is
+          # only a fresh-context nudge and exempts test-only changes). Tolerates both the
+          # plain header (## [1.10.6] — …) and the combined form (## [UNRELEASED] [1.10.6] — …).
+          escaped=${VERSION//./\\.}
+          if ! grep -qE "^## \[(UNRELEASED\] \[)?${escaped}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$VERSION]' section. Add it before tagging the release."
+            exit 1
+          fi
+          echo "CHANGELOG.md documents $VERSION. ✓"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
