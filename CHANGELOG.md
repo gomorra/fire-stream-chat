@@ -6,6 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 - **Send-path failures are handled consistently and no longer swallowed silently.** Internal refactor of `MessageRepositoryImpl` (code-quality review item #1): the six copy-pasted send-failure handlers collapse into one wrapper that logs the error, flips the message to FAILED so tap-to-retry reappears, and still leaves a coroutine-cancelled row in the sending state for orphan recovery. Previously-silent catches across the Signal-init, block-list, decrypt, sync, receipt, search, broadcast-fan-out and media-download paths now log instead of swallowing, and unknown backend enum values are logged before defaulting. No behaviour change beyond more reliable failure reporting. (`a0bdb5c`)
+- **Regression guard for the shared-list sync race.** Added a white-box tripwire test (code-quality review item #4 / M4) asserting the three mutex-guarded Room writes in `ListRepositoryImpl`'s sync paths — both `observeList` listeners and the `observeMyLists` merge — stay inside their per-list lock, so the `eed7519` race (a freshly added list item silently lost to a stale-cache write) can't be re-introduced unnoticed. Test-only; no behaviour change. (`cb796cb`)
 
 ## [1.10.5] — 2026-06-08
 
