@@ -276,7 +276,9 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 
 **At release time** (once store tagging begins): rename `## [Unreleased]` to the released version header and add a new empty `## [Unreleased]` block above.
 
-`.github/workflows/changelog-check.yml` fails pushes and PRs that touch `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Apply the `no-changelog` label to bypass for exempt PRs.
+**Two-tier CHANGELOG gating:**
+- **Push-time nudge** — `.github/workflows/changelog-check.yml` fails pushes and PRs that touch **production** code under `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Test source sets (`app/src/test*/`, `app/src/androidTest*/`, including flavor variants) are **auto-exempt**, so test-only changes never need an entry. Apply the `no-changelog` label to bypass for other exempt PRs (refactors with no user-visible effect).
+- **Release-time gate (authoritative)** — `.github/workflows/release-apk.yml` fails a `vX.Y.Z` tag build unless `CHANGELOG.md` has a matching `## [X.Y.Z]` section. This is the real backstop: nothing ships undocumented, even if it slipped past the push nudge.
 
 ### Cutting a release
 
