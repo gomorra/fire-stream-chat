@@ -229,6 +229,14 @@ android {
         // existing RealtimePresenceSourceTest crashes on its first Log call.
         // Robolectric tests bypass this and use Robolectric shadows instead.
         unitTests.isReturnDefaultValues = true
+        // The forked unit-test worker JVM does NOT inherit org.gradle.jvmargs,
+        // so it would otherwise run with CDS and full C2 tiered compilation —
+        // both intermittently crash (SIGSEGV in IndexSetIterator / StackMapFrame)
+        // on this CachyOS/JBR host. Mirror the daemon's stability flags onto the
+        // test worker so `./gradlew test` is reliable. See gradle.properties.
+        unitTests.all { test ->
+            test.jvmArgs("-Xshare:off", "-XX:TieredStopAtLevel=1")
+        }
     }
 }
 
@@ -238,6 +246,18 @@ val copyChangelogAsset = tasks.register<Copy>("copyChangelogAsset") {
 }
 
 androidComponents {
+    // Unit tests target the *debug* variant only. The Compose UI tests
+    // (MessageBubbleSmokeTest, ChatListItemUiTest, …) launch an Activity via
+    // Robolectric and depend on the ui-test-manifest's ComponentActivity, which
+    // is wired in as `debugImplementation`. The send-path tests
+    // (MessageRepositoryBlockTest) assume the BuildConfig.DEBUG plaintext branch.
+    // Release unit tests run the same JVM classes (no R8 minification at the unit
+    // test level) with encryption flipped on, so they add no real coverage while
+    // breaking `./gradlew test`. Disable the release unit-test component outright.
+    beforeVariants(selector().withBuildType("release")) { variantBuilder ->
+        (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder)
+            .enableUnitTest = false
+    }
     // Bundle CHANGELOG.md into every variant's assets so the app can read it at runtime.
     onVariants { variant ->
         variant.sources.assets?.addStaticSourceDirectory(
