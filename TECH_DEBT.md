@@ -101,7 +101,37 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `ChatCommand.kt` — `@Composable` import in the domain layer (baselined in ArchitectureTest)
+
+**The smell.** `domain/command/ChatCommand.kt:3` imports `androidx.compose.runtime.Composable` for the command palette's icon slot — the only framework import in the otherwise-pure domain layer (verified 2026-06-12).
+
+**Why we haven't fixed it.** Fixing means moving the icon out of the domain model (UI-side lookup keyed by command id) or retyping the slot as a plain lambda; either touches the `@IntoSet` command-registration shape the dot-commands framework established. Too small to justify a standalone session, too coupled for a drive-by.
+
+**When to revisit.** Opportunistically, the next time a dot-command is added or the palette is touched. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("domain layer imports only…") — the rule tightens automatically.
+
+---
+
+### `CallNotificationManager` — data→ui import of `CallActivity` (baselined in ArchitectureTest)
+
+**The smell.** `data/call/CallNotificationManager.kt:10` imports `com.firestream.chat.ui.call.CallActivity` to build the incoming-call notification's full-screen PendingIntent — the only data→ui import in the codebase (found 2026-06-12 while writing the architecture tests; the 2026-06-09 review missed it).
+
+**Why we haven't fixed it.** A notification needs the concrete Activity class for its PendingIntent. The clean alternatives (an `Intent` factory bound in `di/`, or routing through `MainActivity` deep-link extras like FCM notifications do) are pure ceremony for one class reference.
+
+**When to revisit.** The next time call-notification code is touched. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation").
+
+---
+
 ## Declined — not worth the churn
+
+### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
+
+**The smell.** 19 UI files import 24 classes from `data/` directly: `PreferencesDataStore` plus its preference enums (`AppTheme`, `NotificationSound`, `AutoDownloadOption`, `DictationLanguage`, `ScrollPos`), `MediaFileManager`, `SpeechRecognizerManager`/`DictationEvent`, `TimerAlarmScheduler`/`ScheduleResult`, `CallService`/`CallStateHolder`, `ActiveChatTracker`, `LinkPreview`/`LinkPreviewSource`, `SharedContentHolder`/`ShareContentResolver`, `ApkInstaller`, `ChangelogParser`/`ChangelogVersion`, `MediaBackfillWorker`, `FirebasePhoneAuth`/`OtpEvent`. Textbook layering says UI reaches data only through domain interfaces.
+
+**Why we're not fixing it.** 2026-06-09 review verdict (LOW/accepted): these are system-boundary adapters — platform services, preference stores, process-wide state holders — not repositories, and none of them leak Firestore/Room types into composables. Wrapping each in a one-impl domain interface would add 6–8 ceremony interfaces with no decision value. The exact set is enforced as an allowlist in `ArchitectureTest.kt` ("ui imports from data are limited to the accepted system-boundary allowlist"), so growth is a conscious decision instead of drift.
+
+**When to revisit.** Per entry: if one of these stops being a thin adapter (starts carrying business rules), put it behind a domain interface and remove it from the allowlist. For new UI→data dependencies, either extend the allowlist *and* this entry, or design them behind a domain interface from the start.
+
+---
 
 ### Split `ChatRepository` (30 methods) and `MessageRepository` (25 methods) into smaller interfaces
 

@@ -72,6 +72,7 @@ test-ext-junit = "1.2.1"
 robolectric = "4.14.1"
 turbine = "1.2.0"
 roborazzi = "1.32.2"
+konsist = "0.17.3"
 
 [libraries]
 # AndroidX Core
@@ -159,6 +160,7 @@ turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine
 roborazzi = { group = "io.github.takahirom.roborazzi", name = "roborazzi", version.ref = "roborazzi" }
 roborazzi-compose = { group = "io.github.takahirom.roborazzi", name = "roborazzi-compose", version.ref = "roborazzi" }
 roborazzi-rule = { group = "io.github.takahirom.roborazzi", name = "roborazzi-junit-rule", version.ref = "roborazzi" }
+konsist = { group = "com.lemonappdev", name = "konsist", version.ref = "konsist" }
 
 # Baseline Profile
 androidx-benchmark-macro = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }

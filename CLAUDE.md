@@ -236,10 +236,12 @@ Three functions in `functions/index.js`. Runtime: Node.js 20.
 - **UI tests**: Espresso + Compose UI Test (no instrumentation tests written yet)
 - Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions.
 - Existing test coverage: use case tests (Archive, Mute, Pin, Search, Star, Group, Broadcast, Call log), ViewModel tests (ChatList, Settings, GroupSettings, CreateBroadcast, Calls), repository tests (Presence, Delivery/receipts).
+- **Architecture rules are executable** — `app/src/test/java/com/firestream/chat/architecture/ArchitectureTest.kt` (Konsist) enforces domain purity, the data⇏ui/navigation direction, the UI→data system-boundary allowlist, and Chat\*Manager isolation across all production source sets. If a rule fails on code you intend to keep, the decision belongs in `TECH_DEBT.md` (new baseline or allowlist entry) — never weaken a rule silently.
 
 ### Change Safety
 
 - **Every production code change must pass `./gradlew test` before being committed.** If a test fails, fix the root cause — do not skip or delete the test.
+- **CI gate** — `.github/workflows/ci.yml` runs `./gradlew test assembleDebug` on every push and PR to main. Since this repo pushes directly to main, a red run means the commit already landed: fix forward immediately.
 - **Bug fixes require a regression test.** Before fixing a bug, write (or extend) a test that reproduces the failure, then verify the fix makes it green. This prevents the same defect from recurring.
 - **Modifications to tested code must keep tests in sync.** When changing logic that has existing test coverage, update the corresponding tests to reflect the new behavior.
 

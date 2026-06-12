@@ -474,6 +474,9 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.mockwebserver)
+    // Konsist parses production Kotlin sources to enforce architecture rules
+    // (see test/.../architecture/ArchitectureTest.kt).
+    testImplementation(libs.konsist)
     // Compose UI test on JVM (Robolectric); the BOM aligns versions across artifacts.
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.compose.ui.test.junit4)
