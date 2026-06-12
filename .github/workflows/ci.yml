@@ -1,0 +1,82 @@
+name: CI
+
+# Test + build gate (H3, 2026-06-09 review). This repo pushes directly to main,
+# so on push events this is a tripwire, not a blocker — a red run means the
+# commit already landed and must be fixed forward. It still gates PRs normally.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'functions/**'
+      - 'pocketbase/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - 'functions/**'
+      - 'pocketbase/**'
+
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes the in-flight run; only the latest
+# state of main matters for a tripwire.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history + tags: versionCode derives from `git rev-list --count
+          # HEAD` and versionName from `git describe --tags` at configure time.
+          fetch-depth: 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Same override as release-apk.yml: the committed gradle.properties
+      # carries CachyOS-specific JVM workarounds (`-Xshare:off`,
+      # `-XX:TieredStopAtLevel=1`) that Ubuntu Temurin 17 doesn't need.
+      # User-level gradle.properties takes precedence over project-level for
+      # `org.gradle.jvmargs` / `kotlin.daemon.jvmargs`.
+      - name: Override JVM args for Ubuntu CI
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.gradle
+          cat > ~/.gradle/gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx5g -Dfile.encoding=UTF-8
+          kotlin.daemon.jvmargs=-Xmx3g
+          EOF
+
+      - name: Decode google-services.json
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GOOGLE_SERVICES_JSON_B64:-}" ]; then
+            echo "::error::GOOGLE_SERVICES_JSON_B64 secret is not set (required to build the firebase flavor). See docs/RELEASING.md."
+            exit 1
+          fi
+          echo "$GOOGLE_SERVICES_JSON_B64" | base64 -d > app/google-services.json
+
+      # `test` runs the debug unit-test suites for both flavors — release
+      # unit-test components are disabled (TECH_DEBT.md: "testReleaseUnitTest").
+      # `assembleDebug` compiles both flavors' debug APKs. One invocation so
+      # tests and assemble share daemon warmup and configure phase.
+      - name: Test and build
+        run: ./gradlew test assembleDebug
