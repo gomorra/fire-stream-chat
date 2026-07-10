@@ -54,7 +54,6 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 // iOS spring-style easing (equivalent to UIView.animate defaultCurve). Shared by all
 // four NavHost transition lambdas so the bezier is allocated once at file init, not
@@ -131,8 +130,6 @@ fun FireStreamNavGraph(
         androidx.compose.runtime.mutableStateOf<List<String>>(emptyList())
     }
 
-    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
-
     val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
     val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
     val pendingShare = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(isShareIntent) }
@@ -146,12 +143,18 @@ fun FireStreamNavGraph(
     // before navigating, then consumed inside SettingsScreen.
     val settingsFocusUpdate = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
 
-    // Restore last open chat when no deep link or share intent is pending. If no
-    // chat was persisted, fall back to restoring the last open list detail — chat
-    // wins because it was the more recent foreground screen.
+    // Restore last open chat when no deep link, share intent, or settings
+    // launch is pending. If no chat was persisted, fall back to restoring the
+    // last open list detail — chat wins because it was the more recent
+    // foreground screen.
     val restoredLastState = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    // Set only AFTER the restore reads finished (or were skipped) — unlike
+    // restoredLastState, which flips before the DataStore reads and therefore
+    // can't tell "decision made" from "read in flight". clearLastOpenChat()
+    // must never run before this is true, or it races the restore read.
+    val restoreDecisionComplete = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!restoredLastState.value && initialChatId == null && !isShareIntent && preferencesDataStore != null) {
+        if (!restoredLastState.value && initialChatId == null && !isShareIntent && !openSettings && preferencesDataStore != null) {
             restoredLastState.value = true
             val lastChatId = preferencesDataStore.lastChatIdFlow.first()
             val lastRecipientId = preferencesDataStore.lastRecipientIdFlow.first()
@@ -162,6 +165,7 @@ fun FireStreamNavGraph(
                 pendingListId.value = preferencesDataStore.lastOpenListIdFlow.first()
             }
         }
+        restoreDecisionComplete.value = true
     }
 
     NavHost(
@@ -242,44 +246,69 @@ fun FireStreamNavGraph(
         }
 
         composable(Routes.CHAT_LIST) {
-            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value, pendingOpenSettings.value, pendingFocusUpdate.value) {
-                if (pendingShare.value) {
-                    pendingShare.value = false
-                    navController.navigate(Routes.SHARE_PICKER)
-                } else if (pendingOpenSettings.value) {
-                    val shouldFocusUpdate = pendingFocusUpdate.value
-                    pendingOpenSettings.value = false
-                    pendingFocusUpdate.value = false
-                    settingsFocusUpdate.value = shouldFocusUpdate
-                    navController.navigate(Routes.SETTINGS)
-                } else {
-                    val chatId = pendingChatId.value
-                    val senderId = pendingSenderId.value
-                    if (chatId != null && senderId != null) {
-                        val fromNotification = pendingFromNotification.value
+            // True once this chat-list composition entry has navigated
+            // somewhere. Plain remember on purpose: it must reset when the
+            // chat list re-enters composition after a pop — that reset is what
+            // re-arms the clear-restore-target branch for a genuine "user is
+            // resting on the list" state.
+            val navigatedFromThisEntry = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            LaunchedEffect(pendingChatId.value, pendingSenderId.value, pendingShare.value, pendingListId.value, pendingOpenSettings.value, pendingFocusUpdate.value, restoreDecisionComplete.value) {
+                val action = resolveChatListPendingAction(
+                    pendingShare = pendingShare.value,
+                    pendingOpenSettings = pendingOpenSettings.value,
+                    pendingFocusUpdate = pendingFocusUpdate.value,
+                    pendingChatId = pendingChatId.value,
+                    pendingSenderId = pendingSenderId.value,
+                    pendingFromNotification = pendingFromNotification.value,
+                    pendingListId = pendingListId.value,
+                    restoreDecisionComplete = restoreDecisionComplete.value,
+                    navigatedFromThisEntry = navigatedFromThisEntry.value,
+                )
+                when (action) {
+                    ChatListPendingAction.OpenSharePicker -> {
+                        pendingShare.value = false
+                        navigatedFromThisEntry.value = true
+                        navController.navigate(Routes.SHARE_PICKER)
+                    }
+
+                    is ChatListPendingAction.OpenSettings -> {
+                        pendingOpenSettings.value = false
+                        pendingFocusUpdate.value = false
+                        settingsFocusUpdate.value = action.focusUpdate
+                        navigatedFromThisEntry.value = true
+                        navController.navigate(Routes.SETTINGS)
+                    }
+
+                    is ChatListPendingAction.OpenChat -> {
                         pendingChatId.value = null
                         pendingSenderId.value = null
                         pendingFromNotification.value = false
-                        navController.navigate(Routes.chat(chatId, senderId, fromNotification))
-                    } else {
-                        val listId = pendingListId.value
-                        if (listId != null) {
-                            pendingListId.value = null
-                            navController.navigate(Routes.listDetail(listId)) {
-                                launchSingleTop = true
-                            }
+                        navigatedFromThisEntry.value = true
+                        navController.navigate(Routes.chat(action.chatId, action.recipientId, action.fromNotification))
+                    }
+
+                    is ChatListPendingAction.OpenListDetail -> {
+                        pendingListId.value = null
+                        navigatedFromThisEntry.value = true
+                        navController.navigate(Routes.listDetail(action.listId)) {
+                            launchSingleTop = true
                         }
                     }
+
+                    ChatListPendingAction.ClearRestoreTarget -> {
+                        // The user is genuinely resting on the chat list, so
+                        // the list is now the last location: drop the restore
+                        // target (and its scroll keys) so the next cold start
+                        // lands here instead of a chat they backed out of.
+                        preferencesDataStore?.clearLastOpenChat()
+                    }
+
+                    ChatListPendingAction.None -> Unit
                 }
-            }
-            // Clear last open chat when returning to chat list
-            LaunchedEffect(Unit) {
-                preferencesDataStore?.clearLastOpenChat()
             }
             val deletedListTitle by it.savedStateHandle.getStateFlow<String?>("deletedListTitle", null).collectAsState()
             MainScreen(
                 onChatClick = { chatId, recipientId ->
-                    coroutineScope.launch { preferencesDataStore?.setLastOpenChat(chatId, recipientId) }
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
                     }
@@ -289,7 +318,6 @@ fun FireStreamNavGraph(
                 onNewBroadcastClick = { navController.navigate(Routes.CREATE_BROADCAST) },
                 onSettingsClick = { navController.navigate(Routes.SETTINGS) },
                 onMessageClick = { chatId, recipientId ->
-                    coroutineScope.launch { preferencesDataStore?.setLastOpenChat(chatId, recipientId) }
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
                     }

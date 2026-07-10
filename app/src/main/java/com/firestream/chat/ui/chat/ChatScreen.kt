@@ -550,9 +550,14 @@ fun ChatScreen(
         else openAppSettings(context)
     }
 
-    // Reset anchor when dictation ends (user stop, cancel, or back-press).
+    // Hide the IME while dictating (matches Gboard's own voice input, and
+    // avoids the IME composing-region vs programmatic-rewrite conflict that
+    // can wedge Gboard on this field); reset the anchor when dictation ends
+    // (user stop, cancel, or back-press).
     LaunchedEffect(uiState.dictation.isListening) {
-        if (!uiState.dictation.isListening) {
+        if (uiState.dictation.isListening) {
+            keyboardController?.hide()
+        } else {
             dictationAnchor = -1
             dictationLastLen = 0
             lastDictationWriteText = null
@@ -563,17 +568,24 @@ fun ChatScreen(
     // and Final replaces the text from the anchor to anchor+lastLen with the
     // event's cumulative text and advances the cursor to the end of the
     // dictated region. Anchor reset is handled by the isListening effect above.
+    // Liveness is read from the ViewModel's StateFlow, not the collectAsState
+    // local — the Compose copy lags a frame, and a stale-true value here is
+    // exactly what lets a leaked recognizer overwrite user typing.
     LaunchedEffect(Unit) {
         viewModel.dictationCommits.collect { event ->
-            if (dictationAnchor < 0) dictationAnchor = inputCursor.start.coerceIn(0, messageText.length)
-            val safeAnchor = dictationAnchor.coerceIn(0, messageText.length)
-            val before = messageText.substring(0, safeAnchor)
-            val after = messageText.substring((safeAnchor + dictationLastLen).coerceAtMost(messageText.length))
-            val newText = before + event.text + after
-            messageText = newText
-            lastDictationWriteText = newText
-            dictationLastLen = event.text.length
-            inputCursor = TextRange((safeAnchor + event.text.length).coerceIn(0, newText.length))
+            val apply = applyDictationCommit(
+                currentText = messageText,
+                cursorStart = inputCursor.start,
+                anchor = dictationAnchor,
+                lastLen = dictationLastLen,
+                commitText = event.text,
+                isListening = viewModel.uiState.value.dictation.isListening,
+            ) ?: return@collect
+            dictationAnchor = apply.newAnchor
+            dictationLastLen = apply.newLastLen
+            messageText = apply.newText
+            lastDictationWriteText = apply.newText
+            inputCursor = TextRange(apply.newCursorIndex)
         }
     }
 

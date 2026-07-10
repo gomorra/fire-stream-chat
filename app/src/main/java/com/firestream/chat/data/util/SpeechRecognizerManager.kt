@@ -103,18 +103,40 @@ class SpeechRecognizerManager @Inject constructor(
 
         // SpeechRecognizer must be created and driven from the main thread.
         val recognizer = withContext(Dispatchers.Main.immediate) {
+            // A prior segment's posted teardown may not have run yet — destroy
+            // any lingering instance first so at most one recognizer (and one
+            // RecognitionService binding) is ever live in this process.
+            currentRecognizer?.let { stale ->
+                Log.w(TAG, "listen(): destroying lingering recognizer before creating a new one")
+                runCatching { stale.cancel() }
+                runCatching { stale.destroy() }
+            }
+            currentRecognizer = null
             SpeechRecognizer.createSpeechRecognizer(context).also { rec ->
                 rec.setRecognitionListener(listener)
                 rec.startListening(buildIntent(languageTag))
+                // Register inside the main-thread block so teardowns (which
+                // also run on main) can never interleave with the create.
+                currentRecognizer = rec
             }
         }
-        currentRecognizer = recognizer
 
         awaitClose {
-            currentRecognizer = null
-            mainHandler.post {
+            val teardown = Runnable {
+                // Compare-and-clear: an old segment's close must not clobber a
+                // newer segment's registration — that would silently turn
+                // stop() into a no-op while the new recognizer keeps listening.
+                if (currentRecognizer === recognizer) currentRecognizer = null
                 runCatching { recognizer.cancel() }
                 runCatching { recognizer.destroy() }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                teardown.run()
+            } else {
+                // Jump ahead of queued main-thread work: on abrupt disposal
+                // this shrinks the window in which the service binding stays
+                // orphaned if the process dies before the post runs.
+                mainHandler.postAtFrontOfQueue(teardown)
             }
         }
     }

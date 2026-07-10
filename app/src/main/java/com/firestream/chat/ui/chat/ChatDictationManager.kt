@@ -14,6 +14,7 @@
 package com.firestream.chat.ui.chat
 
 import android.content.Context
+import android.util.Log
 import com.firestream.chat.R
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.util.DictationEvent
@@ -32,6 +33,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 
 internal class ChatDictationManager(
     private val recognizer: SpeechRecognizerManager,
@@ -85,23 +87,50 @@ internal class ChatDictationManager(
             it.copy(dictation = it.dictation.copy(isListening = true, error = null))
         }
 
+        Log.d(TAG, "start(languageTag=$languageTag)")
         session = scope.launch { runSession(languageTag) }
     }
 
     fun stop() {
-        if (session == null) return
+        val active = session
+        if (active == null) {
+            // Stale-flag repair: isListening can survive a session that never
+            // ran (scope already cancelled) or a desync with a leaked
+            // recognizer. Without this reset the composer stays owned by
+            // dictation and the cancel-on-type escape hatch is a no-op.
+            Log.w(TAG, "stop() with no session — resetting stale dictation state")
+            resetState()
+            return
+        }
         userStopRequested = true
         recognizer.stop()
+        // stopListening() doesn't always produce onResults (OEM flakiness, or
+        // a clobbered recognizer registration) — force-cancel if this session
+        // is still alive after the grace period. Committed segments were
+        // already emitted as Partial commits, so only an unrefined final can
+        // be lost.
+        scope.launch {
+            delay(STOP_WATCHDOG_MS)
+            if (userStopRequested && session === active) {
+                Log.w(TAG, "stop() watchdog fired — force-cancelling hung session")
+                active.cancel()
+            }
+        }
     }
 
     // cancel() discards the in-flight partial; stop() commits it. Both clear
     // listening state, but only stop() emits a Final commit (handled by
     // runSession's finally + the `cancelled` flag).
     fun cancel() {
-        if (session == null) return
         userStopRequested = true
         cancelled = true
-        session?.cancel()
+        val active = session
+        session = null
+        active?.cancel()
+        if (active == null) {
+            Log.w(TAG, "cancel() with no session — resetting stale dictation state")
+        }
+        resetState()
     }
 
     fun clearError() {
@@ -114,9 +143,19 @@ internal class ChatDictationManager(
         return committedSegments.toString() + (if (needsSpace) " " else "") + segmentText
     }
 
+    private fun resetState() {
+        committedSegments.clear()
+        _audioLevel.value = 0f
+        _uiState.update {
+            it.copy(dictation = it.dictation.copy(isListening = false))
+        }
+    }
+
     private suspend fun runSession(languageTag: String) {
         try {
+            var consecutiveSilentSegments = 0
             while (scope.isActive && !userStopRequested) {
+                val committedBefore = committedSegments.length
                 recognizer.listen(languageTag).collect { event ->
                     when (event) {
                         is DictationEvent.Partial -> {
@@ -150,6 +189,20 @@ internal class ChatDictationManager(
                     }
                 }
                 if (userStopRequested) break
+                // Cap the restart churn: each restart creates a fresh system
+                // recognizer, and an unbounded loop can batter the external
+                // RecognitionService into a wedged state that only a reboot
+                // clears. Consecutive segments with no committed text mean
+                // nobody is talking — stop gracefully.
+                if (committedSegments.length > committedBefore) {
+                    consecutiveSilentSegments = 0
+                } else {
+                    consecutiveSilentSegments++
+                    if (consecutiveSilentSegments >= MAX_SILENT_RESTARTS) {
+                        Log.w(TAG, "$consecutiveSilentSegments consecutive silent segments — ending dictation")
+                        break
+                    }
+                }
                 // Small gap before restart so the recognizer fully releases its mic resources.
                 delay(120)
             }
@@ -161,13 +214,21 @@ internal class ChatDictationManager(
                     _commits.tryEmit(DictationCommit.Final(finalText))
                 }
             }
-            committedSegments.clear()
-            _audioLevel.value = 0f
-            _uiState.update {
-                it.copy(dictation = it.dictation.copy(isListening = false))
+            Log.d(TAG, "session ended (cancelled=$cancelled, committed=${committedSegments.length} chars)")
+            // A newer session may already own the shared state (cancel() nulls
+            // `session` before this finally runs) — only clean up if this
+            // coroutine is still the current session.
+            if (session === coroutineContext[Job]) {
+                session = null
+                resetState()
+                cancelled = false
             }
-            session = null
-            cancelled = false
         }
+    }
+
+    private companion object {
+        const val TAG = "ChatDictation"
+        const val STOP_WATCHDOG_MS = 2_000L
+        const val MAX_SILENT_RESTARTS = 5
     }
 }
