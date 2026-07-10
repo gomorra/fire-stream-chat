@@ -34,9 +34,10 @@ import org.junit.Rule
 import org.junit.Test
 
 /**
- * Exercises the cross-process scroll-restore path in [ChatViewModel]. The SavedStateHandle
- * branch is covered by the existing config-change path; this test locks in the chatId fence
- * so a persisted offset for chat A is never applied when chat B is opened.
+ * Exercises the cross-process restore paths in [ChatViewModel]: the scroll-position
+ * fence (a persisted offset for chat A is never applied when chat B is opened) and
+ * the last-open-chat write that makes every chat entry the restore target. The
+ * SavedStateHandle branch is covered by the existing config-change path.
  */
 class ChatViewModelScrollRestoreTest {
 
@@ -129,6 +130,17 @@ class ChatViewModelScrollRestoreTest {
         val result = buildViewModel().readPersistedScroll()
 
         assertNull(result)
+    }
+
+    @Test
+    fun `init persists this chat as the last open chat`() = runTest {
+        // Regression: the restore path used to rely on the two chat-list click
+        // sites for this write, so a chat opened via restore (or notification)
+        // never re-persisted itself and the *second* cold start restored nothing.
+        buildViewModel()
+        mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
+
+        coVerify { preferencesDataStore.setLastOpenChat("chat1", "recipient1") }
     }
 
     @Test

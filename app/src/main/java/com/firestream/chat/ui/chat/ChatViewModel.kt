@@ -167,6 +167,14 @@ class ChatViewModel @Inject constructor(
         infoManager.start()
         dictationManager.init()
         timerReactor.start()
+        // Single authoritative "last location" write: every entry path into a
+        // chat (list click, notification tap, restore, share, forward) makes
+        // this chat the restore target. NavGraph clears it when the user rests
+        // on the chat list. @ApplicationScope so the write survives immediate
+        // process death after entry.
+        appScope.launch {
+            preferencesDataStore.setLastOpenChat(chatId, recipientId)
+        }
         viewModelScope.launch {
             preferencesDataStore.dictationLanguageFlow.collect { language ->
                 dictationLanguageTag = language.tag
