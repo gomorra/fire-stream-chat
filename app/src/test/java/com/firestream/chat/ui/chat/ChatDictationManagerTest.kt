@@ -14,6 +14,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -266,6 +267,71 @@ class ChatDictationManagerTest {
         assertEquals(1, segments.size)
 
         manager.cancel()
+    }
+
+    @Test
+    fun `cancel with no session resets stale listening state`() = runTest {
+        val manager = newManager()
+        // Desync scenario: the slice says listening but no session exists
+        // (e.g. the session job never ran because the scope was cancelled).
+        uiState.update { it.copy(dictation = it.dictation.copy(isListening = true)) }
+
+        manager.cancel()
+        runCurrent()
+
+        assertFalse(uiState.value.dictation.isListening)
+    }
+
+    @Test
+    fun `stop with no session resets stale listening state`() = runTest {
+        val manager = newManager()
+        uiState.update { it.copy(dictation = it.dictation.copy(isListening = true)) }
+
+        manager.stop()
+        runCurrent()
+
+        assertFalse(uiState.value.dictation.isListening)
+    }
+
+    @Test
+    fun `stop watchdog force-cancels a session that never delivers results`() = runTest {
+        val manager = newManager()
+        val collector = launch { manager.commits.collect { /* drain */ } }
+
+        manager.start("en-US")
+        runCurrent()
+        segments[0].send(DictationEvent.Partial("hello"))
+        runCurrent()
+
+        manager.stop()
+        // Recognizer never fires onResults and never closes the segment.
+        advanceTimeBy(2500)
+        runCurrent()
+
+        assertFalse(uiState.value.dictation.isListening)
+        collector.cancel()
+    }
+
+    @Test
+    fun `restart loop gives up after consecutive silent segments`() = runTest {
+        val manager = newManager()
+        val collector = launch { manager.commits.collect { /* drain */ } }
+
+        manager.start("en-US")
+        runCurrent()
+
+        repeat(10) {
+            if (!uiState.value.dictation.isListening) return@repeat
+            val segment = segments.last()
+            segment.send(DictationEvent.SilentEnd)
+            segment.close()
+            advanceTimeBy(150)
+            runCurrent()
+        }
+
+        assertEquals(5, segments.size)
+        assertFalse(uiState.value.dictation.isListening)
+        collector.cancel()
     }
 
     @Test
