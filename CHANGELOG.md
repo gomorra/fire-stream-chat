@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.10.7] — 2026-07-10
+
+### Fixed
+- **Composer could become untypeable after dictation.** An intermittent state where only the first typed letter registered — no further typing, no deleting, surviving app restarts until a phone reboot — traced back to the dictation path: a stale listening flag (or a leaked system speech-recognizer session) kept rewriting the composer text on every recognition event, and the cancel-on-type escape hatch silently did nothing once the session reference was gone. Stop/cancel now always reset the dictation state, a watchdog force-ends sessions the system recognizer never closes, recognizer instances are capped and torn down defensively, stale recognition events can no longer touch the text field, and the keyboard hides while dictating. (`365af81`)
+- **Reopening the app now reliably lands exactly where you left off.** The restore-last-location feature used to wipe its own saved state on the way back in: the chat list cleared the remembered chat and scroll position during the cold-start pass-through, so the restored chat opened at the newest message instead of your last position — and the *next* launch didn't restore at all. Entering any chat now durably marks it as the restore target, and the saved location is only cleared when you genuinely return to the chat list. (`2f07082`)
+
 ## [1.10.6] — 2026-06-10
 
 ### Changed

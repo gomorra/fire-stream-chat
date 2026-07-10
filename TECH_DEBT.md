@@ -121,6 +121,26 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `SpeechRecognizerManager` teardown — no automated coverage for the CAS/destroy-before-create paths
+
+**The smell.** The 2026-07-10 dictation hardening (`fix:` composer-untypeable) added three teardown guarantees to `data/util/SpeechRecognizerManager.kt` — compare-and-clear of `currentRecognizer` in `awaitClose`, destroy-before-create in `listen()`, and synchronous/front-of-queue teardown — none of which have automated tests. The class is bound to framework statics (`SpeechRecognizer.createSpeechRecognizer`, main looper), so covering it means a Robolectric test against `ShadowSpeechRecognizer` with careful looper/coroutine pumping.
+
+**Why we haven't fixed it.** The hardening session ran in a sandbox that couldn't execute Gradle at all (dl.google.com blocked → no AGP), so a fidelity-sensitive Robolectric test would have shipped blind and was judged more likely to break CI than protect it. The behavioral layer above it (`ChatDictationManagerTest`) covers the state-machine outcomes (stale-flag reset, stop watchdog, restart cap).
+
+**When to revisit.** Next time dictation code is touched in an environment where `./gradlew test` runs locally: add a Robolectric test asserting (a) a second `listen()` collection destroys the first recognizer before creating the second, and (b) an old segment's `awaitClose` does not null a newer registration (i.e. `stop()` still reaches the new recognizer). If `ShadowSpeechRecognizer` fidelity is too poor for (b), record that here and drop the item.
+
+---
+
+### `MainActivity` — no `onNewIntent`; warm-start notification taps don't re-route
+
+**The smell.** `MainActivity` reads `chatId`/`senderId` FCM extras only in `onCreate`. A notification tap while the activity is alive (warm start, `singleTop`-style delivery) doesn't re-trigger extras handling, so the tap may land on whatever screen was open instead of the target chat. Noticed 2026-07-10 while fixing the last-location restore lifecycle; pre-existing and orthogonal to that fix.
+
+**Why we haven't fixed it.** Needs `onNewIntent` override plus a channel to push the new pending chat into the already-composed `FireStreamNavGraph` (the pending* holders are `rememberSaveable` inside the composable). Contained but not trivial; out of scope for the restore fix it was found during.
+
+**When to revisit.** Next time notification routing is touched, or if users report notification taps not opening the right chat while the app is already running.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
