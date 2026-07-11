@@ -10,7 +10,10 @@ admin.initializeApp();
 // onStop() lifecycle method never fires. Firebase RTDB runs onDisconnect() server-side
 // in those cases, writing to RTDB — this function propagates that to Firestore.
 exports.syncPresenceToFirestore = onValueWritten(
-    { ref: "/presence/{userId}" },
+    // Must be co-located with the RTDB instance (europe-west1). A 2nd-gen RTDB
+    // trigger validates against databases in its own region; without this it
+    // defaults to us-central1, where no RTDB exists, and the deploy fails.
+    { ref: "/presence/{userId}", region: "europe-west1" },
     async (event) => {
         const userId = event.params.userId;
         const presence = event.data.after.val();
