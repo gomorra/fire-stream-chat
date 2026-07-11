@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.10.8] — 2026-07-11
+
+### Fixed
+- **Fullscreen image viewer survives rotating the phone.** Rotating while viewing an image fullscreen used to silently drop you back into the chat (activity recreation wiped the viewer's non-saved state) — the viewer now stays open across rotation in every place it's used: chat images and link previews, chat-list avatars, profile avatar and shared media, group avatar, the shared-media grid and the share picker. (`9320acb`)
+- **Keyboard retracts when an image goes fullscreen.** Tapping an image while typing left the keyboard floating on top of the fullscreen view; it now always slides away when the viewer opens. (`9320acb`)
+
 ## [1.10.7] — 2026-07-10
 
 ### Fixed
