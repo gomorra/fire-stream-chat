@@ -108,6 +108,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -167,11 +168,24 @@ private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.get
 // URL. Encoding it as one nullable holder keeps the viewer block dispatch
 // trivial and lets us add more fullscreen sources later (group avatars in
 // settings, etc.) without growing the state surface.
+// Deliberately holds only saveable primitives (no lambdas) so the holder can
+// live in rememberSaveable — the save callback is rebuilt at the viewer site.
 @Immutable
 private data class FullscreenImage(
     val imageUrl: String?,
     val localUri: String? = null,
-    val onSaveToDownloads: (() -> Unit)? = null,
+    val canSaveToDownloads: Boolean = false,
+)
+
+// Keeps the viewer open across activity recreation (rotation). With a plain
+// `remember` the holder reset to null on rotate, silently dropping the user
+// back into the chat.
+private val FullscreenImageSaver = listSaver<FullscreenImage?, Any?>(
+    save = { it?.run { listOf(imageUrl, localUri, canSaveToDownloads) } ?: emptyList() },
+    restore = {
+        if (it.isEmpty()) null
+        else FullscreenImage(it[0] as String?, it[1] as String?, it[2] as Boolean)
+    },
 )
 
 // Chronological↔reversed index translation at the LazyColumn boundary.
@@ -222,7 +236,9 @@ fun ChatScreen(
     var showLocationSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    var fullscreenImage by remember { mutableStateOf<FullscreenImage?>(null) }
+    var fullscreenImage by rememberSaveable(stateSaver = FullscreenImageSaver) {
+        mutableStateOf<FullscreenImage?>(null)
+    }
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
@@ -1015,9 +1031,7 @@ fun ChatScreen(
                                                     fullscreenImage = FullscreenImage(
                                                         imageUrl = message.mediaUrl,
                                                         localUri = message.localUri,
-                                                        onSaveToDownloads = {
-                                                            viewModel.saveImageToDownloads(message.localUri, message.mediaUrl)
-                                                        },
+                                                        canSaveToDownloads = true,
                                                     )
                                                 },
                                                 onPreviewImageClick = { url ->
@@ -1709,13 +1723,23 @@ fun ChatScreen(
         fullscreenImage = null
     }
 
+    // The IME is a system window that floats above the black overlay (the
+    // adjustResize window can't cover it), so an open keyboard would stay
+    // parked over the fullscreen image — always retract it on entry. Keyed on
+    // the boolean so switching images doesn't re-trigger.
+    LaunchedEffect(fullscreenImage != null) {
+        if (fullscreenImage != null) keyboardController?.hide()
+    }
+
     AnimatedVisibility(visible = fullscreenImage != null, enter = fadeIn(), exit = fadeOut()) {
         fullscreenImage?.let { req ->
             FullscreenImageViewer(
                 imageUrl = req.imageUrl,
                 localUri = req.localUri,
                 onDismiss = { fullscreenImage = null },
-                onSaveToDownloads = req.onSaveToDownloads,
+                onSaveToDownloads = if (req.canSaveToDownloads) {
+                    { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
+                } else null,
                 snackbarHostState = fullscreenSnackbarHostState,
             )
         }

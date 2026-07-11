@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +49,14 @@ import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import java.io.File
+
+// Saver for the (remote url, local path) pair host screens keep in
+// rememberSaveable, so the viewer survives activity recreation (rotation)
+// instead of snapping back to the underlying screen.
+internal val FullscreenImageArgsSaver = listSaver<Pair<String?, String?>?, String?>(
+    save = { it?.toList() ?: emptyList() },
+    restore = { if (it.isEmpty()) null else it[0] to it[1] },
+)
 
 @Composable
 internal fun FullscreenImageViewer(

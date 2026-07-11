@@ -53,6 +53,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -67,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
@@ -86,8 +88,12 @@ fun ProfileScreen(
 
     var showBlockDialog by remember { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
-    var fullscreenAvatar by remember { mutableStateOf(false) }
-    var fullscreenMedia by remember { mutableStateOf<Message?>(null) }
+    var fullscreenAvatar by rememberSaveable { mutableStateOf(false) }
+    // (mediaUrl, localUri) of the tapped shared-media item — saveable strings
+    // instead of the Message so the viewer survives rotation.
+    var fullscreenMedia by rememberSaveable(stateSaver = FullscreenImageArgsSaver) {
+        mutableStateOf<Pair<String?, String?>?>(null)
+    }
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     var editingAbout by remember { mutableStateOf(false) }
@@ -403,7 +409,7 @@ fun ProfileScreen(
                     } else {
                         SharedMediaGrid(
                             media = uiState.sharedMedia,
-                            onMediaClick = { fullscreenMedia = it },
+                            onMediaClick = { fullscreenMedia = it.mediaUrl to it.localUri },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
@@ -444,10 +450,10 @@ fun ProfileScreen(
     // Fullscreen shared media viewer
     BackHandler(enabled = fullscreenMedia != null) { fullscreenMedia = null }
     AnimatedVisibility(visible = fullscreenMedia != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenMedia?.let { msg ->
+        fullscreenMedia?.let { (mediaUrl, localUri) ->
             FullscreenImageViewer(
-                imageUrl = msg.mediaUrl ?: "",
-                localUri = msg.localUri,
+                imageUrl = mediaUrl ?: "",
+                localUri = localUri,
                 onDismiss = { fullscreenMedia = null }
             )
         }

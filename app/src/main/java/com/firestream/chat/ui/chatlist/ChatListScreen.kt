@@ -59,6 +59,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -76,6 +77,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -93,7 +95,9 @@ fun ChatListScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-    var fullscreenAvatar by remember { mutableStateOf<Pair<String?, String?>?>(null) }
+    var fullscreenAvatar by rememberSaveable(stateSaver = FullscreenImageArgsSaver) {
+        mutableStateOf<Pair<String?, String?>?>(null)
+    }
 
     val openAvatarFullscreen: (Chat) -> Unit = { chat ->
         val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
