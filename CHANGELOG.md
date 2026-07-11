@@ -21,6 +21,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 - **Fullscreen image viewer survives rotating the phone.** Rotating while viewing an image fullscreen used to silently drop you back into the chat (activity recreation wiped the viewer's non-saved state) — the viewer now stays open across rotation in every place it's used: chat images and link previews, chat-list avatars, profile avatar and shared media, group avatar, the shared-media grid and the share picker. (`9320acb`)
 - **Keyboard retracts when an image goes fullscreen.** Tapping an image while typing left the keyboard floating on top of the fullscreen view; it now always slides away when the viewer opens. (`9320acb`)
+- **Presence-sync cloud function now deploys.** The `syncPresenceToFirestore` RTDB trigger defaulted to `us-central1` — where no Realtime Database instance exists — so the deploy failed and abrupt-disconnect presence (going offline when the app is killed) never mirrored to Firestore. The trigger is now pinned to `europe-west1`, co-located with the RTDB instance, so it deploys and the offline indicator updates reliably again. (`470956d`)
 
 ## [1.10.7] — 2026-07-10
 
