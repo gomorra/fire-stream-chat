@@ -66,6 +66,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -106,7 +107,7 @@ fun GroupSettingsScreen(
     var descriptionInput by remember { mutableStateOf("") }
     var showLeaveDialog by remember { mutableStateOf(false) }
     var showRemoveDialog by remember { mutableStateOf<String?>(null) }
-    var fullscreenGroupAvatar by remember { mutableStateOf(false) }
+    var fullscreenGroupAvatar by rememberSaveable { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
     val imagePicker = rememberImagePicker(
         createCameraUri = { ctx -> cameraCacheUri(ctx, filenamePrefix = "group") },
