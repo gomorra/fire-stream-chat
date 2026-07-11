@@ -1,4 +1,4 @@
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onValueWritten } = require("firebase-functions/v2/database");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions");
@@ -94,6 +94,113 @@ exports.sendCallPushNotification = onDocumentCreated(
             return null;
         } catch (error) {
             logger.error("Error sending call push notification:", error);
+            return null;
+        }
+    }
+);
+
+// Returns the reaction entries (userId → emoji) that are new or changed in
+// `after` compared to `before`. Removed reactions are ignored — removing a
+// reaction must not notify anyone.
+function diffAddedReactions(before, after) {
+    const added = {};
+    for (const [userId, emoji] of Object.entries(after || {})) {
+        if ((before || {})[userId] !== emoji) {
+            added[userId] = emoji;
+        }
+    }
+    return added;
+}
+
+exports.sendReactionPushNotification = onDocumentUpdated(
+    "chats/{chatId}/messages/{messageId}",
+    async (event) => {
+        // This trigger fires on every message update (status changes like
+        // DELIVERED/READ included), so bail out before any Firestore reads
+        // unless a reaction was actually added or changed.
+        const before = event.data.before.data();
+        const after = event.data.after.data();
+        const addedReactions = diffAddedReactions(before.reactions, after.reactions);
+        if (Object.keys(addedReactions).length === 0) return null;
+
+        const chatId = event.params.chatId;
+        const messageId = event.params.messageId;
+        const messageAuthorId = after.senderId;
+
+        try {
+            const chatSnap = await admin.firestore().collection("chats").doc(chatId).get();
+            if (!chatSnap.exists) {
+                logger.error(`Chat ${chatId} not found`);
+                return null;
+            }
+            const chatData = chatSnap.data();
+            const participants = chatData.participants || [];
+            const chatType = chatData.type || "INDIVIDUAL";
+
+            await Promise.all(Object.entries(addedReactions).map(async ([reactorId, emoji]) => {
+                // 1:1 chats: always notify the other person, even for a
+                // reaction on the reactor's own message. Groups/broadcasts:
+                // only the message author, and never the reactor themself.
+                const recipients = chatType === "INDIVIDUAL"
+                    ? participants.filter(id => id !== reactorId)
+                    : [messageAuthorId].filter(id => id && id !== reactorId);
+                if (recipients.length === 0) return;
+
+                const reactorSnap = await admin.firestore().collection("users").doc(reactorId).get();
+                const reactorName = reactorSnap.exists ? reactorSnap.data().displayName : "Someone";
+
+                await Promise.all(recipients.map(async (recipientId) => {
+                    try {
+                        const [receiverSnap, blockedSnap] = await Promise.all([
+                            admin.firestore().collection("users").doc(recipientId).get(),
+                            admin.firestore().collection("users").doc(recipientId)
+                                .collection("blockedUsers").doc(reactorId).get()
+                        ]);
+                        if (!receiverSnap.exists) {
+                            logger.info(`Recipient ${recipientId} not found`);
+                            return;
+                        }
+                        if (blockedSnap.exists) {
+                            logger.info(`Recipient ${recipientId} has blocked reactor ${reactorId}, skipping notification`);
+                            return;
+                        }
+
+                        const fcmToken = receiverSnap.data().fcmToken;
+                        if (!fcmToken) {
+                            logger.info(`Recipient ${recipientId} has no FCM token saved`);
+                            return;
+                        }
+
+                        // No messageContent on purpose: in release builds the
+                        // content field holds Signal ciphertext.
+                        const payload = {
+                            token: fcmToken,
+                            data: {
+                                type: "reaction",
+                                chatId: chatId,
+                                senderId: reactorId,
+                                senderName: reactorName || "Someone",
+                                messageId: messageId,
+                                messageAuthorId: messageAuthorId || "",
+                                emoji: emoji,
+                                chatType: chatType,
+                                chatName: chatData.name || ""
+                            },
+                            android: {
+                                priority: "high"
+                            }
+                        };
+
+                        const response = await admin.messaging().send(payload);
+                        logger.info(`Reaction push sent to ${recipientId}:`, response);
+                    } catch (err) {
+                        logger.error(`Error sending reaction push to ${recipientId}:`, err);
+                    }
+                }));
+            }));
+            return null;
+        } catch (error) {
+            logger.error("Error sending reaction push notification:", error);
             return null;
         }
     }
