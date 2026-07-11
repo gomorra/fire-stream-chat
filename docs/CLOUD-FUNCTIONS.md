@@ -1,6 +1,6 @@
 # Firebase Cloud Functions
 
-Three functions in `functions/index.js` (Node.js 20 runtime):
+Four functions in `functions/index.js` (Node.js 20 runtime):
 
 ### `sendPushNotification`
 
@@ -9,6 +9,14 @@ Three functions in `functions/index.js` (Node.js 20 runtime):
 - Sends concurrent FCM data messages to all recipients
 - Increments per-user `unreadCounts.{userId}` on the chat document
 - **FCM Payload**: `chatId`, `senderId`, `senderName`, `messageId`, `chatType`, `chatName`, `mentions` (comma-separated user IDs)
+
+### `sendReactionPushNotification`
+
+- **Trigger**: Firestore document update at `chats/{chatId}/messages/{messageId}`
+- Diffs `before.reactions` vs `after.reactions` **before any Firestore reads** and exits early unless a reaction was added or its emoji changed (the trigger also fires for DELIVERED/READ status updates); reaction removals never notify
+- **Recipients**: `INDIVIDUAL` chats → all participants except the reactor (so reacting to your *own* message still notifies the other person); `GROUP`/`BROADCAST` → only the author of the reacted-to message, never the reactor themself
+- Applies the same blocked-user and `fcmToken` checks as `sendPushNotification`; does **not** increment `unreadCounts`
+- **FCM Payload**: `type: "reaction"`, `chatId`, `senderId` (reactor), `senderName`, `messageId`, `messageAuthorId`, `emoji`, `chatType`, `chatName` — deliberately no message content (ciphertext in release builds)
 
 ### `sendCallPushNotification`
 

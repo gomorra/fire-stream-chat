@@ -2,7 +2,10 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [1.10.8] — 2026-07-11
+## [1.11.0] — 2026-07-11
+
+### Added
+- **Reaction notifications.** Reacting to a message with an emoji now sends the other side a push notification ("Reacted 👍 to your message"). In 1:1 chats the other person is always notified — including when you react to your own message; in group chats only the author of the reacted-to message is notified (reacting to your own message in a group stays silent). Removing a reaction sends nothing, changing your reaction notifies again; muted chats and the currently open chat suppress the notification as usual. Firebase flavor only — reactions are not yet implemented in the PocketBase flavor. (`603f376`)
 
 ### Fixed
 - **Fullscreen image viewer survives rotating the phone.** Rotating while viewing an image fullscreen used to silently drop you back into the chat (activity recreation wiped the viewer's non-saved state) — the viewer now stays open across rotation in every place it's used: chat images and link previews, chat-list avatars, profile avatar and shared media, group avatar, the shared-media grid and the share picker. (`9320acb`)

@@ -60,6 +60,12 @@ class FCMService : FirebaseMessagingService() {
             return
         }
 
+        // Handle reaction push
+        if (data["type"] == "reaction") {
+            handleReaction(data)
+            return
+        }
+
         val senderId = data["senderId"] ?: return
         val senderName = data["senderName"] ?: "New Message"
         val chatId = data["chatId"] ?: return
@@ -114,6 +120,48 @@ class FCMService : FirebaseMessagingService() {
         }
     }
 
+    private fun handleReaction(data: Map<String, String>) {
+        val chatId = data["chatId"] ?: return
+        val senderId = data["senderId"] ?: return
+        val emoji = data["emoji"] ?: return
+        val senderName = data["senderName"] ?: "Someone"
+        val messageAuthorId = data["messageAuthorId"]
+        val chatType = data["chatType"] ?: "INDIVIDUAL"
+        val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
+
+        // The user is watching this chat — they see the reaction appear live.
+        if (activeChatTracker.isActive(chatId)) return
+
+        // Reactions are not new messages: no markMessagesAsDelivered here,
+        // it would rewrite the status of an already-delivered message.
+        serviceScope.launch {
+            // Suppress notification for muted chats. The mention-only filter
+            // does not apply: group reaction pushes only target the message
+            // author, which is personal, not group noise.
+            val chat = chatRepository.getChatById(chatId).getOrNull()
+            if (chat != null) {
+                val muteUntil = chat.muteUntil
+                if (muteUntil == Long.MAX_VALUE || (muteUntil > 0 && muteUntil > System.currentTimeMillis())) {
+                    return@launch
+                }
+            }
+
+            val target = if (!messageAuthorId.isNullOrBlank() && messageAuthorId == authRepository.currentUserId) {
+                "your message"
+            } else {
+                "a message"
+            }
+            showNotification(
+                chatId = chatId,
+                senderId = senderId,
+                senderName = senderName,
+                chatName = chatName,
+                isGroup = chatType == ChatType.GROUP.name,
+                overrideText = "Reacted $emoji to $target"
+            )
+        }
+    }
+
     private fun handleIncomingCall(data: Map<String, String>) {
         val callId = data["callId"] ?: return
         val callerId = data["callerId"] ?: return
@@ -134,7 +182,8 @@ class FCMService : FirebaseMessagingService() {
         chatName: String?,
         isGroup: Boolean,
         messageType: String = "TEXT",
-        messageContent: String? = null
+        messageContent: String? = null,
+        overrideText: String? = null
     ) {
         val channelId = "fire_stream_messages"
         val notifId = chatId.hashCode()
@@ -155,7 +204,7 @@ class FCMService : FirebaseMessagingService() {
             style.setGroupConversation(true).setConversationTitle(chatName ?: chatId)
         }
         val parsedType = runCatching { MessageType.valueOf(messageType) }.getOrNull()
-        val notificationText = when (parsedType) {
+        val notificationText = overrideText ?: when (parsedType) {
             MessageType.LIST -> messageContent?.takeIf { it.isNotBlank() } ?: "\uD83D\uDCCB Shared a list"
             MessageType.IMAGE -> "\uD83D\uDCF7 Photo"
             MessageType.VIDEO -> "\uD83C\uDFA5 Video"
