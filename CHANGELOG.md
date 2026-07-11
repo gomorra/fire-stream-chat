@@ -7,6 +7,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Added
 - **Reaction notifications.** Reacting to a message with an emoji now sends the other side a push notification ("Reacted 👍 to your message"). In 1:1 chats the other person is always notified — including when you react to your own message; in group chats only the author of the reacted-to message is notified (reacting to your own message in a group stays silent). Removing a reaction sends nothing, changing your reaction notifies again; muted chats and the currently open chat suppress the notification as usual. Firebase flavor only — reactions are not yet implemented in the PocketBase flavor. (`603f376`)
 
+### Fixed
+- **Presence-sync cloud function now deploys.** The `syncPresenceToFirestore` RTDB trigger defaulted to `us-central1` — where no Realtime Database instance exists — so the deploy failed and abrupt-disconnect presence (going offline when the app is killed) never mirrored to Firestore. The trigger is now pinned to `europe-west1`, co-located with the RTDB instance, so it deploys and the offline indicator updates reliably again. (`470956d`)
+
 ## [1.10.7] — 2026-07-10
 
 ### Fixed
