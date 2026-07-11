@@ -224,9 +224,10 @@ Do **not** construct route strings manually.
 
 ## Firebase Cloud Functions
 
-Three functions in `functions/index.js`. Runtime: Node.js 20.
+Four functions in `functions/index.js`. Runtime: Node.js 20.
 
 - `sendPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` creation; sends FCM push to all recipients and increments per-user unread counts.
+- `sendReactionPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` updates; diffs the `reactions` map and pushes a `type: "reaction"` FCM message (1:1 → the other participant, groups → only the message author). Removals stay silent; no unread-count increment.
 - `sendCallPushNotification` — triggers on `calls/{callId}` creation with `status == "ringing"`; sends high-priority FCM to the callee.
 - `syncPresenceToFirestore` — triggers on RTDB `/presence/{userId}` writes; mirrors `isOnline`/`lastSeen` to Firestore with a `lastSeen` transaction guard to reject reordered invocations.
 
