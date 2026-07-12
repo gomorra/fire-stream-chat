@@ -97,7 +97,6 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -108,7 +107,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -161,33 +159,6 @@ private const val INPUT_EMOJI_SIZE_CAP = 2.0f
 
 private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
-// Holder for the currently-shown fullscreen image. Both message images and
-// link-preview thumbnails feed into the same FullscreenImageViewer overlay,
-// but they carry different data: a tapped message image has localUri +
-// save-to-downloads support, while a link-preview thumbnail only has a remote
-// URL. Encoding it as one nullable holder keeps the viewer block dispatch
-// trivial and lets us add more fullscreen sources later (group avatars in
-// settings, etc.) without growing the state surface.
-// Deliberately holds only saveable primitives (no lambdas) so the holder can
-// live in rememberSaveable — the save callback is rebuilt at the viewer site.
-@Immutable
-private data class FullscreenImage(
-    val imageUrl: String?,
-    val localUri: String? = null,
-    val canSaveToDownloads: Boolean = false,
-)
-
-// Keeps the viewer open across activity recreation (rotation). With a plain
-// `remember` the holder reset to null on rotate, silently dropping the user
-// back into the chat.
-private val FullscreenImageSaver = listSaver<FullscreenImage?, Any?>(
-    save = { it?.run { listOf(imageUrl, localUri, canSaveToDownloads) } ?: emptyList() },
-    restore = {
-        if (it.isEmpty()) null
-        else FullscreenImage(it[0] as String?, it[1] as String?, it[2] as Boolean)
-    },
-)
-
 // Chronological↔reversed index translation at the LazyColumn boundary.
 // The LazyColumn runs `reverseLayout = true` so `firstVisibleItemIndex` and
 // every `scrollToItem` target is in reversed space (0 = newest); the message
@@ -236,9 +207,9 @@ fun ChatScreen(
     var showLocationSheet by remember { mutableStateOf(false) }
     var showEmojiSheet by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
-    var fullscreenImage by rememberSaveable(stateSaver = FullscreenImageSaver) {
-        mutableStateOf<FullscreenImage?>(null)
-    }
+    // Lives in ChatUiState (OverlaysState slice) so the open viewer survives
+    // activity recreation on rotation — see FullscreenImage in ChatOverlaysState.
+    val fullscreenImage = uiState.overlays.fullscreenImage
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val configuration = LocalConfiguration.current
@@ -424,7 +395,10 @@ fun ChatScreen(
     // so the message appears on top of the viewer rather than being hidden behind it.
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { event ->
-            val host = if (fullscreenImage != null) fullscreenSnackbarHostState else snackbarHostState
+            // Live read (not the composition-captured local): this collector runs
+            // for the screen's lifetime and must route based on the viewer's
+            // CURRENT visibility, not its state when the effect launched.
+            val host = if (uiState.overlays.fullscreenImage != null) fullscreenSnackbarHostState else snackbarHostState
             val result = host.showSnackbar(
                 message = event.message,
                 actionLabel = event.actionLabel,
@@ -1028,14 +1002,16 @@ fun ChatScreen(
                                                 } else null,
                                                 onSwipeReact = { swipeReactMessage = message },
                                                 onImageClick = { _ ->
-                                                    fullscreenImage = FullscreenImage(
-                                                        imageUrl = message.mediaUrl,
-                                                        localUri = message.localUri,
-                                                        canSaveToDownloads = true,
+                                                    viewModel.showFullscreenImage(
+                                                        FullscreenImage(
+                                                            imageUrl = message.mediaUrl,
+                                                            localUri = message.localUri,
+                                                            canSaveToDownloads = true,
+                                                        )
                                                     )
                                                 },
                                                 onPreviewImageClick = { url ->
-                                                    fullscreenImage = FullscreenImage(imageUrl = url)
+                                                    viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
                                                 onSaveImage = if (message.type == MessageType.IMAGE) {
                                                     { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
@@ -1720,7 +1696,7 @@ fun ChatScreen(
     }
 
     BackHandler(enabled = fullscreenImage != null) {
-        fullscreenImage = null
+        viewModel.dismissFullscreenImage()
     }
 
     // The IME is a system window that floats above the black overlay (the
@@ -1736,7 +1712,7 @@ fun ChatScreen(
             FullscreenImageViewer(
                 imageUrl = req.imageUrl,
                 localUri = req.localUri,
-                onDismiss = { fullscreenImage = null },
+                onDismiss = { viewModel.dismissFullscreenImage() },
                 onSaveToDownloads = if (req.canSaveToDownloads) {
                     { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
                 } else null,

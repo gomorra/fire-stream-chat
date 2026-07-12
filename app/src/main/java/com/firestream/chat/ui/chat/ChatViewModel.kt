@@ -351,6 +351,17 @@ class ChatViewModel @Inject constructor(
     // ── Error ──
     fun clearError() { _uiState.update { it.copy(session = it.session.copy(error = null)) } }
 
+    // ── Fullscreen image viewer ──
+    // ViewModel state (not screen-local compose state) so the open viewer
+    // survives activity recreation on rotation.
+    fun showFullscreenImage(image: FullscreenImage) {
+        _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenImage = image)) }
+    }
+
+    fun dismissFullscreenImage() {
+        _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenImage = null)) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         messageSender.onCleared()
