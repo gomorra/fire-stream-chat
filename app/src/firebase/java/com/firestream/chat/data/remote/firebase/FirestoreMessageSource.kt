@@ -199,11 +199,15 @@ class FirestoreMessageSource @Inject constructor(
         return docRef.id
     }
 
-    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long) {
+    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float>) {
         firestore
             .collection("chats").document(chatId)
             .collection("messages").document(messageId)
-            .update(mapOf("content" to newContent, "editedAt" to editedAt))
+            .update(mapOf(
+                "content" to newContent,
+                "editedAt" to editedAt,
+                "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
+            ))
             .await()
     }
 

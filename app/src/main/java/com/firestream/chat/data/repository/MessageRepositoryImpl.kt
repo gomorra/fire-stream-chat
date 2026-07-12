@@ -493,10 +493,10 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.updateMessageStatus(messageId, status)
     }
 
-    override suspend fun editMessage(chatId: String, messageId: String, newContent: String): Result<Unit> = resultOf {
+    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, emojiSizes: Map<Int, Float>): Result<Unit> = resultOf {
         val editedAt = System.currentTimeMillis()
-        messageSource.editMessage(chatId, messageId, newContent, editedAt)
-        messageDao.editMessage(messageId, newContent, editedAt)
+        messageSource.editMessage(chatId, messageId, newContent, editedAt, emojiSizes)
+        messageDao.editMessage(messageId, newContent, editedAt, emojiSizes)
     }
 
     /**

@@ -419,6 +419,7 @@ fun ChatScreen(
         if (editing != null) {
             messageText = editing.content
             inputCursor = TextRange(editing.content.length)
+            pendingEmojiSizes = editing.emojiSizes
         }
     }
 
@@ -1764,7 +1765,7 @@ private fun DateSeparator(label: String) {
 
 private fun handleSend(viewModel: ChatViewModel, uiState: ChatUiState, text: String, emojiSizes: Map<Int, Float> = emptyMap()) {
     if (uiState.composer.editingMessage != null) {
-        viewModel.confirmEdit(text)
+        viewModel.confirmEdit(text, emojiSizes)
     } else {
         viewModel.sendMessage(text, emojiSizes)
         viewModel.onTyping("")
