@@ -5,7 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.11.1] — 2026-07-12
 
 ### Fixed
-- **Fullscreen image viewer rotation fix, hardened.** The chat viewer's open/closed state moved from screen-local compose state into the ViewModel (`ChatUiState` overlays slice), which Android retains across rotation by object identity — closing the viewer on rotate is now impossible regardless of saved-instance-state behavior. Note: no APK release has shipped since `v1.9.7`, so neither this nor the 1.11.0 fix is on any installed build yet. (`7f7acfb`)
+- **Fullscreen image viewer rotation fix, hardened.** The chat viewer's open/closed state moved from screen-local compose state into the ViewModel (`ChatUiState` overlays slice), which Android retains across rotation by object identity — closing the viewer on rotate is now impossible regardless of saved-instance-state behavior. Note: no APK release has shipped since `v1.9.7`, so neither this nor the 1.11.0 fix is on any installed build yet. (`7f7acfb`, `3e71acf`)
 
 ## [1.11.0] — 2026-07-11
 
