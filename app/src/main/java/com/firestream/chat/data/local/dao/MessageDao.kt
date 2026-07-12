@@ -67,8 +67,8 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id IN (:messageIds)")
     suspend fun updateMessageStatusBatch(messageIds: List<String>, status: String)
 
-    @Query("UPDATE messages SET content = :content, editedAt = :editedAt WHERE id = :messageId")
-    suspend fun editMessage(messageId: String, content: String, editedAt: Long)
+    @Query("UPDATE messages SET content = :content, editedAt = :editedAt, emojiSizes = :emojiSizes WHERE id = :messageId")
+    suspend fun editMessage(messageId: String, content: String, editedAt: Long, emojiSizes: Map<Int, Float>)
 
     @Query("UPDATE messages SET reactions = :reactionsJson WHERE id = :messageId")
     suspend fun updateReactions(messageId: String, reactionsJson: String)

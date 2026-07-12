@@ -5,6 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.11.1] — 2026-07-12
 
 ### Fixed
+- **Emoji size changes now stick when editing a message.** Editing a message and resizing an emoji (or adding an enlarged one) silently kept the old size — the edit only saved the new text and dropped the size information on the way to the server and the local database. The composer now also picks up the message's existing emoji sizes when an edit starts, so previously enlarged emoji keep their size through an edit instead of snapping back to standard. (`d124ac1`)
 - **Fullscreen image viewer rotation fix, hardened.** The chat viewer's open/closed state moved from screen-local compose state into the ViewModel (`ChatUiState` overlays slice), which Android retains across rotation by object identity — closing the viewer on rotate is now impossible regardless of saved-instance-state behavior. Note: no APK release has shipped since `v1.9.7`, so neither this nor the 1.11.0 fix is on any installed build yet. (`7f7acfb`, `3e71acf`)
 
 ## [1.11.0] — 2026-07-11

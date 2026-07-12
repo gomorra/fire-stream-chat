@@ -62,7 +62,7 @@ interface MessageSource {
         isHd: Boolean = false
     ): String
 
-    suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long)
+    suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float> = emptyMap())
     suspend fun deleteMessage(chatId: String, messageId: String)
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String)
 

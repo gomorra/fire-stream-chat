@@ -129,11 +129,12 @@ internal class FakeMessageRepository : MessageRepository {
         chatId: String,
         messageId: String,
         newContent: String,
+        emojiSizes: Map<Int, Float>,
     ): Result<Unit> {
         consumeFailure()?.let { return it }
         messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
             map[chatId] = map[chatId].orEmpty().map { m ->
-                if (m.id == messageId) m.copy(content = newContent) else m
+                if (m.id == messageId) m.copy(content = newContent, emojiSizes = emojiSizes) else m
             }
         }
         return Result.success(Unit)

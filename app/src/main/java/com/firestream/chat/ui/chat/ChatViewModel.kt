@@ -205,7 +205,7 @@ class ChatViewModel @Inject constructor(
     fun deleteMessage(messageId: String) = messageActions.deleteMessage(messageId)
     fun startEdit(message: Message) = messageActions.startEdit(message)
     fun cancelEdit() = messageActions.cancelEdit()
-    fun confirmEdit(newContent: String) = messageActions.confirmEdit(newContent)
+    fun confirmEdit(newContent: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageActions.confirmEdit(newContent, emojiSizes)
     fun setReplyTo(message: Message) = messageActions.setReplyTo(message)
     fun clearReplyTo() = messageActions.clearReplyTo()
     fun toggleReaction(messageId: String, emoji: String) = messageActions.toggleReaction(messageId, emoji)

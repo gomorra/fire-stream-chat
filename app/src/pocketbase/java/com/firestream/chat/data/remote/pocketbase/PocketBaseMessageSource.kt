@@ -183,7 +183,7 @@ class PocketBaseMessageSource @Inject constructor(
 
     // ── Everything else — deferred to follow-up plans ───────────────────────
 
-    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long) =
+    override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float>) =
         throw NotImplementedError("PB v0: edit deferred")
 
     override suspend fun deleteMessage(chatId: String, messageId: String) =

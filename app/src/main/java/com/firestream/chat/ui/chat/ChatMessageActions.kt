@@ -30,12 +30,12 @@ internal class ChatMessageActions(
         _uiState.update { it.copy(composer = it.composer.copy(editingMessage = null)) }
     }
 
-    fun confirmEdit(newContent: String) {
+    fun confirmEdit(newContent: String, emojiSizes: Map<Int, Float> = emptyMap()) {
         val msg = _uiState.value.composer.editingMessage ?: return
         if (newContent.isBlank()) return
         _uiState.update { it.copy(composer = it.composer.copy(editingMessage = null)) }
         scope.launch {
-            messageRepository.editMessage(chatId, msg.id, newContent)
+            messageRepository.editMessage(chatId, msg.id, newContent, emojiSizes)
                 .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
