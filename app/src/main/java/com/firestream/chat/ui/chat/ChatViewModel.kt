@@ -353,12 +353,13 @@ class ChatViewModel @Inject constructor(
 
     // ── Fullscreen image viewer ──
     // ViewModel state (not screen-local compose state) so the open viewer
-    // survives activity recreation on rotation.
-    fun showFullscreenImage(image: FullscreenImage) {
+    // survives activity recreation on rotation. `internal` because the
+    // FullscreenImage parameter type is internal (like `uiState` above).
+    internal fun showFullscreenImage(image: FullscreenImage) {
         _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenImage = image)) }
     }
 
-    fun dismissFullscreenImage() {
+    internal fun dismissFullscreenImage() {
         _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenImage = null)) }
     }
 
