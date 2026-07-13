@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.12.0] — 2026-07-13
+
+### Added
+- **Emoji/keyboard toggle in the chat composer.** With the emoji panel open, the emoji button turns into a keyboard button that swaps the panel back for the keyboard. Tapping the text field now also replaces the panel with the keyboard instead of stacking both on top of each other and eating most of the screen. (`65883c7`)
+
 ## [1.11.1] — 2026-07-12
 
 ### Fixed
