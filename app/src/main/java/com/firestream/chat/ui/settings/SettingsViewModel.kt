@@ -71,6 +71,8 @@ data class SettingsUiState(
     val sendImagesFullQuality: Boolean = false,
     // Chat
     val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
+    // App update auto-download (opt-in, Wi-Fi only)
+    val autoDownloadUpdates: Boolean = false,
     // Media backfill
     val mediaBackfillProgress: Pair<Int, Int>? = null,
     val mediaBackfillRunning: Boolean = false,
@@ -181,6 +183,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(dictationLanguage = language)
             }
         }
+        viewModelScope.launch {
+            preferencesDataStore.autoDownloadUpdatesFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(autoDownloadUpdates = enabled)
+            }
+        }
     }
 
     fun setTheme(theme: AppTheme) {
@@ -240,6 +247,11 @@ class SettingsViewModel @Inject constructor(
     // Chat
     fun setDictationLanguage(language: DictationLanguage) {
         viewModelScope.launch { preferencesDataStore.setDictationLanguage(language) }
+    }
+
+    // App update
+    fun setAutoDownloadUpdates(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setAutoDownloadUpdates(enabled) }
     }
 
     fun startMediaBackfill() {

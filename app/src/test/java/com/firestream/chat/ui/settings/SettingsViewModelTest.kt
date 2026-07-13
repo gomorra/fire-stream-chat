@@ -102,6 +102,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
+        every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(false)
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -460,6 +461,47 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { preferencesDataStore.setAutoDownload(AutoDownloadOption.WIFI_ONLY) }
+    }
+
+    // ── App update auto-download ────────────────────────────────────────────────
+
+    @Test
+    fun `init reflects persisted autoDownloadUpdates`() = runTest {
+        every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(true)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.autoDownloadUpdates)
+    }
+
+    @Test
+    fun `autoDownloadUpdates defaults to false in state`() = runTest {
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.autoDownloadUpdates)
+    }
+
+    @Test
+    fun `setAutoDownloadUpdates true calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setAutoDownloadUpdates(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setAutoDownloadUpdates(true)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setAutoDownloadUpdates(true) }
+    }
+
+    @Test
+    fun `setAutoDownloadUpdates false calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setAutoDownloadUpdates(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setAutoDownloadUpdates(false)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setAutoDownloadUpdates(false) }
     }
 
     @Test

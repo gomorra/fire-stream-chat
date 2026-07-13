@@ -85,7 +85,7 @@ git tag vX.Y.Z
 git push origin main vX.Y.Z
 ```
 
-The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings.
+The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings. Users who enable **Settings → Auto-download updates on Wi-Fi** (opt-in, off by default) have the new APK downloaded automatically in the background when the daily check runs on an unmetered network, so it's already on-device and only the tap-to-install step remains.
 
 By default a tag push builds **firebase only**. To include pocketbase, see the next section.
 

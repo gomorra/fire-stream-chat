@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import android.content.Context
 import androidx.work.Data
+import androidx.work.NetworkType
 import androidx.work.WorkInfo
 import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.remote.update.NoReleasePublishedException
@@ -93,6 +94,18 @@ class AppUpdateRepositoryImplTest {
         val result = repository.checkForUpdate().getOrThrow()
 
         assertEquals(UpdateCheckResult.UpToDate, result)
+    }
+
+    // --- networkTypeFor(unmeteredOnly) ---
+
+    @Test
+    fun `networkTypeFor unmeteredOnly true is UNMETERED`() {
+        assertEquals(NetworkType.UNMETERED, AppUpdateRepositoryImpl.networkTypeFor(true))
+    }
+
+    @Test
+    fun `networkTypeFor unmeteredOnly false is CONNECTED`() {
+        assertEquals(NetworkType.CONNECTED, AppUpdateRepositoryImpl.networkTypeFor(false))
     }
 
     // --- translate(WorkInfo) -> DownloadProgress ---

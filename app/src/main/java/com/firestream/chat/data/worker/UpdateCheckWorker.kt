@@ -10,15 +10,22 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.firestream.chat.MainActivity
+import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.UpdateCheckResult
 import com.firestream.chat.domain.repository.AppUpdateRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.flow.first
 
 /**
  * Periodic background check (24h cadence, scheduled in [com.firestream.chat.FireStreamApp]).
- * On finding a newer release, posts a low-priority notification deep-linking
- * to MainActivity; the user opens Settings → Check for updates to install.
+ * On finding a newer release, behavior forks on the `autoDownloadUpdates` opt-in:
+ *
+ * - **off (default):** posts a low-priority notification deep-linking to
+ *   MainActivity; the user opens Settings → Check for updates to install.
+ * - **on:** enqueues the APK download immediately (constrained to Wi-Fi via
+ *   `unmeteredOnly`) and suppresses the "available" notification — [ApkDownloadWorker]
+ *   surfaces its own progress and the single "ready to install" notification.
  *
  * Per the project's notification-only update UX: no start-up dialogs, no nag.
  * If the user dismisses the notification it's gone — a duplicate notification
@@ -28,7 +35,8 @@ import dagger.assisted.AssistedInject
 class UpdateCheckWorker @AssistedInject constructor(
     @Assisted private val context: Context,
     @Assisted workerParams: WorkerParameters,
-    private val appUpdateRepository: AppUpdateRepository
+    private val appUpdateRepository: AppUpdateRepository,
+    private val preferencesDataStore: PreferencesDataStore
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
@@ -36,7 +44,15 @@ class UpdateCheckWorker @AssistedInject constructor(
             return Result.retry()
         }
         if (outcome is UpdateCheckResult.Available) {
-            postNotification(outcome.update.versionName)
+            if (preferencesDataStore.autoDownloadUpdatesFlow.first()) {
+                // Enqueue only — ApkDownloadWorker runs independently, carries its
+                // own UNMETERED constraint (defers if Wi-Fi drops rather than
+                // falling to cellular), and posts its own progress + "ready to
+                // install" notification. No "available" notification here.
+                appUpdateRepository.downloadUpdate(outcome.update, unmeteredOnly = true)
+            } else {
+                postNotification(outcome.update.versionName)
+            }
         }
         return Result.success()
     }

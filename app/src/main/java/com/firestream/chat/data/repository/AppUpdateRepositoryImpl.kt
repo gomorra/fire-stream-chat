@@ -57,7 +57,7 @@ class AppUpdateRepositoryImpl @Inject constructor(
         }
     }
 
-    override fun downloadUpdate(update: AppUpdate): Flow<DownloadProgress> {
+    override fun downloadUpdate(update: AppUpdate, unmeteredOnly: Boolean): Flow<DownloadProgress> {
         val wm = WorkManager.getInstance(context)
         val request = OneTimeWorkRequestBuilder<ApkDownloadWorker>()
             .setInputData(workDataOf(
@@ -68,7 +68,7 @@ class AppUpdateRepositoryImpl @Inject constructor(
             ))
             .setConstraints(
                 Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .setRequiredNetworkType(networkTypeFor(unmeteredOnly))
                     .build()
             )
             // Expedited: WorkManager handles the FGS lifecycle. If quota is
@@ -112,6 +112,15 @@ class AppUpdateRepositoryImpl @Inject constructor(
             .distinctUntilChanged()
 
     companion object {
+        /**
+         * Pure choice of download network constraint. Extracted so the
+         * unmetered-vs-connected decision is testable without initializing
+         * `WorkManager`. `UNMETERED` (Wi-Fi) for the background auto-download
+         * path; `CONNECTED` for the manual Settings "Download" tap.
+         */
+        internal fun networkTypeFor(unmeteredOnly: Boolean): NetworkType =
+            if (unmeteredOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+
         /**
          * Pure translator from `WorkInfo` to `DownloadProgress`. Pulled out so the
          * state machine is testable without `WorkManager`. Reads version metadata
