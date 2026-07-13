@@ -5,6 +5,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ## [1.12.0] — 2026-07-13
 
 ### Added
+- **Auto-download app updates over Wi-Fi.** A new opt-in Settings toggle ("Auto-download updates on Wi-Fi", off by default) lets the daily update check download a newer release APK automatically in the background whenever you're on an unmetered network, so it's already on-device when you choose to install. When enabled the "update available" notification is suppressed — you get a single "Update ready — tap to install" notification once the download finishes. Nothing installs silently: tapping still opens the system installer as before. (`fb03109`)
 - **Emoji/keyboard toggle in the chat composer.** With the emoji panel open, the emoji button turns into a keyboard button that swaps the panel back for the keyboard. Tapping the text field now also replaces the panel with the keyboard instead of stacking both on top of each other and eating most of the screen. (`65883c7`)
 
 ## [1.11.1] — 2026-07-12
