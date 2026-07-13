@@ -38,6 +38,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -58,6 +61,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -111,6 +115,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -167,7 +173,11 @@ private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.get
 // same function works both directions.
 private fun List<Message>.toReversedIndex(idx: Int): Int = lastIndex - idx
 
-@OptIn(ExperimentalMaterial3Api::class, kotlinx.coroutines.FlowPreview::class)
+@OptIn(
+    ExperimentalMaterial3Api::class,
+    ExperimentalLayoutApi::class,
+    kotlinx.coroutines.FlowPreview::class,
+)
 @Composable
 fun ChatScreen(
     onBackClick: () -> Unit,
@@ -212,6 +222,7 @@ fun ChatScreen(
     val fullscreenImage = uiState.overlays.fullscreenImage
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
+    val composerFocusRequester = remember { FocusRequester() }
     val configuration = LocalConfiguration.current
     val screenHeightDp = configuration.screenHeightDp
     val screenWidthDp = configuration.screenWidthDp
@@ -222,6 +233,17 @@ fun ChatScreen(
     }
 
     BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
+
+    // Keyboard replaces the emoji panel, never stacks on top of it. The
+    // onFocusChanged hook on the text field misses the common case where the
+    // field kept focus while the panel was open (opening the panel only hides
+    // the IME), so any IME rise — focus change or not — collapses the panel.
+    // Keyed on the boolean transition: opening the panel while the IME is
+    // still animating out doesn't re-run this and close the fresh panel.
+    val imeVisible = WindowInsets.isImeVisible
+    LaunchedEffect(imeVisible) {
+        if (imeVisible) showEmojiSheet = false
+    }
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -1348,12 +1370,19 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
-                    keyboardController?.hide()
-                    showEmojiSheet = !showEmojiSheet
+                    if (showEmojiSheet) {
+                        showEmojiSheet = false
+                        composerFocusRequester.requestFocus()
+                        keyboardController?.show()
+                    } else {
+                        keyboardController?.hide()
+                        showEmojiSheet = true
+                    }
                 }) {
                     Icon(
-                        imageVector = Icons.Outlined.EmojiEmotions,
-                        contentDescription = "Emoji",
+                        imageVector = if (showEmojiSheet) Icons.Outlined.Keyboard
+                                      else Icons.Outlined.EmojiEmotions,
+                        contentDescription = if (showEmojiSheet) "Keyboard" else "Emoji",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1405,6 +1434,7 @@ fun ChatScreen(
                         },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(composerFocusRequester)
                             .padding(
                                 start = 16.dp,
                                 end = if (uiState.composer.editingMessage == null) 48.dp else 16.dp,
