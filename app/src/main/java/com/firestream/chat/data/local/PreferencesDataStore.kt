@@ -52,6 +52,9 @@ class PreferencesDataStore @Inject constructor(
     private val autoDownloadKey = stringPreferencesKey("auto_download")
     private val sendImagesFullQualityKey = booleanPreferencesKey("send_images_full_quality")
 
+    // App updates
+    private val autoDownloadUpdatesKey = booleanPreferencesKey("auto_download_updates")
+
     // Chat
     private val dictationLanguageKey = stringPreferencesKey("dictation_language")
 
@@ -190,6 +193,19 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setSendImagesFullQuality(fullQuality: Boolean) {
         context.dataStore.edit { prefs -> prefs[sendImagesFullQualityKey] = fullQuality }
+    }
+
+    // --- App updates ---
+
+    // Opt-in: when on and the device is on an unmetered (Wi-Fi) network, a newer
+    // release APK downloads automatically in the background. Defaults off so
+    // existing users keep the notify-only behavior.
+    val autoDownloadUpdatesFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[autoDownloadUpdatesKey] ?: false
+    }
+
+    suspend fun setAutoDownloadUpdates(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[autoDownloadUpdatesKey] = enabled }
     }
 
     // --- Chat ---

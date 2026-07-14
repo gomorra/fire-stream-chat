@@ -468,6 +468,14 @@ fun SettingsScreen(
                 onRequestPermission = viewModel::requestInstallPermission
             )
 
+            SettingsToggleItem(
+                icon = Icons.Default.SystemUpdate,
+                title = "Auto-download updates on Wi-Fi",
+                subtitle = "Download new versions automatically when connected to Wi-Fi",
+                checked = uiState.autoDownloadUpdates,
+                onCheckedChange = viewModel::setAutoDownloadUpdates
+            )
+
             SettingsItem(
                 icon = Icons.Default.Description,
                 title = "Terms of Service",

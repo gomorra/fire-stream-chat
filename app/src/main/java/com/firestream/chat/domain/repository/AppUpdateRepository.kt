@@ -17,8 +17,13 @@ interface AppUpdateRepository {
      *
      * Multiple subscriptions return the same in-flight worker (re-entry on
      * Settings rehydrates the dialog rather than restarting from byte 0).
+     *
+     * @param unmeteredOnly when true the download is constrained to
+     * [androidx.work.NetworkType.UNMETERED] (Wi-Fi) — used by the background
+     * auto-download path. The default (false) uses `CONNECTED`, matching the
+     * manual "Download" tap in Settings.
      */
-    fun downloadUpdate(update: AppUpdate): Flow<DownloadProgress>
+    fun downloadUpdate(update: AppUpdate, unmeteredOnly: Boolean = false): Flow<DownloadProgress>
 
     /**
      * Observes any in-flight download enqueued by [downloadUpdate]. Used by
