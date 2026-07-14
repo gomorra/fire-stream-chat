@@ -6,6 +6,9 @@
 //   Lists tabs are pager state, not NavHost destinations.
 // Owns: Route constants, route arg helpers (Routes.chat / Routes.otp /
 //   Routes.messageInfo / Routes.userProfile), NavHost transition timing.
+//   Launch-restore navigations (last-open chat/list restore, login auto-redirect)
+//   snap without animation — see isLaunchRestoreNavigation; the slide is
+//   reserved for user-initiated navigation.
 // Collaborators: every UI screen package; PreferencesDataStore for
 //   first-launch routing.
 // Don't put here: Bottom navigation (lives in MainScreen), per-screen state
@@ -17,6 +20,8 @@
 package com.firestream.chat.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
@@ -72,12 +77,30 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.navSlideDuration()
         targetState.destination.route in SlowTransitionRoutes
     ) NAV_SLIDE_DURATION_MS_SLOW else NAV_SLIDE_DURATION_MS
 
+// A navigation performed by the app itself on launch (last-screen restore,
+// login auto-redirect) must snap into place — the slide is reserved for
+// user-initiated navigation. Only forward transitions check this; backing out
+// of a restored screen is a user action and animates normally.
+internal fun isLaunchRestoreNavigation(
+    initialRoute: String?,
+    targetRoute: String?,
+    targetRestoredArg: Boolean,
+): Boolean = targetRestoredArg ||
+    (initialRoute == Routes.LOGIN && targetRoute == Routes.CHAT_LIST)
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isLaunchRestore(): Boolean =
+    isLaunchRestoreNavigation(
+        initialRoute = initialState.destination.route,
+        targetRoute = targetState.destination.route,
+        targetRestoredArg = targetState.arguments?.getBoolean("restored") == true,
+    )
+
 object Routes {
     const val LOGIN = "login"
     const val OTP = "otp/{verificationId}/{phoneNumber}"
     const val PROFILE_SETUP = "profile_setup"
     const val CHAT_LIST = "chat_list"
-    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}"
+    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}&restored={restored}"
     const val CONTACTS = "contacts"
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
     // Phase 2 routes
@@ -93,14 +116,18 @@ object Routes {
     const val CREATE_GROUP = "create_group"
     const val SHARE_PICKER = "share_picker"
     const val SHARED_MEDIA = "shared_media/{chatId}"
-    const val LIST_DETAIL = "list_detail/{listId}?autoFocus={autoFocus}"
+    const val LIST_DETAIL = "list_detail/{listId}?autoFocus={autoFocus}&restored={restored}"
     const val SHARED_LISTS = "shared_lists/{chatId}"
 
     fun otp(verificationId: String, phoneNumber: String) =
         "otp/$verificationId/$phoneNumber"
 
-    fun chat(chatId: String, recipientId: String, fromNotification: Boolean = false) =
-        "chat/$chatId/$recipientId?fromNotification=$fromNotification"
+    fun chat(
+        chatId: String,
+        recipientId: String,
+        fromNotification: Boolean = false,
+        restored: Boolean = false,
+    ) = "chat/$chatId/$recipientId?fromNotification=$fromNotification&restored=$restored"
 
     fun messageInfo(messageId: String, chatId: String) =
         "message_info/$messageId/$chatId"
@@ -109,7 +136,8 @@ object Routes {
 
     fun groupSettings(chatId: String) = "group_settings/$chatId"
     fun sharedMedia(chatId: String) = "shared_media/$chatId"
-    fun listDetail(listId: String, autoFocus: Boolean = false) = "list_detail/$listId?autoFocus=$autoFocus"
+    fun listDetail(listId: String, autoFocus: Boolean = false, restored: Boolean = false) =
+        "list_detail/$listId?autoFocus=$autoFocus&restored=$restored"
     fun sharedLists(chatId: String) = "shared_lists/$chatId"
 }
 
@@ -172,13 +200,15 @@ fun FireStreamNavGraph(
         navController = navController,
         startDestination = Routes.LOGIN,
         enterTransition = {
-            slideInHorizontally(
+            if (isLaunchRestore()) EnterTransition.None
+            else slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
                 animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         },
         exitTransition = {
-            slideOutHorizontally(
+            if (isLaunchRestore()) ExitTransition.None
+            else slideOutHorizontally(
                 targetOffsetX = { fullWidth -> -(fullWidth / 3) },
                 animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
@@ -284,13 +314,22 @@ fun FireStreamNavGraph(
                         pendingSenderId.value = null
                         pendingFromNotification.value = false
                         navigatedFromThisEntry.value = true
-                        navController.navigate(Routes.chat(action.chatId, action.recipientId, action.fromNotification))
+                        // A pending chat without the notification flag can only come
+                        // from the last-open-chat restore read — snap, don't slide.
+                        navController.navigate(
+                            Routes.chat(
+                                action.chatId,
+                                action.recipientId,
+                                action.fromNotification,
+                                restored = !action.fromNotification,
+                            )
+                        )
                     }
 
                     is ChatListPendingAction.OpenListDetail -> {
                         pendingListId.value = null
                         navigatedFromThisEntry.value = true
-                        navController.navigate(Routes.listDetail(action.listId)) {
+                        navController.navigate(Routes.listDetail(action.listId, restored = true)) {
                             launchSingleTop = true
                         }
                     }
@@ -344,6 +383,11 @@ fun FireStreamNavGraph(
                 navArgument("chatId") { type = NavType.StringType },
                 navArgument("recipientId") { type = NavType.StringType },
                 navArgument("fromNotification") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+                // Read only by the NavHost transition lambdas (launch-restore snap).
+                navArgument("restored") {
                     type = NavType.BoolType
                     defaultValue = false
                 }
@@ -509,7 +553,9 @@ fun FireStreamNavGraph(
             route = Routes.LIST_DETAIL,
             arguments = listOf(
                 navArgument("listId") { type = NavType.StringType },
-                navArgument("autoFocus") { type = NavType.BoolType; defaultValue = false }
+                navArgument("autoFocus") { type = NavType.BoolType; defaultValue = false },
+                // Read only by the NavHost transition lambdas (launch-restore snap).
+                navArgument("restored") { type = NavType.BoolType; defaultValue = false }
             )
         ) { backStackEntry ->
             val autoFocus = backStackEntry.arguments?.getBoolean("autoFocus") ?: false
