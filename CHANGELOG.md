@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.12.1] — 2026-07-14
+
+### Fixed
+- **No more slide animation when the app reopens where you left off.** Restoring the last-open chat or list on app launch (and the automatic login redirect to the chat list) replayed the forward slide transition, as if you had just navigated there. Restored screens now snap into place instantly — the slide animation only plays for actual in-app navigation: tapping a chat, going back, or opening a chat from a notification. (`ab42038`)
+
 ## [1.12.0] — 2026-07-13
 
 ### Added
