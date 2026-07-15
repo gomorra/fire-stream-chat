@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.12.2] — 2026-07-15
+
+### Fixed
+- **Reopening the app is now genuinely smooth.** The previous no-slide-on-resume fix replaced the animation with a hard snap that exposed the chat mid-load: a spinner, the message list popping in, and a visible jump to the saved scroll position. The app now holds the system splash screen until the restored chat (or list) is fully settled — populated and scrolled — and reveals it with a short fade, so a process restart lands directly on the finished screen with no flashes or jumps. (`5dca20e`)
+- **Opening a chat from the chat list no longer stutters.** The slide animation used to drop frames because the entire message list composed in one heavy frame mid-slide. The list now waits for the slide to finish, then fades in already scrolled to the right position; returning to a chat from message info or a profile still shows its content immediately. (`5dca20e`)
+
 ## [1.12.1] — 2026-07-14
 
 ### Fixed
