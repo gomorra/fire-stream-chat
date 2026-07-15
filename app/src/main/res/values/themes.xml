@@ -4,4 +4,11 @@
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
+
+    <!-- Launch theme: keeps the system splash visible until MainActivity's
+         setKeepOnScreenCondition releases it (launch-restore settled). The
+         splash icon/background come from the platform defaults (app icon). -->
+    <style name="Theme.FireStreamChat.Starting" parent="Theme.SplashScreen">
+        <item name="postSplashScreenTheme">@style/Theme.FireStreamChat</item>
+    </style>
 </resources>

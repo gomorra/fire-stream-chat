@@ -15,6 +15,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -127,6 +129,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextRange
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
@@ -188,6 +191,13 @@ fun ChatScreen(
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
     fromNotification: Boolean = false,
+    // False while the navigation enter transition is still running (NavGraph
+    // passes a sticky flag). The first message-list composition waits for it —
+    // see shouldComposeMessageList in MessageListGate.kt.
+    enterTransitionSettled: Boolean = true,
+    // Invoked once when the message list (or the empty state of a fresh chat)
+    // becomes visible. MainActivity uses it to release the splash screen.
+    onContentSettled: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -208,6 +218,25 @@ fun ChatScreen(
     var lastDictationWriteText by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     var initialScrollDone by remember { mutableStateOf(false) }
+    // True when the ViewModel already held messages as this composition started
+    // (pop-return from message info / profile) — existing content is never
+    // hidden behind the transition gate.
+    val hadMessagesAtEntry = remember { uiState.messages.messages.isNotEmpty() }
+    val composeMessageList = shouldComposeMessageList(
+        isLoading = uiState.session.isLoading,
+        enterTransitionSettled = enterTransitionSettled,
+        hadMessagesAtEntry = hadMessagesAtEntry,
+    )
+    // The list stays invisible until the initial scroll restore has been
+    // applied, then fades in — the user never sees the populate-then-jump
+    // (the jump used to be masked by the nav slide; launch-restore only
+    // cross-fades now).
+    var listRevealed by remember { mutableStateOf(false) }
+    val listRevealAlpha by animateFloatAsState(
+        targetValue = if (listRevealed) 1f else 0f,
+        animationSpec = tween(150),
+        label = "messageListReveal"
+    )
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -326,32 +355,42 @@ fun ChatScreen(
             }
     }
 
-    // Restore saved scroll position once messages are first available.
-    // When opened from a notification, always land on the newest message —
-    // the saved index would point to wherever the user last scrolled.
+    // Restore saved scroll position once the list is composed and populated
+    // (composeMessageList in the keys — the LazyColumn may be deferred until
+    // the enter transition settles). When opened from a notification, always
+    // land on the newest message — the saved index would point to wherever
+    // the user last scrolled.
     // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
     //
     // Saved indices are chronological; `toReversedIndex` flips them at the
     // scroll boundary. "Newest message" is reversed index 0.
-    LaunchedEffect(uiState.messages.messages.isNotEmpty()) {
-        if (uiState.messages.messages.isNotEmpty() && !initialScrollDone) {
+    LaunchedEffect(uiState.messages.messages.isNotEmpty(), composeMessageList) {
+        if (!composeMessageList) return@LaunchedEffect
+        val messages = uiState.messages.messages
+        if (messages.isNotEmpty() && !initialScrollDone) {
             initialScrollDone = true
             if (fromNotification) {
                 listState.scrollToItem(0)
-                return@LaunchedEffect
-            }
-            val messages = uiState.messages.messages
-            val savedIndex = viewModel.savedScrollIndex
-            if (savedIndex in messages.indices) {
-                listState.scrollToItem(messages.toReversedIndex(savedIndex), viewModel.savedScrollOffset)
-                return@LaunchedEffect
-            }
-            val persisted = viewModel.readPersistedScroll()
-            if (persisted != null && persisted.index in messages.indices) {
-                listState.scrollToItem(messages.toReversedIndex(persisted.index), persisted.offset)
             } else {
-                listState.scrollToItem(0)
+                val savedIndex = viewModel.savedScrollIndex
+                if (savedIndex in messages.indices) {
+                    listState.scrollToItem(messages.toReversedIndex(savedIndex), viewModel.savedScrollOffset)
+                } else {
+                    val persisted = viewModel.readPersistedScroll()
+                    if (persisted != null && persisted.index in messages.indices) {
+                        listState.scrollToItem(messages.toReversedIndex(persisted.index), persisted.offset)
+                    } else {
+                        listState.scrollToItem(0)
+                    }
+                }
             }
+        }
+        // Reveal after the initial scroll has been applied — or immediately
+        // for a chat with no messages yet. Also releases the splash screen on
+        // a launch restore (onContentSettled is idempotent).
+        if (!listRevealed && (initialScrollDone || messages.isEmpty())) {
+            listRevealed = true
+            onContentSettled()
         }
     }
 
@@ -889,7 +928,10 @@ fun ChatScreen(
             val showingSearchResults = uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank() && uiState.overlays.searchResults.isNotEmpty()
             if (!showingSearchResults) {
                 when {
-                    uiState.session.isLoading -> {
+                    // Also true while the enter transition is still running:
+                    // the heavy first list composition waits for the slide to
+                    // finish so the animation doesn't drop frames.
+                    !composeMessageList -> {
                         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
                         }
@@ -910,7 +952,14 @@ fun ChatScreen(
                             }
                         }
 
-                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                        // Invisible (alpha 0) until the initial scroll restore
+                        // has been applied, then fades in — see listRevealed.
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                                .graphicsLayer { alpha = listRevealAlpha }
+                        ) {
                         // Index 0 = newest (anchored at viewport bottom by reverseLayout=true),
                         // lastIndex = oldest.
                         val reversed = remember(uiState.messages.messages) {

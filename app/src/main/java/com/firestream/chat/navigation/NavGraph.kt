@@ -7,8 +7,10 @@
 // Owns: Route constants, route arg helpers (Routes.chat / Routes.otp /
 //   Routes.messageInfo / Routes.userProfile), NavHost transition timing.
 //   Launch-restore navigations (last-open chat/list restore, login auto-redirect)
-//   snap without animation — see isLaunchRestoreNavigation; the slide is
-//   reserved for user-initiated navigation.
+//   use a fast fade instead of the slide — see isLaunchRestoreNavigation; the
+//   slide is reserved for user-initiated navigation. The system splash screen
+//   is held (via onLaunchSettled → MainActivity) until the restored screen has
+//   revealed its content.
 // Collaborators: every UI screen package; PreferencesDataStore for
 //   first-launch routing.
 // Don't put here: Bottom navigation (lives in MainScreen), per-screen state
@@ -20,10 +22,11 @@
 package com.firestream.chat.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
@@ -66,6 +69,9 @@ import kotlinx.coroutines.flow.first
 private val NavSlideEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 private const val NAV_SLIDE_DURATION_MS = 500
 private const val NAV_SLIDE_DURATION_MS_SLOW = 600
+// Launch-restore navigations cross-fade quickly instead of sliding — fast
+// enough to read as "the app opened here", not as a navigation.
+private const val LAUNCH_RESTORE_FADE_MS = 150
 
 // Routes whose enter/exit transitions run at the slower duration. Checked against
 // both initialState and targetState so the pair stays symmetric — leaving-screen
@@ -78,9 +84,9 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.navSlideDuration()
     ) NAV_SLIDE_DURATION_MS_SLOW else NAV_SLIDE_DURATION_MS
 
 // A navigation performed by the app itself on launch (last-screen restore,
-// login auto-redirect) must snap into place — the slide is reserved for
-// user-initiated navigation. Only forward transitions check this; backing out
-// of a restored screen is a user action and animates normally.
+// login auto-redirect) cross-fades instead of sliding — the slide is reserved
+// for user-initiated navigation. Only forward transitions check this; backing
+// out of a restored screen is a user action and animates normally.
 internal fun isLaunchRestoreNavigation(
     initialRoute: String?,
     targetRoute: String?,
@@ -148,7 +154,11 @@ fun FireStreamNavGraph(
     isShareIntent: Boolean = false,
     openSettings: Boolean = false,
     focusUpdate: Boolean = false,
-    preferencesDataStore: PreferencesDataStore? = null
+    preferencesDataStore: PreferencesDataStore? = null,
+    // Releases the system splash screen (MainActivity.setKeepOnScreenCondition).
+    // Called once the launch has settled: either nothing is pending restore, or
+    // the restored chat/list has revealed its content. Must be idempotent.
+    onLaunchSettled: () -> Unit = {}
 ) {
     val navController = rememberNavController()
     val messageInfoHolder = androidx.compose.runtime.remember {
@@ -194,20 +204,26 @@ fun FireStreamNavGraph(
             }
         }
         restoreDecisionComplete.value = true
+        // Nothing to restore into (fresh login, resting chat list, share or
+        // settings launch): the splash can release now. When a chat or list
+        // restore IS pending, the destination screen releases it on reveal.
+        if (pendingChatId.value == null && pendingListId.value == null) {
+            onLaunchSettled()
+        }
     }
 
     NavHost(
         navController = navController,
         startDestination = Routes.LOGIN,
         enterTransition = {
-            if (isLaunchRestore()) EnterTransition.None
+            if (isLaunchRestore()) fadeIn(tween(LAUNCH_RESTORE_FADE_MS))
             else slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
                 animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
             )
         },
         exitTransition = {
-            if (isLaunchRestore()) ExitTransition.None
+            if (isLaunchRestore()) fadeOut(tween(LAUNCH_RESTORE_FADE_MS))
             else slideOutHorizontally(
                 targetOffsetX = { fullWidth -> -(fullWidth / 3) },
                 animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
@@ -396,7 +412,20 @@ fun FireStreamNavGraph(
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
             val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
             val fromNotification = backStackEntry.arguments?.getBoolean("fromNotification") ?: false
+            // Sticky "enter transition finished" flag. ChatScreen defers the
+            // heavy first message-list composition until the slide has settled
+            // so the animation doesn't drop frames. Sticky on purpose: the
+            // transition leaves the Visible/Visible state again on exit, and
+            // the list must not swap back to a spinner mid-exit.
+            val enterSettled = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            LaunchedEffect(transition.currentState, transition.targetState) {
+                if (transition.currentState == EnterExitState.Visible &&
+                    transition.targetState == EnterExitState.Visible
+                ) enterSettled.value = true
+            }
             ChatScreen(
+                enterTransitionSettled = enterSettled.value,
+                onContentSettled = onLaunchSettled,
                 onBackClick = { navController.popBackStack() },
                 onMessageInfoClick = { message, participants ->
                     messageInfoHolder.value = message
@@ -560,6 +589,9 @@ fun FireStreamNavGraph(
         ) { backStackEntry ->
             val autoFocus = backStackEntry.arguments?.getBoolean("autoFocus") ?: false
             val viewModel: ListDetailViewModel = hiltViewModel()
+            // List detail is light enough to settle on first composition —
+            // releases the splash when this screen is the restore target.
+            LaunchedEffect(Unit) { onLaunchSettled() }
             ListDetailScreen(
                 autoFocus = autoFocus,
                 viewModel = viewModel,

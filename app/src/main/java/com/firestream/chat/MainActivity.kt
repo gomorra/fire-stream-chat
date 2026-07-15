@@ -11,9 +11,12 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.share.SharedContentHolder
@@ -30,6 +33,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CHAT_ID: String = "chatId"
         const val EXTRA_SENDER_ID: String = "senderId"
+        private const val SPLASH_SETTLE_TIMEOUT_MS = 1500L
     }
 
     @Inject
@@ -41,6 +45,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var sharedContentHolder: SharedContentHolder
 
+    // Keeps the system splash on screen until the launch-restore has settled
+    // (restored chat/list revealed, or nothing to restore). Flipped by
+    // FireStreamNavGraph via onLaunchSettled; the timeout in onCreate is the
+    // safety net so a missed signal can never trap the user behind the splash.
+    private val launchSettled = mutableStateOf(false)
+
     override fun onResume() {
         super.onResume()
         // Redundant with AppLifecycleObserver.onStart(), but guarantees online status is set
@@ -49,7 +59,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
+        splashScreen.setKeepOnScreenCondition { !launchSettled.value }
+        lifecycleScope.launch {
+            delay(SPLASH_SETTLE_TIMEOUT_MS)
+            launchSettled.value = true
+        }
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
         val initialChatId = intent.getStringExtra(EXTRA_CHAT_ID)
@@ -74,7 +90,8 @@ class MainActivity : ComponentActivity() {
                     isShareIntent = isShareIntent,
                     openSettings = openSettings,
                     focusUpdate = focusUpdate,
-                    preferencesDataStore = preferencesDataStore
+                    preferencesDataStore = preferencesDataStore,
+                    onLaunchSettled = { launchSettled.value = true }
                 )
             }
         }
