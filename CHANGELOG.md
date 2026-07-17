@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.12.3] — 2026-07-17
+
+### Fixed
+- **Chat opening is content-first again.** The 1.12.2 change held the message list behind a spinner until the slide animation finished — it felt slower, not smoother, and is reverted. Messages now appear the moment they're loaded (even mid-slide, as before), and the two real defects are fixed structurally instead: the saved scroll position is resolved *before* the list's first visible frame (no more populate-then-jump — the chat opens already scrolled to where you left off), and the first population is cheaper because the per-message appearance fade no longer runs for every item at once. The cold-start splash hold and the subtle resume fade from 1.12.2 remain. (`c82703f`)
+
 ## [1.12.2] — 2026-07-15
 
 ### Fixed
