@@ -35,12 +35,14 @@ import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
 import com.firestream.chat.data.util.parseMessageType
 import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.domain.model.ListDiff
+import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -101,6 +103,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val listRepository: dagger.Lazy<ListRepository>,
     private val mediaFileManager: MediaFileManager,
     private val imageCompressor: ImageCompressor,
+    private val videoTranscoder: VideoTranscoder,
     private val preferencesDataStore: PreferencesDataStore,
     private val connectivityManager: ConnectivityManager,
     private val userSource: UserSource
@@ -344,6 +347,7 @@ class MessageRepositoryImpl @Inject constructor(
         mentions: List<String> = emptyList(),
         emojiSizes: Map<Int, Float> = emptyMap(),
         mediaUrl: String? = null,
+        mediaThumbnailUrl: String? = null,
         mediaWidth: Int? = null,
         mediaHeight: Int? = null,
         duration: Int? = null,
@@ -369,6 +373,7 @@ class MessageRepositoryImpl @Inject constructor(
                 replyToId = replyToId,
                 timestamp = timestamp,
                 mediaUrl = mediaUrl,
+                mediaThumbnailUrl = mediaThumbnailUrl,
                 isForwarded = isForwarded,
                 duration = duration,
                 mentions = mentions,
@@ -389,6 +394,7 @@ class MessageRepositoryImpl @Inject constructor(
                 replyToId = replyToId,
                 timestamp = timestamp,
                 mediaUrl = mediaUrl,
+                mediaThumbnailUrl = mediaThumbnailUrl,
                 isForwarded = isForwarded,
                 duration = duration,
                 mentions = mentions,
@@ -515,8 +521,25 @@ class MessageRepositoryImpl @Inject constructor(
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
         val isImage = mimeType.startsWith("image/")
-        val messageType = if (isImage) MessageType.IMAGE else MessageType.DOCUMENT
+        val isVideo = mimeType.startsWith("video/")
+        val messageType = when {
+            isImage -> MessageType.IMAGE
+            isVideo -> MessageType.VIDEO
+            else -> MessageType.DOCUMENT
+        }
         val isHd = if (isImage) preferencesDataStore.sendImagesFullQualityFlow.first() else false
+        val videoQuality = if (isVideo) preferencesDataStore.videoQualityFlow.first() else null
+
+        // Guard BEFORE the optimistic insert: reject over-limit videos so no dead
+        // SENDING row is left behind. MediaLimitException maps to AppError.Validation.
+        if (isVideo) {
+            val metadata = videoTranscoder.readMetadata(parsedUri)
+            if (metadata.durationMs > VideoTranscoder.MAX_VIDEO_DURATION_MS ||
+                metadata.sizeBytes > VideoTranscoder.MAX_VIDEO_SOURCE_BYTES
+            ) {
+                throw MediaLimitException("Videos can be up to 3 minutes and 100 MB")
+            }
+        }
 
         // Insert the optimistic row BEFORE any IO so the bubble appears immediately
         // and survives a downstream failure (e.g. concurrent-compression OOM when
@@ -538,40 +561,72 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.insertMessage(MessageEntity.fromDomain(placeholder))
 
         var tempCompressedFile: File? = null
+        var tempTranscodedFile: File? = null
+        var tempThumbFile: File? = null
         try {
             failSendOnError(tempId) {
-                // For images: compress/process and store locally
+                // For images: compress/process and store locally.
+                // For videos: transcode to H.264/AAC mp4, store locally, then
+                // extract + upload a JPEG thumbnail (populates mediaThumbnailUrl).
                 val localFile: File?
                 val mediaWidth: Int?
                 val mediaHeight: Int?
                 val uploadUri: Uri
                 val uploadMimeType: String
+                var videoDurationSec: Int? = null
+                var thumbnailUrl: String? = null
 
-                if (isImage) {
-                    val result = imageCompressor.processImage(parsedUri, isHd)
-                    tempCompressedFile = result.file
+                when {
+                    isImage -> {
+                        val result = imageCompressor.processImage(parsedUri, isHd)
+                        tempCompressedFile = result.file
 
-                    localFile = mediaFileManager.copyToLocal(
-                        chatId, tempId, Uri.fromFile(result.file), "jpg"
-                    )
-                    mediaWidth = result.width
-                    mediaHeight = result.height
-                    uploadUri = Uri.fromFile(localFile)
-                    uploadMimeType = result.mimeType
-                } else {
-                    localFile = null
-                    mediaWidth = null
-                    mediaHeight = null
-                    uploadUri = parsedUri
-                    uploadMimeType = mimeType
+                        localFile = mediaFileManager.copyToLocal(
+                            chatId, tempId, Uri.fromFile(result.file), "jpg"
+                        )
+                        mediaWidth = result.width
+                        mediaHeight = result.height
+                        uploadUri = Uri.fromFile(localFile)
+                        uploadMimeType = result.mimeType
+                    }
+                    isVideo -> {
+                        val result = videoTranscoder.transcode(parsedUri, videoQuality!!.targetHeight)
+                        tempTranscodedFile = result.file
+
+                        localFile = mediaFileManager.copyToLocal(
+                            chatId, tempId, Uri.fromFile(result.file), "mp4"
+                        )
+                        mediaWidth = result.width
+                        mediaHeight = result.height
+                        videoDurationSec = result.durationSec
+                        uploadUri = Uri.fromFile(localFile)
+                        uploadMimeType = result.mimeType
+
+                        // Extract the thumbnail from the LOCAL transcoded file and
+                        // upload it as a second storage object (no progress reporting).
+                        val thumb = videoTranscoder.extractThumbnail(Uri.fromFile(localFile))
+                        tempThumbFile = thumb.file
+                        thumbnailUrl = storageSource.uploadMedia(
+                            chatId, "${tempId}_thumb", Uri.fromFile(thumb.file), "image/jpeg"
+                        )
+                    }
+                    else -> {
+                        localFile = null
+                        mediaWidth = null
+                        mediaHeight = null
+                        uploadUri = parsedUri
+                        uploadMimeType = mimeType
+                    }
                 }
 
-                // Swap placeholder for an entity pointing at the compressed local file,
-                // now that we know the real dimensions.
+                // Swap placeholder for an entity pointing at the local file, now that
+                // we know the real dimensions (and, for video, duration + thumbnail).
                 val optimisticMessage = placeholder.copy(
                     localUri = localFile?.absolutePath ?: uri,
                     mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight
+                    mediaHeight = mediaHeight,
+                    duration = videoDurationSec,
+                    mediaThumbnailUrl = thumbnailUrl,
                 )
                 messageDao.replaceMessage(tempId, MessageEntity.fromDomain(optimisticMessage))
 
@@ -591,8 +646,10 @@ class MessageRepositoryImpl @Inject constructor(
                     type = messageType,
                     timestamp = timestamp,
                     mediaUrl = downloadUrl,
+                    mediaThumbnailUrl = thumbnailUrl,
                     mediaWidth = mediaWidth,
                     mediaHeight = mediaHeight,
+                    duration = videoDurationSec,
                     isHd = isHd,
                 )
 
@@ -600,17 +657,20 @@ class MessageRepositoryImpl @Inject constructor(
                     id = remoteId,
                     status = MessageStatus.SENT,
                     mediaUrl = downloadUrl,
+                    mediaThumbnailUrl = thumbnailUrl,
                     localUri = localFile?.absolutePath,
                     mediaWidth = mediaWidth,
                     mediaHeight = mediaHeight,
+                    duration = videoDurationSec,
                     isHd = isHd
                 )
                 messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
                 chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
 
-                // Rename local file from tempId to remoteId to prevent orphaned files
+                // Rename local file from tempId to remoteId to prevent orphaned files.
                 val finalLocalUri: String? = if (localFile != null) {
-                    val newFile = mediaFileManager.getLocalFile(chatId, remoteId, "jpg")
+                    val ext = if (isVideo) "mp4" else "jpg"
+                    val newFile = mediaFileManager.getLocalFile(chatId, remoteId, ext)
                     if (localFile.renameTo(newFile)) {
                         messageDao.updateLocalUri(remoteId, newFile.absolutePath)
                         newFile.absolutePath
@@ -622,8 +682,10 @@ class MessageRepositoryImpl @Inject constructor(
                 sentMessage.copy(localUri = finalLocalUri)
             }
         } finally {
-            // Clean up temp compressed file from cacheDir/compressed/
+            // Clean up temp files from cacheDir (compressed image / transcoded video / thumb).
             tempCompressedFile?.let { if (it.exists()) it.delete() }
+            tempTranscodedFile?.let { if (it.exists()) it.delete() }
+            tempThumbFile?.let { if (it.exists()) it.delete() }
         }
     }
 
@@ -647,7 +709,7 @@ class MessageRepositoryImpl @Inject constructor(
         failSendOnError(messageId) {
             when (message.type) {
                 MessageType.TEXT -> retrySendTextLike(message, senderId, recipientId)
-                MessageType.IMAGE, MessageType.DOCUMENT -> retrySendMedia(message, senderId, recipientId)
+                MessageType.IMAGE, MessageType.DOCUMENT, MessageType.VIDEO -> retrySendMedia(message, senderId, recipientId)
                 MessageType.VOICE -> retrySendVoice(message, senderId, recipientId)
                 MessageType.LOCATION -> retrySendLocation(message, senderId)
                 else -> throw IllegalStateException("Retry not supported for message type ${message.type}")
@@ -691,18 +753,22 @@ class MessageRepositoryImpl @Inject constructor(
         val source = message.localUri
             ?: throw IllegalStateException("Cannot retry media message ${message.id}: local file is missing")
         val isImage = message.type == MessageType.IMAGE
+        val isVideo = message.type == MessageType.VIDEO
         var tempCompressedFile: File? = null
         return try {
             val uploadUri: Uri
             val uploadMimeType: String
             val mediaWidth: Int?
             val mediaHeight: Int?
-            // Tracks the on-disk path of the compressed local file as we move
-            // through the pipeline. After a fresh compression this points at the
-            // new file in Pictures/FireStream; if we skip compression it stays at
-            // the original failed-attempt path. Used to rename to the remote id
-            // after a successful send.
-            var localFilePath: String? = if (isImage) source else null
+            // Tracks the on-disk path of the local media file as we move through
+            // the pipeline. After a fresh image compression this points at the new
+            // file in Pictures/FireStream; otherwise it stays at the original
+            // failed-attempt path. Used to rename to the remote id after a
+            // successful send. Video is never re-transcoded on retry — the local
+            // mp4 (if the first pipeline produced one) is re-uploaded as-is; if
+            // localUri is still the original content:// URI, we upload the original
+            // as video/mp4, an acceptable degradation over re-running the encoder.
+            var localFilePath: String? = if (isImage || isVideo) source else null
 
             if (isImage && message.mediaWidth == null) {
                 val result = imageCompressor.processImage(Uri.parse(source), message.isHd)
@@ -732,7 +798,11 @@ class MessageRepositoryImpl @Inject constructor(
                 val parsed = Uri.parse(source)
                 val asFile = if (parsed.scheme == null) File(source) else null
                 uploadUri = if (asFile != null) Uri.fromFile(asFile) else parsed
-                uploadMimeType = if (isImage) "image/jpeg" else "application/octet-stream"
+                uploadMimeType = when {
+                    isImage -> "image/jpeg"
+                    isVideo -> "video/mp4"
+                    else -> "application/octet-stream"
+                }
             }
 
             val downloadUrl = try {
@@ -751,8 +821,13 @@ class MessageRepositoryImpl @Inject constructor(
                 type = message.type,
                 timestamp = message.timestamp,
                 mediaUrl = downloadUrl,
+                // Re-send the persisted thumbnail + duration. If the thumbnail was
+                // never uploaded (null — first pipeline died before that step),
+                // retry sends without one; acceptable degradation.
+                mediaThumbnailUrl = message.mediaThumbnailUrl,
                 mediaWidth = mediaWidth,
                 mediaHeight = mediaHeight,
+                duration = message.duration,
                 isHd = message.isHd,
             )
 
@@ -773,10 +848,11 @@ class MessageRepositoryImpl @Inject constructor(
                 timestamp = message.timestamp,
             )
 
-            val finalLocalUri: String? = if (isImage) {
+            val finalLocalUri: String? = if (isImage || isVideo) {
                 val currentFile = localFilePath?.let { File(it) }
                 if (currentFile != null && currentFile.exists()) {
-                    val newFile = mediaFileManager.getLocalFile(message.chatId, remoteId, "jpg")
+                    val ext = if (isVideo) "mp4" else "jpg"
+                    val newFile = mediaFileManager.getLocalFile(message.chatId, remoteId, ext)
                     if (currentFile.absolutePath == newFile.absolutePath) {
                         currentFile.absolutePath
                     } else if (currentFile.renameTo(newFile)) {

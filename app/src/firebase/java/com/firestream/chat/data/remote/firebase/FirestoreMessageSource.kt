@@ -49,6 +49,7 @@ class FirestoreMessageSource @Inject constructor(
      */
     override fun lastContentFor(type: MessageType, plain: String): String = when (type) {
         MessageType.IMAGE -> if (plain.isNotBlank()) "📷 $plain" else "📷 Photo"
+        MessageType.VIDEO -> if (plain.isNotBlank()) "🎥 $plain" else "🎥 Video"
         MessageType.DOCUMENT -> "📎 File"
         MessageType.VOICE -> "🎤 Voice message"
         MessageType.POLL -> POLL_CONTENT
@@ -97,6 +98,7 @@ class FirestoreMessageSource @Inject constructor(
         replyToId: String?,
         timestamp: Long,
         mediaUrl: String?,
+        mediaThumbnailUrl: String?,
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,
@@ -123,6 +125,7 @@ class FirestoreMessageSource @Inject constructor(
             "mentions" to mentions,
             "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
+        if (mediaThumbnailUrl != null) data["mediaThumbnailUrl"] = mediaThumbnailUrl
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         if (latitude != null) data["latitude"] = latitude
@@ -153,6 +156,7 @@ class FirestoreMessageSource @Inject constructor(
         replyToId: String?,
         timestamp: Long,
         mediaUrl: String?,
+        mediaThumbnailUrl: String?,
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,
@@ -177,6 +181,7 @@ class FirestoreMessageSource @Inject constructor(
             "mentions" to mentions,
             "emojiSizes" to emojiSizes.mapKeys { it.key.toString() }
         )
+        if (mediaThumbnailUrl != null) data["mediaThumbnailUrl"] = mediaThumbnailUrl
         if (mediaWidth != null) data["mediaWidth"] = mediaWidth
         if (mediaHeight != null) data["mediaHeight"] = mediaHeight
         if (latitude != null) data["latitude"] = latitude

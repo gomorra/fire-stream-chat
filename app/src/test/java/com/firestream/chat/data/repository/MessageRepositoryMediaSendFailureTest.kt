@@ -15,6 +15,13 @@ import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.ImageResult
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.ThumbResult
+import com.firestream.chat.data.util.VideoMetadata
+import com.firestream.chat.data.util.VideoResult
+import com.firestream.chat.data.util.VideoTranscoder
+import com.firestream.chat.data.local.VideoQualityOption
+import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -63,6 +70,7 @@ class MessageRepositoryMediaSendFailureTest {
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val imageCompressor = mockk<ImageCompressor>()
+    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
@@ -85,6 +93,7 @@ class MessageRepositoryMediaSendFailureTest {
 
         every { authSource.currentUserId } returns "uid1"
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
+        every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
 
         coEvery { messageDao.insertMessage(any()) } answers {
             insertedEntities += firstArg<MessageEntity>()
@@ -99,7 +108,7 @@ class MessageRepositoryMediaSendFailureTest {
 
         repository = MessageRepositoryImpl(
             messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager,
+            listRepository, mediaFileManager, imageCompressor, videoTranscoder, preferencesDataStore, connectivityManager,
             userSource
         )
     }
@@ -163,7 +172,7 @@ class MessageRepositoryMediaSendFailureTest {
                 messageSource.sendPlainMessage(
                     chatId = any(), senderId = any(), content = any(), type = any(),
                     replyToId = any(), timestamp = any(), mediaUrl = any(),
-                    isForwarded = any(), duration = any(), mentions = any(),
+                    mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                     emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
                     latitude = any(), longitude = any(), isHd = any()
                 )
@@ -208,6 +217,83 @@ class MessageRepositoryMediaSendFailureTest {
         } finally {
             compressedFile.delete()
         }
+    }
+
+    @Test
+    fun `video mime creates a VIDEO-typed placeholder before transcode`() = runTest {
+        // Metadata within limits so the guard passes and the optimistic row is inserted.
+        every { videoTranscoder.readMetadata(any()) } returns
+            VideoMetadata(width = 1920, height = 1080, durationMs = 30_000L, rotationDegrees = 0, sizeBytes = 5_000_000L)
+        // Fail the transcode so the test ends quickly — the placeholder is already inserted.
+        coEvery { videoTranscoder.transcode(any(), any()) } throws RuntimeException("transcode boom")
+
+        val result = repository.sendMediaMessage(
+            chatId = "chat1",
+            uri = "content://media/picker/0/clip.mp4",
+            mimeType = "video/mp4",
+            recipientId = "",
+            caption = "my clip"
+        )
+
+        assertTrue(result.isFailure)
+        // Optimistic row inserted BEFORE transcode, typed VIDEO.
+        assertEquals(1, insertedEntities.size)
+        val placeholder = insertedEntities.single()
+        assertEquals("VIDEO", placeholder.type)
+        assertEquals("SENDING", placeholder.status)
+        assertEquals("my clip", placeholder.content)
+        assertEquals("content://media/picker/0/clip.mp4", placeholder.localUri)
+    }
+
+    @Test
+    fun `transcode failure flips row to FAILED`() = runTest {
+        every { videoTranscoder.readMetadata(any()) } returns
+            VideoMetadata(width = 1280, height = 720, durationMs = 20_000L, rotationDegrees = 0, sizeBytes = 3_000_000L)
+        coEvery { videoTranscoder.transcode(any(), any()) } throws RuntimeException("transcode boom")
+
+        val result = repository.sendMediaMessage(
+            chatId = "chat1",
+            uri = "content://media/picker/0/clip.mp4",
+            mimeType = "video/mp4",
+            recipientId = "",
+            caption = ""
+        )
+
+        assertTrue(result.isFailure)
+        // Transcode threw before the post-processing replace ran.
+        assertTrue(replaceArgs.isEmpty())
+        val placeholder = insertedEntities.single()
+        val failedUpdate = statusUpdates.single()
+        assertEquals(placeholder.id, failedUpdate.first)
+        assertEquals("FAILED", failedUpdate.second)
+    }
+
+    @Test
+    fun `over-limit video is rejected before any row is inserted`() = runTest {
+        // Duration over the 3-minute guard (180_000 ms).
+        every { videoTranscoder.readMetadata(any()) } returns
+            VideoMetadata(width = 1920, height = 1080, durationMs = 200_000L, rotationDegrees = 0, sizeBytes = 1_000L)
+
+        val result = repository.sendMediaMessage(
+            chatId = "chat1",
+            uri = "content://media/picker/0/long.mp4",
+            mimeType = "video/mp4",
+            recipientId = "",
+            caption = "too long"
+        )
+
+        assertTrue(result.isFailure)
+        // No placeholder row was ever written — guard runs before the insert.
+        assertTrue(insertedEntities.isEmpty())
+        coVerify(exactly = 0) { messageDao.insertMessage(any()) }
+        assertTrue(statusUpdates.isEmpty())
+
+        // The thrown exception is a MediaLimitException that AppError.from maps to Validation.
+        val error = result.exceptionOrNull()
+        assertTrue(error is MediaLimitException)
+        val appError = AppError.from(error!!)
+        assertTrue(appError is AppError.Validation)
+        assertEquals("Videos can be up to 3 minutes and 100 MB", appError.message)
     }
 
     @Test

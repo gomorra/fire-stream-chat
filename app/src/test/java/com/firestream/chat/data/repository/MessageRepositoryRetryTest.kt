@@ -14,6 +14,7 @@ import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -54,6 +55,7 @@ class MessageRepositoryRetryTest {
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val imageCompressor = mockk<ImageCompressor>()
+    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
@@ -86,7 +88,7 @@ class MessageRepositoryRetryTest {
 
         repository = MessageRepositoryImpl(
             messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            listRepository, mediaFileManager, imageCompressor, preferencesDataStore, connectivityManager,
+            listRepository, mediaFileManager, imageCompressor, videoTranscoder, preferencesDataStore, connectivityManager,
             userSource
         )
     }
@@ -138,7 +140,7 @@ class MessageRepositoryRetryTest {
             messageSource.sendPlainMessage(
                 chatId = any(), senderId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
                 latitude = any(), longitude = any(), isHd = any()
             )
@@ -172,7 +174,7 @@ class MessageRepositoryRetryTest {
             messageSource.sendPlainMessage(
                 chatId = any(), senderId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
                 latitude = any(), longitude = any(), isHd = any()
             )
@@ -203,7 +205,7 @@ class MessageRepositoryRetryTest {
             messageSource.sendPlainMessage(
                 chatId = any(), senderId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
                 latitude = any(), longitude = any(), isHd = any()
             )
@@ -232,7 +234,7 @@ class MessageRepositoryRetryTest {
             messageSource.sendPlainMessage(
                 chatId = any(), senderId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
                 latitude = any(), longitude = any(), isHd = any()
             )
@@ -244,6 +246,58 @@ class MessageRepositoryRetryTest {
         // imageCompressor.processImage must NOT have been called — saving us a round
         // of quality loss when compression already succeeded on the first attempt.
         coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
+    }
+
+    @Test
+    fun `video retry dispatches to the media path and re-uploads as video mp4`() = runTest {
+        val failed = Message(
+            id = "failed-vid-1",
+            chatId = "chat1",
+            senderId = "uid1",
+            content = "clip",
+            type = MessageType.VIDEO,
+            status = MessageStatus.FAILED,
+            timestamp = 1_000L,
+            localUri = "/storage/local/failed-vid-1.mp4",
+            mediaWidth = 1280,
+            mediaHeight = 720,
+            duration = 12,
+            mediaThumbnailUrl = "https://example/firebase/vid_thumb.jpg",
+        )
+        stubExistingFailed(failed)
+        stubChatLastMessageId(failed.chatId, lastId = null)
+        coEvery {
+            storageSource.uploadMedia(any(), any(), any(), any(), any())
+        } returns "https://example/firebase/vid.mp4"
+        coEvery {
+            messageSource.sendPlainMessage(
+                chatId = any(), senderId = any(), content = any(), type = any(),
+                replyToId = any(), timestamp = any(), mediaUrl = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(),
+                mentions = any(), emojiSizes = any(), mediaWidth = any(),
+                mediaHeight = any(), latitude = any(), longitude = any(), isHd = any()
+            )
+        } returns "remote-vid-id"
+
+        val result = repository.retryFailedMessage(failed.id, recipientId = "")
+
+        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals("remote-vid-id", result.getOrThrow().id)
+        // Routed through the media path, not re-transcoded — uploaded as video/mp4,
+        // and videoTranscoder.transcode was never invoked.
+        coVerify { storageSource.uploadMedia(any(), any(), any(), "video/mp4", any()) }
+        coVerify(exactly = 0) { videoTranscoder.transcode(any(), any()) }
+        // The persisted thumbnail + duration are re-sent through the source.
+        coVerify {
+            messageSource.sendPlainMessage(
+                chatId = any(), senderId = any(), content = any(),
+                type = MessageType.VIDEO, replyToId = any(), timestamp = any(),
+                mediaUrl = any(), mediaThumbnailUrl = "https://example/firebase/vid_thumb.jpg",
+                isForwarded = any(), duration = 12, mentions = any(), emojiSizes = any(),
+                mediaWidth = any(), mediaHeight = any(), latitude = any(),
+                longitude = any(), isHd = any()
+            )
+        }
     }
 
     @Test

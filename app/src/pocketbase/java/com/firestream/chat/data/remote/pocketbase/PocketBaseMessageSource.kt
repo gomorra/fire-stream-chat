@@ -46,6 +46,7 @@ class PocketBaseMessageSource @Inject constructor(
 
     override fun lastContentFor(type: MessageType, plain: String): String = when (type) {
         MessageType.IMAGE -> if (plain.isNotBlank()) "📷 $plain" else "📷 Photo"
+        MessageType.VIDEO -> if (plain.isNotBlank()) "🎥 $plain" else "🎥 Video"
         MessageType.DOCUMENT -> "📎 File"
         MessageType.VOICE -> "🎤 Voice message"
         MessageType.POLL -> "📊 Poll"
@@ -103,6 +104,7 @@ class PocketBaseMessageSource @Inject constructor(
         replyToId: String?,
         timestamp: Long,
         mediaUrl: String?,
+        mediaThumbnailUrl: String?,
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,
@@ -113,6 +115,8 @@ class PocketBaseMessageSource @Inject constructor(
         longitude: Double?,
         isHd: Boolean
     ): String {
+        // v0 pb_schema.json has no media_thumbnail field; the param is accepted
+        // for contract parity and intentionally ignored until the follow-up lands.
         val body = JSONObject().apply {
             put("chat_id", chatId)
             put("sender_id", senderId)
@@ -154,6 +158,7 @@ class PocketBaseMessageSource @Inject constructor(
         replyToId: String?,
         timestamp: Long,
         mediaUrl: String?,
+        mediaThumbnailUrl: String?,
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,

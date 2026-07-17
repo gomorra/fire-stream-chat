@@ -76,7 +76,19 @@ sealed interface AppError {
             is UnknownHostException,
             is SocketTimeoutException,
             is IOException -> Network
+            is MediaLimitException -> Validation(throwable.message ?: "Media exceeds the allowed limit")
             else -> Unknown(throwable)
         }
     }
 }
+
+/**
+ * Thrown when a picked media source exceeds a send guard (e.g. a video longer
+ * than 3 minutes or larger than 100 MB). The repository throws this before any
+ * optimistic row is written; [AppError.from] maps it to [AppError.Validation]
+ * so the existing snackbar surfaces the human-readable [message] verbatim.
+ *
+ * Domain-pure — no `android.*` types, so it stays inside the domain layer and
+ * satisfies the Konsist purity rule.
+ */
+class MediaLimitException(message: String) : Exception(message)
