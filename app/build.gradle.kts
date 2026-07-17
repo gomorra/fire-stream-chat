@@ -433,6 +433,14 @@ dependencies {
 
     // Image Loading
     implementation(libs.coil.compose)
+    implementation(libs.coil.video)
+
+    // Media3 (video transcoding/playback)
+    implementation(libs.media3.transformer)
+    implementation(libs.media3.effect)
+    implementation(libs.media3.common)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
 
     // ExifInterface
     implementation(libs.androidx.exifinterface)
