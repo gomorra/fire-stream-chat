@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.SettingsBrightness
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -93,6 +94,7 @@ import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
+import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.util.ChangelogParser
 import com.firestream.chat.data.util.ChangelogVersion
 import com.firestream.chat.ui.components.UserAvatar
@@ -116,6 +118,7 @@ fun SettingsScreen(
     var showSignOutDialog by remember { mutableStateOf(false) }
     var showSoundPicker by remember { mutableStateOf(false) }
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
+    var showVideoQualityPicker by remember { mutableStateOf(false) }
     var showDictationLanguagePicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showDisableEncryptionDialog by remember { mutableStateOf(false) }
@@ -394,6 +397,18 @@ fun SettingsScreen(
                 onCheckedChange = { viewModel.setSendImagesFullQuality(it) }
             )
 
+            val videoQualityLabel = when (uiState.videoQuality) {
+                VideoQualityOption.DATA_SAVER -> "480p (data saver)"
+                VideoQualityOption.STANDARD -> "720p (standard, recommended)"
+                VideoQualityOption.HIGH -> "1080p (high)"
+            }
+            SettingsItem(
+                icon = Icons.Default.Videocam,
+                title = "Video Quality",
+                subtitle = videoQualityLabel,
+                onClick = { showVideoQualityPicker = true }
+            )
+
             // Download All Media button / progress
             if (uiState.mediaBackfillRunning && uiState.mediaBackfillProgress != null) {
                 val progress = uiState.mediaBackfillProgress!!
@@ -543,6 +558,17 @@ fun SettingsScreen(
                 showAutoDownloadPicker = false
             },
             onDismiss = { showAutoDownloadPicker = false }
+        )
+    }
+
+    if (showVideoQualityPicker) {
+        VideoQualityPickerDialog(
+            currentOption = uiState.videoQuality,
+            onSelect = { option ->
+                viewModel.setVideoQuality(option)
+                showVideoQualityPicker = false
+            },
+            onDismiss = { showVideoQualityPicker = false }
         )
     }
 
@@ -1044,6 +1070,43 @@ private fun AutoDownloadPickerDialog(
                         AutoDownloadOption.WIFI_ONLY -> "WiFi only"
                         AutoDownloadOption.ALWAYS -> "Always"
                         AutoDownloadOption.NEVER -> "Never"
+                    }
+                    TextButton(
+                        onClick = { onSelect(option) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (option == currentOption) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun VideoQualityPickerDialog(
+    currentOption: VideoQualityOption,
+    onSelect: (VideoQualityOption) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Video Quality") },
+        text = {
+            Column {
+                VideoQualityOption.entries.forEach { option ->
+                    val label = when (option) {
+                        VideoQualityOption.DATA_SAVER -> "480p (data saver)"
+                        VideoQualityOption.STANDARD -> "720p (standard, recommended)"
+                        VideoQualityOption.HIGH -> "1080p (high)"
                     }
                     TextButton(
                         onClick = { onSelect(option) },

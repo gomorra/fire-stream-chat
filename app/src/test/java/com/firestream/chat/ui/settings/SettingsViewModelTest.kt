@@ -6,6 +6,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.model.UpdateCheckResult
@@ -101,6 +102,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(true)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
+        every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(false)
     }
@@ -132,6 +134,7 @@ class SettingsViewModelTest {
         assertEquals(NotificationSound.DEFAULT, state.notificationSound)
         assertTrue(state.vibration)
         assertEquals(AutoDownloadOption.WIFI_ONLY, state.autoDownload)
+        assertEquals(VideoQualityOption.STANDARD, state.videoQuality)
     }
 
     @Test
@@ -163,6 +166,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(false)
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
+        every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.HIGH)
         val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
 
         advanceUntilIdle()
@@ -173,6 +177,7 @@ class SettingsViewModelTest {
         assertFalse(state.vibration)
         assertEquals(NotificationSound.SILENT, state.notificationSound)
         assertEquals(AutoDownloadOption.NEVER, state.autoDownload)
+        assertEquals(VideoQualityOption.HIGH, state.videoQuality)
     }
 
     // ── Theme ─────────────────────────────────────────────────────────────────
@@ -461,6 +466,46 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { preferencesDataStore.setAutoDownload(AutoDownloadOption.WIFI_ONLY) }
+    }
+
+    @Test
+    fun `videoQuality defaults to STANDARD in state`() = runTest {
+        advanceUntilIdle()
+
+        assertEquals(VideoQualityOption.STANDARD, viewModel.uiState.value.videoQuality)
+    }
+
+    @Test
+    fun `setVideoQuality DATA_SAVER calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setVideoQuality(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setVideoQuality(VideoQualityOption.DATA_SAVER)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setVideoQuality(VideoQualityOption.DATA_SAVER) }
+    }
+
+    @Test
+    fun `setVideoQuality HIGH calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setVideoQuality(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setVideoQuality(VideoQualityOption.HIGH)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setVideoQuality(VideoQualityOption.HIGH) }
+    }
+
+    @Test
+    fun `setVideoQuality STANDARD calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setVideoQuality(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setVideoQuality(VideoQualityOption.STANDARD)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setVideoQuality(VideoQualityOption.STANDARD) }
     }
 
     // ── App update auto-download ────────────────────────────────────────────────

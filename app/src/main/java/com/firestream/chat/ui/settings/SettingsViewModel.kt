@@ -19,6 +19,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.model.UpdateCheckResult
@@ -69,6 +70,7 @@ data class SettingsUiState(
     val cacheSize: Long = 0L,
     val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
     val sendImagesFullQuality: Boolean = false,
+    val videoQuality: VideoQualityOption = VideoQualityOption.STANDARD,
     // Chat
     val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
     // App update auto-download (opt-in, Wi-Fi only)
@@ -179,6 +181,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            preferencesDataStore.videoQualityFlow.collect { option ->
+                _uiState.value = _uiState.value.copy(videoQuality = option)
+            }
+        }
+        viewModelScope.launch {
             preferencesDataStore.dictationLanguageFlow.collect { language ->
                 _uiState.value = _uiState.value.copy(dictationLanguage = language)
             }
@@ -242,6 +249,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setSendImagesFullQuality(enabled: Boolean) {
         viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
+    }
+
+    fun setVideoQuality(option: VideoQualityOption) {
+        viewModelScope.launch { preferencesDataStore.setVideoQuality(option) }
     }
 
     // Chat

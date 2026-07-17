@@ -20,6 +20,8 @@ enum class AppTheme { SYSTEM, LIGHT, DARK }
 
 enum class AutoDownloadOption { WIFI_ONLY, ALWAYS, NEVER }
 
+enum class VideoQualityOption(val targetHeight: Int) { DATA_SAVER(480), STANDARD(720), HIGH(1080) }
+
 enum class NotificationSound { DEFAULT, SILENT }
 
 enum class DictationLanguage(val tag: String) { GERMAN("de-DE"), ENGLISH("en-US") }
@@ -51,6 +53,7 @@ class PreferencesDataStore @Inject constructor(
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
     private val sendImagesFullQualityKey = booleanPreferencesKey("send_images_full_quality")
+    private val videoQualityKey = stringPreferencesKey("video_quality")
 
     // App updates
     private val autoDownloadUpdatesKey = booleanPreferencesKey("auto_download_updates")
@@ -193,6 +196,15 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setSendImagesFullQuality(fullQuality: Boolean) {
         context.dataStore.edit { prefs -> prefs[sendImagesFullQualityKey] = fullQuality }
+    }
+
+    val videoQualityFlow: Flow<VideoQualityOption> = context.dataStore.data.map { prefs ->
+        runCatching { VideoQualityOption.valueOf(prefs[videoQualityKey] ?: VideoQualityOption.STANDARD.name) }
+            .getOrDefault(VideoQualityOption.STANDARD)
+    }
+
+    suspend fun setVideoQuality(option: VideoQualityOption) {
+        context.dataStore.edit { prefs -> prefs[videoQualityKey] = option.name }
     }
 
     // --- App updates ---

@@ -61,6 +61,7 @@ private val UI_ALLOWED_DATA_IMPORTS = setOf(
     "com.firestream.chat.data.local.NotificationSound",
     "com.firestream.chat.data.local.PreferencesDataStore",
     "com.firestream.chat.data.local.ScrollPos",
+    "com.firestream.chat.data.local.VideoQualityOption",
     "com.firestream.chat.data.remote.LinkPreview",
     "com.firestream.chat.data.remote.LinkPreviewSource",
     "com.firestream.chat.data.remote.auth.FirebasePhoneAuth",
