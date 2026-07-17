@@ -379,6 +379,17 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenImage = null)) }
     }
 
+    // ── Fullscreen video player ──
+    // Mirrors the fullscreen-image pair above: ViewModel state so the open
+    // player survives activity recreation on rotation.
+    internal fun showFullscreenVideo(source: String) {
+        _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenVideo = FullscreenVideo(source = source))) }
+    }
+
+    internal fun dismissFullscreenVideo() {
+        _uiState.update { it.copy(overlays = it.overlays.copy(fullscreenVideo = null)) }
+    }
+
     override fun onCleared() {
         super.onCleared()
         messageSender.onCleared()

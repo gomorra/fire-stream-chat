@@ -139,4 +139,48 @@ class ChatViewModelFullscreenImageTest {
 
         assertEquals(second, viewModel.uiState.value.overlays.fullscreenImage)
     }
+
+    // ── Fullscreen video player ── same ownership rationale as the image
+    // viewer above: state lives in ChatUiState.overlays so it survives
+    // rotation, not in screen-local compose state.
+
+    @Test
+    fun `video player is closed by default`() = runTest {
+        assertNull(buildViewModel().uiState.value.overlays.fullscreenVideo)
+    }
+
+    @Test
+    fun `showFullscreenVideo exposes the source in the overlays slice`() = runTest {
+        val viewModel = buildViewModel()
+
+        viewModel.showFullscreenVideo("/data/local/video.mp4")
+
+        assertEquals(
+            FullscreenVideo(source = "/data/local/video.mp4"),
+            viewModel.uiState.value.overlays.fullscreenVideo,
+        )
+    }
+
+    @Test
+    fun `dismissFullscreenVideo clears the overlay`() = runTest {
+        val viewModel = buildViewModel()
+        viewModel.showFullscreenVideo("https://example.com/video.mp4")
+
+        viewModel.dismissFullscreenVideo()
+
+        assertNull(viewModel.uiState.value.overlays.fullscreenVideo)
+    }
+
+    @Test
+    fun `showing a second video replaces the first`() = runTest {
+        val viewModel = buildViewModel()
+        viewModel.showFullscreenVideo("https://example.com/a.mp4")
+
+        viewModel.showFullscreenVideo("https://example.com/b.mp4")
+
+        assertEquals(
+            FullscreenVideo(source = "https://example.com/b.mp4"),
+            viewModel.uiState.value.overlays.fullscreenVideo,
+        )
+    }
 }

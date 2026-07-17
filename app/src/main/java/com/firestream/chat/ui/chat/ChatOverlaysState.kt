@@ -19,6 +19,16 @@ internal data class FullscreenImage(
     val canSaveToDownloads: Boolean = false,
 )
 
+// The currently-shown fullscreen video. Mirrors FullscreenImage: lives in
+// ChatUiState (not screen-local compose state) so the open player survives
+// activity recreation on rotation via ViewModel retention. `source` is
+// local-first (localUri ?: mediaUrl) — resolved by the caller before this is
+// constructed, same as FullscreenImageViewer's model resolution.
+@Immutable
+internal data class FullscreenVideo(
+    val source: String,
+)
+
 internal data class OverlaysState(
     val searchQuery: String = "",
     val searchResults: List<Message> = emptyList(),
@@ -27,4 +37,5 @@ internal data class OverlaysState(
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val recentEmojis: List<String> = emptyList(),
     val fullscreenImage: FullscreenImage? = null,
+    val fullscreenVideo: FullscreenVideo? = null,
 )

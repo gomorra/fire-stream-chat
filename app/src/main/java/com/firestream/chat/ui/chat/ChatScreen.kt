@@ -234,6 +234,7 @@ fun ChatScreen(
     // Lives in ChatUiState (OverlaysState slice) so the open viewer survives
     // activity recreation on rotation — see FullscreenImage in ChatOverlaysState.
     val fullscreenImage = uiState.overlays.fullscreenImage
+    val fullscreenVideo = uiState.overlays.fullscreenVideo
     val sheetState = rememberModalBottomSheetState()
     val keyboardController = LocalSoftwareKeyboardController.current
     val composerFocusRequester = remember { FocusRequester() }
@@ -1064,6 +1065,9 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
+                                                onVideoClick = { source ->
+                                                    viewModel.showFullscreenVideo(source)
+                                                },
                                                 onSaveImage = if (message.type == MessageType.IMAGE) {
                                                     { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
                                                 } else null,
@@ -1776,6 +1780,25 @@ fun ChatScreen(
                     { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
                 } else null,
                 snackbarHostState = fullscreenSnackbarHostState,
+            )
+        }
+    }
+
+    BackHandler(enabled = fullscreenVideo != null) {
+        viewModel.dismissFullscreenVideo()
+    }
+
+    // Same rationale as the fullscreen-image IME retract above — the player's
+    // controller overlay would otherwise sit under a parked keyboard.
+    LaunchedEffect(fullscreenVideo != null) {
+        if (fullscreenVideo != null) keyboardController?.hide()
+    }
+
+    AnimatedVisibility(visible = fullscreenVideo != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenVideo?.let { req ->
+            FullscreenVideoPlayer(
+                source = req.source,
+                onDismiss = { viewModel.dismissFullscreenVideo() },
             )
         }
     }
