@@ -15,7 +15,6 @@ import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.ImageResult
 import com.firestream.chat.data.util.MediaFileManager
-import com.firestream.chat.data.util.ThumbResult
 import com.firestream.chat.data.util.VideoMetadata
 import com.firestream.chat.data.util.VideoResult
 import com.firestream.chat.data.util.VideoTranscoder
@@ -222,10 +221,10 @@ class MessageRepositoryMediaSendFailureTest {
     @Test
     fun `video mime creates a VIDEO-typed placeholder before transcode`() = runTest {
         // Metadata within limits so the guard passes and the optimistic row is inserted.
-        every { videoTranscoder.readMetadata(any()) } returns
+        coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
             VideoMetadata(width = 1920, height = 1080, durationMs = 30_000L, rotationDegrees = 0, sizeBytes = 5_000_000L)
         // Fail the transcode so the test ends quickly — the placeholder is already inserted.
-        coEvery { videoTranscoder.transcode(any(), any()) } throws RuntimeException("transcode boom")
+        coEvery { videoTranscoder.transcode(any(), any(), any()) } throws RuntimeException("transcode boom")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",
@@ -247,9 +246,9 @@ class MessageRepositoryMediaSendFailureTest {
 
     @Test
     fun `transcode failure flips row to FAILED`() = runTest {
-        every { videoTranscoder.readMetadata(any()) } returns
+        coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
             VideoMetadata(width = 1280, height = 720, durationMs = 20_000L, rotationDegrees = 0, sizeBytes = 3_000_000L)
-        coEvery { videoTranscoder.transcode(any(), any()) } throws RuntimeException("transcode boom")
+        coEvery { videoTranscoder.transcode(any(), any(), any()) } throws RuntimeException("transcode boom")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",
@@ -270,9 +269,11 @@ class MessageRepositoryMediaSendFailureTest {
 
     @Test
     fun `over-limit video is rejected before any row is inserted`() = runTest {
-        // Duration over the 3-minute guard (180_000 ms).
-        every { videoTranscoder.readMetadata(any()) } returns
-            VideoMetadata(width = 1920, height = 1080, durationMs = 200_000L, rotationDegrees = 0, sizeBytes = 1_000L)
+        // The limit check lives inside VideoTranscoder.ensureWithinLimits; here we only
+        // verify the repository's ordering contract (guard rejects → nothing inserted)
+        // and the AppError mapping of the thrown MediaLimitException.
+        coEvery { videoTranscoder.ensureWithinLimits(any()) } throws
+            MediaLimitException("Videos can be up to 3 minutes and 100 MB")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",

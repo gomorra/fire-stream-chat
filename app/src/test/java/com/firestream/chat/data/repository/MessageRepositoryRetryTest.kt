@@ -286,7 +286,7 @@ class MessageRepositoryRetryTest {
         // Routed through the media path, not re-transcoded — uploaded as video/mp4,
         // and videoTranscoder.transcode was never invoked.
         coVerify { storageSource.uploadMedia(any(), any(), any(), "video/mp4", any()) }
-        coVerify(exactly = 0) { videoTranscoder.transcode(any(), any()) }
+        coVerify(exactly = 0) { videoTranscoder.transcode(any(), any(), any()) }
         // The persisted thumbnail + duration are re-sent through the source.
         coVerify {
             messageSource.sendPlainMessage(

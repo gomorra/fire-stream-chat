@@ -17,6 +17,7 @@ import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import com.firestream.chat.domain.model.MediaLimitException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -42,12 +43,6 @@ data class VideoResult(
     val height: Int,
     val durationSec: Int,
     val mimeType: String = "video/mp4"
-)
-
-data class ThumbResult(
-    val file: File,
-    val width: Int,
-    val height: Int
 )
 
 /**
@@ -90,11 +85,28 @@ class VideoTranscoder @Inject constructor(
     }
 
     /**
+     * Reads the source metadata off the calling thread and throws [MediaLimitException] when the
+     * video exceeds [MAX_VIDEO_DURATION_MS] or [MAX_VIDEO_SOURCE_BYTES] — the user-facing message
+     * is built from those constants so the two can't drift apart. Returns the metadata so the
+     * caller can hand it to [transcode] without a second container parse.
+     */
+    suspend fun ensureWithinLimits(uri: Uri): VideoMetadata = withContext(Dispatchers.IO) {
+        val metadata = readMetadata(uri)
+        if (metadata.durationMs > MAX_VIDEO_DURATION_MS || metadata.sizeBytes > MAX_VIDEO_SOURCE_BYTES) {
+            throw MediaLimitException(
+                "Videos can be up to ${MAX_VIDEO_DURATION_MS / 60_000} minutes and " +
+                    "${MAX_VIDEO_SOURCE_BYTES / (1024 * 1024)} MB"
+            )
+        }
+        metadata
+    }
+
+    /**
      * Reads width/height/duration/rotation via [MediaMetadataRetriever] and the byte size via the
      * content resolver (falling back to [File] length for `file://` URIs). The retriever is always
-     * released.
+     * released. Blocking — callers go through [ensureWithinLimits].
      */
-    fun readMetadata(uri: Uri): VideoMetadata {
+    private fun readMetadata(uri: Uri): VideoMetadata {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSource(context, uri)
@@ -126,10 +138,10 @@ class VideoTranscoder @Inject constructor(
      * Transcodes [uri] to H.264/AAC MP4 in `cacheDir/transcoded/<uuid>.mp4`. A
      * [Presentation.createForHeight] video effect is applied only when the rotation-adjusted
      * display height exceeds [targetHeight] (never upscale); compatible tracks are otherwise passed
-     * through. See the class KDoc for the looper/cancellation contract.
+     * through. [metadata] comes from [ensureWithinLimits] so the container is parsed exactly once
+     * per send. See the class KDoc for the looper/cancellation contract.
      */
-    suspend fun transcode(uri: Uri, targetHeight: Int): VideoResult {
-        val metadata = withContext(Dispatchers.IO) { readMetadata(uri) }
+    suspend fun transcode(uri: Uri, targetHeight: Int, metadata: VideoMetadata): VideoResult {
         val (displayWidth, displayHeight) =
             displayDimensions(metadata.width, metadata.height, metadata.rotationDegrees)
         val durationSec = ((metadata.durationMs + 500) / 1000).toInt()
@@ -187,9 +199,10 @@ class VideoTranscoder @Inject constructor(
     /**
      * Extracts a representative frame near t=0–1s, scaled so its long edge is ≤ 1280 px (no
      * upscale), and writes it as a JPEG (quality 80) to `cacheDir/transcoded/thumb_<uuid>.jpg`.
-     * Bitmaps are recycled; the retriever is always released.
+     * Runs on [Dispatchers.IO] — the frame decode/scale/encode is the heaviest CPU chunk in the
+     * pipeline after the transcode itself. Bitmaps are recycled; the retriever is always released.
      */
-    fun extractThumbnail(uri: Uri): ThumbResult {
+    suspend fun extractThumbnail(uri: Uri): File = withContext(Dispatchers.IO) {
         val retriever = MediaMetadataRetriever()
         var frame: Bitmap? = null
         var scaled: Bitmap? = null
@@ -218,7 +231,7 @@ class VideoTranscoder @Inject constructor(
             outputFile.outputStream().use { out ->
                 scaled.compress(Bitmap.CompressFormat.JPEG, THUMB_JPEG_QUALITY, out)
             }
-            return ThumbResult(outputFile, scaled.width, scaled.height)
+            outputFile
         } finally {
             if (scaled != null && scaled !== frame) scaled.recycle()
             frame?.recycle()
