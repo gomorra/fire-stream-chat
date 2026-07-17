@@ -69,6 +69,7 @@ class ChatViewModelBlockedStateTest {
         every { linkPreviewSource.extractUrl(any()) } returns null
         every { preferencesDataStore.readReceiptsFlow } returns flowOf(true)
         every { preferencesDataStore.recentEmojisFlow } returns flowOf(emptyList())
+        every { preferencesDataStore.lastChatScrollFlow } returns flowOf(null)
 
         chatRepository.chatByIdResult = Result.success(Chat(id = "chat1", type = ChatType.INDIVIDUAL))
     }
