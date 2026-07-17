@@ -151,6 +151,7 @@ private fun StarredMessageItem(
                 Text(
                     text = when (message.type) {
                         MessageType.IMAGE -> if (message.content.isNotBlank()) "📷 ${message.content}" else "📷 Photo"
+                        MessageType.VIDEO -> if (message.content.isNotBlank()) "🎥 ${message.content}" else "🎥 Video"
                         MessageType.VOICE -> "🎤 Voice message"
                         MessageType.DOCUMENT -> "📄 Document"
                         else -> message.content

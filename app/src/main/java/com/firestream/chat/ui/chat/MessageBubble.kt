@@ -61,6 +61,7 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -113,6 +114,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
@@ -169,6 +171,9 @@ internal data class MessageBubbleCallbacks(
     // or remote URL, but ChatScreen uses the captured `message` for full info
     // (mediaUrl + localUri + save-to-downloads), so the lambda may ignore it.
     val onImageClick: (String) -> Unit = {},
+    // Tapping a VIDEO bubble's thumbnail — opens the fullscreen player. The
+    // String is localUri ?: mediaUrl, same convention as onImageClick.
+    val onVideoClick: (String) -> Unit = {},
     // Tapping a thumbnail inside a LinkPreviewCard. This MUST use the URL
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
@@ -349,11 +354,12 @@ internal fun MessageBubble(
                     }
 
                     if (replyToMessage != null) {
-                        val replySnippet = if (replyToMessage.type == MessageType.IMAGE) {
-                            replyToMessage.content.take(80)
+                        val replySnippet = when (replyToMessage.type) {
+                            MessageType.IMAGE -> replyToMessage.content.take(80)
                                 .ifBlank { stringResource(R.string.reply_preview_photo) }
-                        } else {
-                            replyToMessage.content.take(80)
+                            MessageType.VIDEO -> replyToMessage.content.take(80)
+                                .ifBlank { stringResource(R.string.reply_preview_video) }
+                            else -> replyToMessage.content.take(80)
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -366,6 +372,12 @@ internal fun MessageBubble(
                         ) {
                             if (replyToMessage.type == MessageType.IMAGE) {
                                 ReplyImageThumbnail(
+                                    message = replyToMessage,
+                                    modifier = Modifier.size(36.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                            } else if (replyToMessage.type == MessageType.VIDEO) {
+                                ReplyVideoThumbnail(
                                     message = replyToMessage,
                                     modifier = Modifier.size(36.dp)
                                 )
@@ -489,6 +501,168 @@ internal fun MessageBubble(
                                         Icon(
                                             imageVector = Icons.Default.BrokenImage,
                                             contentDescription = "Image unavailable",
+                                            modifier = Modifier.size(40.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            if (message.content.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = message.content,
+                                    style = MaterialTheme.typography.bodyMedium.copy(
+                                        lineHeightStyle = CenteredLineHeight
+                                    ),
+                                    color = textColor
+                                )
+                            }
+                        }
+                        MessageType.VIDEO -> {
+                            val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
+                                message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
+                            } else {
+                                4f / 3f // fallback for old messages without dimensions
+                            }
+
+                            val videoThumbModel = rememberMessageVideoThumbModel(message)
+                            val progress = state.uploadProgress
+                            // Hide the play affordance while an upload is in flight — the
+                            // progress ring is the only interactive overlay in that state.
+                            val showPlayButton = progress == null || progress >= 1f
+
+                            Box(
+                                modifier = Modifier
+                                    .widthIn(max = 280.dp)
+                                    .then(
+                                        if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
+                                        else Modifier
+                                    )
+                                    .heightIn(min = 100.dp, max = 400.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .combinedClickable(
+                                        onClick = {
+                                            val clickUrl = message.localUri ?: message.mediaUrl
+                                            clickUrl?.let { callbacks.onVideoClick(it) }
+                                        },
+                                        onLongClick = { showMenu = true }
+                                    )
+                            ) {
+                                if (videoThumbModel != null) {
+                                    AsyncImage(
+                                        model = videoThumbModel,
+                                        contentDescription = "Video",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                        error = rememberVectorPainter(Icons.Default.BrokenImage)
+                                    )
+
+                                    if (showPlayButton) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.Center)
+                                                .size(48.dp)
+                                                .background(
+                                                    color = Color.Black.copy(alpha = 0.45f),
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.PlayArrow,
+                                                contentDescription = "Play video",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(28.dp)
+                                            )
+                                        }
+                                    }
+
+                                    val durationSeconds = message.duration
+                                    if (durationSeconds != null && durationSeconds > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(6.dp)
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(Color.Black.copy(alpha = 0.55f))
+                                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = formatDuration(durationSeconds),
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    }
+
+                                    // Upload progress overlay
+                                    if (progress != null && progress < 1f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.BottomEnd)
+                                                .padding(8.dp)
+                                                .size(28.dp)
+                                                .background(
+                                                    color = Color.Black.copy(alpha = 0.5f),
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(
+                                                progress = { progress },
+                                                modifier = Modifier.size(20.dp),
+                                                color = Color.White,
+                                                strokeWidth = 2.dp
+                                            )
+                                        }
+                                    }
+
+                                    // Failed-send retry overlay. Suppressed while a retry is in
+                                    // flight (uploadProgress != null) so it doesn't fight the
+                                    // progress spinner.
+                                    val onRetry = callbacks.onRetrySend
+                                    if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
+                                        Box(
+                                            modifier = Modifier
+                                                .matchParentSize()
+                                                .background(Color.Black.copy(alpha = 0.35f))
+                                                .clickable { onRetry() },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .background(
+                                                            color = Color.Black.copy(alpha = 0.6f),
+                                                            shape = CircleShape
+                                                        ),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Refresh,
+                                                        contentDescription = "Retry sending",
+                                                        tint = Color.White,
+                                                        modifier = Modifier.size(28.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.height(6.dp))
+                                                Text(
+                                                    text = "Failed to send",
+                                                    color = Color.White,
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.BrokenImage,
+                                            contentDescription = "Video unavailable",
                                             modifier = Modifier.size(40.dp),
                                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -1055,4 +1229,64 @@ private fun rememberMessageImageModel(message: Message): Any? {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
     return localFile ?: message.mediaUrl
+}
+
+@Composable
+internal fun ReplyVideoThumbnail(
+    message: Message,
+    modifier: Modifier = Modifier,
+) {
+    val videoThumbModel = rememberMessageVideoThumbModel(message)
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(6.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (videoThumbModel != null) {
+            AsyncImage(
+                model = videoThumbModel,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                error = rememberVectorPainter(Icons.Default.BrokenImage),
+            )
+            Icon(
+                imageVector = Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(16.dp),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.BrokenImage,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// Resolves a Message's video-bubble thumbnail: a local mp4 file decoded via
+// coil-video's VideoFrameDecoder (per-request only — the global ImageLoader
+// is untouched, see design decision in the video-sharing plan), else the
+// remote JPEG thumbnail uploaded alongside the video, else null (grey
+// placeholder). Same synchronous exists/isFile/canRead check as
+// rememberMessageImageModel — no produceState, no cold-start spinner.
+@Composable
+private fun rememberMessageVideoThumbModel(message: Message): Any? {
+    val localUri = message.localUri
+    val context = LocalContext.current
+    val localFile = remember(localUri) {
+        localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
+    }
+    return when {
+        localFile != null -> remember(localFile) {
+            ImageRequest.Builder(context)
+                .data(localFile)
+                .decoderFactory(VideoFrameDecoder.Factory())
+                .build()
+        }
+        message.mediaThumbnailUrl != null -> message.mediaThumbnailUrl
+        else -> null
+    }
 }

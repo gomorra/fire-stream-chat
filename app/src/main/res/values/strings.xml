@@ -37,4 +37,5 @@
     <string name="dictation_start">Start voice input</string>
     <string name="dictation_stop">Stop voice input</string>
     <string name="reply_preview_photo">Photo</string>
+    <string name="reply_preview_video">Video</string>
 </resources>

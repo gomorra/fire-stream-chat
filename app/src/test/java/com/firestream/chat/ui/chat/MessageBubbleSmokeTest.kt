@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.test.TestData
@@ -136,6 +137,129 @@ class MessageBubbleSmokeTest {
             }
         }
         // No assertion needed — composing without throwing IS the assertion.
+    }
+
+    @Test
+    fun `renders video message without crash`() {
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "m1",
+                        senderId = "uid2",
+                        content = "",
+                        type = MessageType.VIDEO,
+                        status = MessageStatus.SENT,
+                    ).copy(
+                        mediaUrl = "https://cdn.example.com/clip.mp4",
+                        mediaThumbnailUrl = "https://cdn.example.com/clip_thumb.jpg",
+                        mediaWidth = 1280,
+                        mediaHeight = 720,
+                        duration = 95,
+                    ),
+                    isOwnMessage = false,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = emptyCallbacks,
+                )
+            }
+        }
+        // Remote thumbnail model + duration badge render without throwing.
+        composeTestRule.onNodeWithText("1:35").assertIsDisplayed()
+    }
+
+    @Test
+    fun `tapping video bubble invokes onVideoClick with mediaUrl`() {
+        var clickedUrl: String? = null
+        val videoCallbacks = emptyCallbacks.copy(onVideoClick = { clickedUrl = it })
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "m1",
+                        senderId = "uid2",
+                        content = "",
+                        type = MessageType.VIDEO,
+                        status = MessageStatus.SENT,
+                    ).copy(
+                        mediaUrl = "https://cdn.example.com/clip.mp4",
+                        mediaThumbnailUrl = "https://cdn.example.com/clip_thumb.jpg",
+                        mediaWidth = 1280,
+                        mediaHeight = 720,
+                        duration = 95,
+                    ),
+                    isOwnMessage = false,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = videoCallbacks,
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("1:35").performClick()
+        assert(clickedUrl == "https://cdn.example.com/clip.mp4") {
+            "expected onVideoClick(mediaUrl), got $clickedUrl"
+        }
+    }
+
+    @Test
+    fun `renders failed video with retry overlay`() {
+        var retryClicks = 0
+        val retryCallbacks = emptyCallbacks.copy(onRetrySend = { retryClicks++ })
+        // rememberMessageVideoThumbModel needs a real file for the local-file branch;
+        // the retry overlay itself is gated on message.status, not the thumb model,
+        // but a real thumbnail URL keeps the AsyncImage branch exercised too.
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "m1",
+                        senderId = "uid1",
+                        content = "",
+                        type = MessageType.VIDEO,
+                        status = MessageStatus.FAILED,
+                    ).copy(
+                        mediaThumbnailUrl = "https://cdn.example.com/clip_thumb.jpg",
+                        mediaWidth = 1280,
+                        mediaHeight = 720,
+                        duration = 12,
+                    ),
+                    isOwnMessage = true,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = retryCallbacks,
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Failed to send").assertIsDisplayed()
+    }
+
+    @Test
+    fun `renders reply to video message without crash`() {
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "m1",
+                        senderId = "uid2",
+                        content = "Check this out",
+                    ),
+                    isOwnMessage = false,
+                    replyToMessage = TestData.message(
+                        id = "m0",
+                        senderId = "uid3",
+                        content = "",
+                        type = MessageType.VIDEO,
+                    ).copy(mediaThumbnailUrl = "https://cdn.example.com/clip_thumb.jpg"),
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = emptyCallbacks,
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Video").assertIsDisplayed()
     }
 
     @Test

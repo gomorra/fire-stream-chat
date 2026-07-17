@@ -259,6 +259,16 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### Shared-media grid omits VIDEO messages
+
+**The smell.** `SharedMediaViewModel.mediaUrls` filters `MessageType.IMAGE` only, so videos shared in a chat never appear in the shared-media grid (`app/src/main/java/com/firestream/chat/ui/chat/` shared-media path). Introduced knowingly when video sharing landed (2026-07-18): videos render, play, and auto-download in the conversation, but the media grid ignores them.
+
+**Why we're not fixing it.** Adding video to the grid is a scope decision, not a bug fix — it needs a thumbnail-in-grid design (VideoFrameDecoder vs. mediaThumbnailUrl), a play affordance, and a tap-through to the fullscreen player. Bolting it on during the video-sharing plan would have grown Step 5 well past its reviewed shape.
+
+**When to revisit.** First user report of "where are my videos in shared media", or the next time SharedMediaScreen is touched for any other reason — the bubble's `rememberMessageVideoThumbModel` is directly reusable there.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.
