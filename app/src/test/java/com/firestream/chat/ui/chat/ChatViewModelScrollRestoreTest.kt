@@ -28,7 +28,6 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -99,37 +98,42 @@ class ChatViewModelScrollRestoreTest {
         context = context,
     )
 
+    private fun awaitPersistedScroll(viewModel: ChatViewModel): PersistedScrollState {
+        mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
+        return viewModel.persistedScrollState.value
+    }
+
     @Test
-    fun `readPersistedScroll returns position when chatId matches`() = runTest {
+    fun `persisted scroll resolves to position when chatId matches`() = runTest {
         every { preferencesDataStore.lastChatScrollFlow } returns flowOf(
             ScrollPos(chatId = "chat1", index = 12, offset = 34)
         )
 
-        val result = buildViewModel().readPersistedScroll()
+        val state = awaitPersistedScroll(buildViewModel())
 
-        assertEquals(ScrollPos("chat1", 12, 34), result)
+        assertEquals(PersistedScrollState.Ready(ScrollPos("chat1", 12, 34)), state)
     }
 
     @Test
-    fun `readPersistedScroll returns null when chatId does not match`() = runTest {
+    fun `persisted scroll resolves to null when chatId does not match`() = runTest {
         // Persisted scroll belongs to a different chat — the fence must reject it
         // so we don't apply chat A's offset to chat B.
         every { preferencesDataStore.lastChatScrollFlow } returns flowOf(
             ScrollPos(chatId = "someOtherChat", index = 12, offset = 34)
         )
 
-        val result = buildViewModel().readPersistedScroll()
+        val state = awaitPersistedScroll(buildViewModel())
 
-        assertNull(result)
+        assertEquals(PersistedScrollState.Ready(null), state)
     }
 
     @Test
-    fun `readPersistedScroll returns null when nothing is persisted`() = runTest {
+    fun `persisted scroll resolves to null when nothing is persisted`() = runTest {
         every { preferencesDataStore.lastChatScrollFlow } returns flowOf(null)
 
-        val result = buildViewModel().readPersistedScroll()
+        val state = awaitPersistedScroll(buildViewModel())
 
-        assertNull(result)
+        assertEquals(PersistedScrollState.Ready(null), state)
     }
 
     @Test

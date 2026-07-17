@@ -22,7 +22,6 @@
 package com.firestream.chat.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -412,19 +411,7 @@ fun FireStreamNavGraph(
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
             val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
             val fromNotification = backStackEntry.arguments?.getBoolean("fromNotification") ?: false
-            // Sticky "enter transition finished" flag. ChatScreen defers the
-            // heavy first message-list composition until the slide has settled
-            // so the animation doesn't drop frames. Sticky on purpose: the
-            // transition leaves the Visible/Visible state again on exit, and
-            // the list must not swap back to a spinner mid-exit.
-            val enterSettled = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-            LaunchedEffect(transition.currentState, transition.targetState) {
-                if (transition.currentState == EnterExitState.Visible &&
-                    transition.targetState == EnterExitState.Visible
-                ) enterSettled.value = true
-            }
             ChatScreen(
-                enterTransitionSettled = enterSettled.value,
                 onContentSettled = onLaunchSettled,
                 onBackClick = { navController.popBackStack() },
                 onMessageInfoClick = { message, participants ->

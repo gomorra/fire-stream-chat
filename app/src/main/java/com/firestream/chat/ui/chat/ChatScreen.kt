@@ -15,8 +15,6 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -104,6 +102,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -129,7 +128,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.TextRange
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
@@ -191,10 +189,6 @@ fun ChatScreen(
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
     fromNotification: Boolean = false,
-    // False while the navigation enter transition is still running (NavGraph
-    // passes a sticky flag). The first message-list composition waits for it —
-    // see shouldComposeMessageList in MessageListGate.kt.
-    enterTransitionSettled: Boolean = true,
     // Invoked once when the message list (or the empty state of a fresh chat)
     // becomes visible. MainActivity uses it to release the splash screen.
     onContentSettled: () -> Unit = {},
@@ -218,24 +212,15 @@ fun ChatScreen(
     var lastDictationWriteText by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
     var initialScrollDone by remember { mutableStateOf(false) }
-    // True when the ViewModel already held messages as this composition started
-    // (pop-return from message info / profile) — existing content is never
-    // hidden behind the transition gate.
-    val hadMessagesAtEntry = remember { uiState.messages.messages.isNotEmpty() }
-    val composeMessageList = shouldComposeMessageList(
+    // Content-first: the message area shows as soon as messages are loaded AND
+    // the initial scroll target is resolvable (the DataStore read is prefetched
+    // in ChatViewModel.init and only gates the process-death restore path).
+    val persistedScroll by viewModel.persistedScrollState.collectAsState()
+    val contentReady = isChatContentReady(
         isLoading = uiState.session.isLoading,
-        enterTransitionSettled = enterTransitionSettled,
-        hadMessagesAtEntry = hadMessagesAtEntry,
-    )
-    // The list stays invisible until the initial scroll restore has been
-    // applied, then fades in — the user never sees the populate-then-jump
-    // (the jump used to be masked by the nav slide; launch-restore only
-    // cross-fades now).
-    var listRevealed by remember { mutableStateOf(false) }
-    val listRevealAlpha by animateFloatAsState(
-        targetValue = if (listRevealed) 1f else 0f,
-        animationSpec = tween(150),
-        label = "messageListReveal"
+        fromNotification = fromNotification,
+        hasSavedScrollIndex = viewModel.savedScrollIndex >= 0,
+        persistedScrollResolved = persistedScroll is PersistedScrollState.Ready,
     )
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -355,41 +340,41 @@ fun ChatScreen(
             }
     }
 
-    // Restore saved scroll position once the list is composed and populated
-    // (composeMessageList in the keys — the LazyColumn may be deferred until
-    // the enter transition settles). When opened from a notification, always
-    // land on the newest message — the saved index would point to wherever
-    // the user last scrolled.
+    // Apply the initial scroll position in the SAME frame the list first
+    // composes with data: SideEffect runs after this composition applies but
+    // before its measure/draw, and requestScrollToItem (non-suspending) sets
+    // the position the first layout pass will use — the first visible frame is
+    // already at the target, so there is no populate-then-jump. When opened
+    // from a notification, always land on the newest message — the saved
+    // index would point to wherever the user last scrolled.
     // Precedence: SavedStateHandle (same-process) > DataStore (cross-process) > tail.
     //
     // Saved indices are chronological; `toReversedIndex` flips them at the
     // scroll boundary. "Newest message" is reversed index 0.
-    LaunchedEffect(uiState.messages.messages.isNotEmpty(), composeMessageList) {
-        if (!composeMessageList) return@LaunchedEffect
+    if (contentReady && !initialScrollDone && uiState.messages.messages.isNotEmpty()) {
         val messages = uiState.messages.messages
-        if (messages.isNotEmpty() && !initialScrollDone) {
-            initialScrollDone = true
-            if (fromNotification) {
-                listState.scrollToItem(0)
-            } else {
-                val savedIndex = viewModel.savedScrollIndex
-                if (savedIndex in messages.indices) {
-                    listState.scrollToItem(messages.toReversedIndex(savedIndex), viewModel.savedScrollOffset)
-                } else {
-                    val persisted = viewModel.readPersistedScroll()
-                    if (persisted != null && persisted.index in messages.indices) {
-                        listState.scrollToItem(messages.toReversedIndex(persisted.index), persisted.offset)
-                    } else {
-                        listState.scrollToItem(0)
-                    }
-                }
-            }
+        val savedIndex = viewModel.savedScrollIndex
+        val persistedPos = (persistedScroll as? PersistedScrollState.Ready)?.pos
+        val (initialIndex, initialOffset) = when {
+            fromNotification -> 0 to 0
+            savedIndex in messages.indices ->
+                messages.toReversedIndex(savedIndex) to viewModel.savedScrollOffset
+            persistedPos != null && persistedPos.index in messages.indices ->
+                messages.toReversedIndex(persistedPos.index) to persistedPos.offset
+            else -> 0 to 0
         }
-        // Reveal after the initial scroll has been applied — or immediately
-        // for a chat with no messages yet. Also releases the splash screen on
-        // a launch restore (onContentSettled is idempotent).
-        if (!listRevealed && (initialScrollDone || messages.isEmpty())) {
-            listRevealed = true
+        SideEffect {
+            listState.requestScrollToItem(initialIndex, initialOffset)
+            initialScrollDone = true
+            onContentSettled()
+        }
+    }
+
+    // A chat with no messages yet has nothing to scroll — mark done so the
+    // tail-follow effects arm, and release the splash on a launch restore.
+    LaunchedEffect(contentReady, uiState.messages.messages.isEmpty()) {
+        if (contentReady && uiState.messages.messages.isEmpty() && !initialScrollDone) {
+            initialScrollDone = true
             onContentSettled()
         }
     }
@@ -928,10 +913,7 @@ fun ChatScreen(
             val showingSearchResults = uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank() && uiState.overlays.searchResults.isNotEmpty()
             if (!showingSearchResults) {
                 when {
-                    // Also true while the enter transition is still running:
-                    // the heavy first list composition waits for the slide to
-                    // finish so the animation doesn't drop frames.
-                    !composeMessageList -> {
+                    !contentReady -> {
                         Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             CircularProgressIndicator()
                         }
@@ -952,14 +934,7 @@ fun ChatScreen(
                             }
                         }
 
-                        // Invisible (alpha 0) until the initial scroll restore
-                        // has been applied, then fades in — see listRevealed.
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .graphicsLayer { alpha = listRevealAlpha }
-                        ) {
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                         // Index 0 = newest (anchored at viewport bottom by reverseLayout=true),
                         // lastIndex = oldest.
                         val reversed = remember(uiState.messages.messages) {
@@ -1006,7 +981,11 @@ fun ChatScreen(
                                 // render the separator *below* its message — landing it between two
                                 // consecutive same-day messages instead of above the first. Wrapping
                                 // them in one Column pins the separator above the day's first message.
-                                Column(modifier = Modifier.animateItem().fillMaxWidth()) {
+                                // fadeInSpec = null: no per-item appearance fade — on the
+                                // first population EVERY item would animate, which is the
+                                // biggest avoidable cost while the nav slide is running.
+                                // Placement animation (inserts/reorders) stays.
+                                Column(modifier = Modifier.animateItem(fadeInSpec = null).fillMaxWidth()) {
                                 if (showSeparator) {
                                     DateSeparator(formatDateSeparator(message.timestamp))
                                 }

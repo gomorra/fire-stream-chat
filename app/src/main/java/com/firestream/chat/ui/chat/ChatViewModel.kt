@@ -46,6 +46,13 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+/** Resolution state of the cross-process persisted scroll position (DataStore). */
+internal sealed interface PersistedScrollState {
+    data object Loading : PersistedScrollState
+    /** [pos] is null when nothing is persisted for this chat. */
+    data class Ready(val pos: ScrollPos?) : PersistedScrollState
+}
+
 internal data class SnackbarEvent(
     val message: String,
     val actionLabel: String? = null,
@@ -109,8 +116,13 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    suspend fun readPersistedScroll(): ScrollPos? =
-        preferencesDataStore.lastChatScrollFlow.first()?.takeIf { it.chatId == chatId }
+    // Prefetched in init so the value is already resolved by the time Room's
+    // first message emission reaches the screen — the initial scroll position
+    // must be known BEFORE the list first composes with data (jump-free first
+    // frame; see the SideEffect in ChatScreen).
+    private val _persistedScrollState =
+        MutableStateFlow<PersistedScrollState>(PersistedScrollState.Loading)
+    internal val persistedScrollState: StateFlow<PersistedScrollState> = _persistedScrollState.asStateFlow()
 
     // Shared mutable state. Handed to every Chat*Manager below — each manager owns a
     // conceptual slice of ChatUiState (messages, composer, overlays, session) and
@@ -163,6 +175,10 @@ class ChatViewModel @Inject constructor(
 
     init {
         _uiState.update { it.copy(session = it.session.copy(currentUserId = authRepository.currentUserId ?: "")) }
+        viewModelScope.launch {
+            val pos = preferencesDataStore.lastChatScrollFlow.first()?.takeIf { it.chatId == chatId }
+            _persistedScrollState.value = PersistedScrollState.Ready(pos)
+        }
         messageLoader.start()
         infoManager.start()
         dictationManager.init()
