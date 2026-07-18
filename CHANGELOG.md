@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.13.0] — 2026-07-18
+## [1.13.0] — 2026-07-18
 
 ### Added
 - **Video sharing.** Chats can now share video — record with the camera or pick one from the gallery. Videos are transcoded to a configurable quality (480p/720p/1080p in Settings, default 720p) with a 3-minute/100 MB limit to keep sends fast and storage reasonable. Bubbles show a thumbnail with a play button and the clip's duration; tapping opens a fullscreen player. (`3b1344a`, `feddc46`, `e2ff3f8`, `7690fd6`, `d44ecc8`, `da4603c`)
