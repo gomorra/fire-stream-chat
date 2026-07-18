@@ -74,9 +74,9 @@ Then `./gradlew assembleFirebaseRelease` produces a signed APK at `app/build/out
 
 `versionName` is derived from `git describe --tags` — the tag IS the version, no source edit required. `versionCode` is derived from the commit count.
 
-1. Verify `CHANGELOG.md` has an `[Unreleased]` section with entries.
-2. Decide the new version (SemVer, per `CLAUDE.md` rules).
-3. Rename the `[Unreleased]` heading to `[X.Y.Z] — YYYY-MM-DD` and add a fresh empty `[Unreleased]` block above it.
+1. Verify `CHANGELOG.md`'s top section is `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` with entries — the version and date live in this combined working header, decided per-commit as entries land (see `CLAUDE.md` Changelog section).
+2. Confirm `X.Y.Z` is the version you intend to ship (bump per the SemVer rules in `CLAUDE.md` if the last entry under-bumped it).
+3. Drop the `[UNRELEASED] ` prefix from that header, leaving `## [X.Y.Z] — YYYY-MM-DD`.
 4. Commit, then tag and push both:
 
 ```bash

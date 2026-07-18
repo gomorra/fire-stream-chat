@@ -23,12 +23,12 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ## ChatUiState slice composition
 
-**Definition.** `ChatUiState` is a single data class composed of five nested slices: `MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`, `DictationState`. New chat-screen fields go in the slice that matches their semantic.
+**Definition.** `ChatUiState` is a single data class composed of six nested slices: `MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`, `DictationState`, `CommandsState`. New chat-screen fields go in the slice that matches their semantic.
 
 **Use when.** Adding a new field to `ChatUiState`.
 **Don't use when.** The field is global to the app — it belongs in a different ViewModel or DataStore.
 
-**Example.** `app/src/main/java/com/firestream/chat/ui/chat/ChatViewModel.kt:44–55` — slice composition. Per-slice files at `ui/chat/Chat{Messages,Composer,Overlays,Session}State.kt`.
+**Example.** `app/src/main/java/com/firestream/chat/ui/chat/ChatViewModel.kt:62–69` — slice composition. Per-slice files at `ui/chat/Chat{Messages,Composer,Overlays,Session,Dictation,Commands}State.kt`.
 
 **Trap.** Multi-field writes across slices must collapse into a single `_uiState.update { it.copy(a = it.a.copy(...), b = it.b.copy(...)) }`. Two consecutive `.update {}` calls emit an inconsistent intermediate state that observers will recompose against.
 

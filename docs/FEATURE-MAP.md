@@ -1,4 +1,4 @@
-<!-- last-verified: 2026-04-29 -->
+<!-- last-verified: 2026-07-18 -->
 
 # Feature → File Map
 
@@ -20,7 +20,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>` |
 | `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications |
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory + ICE server config |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections |
 | `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source |
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
@@ -67,7 +67,7 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/data/util/ImageCompressor.kt` | EXIF-aware compress; `inSampleSize` for memory-safe decode |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — 15-min periodic backfill, respects `AutoDownloadOption` + WiFi |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage`, `downloadAndSave` (in-flight dedup map), per-chat scan |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Pinch-to-zoom + caption before send |
@@ -89,8 +89,8 @@ Lists shared into chats as a live `LIST` message bubble. Subcollection-based ite
 |---|---|
 | `app/src/main/java/com/firestream/chat/domain/usecase/list/SendListUpdateToChatsUseCase.kt` | Multi-repo orchestration — creates `LIST` message, updates list, writes history |
 | `app/src/main/java/com/firestream/chat/data/repository/ListRepositoryImpl.kt` | List CRUD + share/unshare flows |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirestoreListSource.kt` | `lists/{id}/items/{itemId}` subcollection, denormalized counts |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirestoreListHistorySource.kt` | `lists/{id}/history/{entryId}` audit trail |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreListSource.kt` | `lists/{id}/items/{itemId}` subcollection, denormalized counts |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreListHistorySource.kt` | `lists/{id}/history/{entryId}` audit trail |
 | `app/src/main/java/com/firestream/chat/ui/lists/ListsScreen.kt` | Lists tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/lists/ListsViewModel.kt` | List index + counts |
 | `app/src/main/java/com/firestream/chat/ui/lists/ListDetailScreen.kt` | List edit screen |
@@ -122,7 +122,7 @@ Create / vote / close. Lives inside the message stream (no separate collection).
 | `app/src/main/java/com/firestream/chat/domain/repository/PollRepository.kt` | Vote + close interface |
 | `app/src/main/java/com/firestream/chat/data/repository/PollRepositoryImpl.kt` | Vote/close, delegates message updates |
 | `app/src/main/java/com/firestream/chat/data/repository/PollMapper.kt` | `Poll` ↔ Firestore map serialisation |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `pollData` field on the message subcollection |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `pollData` field on the message subcollection |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatPollManager.kt` | Slice owner for poll send/vote intents |
 | `app/src/main/java/com/firestream/chat/ui/chat/PollBubble.kt` | Vote UI inside a message bubble |
 | `app/src/main/java/com/firestream/chat/ui/chat/CreatePollSheet.kt` | Create-poll bottom sheet |
@@ -139,11 +139,11 @@ RTDB-backed presence with a Cloud Function mirror to Firestore.
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/AppLifecycleObserver.kt` | Process-level `DefaultLifecycleObserver` — drives RTDB enter/leave |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/RealtimePresenceSource.kt` | `.info/connected` pattern + `onDisconnect()` registration |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/RealtimePresenceSource.kt` | `.info/connected` pattern + `onDisconnect()` registration |
 | `app/src/main/java/com/firestream/chat/data/repository/UserRepositoryImpl.kt` | Combines RTDB presence into the `observeUser()` stream |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirestoreUserSource.kt` | Persisted `lastSeen` mirror |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreUserSource.kt` | Persisted `lastSeen` mirror |
 | `functions/index.js` | `syncPresenceToFirestore` Cloud Function — RTDB → Firestore mirror with `lastSeen` transaction guard |
-| `app/src/test/java/com/firestream/chat/data/remote/firebase/RealtimePresenceSourceTest.kt` | State-machine reconnect/teardown |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/RealtimePresenceSourceTest.kt` | State-machine reconnect/teardown |
 | `app/src/test/java/com/firestream/chat/data/repository/UserRepositoryImplPresenceTest.kt` | Presence stream merge |
 
 **Entry point:** `FireStreamApp.onCreate` → `ProcessLifecycleOwner.observe(AppLifecycleObserver)`.
@@ -159,7 +159,7 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration |
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalProtocolStoreImpl.kt` | `SignalProtocolStore` backed by `SignalDatabase` |
 | `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` — keys survive `AppDatabase` destructive migrations |
-| `app/src/main/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `BuildConfig.DEBUG` + `e2eEncryptionEnabledFlow` guard around the Signal branch |
 | `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `e2eEncryptionEnabledFlow` (default `true`) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → Encryption toggle (release builds) |
@@ -245,6 +245,42 @@ Composer-driven `.command` grammar plus the timer as the first command. Typing `
 | `app/src/main/AndroidManifest.xml` | `SCHEDULE_EXACT_ALARM` / `USE_EXACT_ALARM` / `RECEIVE_BOOT_COMPLETED` permissions + receiver registrations |
 
 **Entry point:** type `.` in any chat composer → `ChatCommandsManager.onComposerTextChanged()` → `CommandPalette` opens → tap `.timer.set` (or type it) → `TimerPickerWidget` mounts → send → `MessageRepository.sendTimerMessage()` → `ChatTimerReactor` schedules alarms on both sides via `TimerAlarmScheduler`.
+
+---
+
+## Video Sharing
+
+Chats can send video — record with the camera or pick one from the gallery. Videos are typed `VIDEO`, guarded at 3 min / 100 MB before the optimistic insert, then transcoded to a configurable quality (480p/720p/1080p, default 720p, set in Settings) with a JPEG thumbnail extracted and uploaded alongside. Bubbles show the thumbnail with a play overlay and duration badge, IMAGE-matched sizing/progress/retry; tapping opens a fullscreen ExoPlayer overlay that mirrors the existing image viewer.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `videoQualityFlow` preference (480p/720p/1080p, default 720p) |
+| `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Video quality picker |
+| `app/src/main/java/com/firestream/chat/ui/settings/SettingsViewModel.kt` | Wires the picker |
+| `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Video quality persistence |
+| `app/src/main/java/com/firestream/chat/data/util/VideoTranscoder.kt` | Media3 Transformer wrapper — `ensureWithinLimits` (pre-insert guard), `transcode` to quality preset, per-request `VideoFrameDecoder` thumbnail extraction |
+| `app/src/test/java/com/firestream/chat/data/util/VideoTranscoderLogicTest.kt` | Limit-guard and quality-mapping logic coverage |
+| `app/src/main/java/com/firestream/chat/data/remote/source/MessageSource.kt` | `mediaThumbnailUrl` added to the cross-flavor `sendMessage`/`sendPlainMessage` contract |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `mediaThumbnailUrl` param (firebase flavor) |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseMessageSource.kt` | `mediaThumbnailUrl` param (pocketbase flavor) |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` — shared image/video path; video branch transcodes, uploads thumbnail, retries without re-transcoding |
+| `app/src/main/java/com/firestream/chat/domain/model/AppError.kt` | `MediaLimitException` → `AppError.Validation` mapping |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryMediaSendFailureTest.kt` | Video limit-guard / send-failure coverage |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryRetryTest.kt` | Retry re-uploads without re-transcoding |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `VIDEO` branch — thumbnail, play overlay, duration badge |
+| `app/src/main/java/com/firestream/chat/ui/starred/StarredMessagesScreen.kt` | `VIDEO` branch in the starred list |
+| `app/src/test/java/com/firestream/chat/ui/chat/MessageBubbleSmokeTest.kt` | `VIDEO` bubble render smoke coverage |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatOverlaysState.kt` | `fullscreenVideo` slice beside `fullscreenImage` |
+| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenVideoPlayer.kt` | `PlayerView` in `AndroidView` — release-on-dispose, pause-on-`ON_PAUSE`, `BackHandler` dismiss |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatViewModel.kt` | `showFullscreenVideo` / dismiss actions on the overlays slice |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatViewModelFullscreenImageTest.kt` | Fullscreen video overlay-slice coverage (same file as the image-viewer tests) |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt` | Fullscreen player mount + composer wiring — gallery picker widened to `ImageAndVideo`, `READ_MEDIA_VIDEO` on 13+, new Record-video attachment option via `CaptureVideo` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Video mode — decoded frame + play badge, caption flow unchanged |
+| `app/src/test/java/com/firestream/chat/test/fakes/FakeMessageRepository.kt` | Fake updated for the `mediaThumbnailUrl` send signature |
+| `app/src/test/java/com/firestream/chat/ui/share/SharePickerViewModelTest.kt` | Gallery video share coverage |
+| `app/src/main/res/values/strings.xml` | `reply_preview_video`, `attachment_record_video` |
+
+**Entry point:** record or pick a video in `ChatScreen.kt`'s composer → `ImagePreviewScreen` (video mode) → `MessageRepositoryImpl.sendMediaMessage()` guards via `VideoTranscoder.ensureWithinLimits`, transcodes, uploads a thumbnail → `MessageBubble` `VIDEO` branch renders it → tap opens `ChatViewModel.showFullscreenVideo()` → `FullscreenVideoPlayer`.
 
 ---
 

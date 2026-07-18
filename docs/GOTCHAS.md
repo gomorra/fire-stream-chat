@@ -27,6 +27,11 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   mid-interaction (e.g. emoji Recents), snapshot the order with `remember { list }` per
   open session and keep the underlying flow live. Don't add a `delay` debounce in the
   ViewModel (`08fe2b1`).
+- **IME inset plumbing for bottom-anchored screens.** A screen with a bottom-anchored
+  input needs both `android:windowSoftInputMode="adjustResize"` on the activity/manifest
+  entry *and* `Modifier.consumeWindowInsets(padding)` placed between `.padding(padding)`
+  and `.imePadding()`. Skip either half and insets get double-applied or the composer
+  hides under the keyboard. Established in `a972533`.
 
 ## Coroutines / lifecycle
 

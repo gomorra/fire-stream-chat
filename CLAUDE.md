@@ -194,7 +194,7 @@ com.firestream.chat/
 Each pattern below is a one-line pointer; for the rule's *example, trap, and when-not-to-use* see [`docs/PATTERNS.md`](docs/PATTERNS.md). Package layout (where ViewModels / repos / entities / sources / DI live) is in [`docs/ARCHITECTURE.md` §12](docs/ARCHITECTURE.md).
 
 - **Chat\*Manager slice-ownership** — each manager owns one slice of `ChatUiState`, mutates only via `_uiState.update {}`, never calls another manager. → [PATTERNS.md#chat-manager-slice-ownership](docs/PATTERNS.md#chat-manager-slice-ownership)
-- **ChatUiState slice composition** — five nested slices (`MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`, `DictationState`); cross-slice writes must collapse into one `.update {}`. → [PATTERNS.md#chatuistate-slice-composition](docs/PATTERNS.md#chatuistate-slice-composition)
+- **ChatUiState slice composition** — six nested slices (`MessagesState`, `ComposerState`, `OverlaysState`, `SessionState`, `DictationState`, `CommandsState`); cross-slice writes must collapse into one `.update {}`. → [PATTERNS.md#chatuistate-slice-composition](docs/PATTERNS.md#chatuistate-slice-composition)
 - **AppError boundary wrapping** — every `UiState.error` is `AppError?`; wrap Throwables via `AppError.from(e)`, validation via `AppError.Validation(...)`. → [PATTERNS.md#apperror-boundary-wrapping](docs/PATTERNS.md#apperror-boundary-wrapping)
 - **Fake repositories vs. MockK** — use `test/fakes/Fake{Message,Chat,User}Repository` for those three; MockK stays default elsewhere. → [PATTERNS.md#fake-repositories-vs-mockk](docs/PATTERNS.md#fake-repositories-vs-mockk)
 - **Use-case vs. direct repository** — use cases only for cross-repository orchestration or pure logic worth isolating; otherwise call the repo directly. → [PATTERNS.md#use-case-vs-direct-repository](docs/PATTERNS.md#use-case-vs-direct-repository)
@@ -253,9 +253,9 @@ Deferred and declined refactors are catalogued in `TECH_DEBT.md` at the repo roo
 
 ## Changelog
 
-User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Each section is headed by the SemVer `versionName` shipped on that merge day: `## [1.2.3] — 2026-04-24`.
+User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). The working (unreleased) section uses a combined header — version and date live in the header itself, decided per-commit as entries land: `## [UNRELEASED] [1.2.3] — 2026-04-24`. Once released, the `[UNRELEASED] ` prefix is dropped, leaving the plain `## [1.2.3] — 2026-04-24` form.
 
-**After each user-visible commit**, append an entry under `## [Unreleased]` in the matching section (`Added` / `Fixed` / `Changed` / `Removed`):
+**After each user-visible commit**, append an entry under the top `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` section in the matching subsection (`Added` / `Fixed` / `Changed` / `Removed`):
 - Lead with a bold descriptive name, not the raw commit subject.
 - One or two sentences explaining **what changed and why** — existing entries are editorial, not commit dumps.
 - End with the commit hash in backticks: `` (`8bb2a2e`) ``. Group related commits by appending more hashes: `` (`a972533`, `e892f58`) ``.
@@ -274,11 +274,11 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 | `feat!:` or `BREAKING CHANGE:` | major | `1.2.3` → `2.0.0` |
 | `chore:`, `docs:`, `test:`, `ci:` (no CHANGELOG entry) | none | — |
 
-**Section placement.** If the top section below `[Unreleased]` is already dated today, append to it — and if this commit's bump is higher-severity than the section's current version, upgrade the header too (e.g. a `feat` landing on a `## [1.2.4] — today` section promotes it to `## [1.3.0] — today`). Otherwise insert a fresh `## [X.Y.Z] — YYYY-MM-DD` section.
+**Section placement.** If the top `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` section is already dated today, append to it — and if this commit's bump is higher-severity than the section's current version, upgrade the version in the header in place (e.g. a `feat` landing on a `## [UNRELEASED] [1.2.4] — today` section promotes it to `## [UNRELEASED] [1.3.0] — today`). Otherwise insert a fresh `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` section (version and date decided per this commit's bump).
 
 **`versionCode` is auto-derived** from `git rev-list --count HEAD` at Gradle configure time — never edit it by hand. Same with `BuildConfig.GIT_SHA` / `COMMIT_TIMESTAMP`.
 
-**At release time** (once store tagging begins): rename `## [Unreleased]` to the released version header and add a new empty `## [Unreleased]` block above.
+**At release time** (once store tagging begins): drop the `[UNRELEASED] ` prefix from the top section's header, leaving `## [X.Y.Z] — YYYY-MM-DD`.
 
 **Two-tier CHANGELOG gating:**
 - **Push-time nudge** — `.github/workflows/changelog-check.yml` fails pushes and PRs that touch **production** code under `app/src/**` or `functions/**` without updating `CHANGELOG.md`. Test source sets (`app/src/test*/`, `app/src/androidTest*/`, including flavor variants) are **auto-exempt**, so test-only changes never need an entry. Apply the `no-changelog` label to bypass for other exempt PRs (refactors with no user-visible effect).
@@ -286,7 +286,7 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Ea
 
 ### Cutting a release
 
-Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. **`versionName` is auto-derived from `git describe --tags`** — exact tag → `X.Y.Z`, untagged HEAD → `X.Y.Z-dev+<sha>` — so the tag is the single source of truth. To ship a release: rename `## [Unreleased]` to `## [X.Y.Z] — YYYY-MM-DD`, commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
+Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. **`versionName` is auto-derived from `git describe --tags`** — exact tag → `X.Y.Z`, untagged HEAD → `X.Y.Z-dev+<sha>` — so the tag is the single source of truth. To ship a release: verify the top section is `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` with the intended version, drop the `[UNRELEASED] ` prefix, commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Sensitive Files
 
