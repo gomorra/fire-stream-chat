@@ -206,7 +206,8 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 
 - **Cross-cutting work** — for any feature spanning 4+ packages, [`docs/FEATURE-MAP.md`](docs/FEATURE-MAP.md) lists every file involved. Check there before grepping.
 - **Maintaining FEATURE-MAP** — when you add, move, rename, or delete a file in `app/src/main/java/`, check whether it appears in `docs/FEATURE-MAP.md` and update if so. Refresh the `last-verified` HTML comment quarterly.
-- **Plans** — in-flight plans live in `.claude/plans/`; shipped plans archive to `.claude/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome).
+- **Gotchas** — hard-won, host-independent traps (Compose VerifyError ceiling, MockK relaxed-nullable, Media3 pins/looper contract, …) are catalogued in [`docs/GOTCHAS.md`](docs/GOTCHAS.md). Check it before debugging something that smells platform-shaped; add entries there (not to local session memory) when the lesson is machine-independent — cloud sessions only see what's in git.
+- **Plans** — in-flight plans live in `.claude/plans/`; shipped plans archive to `.claude/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
 - **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
 
 ## Navigation

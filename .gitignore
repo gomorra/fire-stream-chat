@@ -38,13 +38,16 @@ login_script.py
 firebase_login.log
 firebase.log
 
-# Claude Code session state (scheduled_tasks.lock, plans, tool outputs).
+# Claude Code session state (scheduled_tasks.lock, tool outputs).
 # Ignore contents by default, but share the SessionStart hook and its wiring
 # so every Claude Code on the web session pre-warms the Gradle cache
 # (sandbox tool-execution cannot reach dl.google.com — SessionStart can).
+# Plans are tracked (in-flight + done/) so cloud sessions can execute them —
+# a cloud checkout never sees ~/.claude, so the repo is the only shared path.
 .claude/*
 !.claude/hooks/
 .claude/hooks/*
 !.claude/hooks/session-start.sh
 !.claude/hooks/block-heredoc-commit.sh
 !.claude/settings.json
+!.claude/plans/
