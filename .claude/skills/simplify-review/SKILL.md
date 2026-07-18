@@ -32,5 +32,5 @@ Review all recently changed code for quality, then fix any issues found.
 ## Scope
 
 - Only review files changed since the last commit (or since session start if no commits yet)
-- If called with a diff range (e.g., from `/build`), review that specific range
+- If called with a diff range, review that specific range
 - Keep the review focused — this is a quality gate, not a full codebase audit

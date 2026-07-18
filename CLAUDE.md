@@ -40,36 +40,15 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 - Version catalog: `gradle/libs.versions.toml`
 - Gradle version: 8.11.1
 
-## Model & Effort Guidelines
+## Model Guidelines
 
-When creating implementation plans, include a model/effort recommendation per step using these rules:
+Plans do not include per-step model/effort tables. Principles:
 
-| Task Characteristics | Model | Effort |
-|---------------------|-------|--------|
-| Foundation/architecture work, new patterns, complex state management; anything security-adjacent or concurrency-heavy | Fable 5 (or Opus 4.8) | High |
-| Extends existing patterns with moderate complexity | Fable 5 (or Opus 4.8) | Medium |
-| New features following established patterns, multiple files | Sonnet 4.6 | High |
-| Straightforward feature work, well-scoped changes | Sonnet 4.6 | Medium |
-| Simple bug fixes, typos, single-file changes | Sonnet 4.6 | Low |
+- **Planning, and anything security-adjacent, concurrency-heavy, or architecture-defining** belongs on the strongest available model tier (currently Fable/Opus).
+- **Everything else** is fine on the current mid-tier model — quality on small steps is enforced by the test+build gate, not model choice; using the stronger model is always safe.
+- **Spawned `Agent` calls**: choose each call's `model` by the same judgment (stronger models for security/concurrency-shaped review work).
 
-> **Model generation (current as of 2026-06):** Fable 5 and Opus 4.8 are the top-tier models — use either for security-adjacent, concurrency-heavy, or architecture-defining work. Sonnet 4.6 is listed only where the task is trivial and fully specified and you want to save cost/latency; using the stronger model on a small step is always safe (just slower/pricier). Quality on the small steps is enforced by the test+build gate, not the model choice.
-
-**Defaults:**
-- **Planning** — always Fable 5 (or Opus 4.8), High effort (unless the plan is trivial/single-step)
-- **Implementation** — Sonnet 4.6, Medium effort (override per the table above when warranted)
-
-**Per-step model selection:** For each implementation step, automatically apply the model/effort from the table above based on the step's characteristics. The defaults (Sonnet/Medium) are the fallback only when no table row clearly applies. If the table suggests a different model/effort than the default, apply it automatically — but if the choice is ambiguous, ask the user before deviating.
-
-**Decision factors:**
-- **Fable 5 / Opus 4.8** when: defining architecture others build on, complex permission/security logic, concurrency/state machines, multiple interacting systems
-- **Sonnet 4.6** when: following patterns already in the codebase, isolated features, UI components
-- **High effort** when: many new files (>5), critical infrastructure, cross-cutting changes
-- **Medium effort** when: extending existing patterns, moderate file count (2–5)
-
-Plans must include a recommendation table per step:
-
-| Step | Model | Effort | Rationale |
-|------|-------|--------|-----------|
+Name tiers, not versions — do not hard-code model version numbers in this file.
 
 ## Plan Execution Workflow
 
@@ -82,30 +61,20 @@ Plans must include an **Order** line that defines the build sequence:
 
 **Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
 
-### Per-step display
-
-**At the start of each implementation step, display:**
-> **Step X — Model: [Fable 5|Opus 4.8|Sonnet 4.6] / Effort: [High|Medium|Low]**
-
-This must appear before any code changes are made for that step.
-
 ### Post-step code review
 
 **After each significant phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
 1. `./gradlew test` — unit tests must pass
 2. `./gradlew assembleDebug` — build must be clean
-3. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — pin each call's `model` parameter rather than switching the parent model. Drop `/effort` from the ceremony; `Agent` has no effort knob, so accept the chosen model's default.
+3. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin (stronger models for the trigger categories below).
    - **Triggers** (any one is sufficient): (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines).
-   - **Model selection when triggered** — pin all three Phase 2 `Agent` calls to `model: "opus"` for the trigger categories above. For lighter-weight reviews you choose to run anyway, pin to `model: "sonnet"` (roughly a third the token cost, three independent-context perspectives).
-   - **Never reimplement the review** with a custom prompt — always `Skill(skill: "simplify")`. The 2026-04-23 incident was a main-context reimplementation, not a sub-agent one; pinning per-Agent model doesn't change that — the prompt and structure must come from the skill.
+   - **Never reimplement the review** with a custom prompt — always `Skill(skill: "simplify")`.
    - **Never substitute `/simplify-review`** — that skill is manual-invocation only.
 4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
 6. `./gradlew test` — unit tests must pass
 7. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 8. Update MEMORY.md — record what was done, key patterns established, remove stale entries
-
-> **Note:** Do not use `/build` or `/step` skills — implement plans directly with the selected model.
 
 ### Token efficiency
 
