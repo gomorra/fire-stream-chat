@@ -32,6 +32,16 @@ cd functions && npm install && firebase deploy --only functions
 cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 ```
 
+> **⚠️ Cloud sessions (Claude Code on the web): Gradle does NOT work.** The managed
+> environment's egress policy blocks `dl.google.com` (Google Maven; `maven.google.com`
+> just redirects there), so AGP and the Android SDK cannot be downloaded and every
+> `./gradlew` invocation fails at plugin resolution. Do **not** retry, probe mirrors,
+> or attempt proxy workarounds — it burns tokens for nothing. Instead: skip the
+> test+build gate, review the diff statically with extra care, and state clearly in
+> the final report that the change is build-unverified and needs a local
+> `./gradlew test assembleDebug`. (Status 2026-07-18 — remove this note once the
+> egress policy allows `dl.google.com`.)
+
 - JVM target: 17
 - `minSdk = 29`, `targetSdk = 35`, `compileSdk = 35`
 - Core library desugaring enabled

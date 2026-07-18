@@ -15,6 +15,10 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -37,10 +41,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.consumeWindowInsets
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.isImeVisible
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -109,6 +114,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -117,9 +123,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -134,6 +141,7 @@ import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -230,7 +238,7 @@ fun ChatScreen(
     var showCreatePollSheet by remember { mutableStateOf(false) }
     var showCreateListSheet by remember { mutableStateOf(false) }
     var showLocationSheet by remember { mutableStateOf(false) }
-    var showEmojiSheet by remember { mutableStateOf(false) }
+    var showEmojiPanel by remember { mutableStateOf(false) }
     var showOverflowMenu by remember { mutableStateOf(false) }
     // Lives in ChatUiState (OverlaysState slice) so the open viewer survives
     // activity recreation on rotation — see FullscreenImage in ChatOverlaysState.
@@ -248,18 +256,32 @@ fun ChatScreen(
         52 + 5 * cellDp + 4 * 2 + 40           // search + rows + row-gaps + toolbar
     }
 
-    BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
-
-    // Keyboard replaces the emoji panel, never stacks on top of it. The
-    // onFocusChanged hook on the text field misses the common case where the
-    // field kept focus while the panel was open (opening the panel only hides
-    // the IME), so any IME rise — focus change or not — collapses the panel.
-    // Keyed on the boolean transition: opening the panel while the IME is
-    // still animating out doesn't re-run this and close the fresh panel.
     val imeVisible = WindowInsets.isImeVisible
-    LaunchedEffect(imeVisible) {
-        if (imeVisible) showEmojiSheet = false
+    // Largest IME overlap (ime − navBars) seen in this configuration: the emoji
+    // panel adopts the keyboard's height so the keyboard↔panel handoff is
+    // same-height. Keyed on orientation/size so rotation and split-screen
+    // resizes discard stale heights.
+    val imeMaxOverlapPx = remember(configuration.orientation, screenWidthDp, screenHeightDp) {
+        mutableIntStateOf(0)
     }
+    val imeInsets = WindowInsets.ime
+    val navBarInsets = WindowInsets.navigationBars
+    val panelContentDp =
+        if (imeMaxOverlapPx.intValue > 0) with(density) { imeMaxOverlapPx.intValue.toDp() }
+        else emojiPanelHeightDp.dp
+    val panelTargetPx = if (showEmojiPanel) with(density) { panelContentDp.roundToPx() } else 0
+    // Snap while the IME is on screen — the IME's own slide is the animation and
+    // the reserved space must change instantly beneath it. Tween only for cold
+    // open/close with no keyboard involved.
+    val animatedPanelPx by animateIntAsState(
+        targetValue = panelTargetPx,
+        animationSpec = if (imeVisible) snap() else tween(250, easing = FastOutSlowInEasing),
+        label = "emojiPanelHeight"
+    )
+
+    // Registered before the dictation BackHandler below so dictation keeps
+    // precedence (Compose gives it to the later-registered handler).
+    BackHandler(enabled = showEmojiPanel && !imeVisible) { showEmojiPanel = false }
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -774,7 +796,10 @@ fun ChatScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .consumeWindowInsets(padding)
-                .imePadding()
+                // No blanket imePadding(): the IME lift is provided by the
+                // keyboard/emoji bottom region at the end of this Column
+                // (imeOrPanelHeight), so the emoji panel can share the
+                // keyboard's space for a same-height handoff.
         ) {
             // Pinned message banner
             if (uiState.messages.pinnedMessages.isNotEmpty()) {
@@ -1418,19 +1443,22 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconButton(onClick = {
-                    if (showEmojiSheet) {
-                        showEmojiSheet = false
+                    if (showEmojiPanel && !imeVisible) {
+                        // Panel showing → slide the keyboard up over it. The
+                        // flag stays true: the panel remains mounted underneath.
                         composerFocusRequester.requestFocus()
                         keyboardController?.show()
                     } else {
+                        // Keyboard (or nothing) showing → reveal/open the panel
+                        showEmojiPanel = true
                         keyboardController?.hide()
-                        showEmojiSheet = true
                     }
                 }) {
+                    val panelShowing = showEmojiPanel && !imeVisible
                     Icon(
-                        imageVector = if (showEmojiSheet) Icons.Outlined.Keyboard
+                        imageVector = if (panelShowing) Icons.Outlined.Keyboard
                                       else Icons.Outlined.EmojiEmotions,
-                        contentDescription = if (showEmojiSheet) "Keyboard" else "Emoji",
+                        contentDescription = if (panelShowing) "Keyboard" else "Emoji",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
@@ -1439,7 +1467,6 @@ fun ChatScreen(
                     messageText = ""
                     inputCursor = TextRange(0)
                     pendingEmojiSizes = emptyMap()
-                    showEmojiSheet = false
                 }
                 val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
                 val inputAnnotated = remember(messageText, pendingEmojiSizes, emojiInputSize) {
@@ -1458,7 +1485,6 @@ fun ChatScreen(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .onFocusChanged { if (it.isFocused) showEmojiSheet = false }
                         // No clip: large emoji must overflow the Row's cross-axis height constraint.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
@@ -1586,38 +1612,55 @@ fun ChatScreen(
                 }
             }
 
-            // Inline emoji panel — pushes chat list up like the keyboard
-            AnimatedVisibility(
-                visible = showEmojiSheet,
-                enter = slideInVertically { it } + fadeIn(),
-                exit = slideOutVertically { it } + fadeOut()
+            // Bottom region — the space "under" the composer that the keyboard
+            // and the emoji panel share. Height = max(live IME overlap, animated
+            // panel target): opening the panel while the keyboard is up is a
+            // constant-height handoff (the IME slides off a panel already laid
+            // out beneath it) and the keyboard slides back up over the still-
+            // mounted panel. Unconditional so IME spacing also works when the
+            // composer row is hidden (blocked contact) or the IME opens for
+            // in-chat search. Replaces the Column's old blanket imePadding().
+            Box(
+                modifier = Modifier
+                    .imeOrPanelHeight(
+                        ime = imeInsets,
+                        navBars = navBarInsets,
+                        panelPx = { animatedPanelPx },
+                        imeMaxOverlapPx = imeMaxOverlapPx
+                    )
+                    .clipToBounds()
             ) {
-                EmojiHandlerPanel(
-                    mode = EmojiMode.TEXT_INPUT,
-                    recentEmojis = uiState.overlays.recentEmojis,
-                    onEmojiSelected = { emoji, size ->
-                        val insertIdx = messageText.length
-                        messageText += emoji
-                        inputCursor = TextRange(messageText.length)
-                        if (size != 1.0f) {
-                            pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
-                        }
-                    },
-                    onBackspace = {
-                        if (messageText.isNotEmpty()) {
-                            val iter = java.text.BreakIterator.getCharacterInstance()
-                            iter.setText(messageText)
-                            iter.last()
-                            val boundary = iter.previous()
-                            val removedIdx = boundary
-                            messageText = messageText.substring(0, boundary)
+                if (showEmojiPanel || animatedPanelPx > 0) {
+                    EmojiHandlerPanel(
+                        mode = EmojiMode.TEXT_INPUT,
+                        recentEmojis = uiState.overlays.recentEmojis,
+                        onEmojiSelected = { emoji, size ->
+                            val insertIdx = messageText.length
+                            messageText += emoji
                             inputCursor = TextRange(messageText.length)
-                            pendingEmojiSizes = pendingEmojiSizes - removedIdx
-                        }
-                    },
-                    onRecentUsed = { viewModel.addRecentEmoji(it) },
-                    modifier = Modifier.height(emojiPanelHeightDp.dp)
-                )
+                            if (size != 1.0f) {
+                                pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
+                            }
+                        },
+                        onBackspace = {
+                            if (messageText.isNotEmpty()) {
+                                val iter = java.text.BreakIterator.getCharacterInstance()
+                                iter.setText(messageText)
+                                iter.last()
+                                val boundary = iter.previous()
+                                val removedIdx = boundary
+                                messageText = messageText.substring(0, boundary)
+                                inputCursor = TextRange(messageText.length)
+                                pendingEmojiSizes = pendingEmojiSizes - removedIdx
+                            }
+                        },
+                        onRecentUsed = { viewModel.addRecentEmoji(it) },
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(panelContentDp)
+                    )
+                }
             }
         }
     }
@@ -1954,4 +1997,28 @@ private fun openAppSettings(context: Context) {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     runCatching { context.startActivity(intent) }
+}
+
+/**
+ * Sizes the composer's bottom region to max(ime − navBars, emoji panel target),
+ * replacing a blanket `imePadding()` so the keyboard and the emoji panel can
+ * share the same reserved space (the keyboard slides over/off an always-there
+ * panel). Insets and the animated panel value are read at measure time, so IME
+ * animation frames cause relayout only — the screen never recomposes per frame
+ * (the same deferral `imePadding()` relies on internally). Also records the
+ * largest observed IME overlap — the keyboard's height — so the panel can match
+ * it for a same-height handoff. The PATTERNS.md `snapshotFlow{ime}` ban targets
+ * list-scroll coupling; this modifier never touches the list.
+ */
+private fun Modifier.imeOrPanelHeight(
+    ime: WindowInsets,
+    navBars: WindowInsets,
+    panelPx: () -> Int,
+    imeMaxOverlapPx: MutableIntState
+): Modifier = layout { measurable, constraints ->
+    val overlap = (ime.getBottom(this) - navBars.getBottom(this)).coerceAtLeast(0)
+    if (overlap > imeMaxOverlapPx.intValue) imeMaxOverlapPx.intValue = overlap
+    val height = maxOf(overlap, panelPx())
+    val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
+    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }

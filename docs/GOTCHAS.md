@@ -31,7 +31,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   input needs both `android:windowSoftInputMode="adjustResize"` on the activity/manifest
   entry *and* `Modifier.consumeWindowInsets(padding)` placed between `.padding(padding)`
   and `.imePadding()`. Skip either half and insets get double-applied or the composer
-  hides under the keyboard. Established in `a972533`.
+  hides under the keyboard. Established in `a972533`. Exception: `ChatScreen` replaces
+  the blanket `.imePadding()` with a measure-time `max(ime − navBars, emoji panel)`
+  bottom region (`imeOrPanelHeight`) — same net inset, but it lets the keyboard slide
+  over/off an always-mounted emoji panel. Note `WindowInsets.ime.getBottom()` reads
+  *raw* insets (consumption only affects the padding-modifier family), hence the
+  explicit `− navigationBars` subtraction there. Blanket `imePadding()` stays the rule
+  for simple bottom-anchored screens (`ListDetailScreen`, `ImagePreviewScreen`).
 
 ## Coroutines / lifecycle
 
