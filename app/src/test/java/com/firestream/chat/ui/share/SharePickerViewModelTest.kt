@@ -27,6 +27,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.IOException
@@ -130,6 +131,32 @@ class SharePickerViewModelTest {
         assertEquals(groupChat.id, doneChatId)
         // Confirms the group branch passed "" and NOT otherGroupMember.
         assertEquals("", messageRepository.lastSentRecipientId)
+    }
+
+    @Test
+    fun `send video shared content routes to sendMediaMessage with video mime`() = runTest {
+        every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
+        coEvery { shareContentResolver.resolve(any()) } returns SharedContent.Media(
+            items = listOf(
+                SharedContent.Media.MediaItem(
+                    cachedUri = "content://media/video1",
+                    mimeType = "video/mp4",
+                    fileName = "clip.mp4"
+                )
+            )
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.toggleChatSelection(individualChat.id)
+
+        var onDoneCalled = false
+        viewModel.send { _, _ -> onDoneCalled = true }
+        advanceUntilIdle()
+
+        assertEquals("video/mp4", messageRepository.lastSentMimeType)
+        assertFalse("isSending should reset after a successful send", viewModel.uiState.value.isSending)
+        assertTrue("onDone should fire for a successful single-chat share", onDoneCalled)
     }
 
     @Test

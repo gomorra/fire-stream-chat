@@ -27,6 +27,7 @@ internal class FakeMessageRepository : MessageRepository {
     val retryCalls: MutableList<Pair<String, String>> = mutableListOf()
     var lastSentMessage: Message? = null
     var lastSentRecipientId: String? = null
+    var lastSentMimeType: String? = null
 
     fun emit(chatId: String, messages: List<Message>) {
         messagesByChat.value = messagesByChat.value + (chatId to messages)
@@ -42,6 +43,7 @@ internal class FakeMessageRepository : MessageRepository {
         retryCalls.clear()
         lastSentMessage = null
         lastSentRecipientId = null
+        lastSentMimeType = null
     }
 
     private fun consumeFailure(): Result<Nothing>? =
@@ -150,6 +152,7 @@ internal class FakeMessageRepository : MessageRepository {
         consumeFailure()?.let { return it }
         val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, content = caption)
         lastSentMessage = msg
+        lastSentMimeType = mimeType
         return Result.success(msg)
     }
 

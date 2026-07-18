@@ -29,6 +29,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.BrokenImage
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -49,14 +51,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
 
 @Composable
 internal fun ImagePreviewScreen(
@@ -64,8 +70,10 @@ internal fun ImagePreviewScreen(
     recentEmojis: List<String>,
     onEmojiUsed: (String) -> Unit,
     onSend: (caption: String) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    mimeType: String? = null,
 ) {
+    val isVideo = mimeType?.startsWith("video/") == true
     var caption by rememberSaveable { mutableStateOf("") }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
@@ -85,46 +93,80 @@ internal fun ImagePreviewScreen(
             .background(Color.Black)
             .imePadding()
     ) {
-        // Zoomable image
-        AsyncImage(
-            model = imageUri,
-            contentDescription = "Image preview",
-            contentScale = ContentScale.Fit,
-            modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onDoubleTap = {
-                            if (scale > 1f) {
-                                scale = 1f
-                                offset = Offset.Zero
-                            } else {
-                                scale = 3f
-                            }
-                        }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectTransformGestures { centroid, pan, zoom, _ ->
-                        val newScale = (scale * zoom).coerceIn(1f, 5f)
-                        if (newScale > 1f) {
-                            val center = Offset(size.width / 2f, size.height / 2f)
-                            val newOffset = centroid - center -
-                                (centroid - center - offset) * (newScale / scale) + pan
-                            offset = newOffset
-                        } else {
-                            offset = Offset.Zero
-                        }
-                        scale = newScale
-                    }
-                }
-                .graphicsLayer(
-                    scaleX = scale,
-                    scaleY = scale,
-                    translationX = offset.x,
-                    translationY = offset.y
+        if (isVideo) {
+            // Video: still frame only — no inline playback, no pinch-zoom.
+            // Reuses the exact VideoFrameDecoder pattern from
+            // rememberMessageVideoThumbModel in MessageBubble.kt.
+            val context = LocalContext.current
+            val videoFrameModel = remember(imageUri) {
+                ImageRequest.Builder(context)
+                    .data(imageUri)
+                    .decoderFactory(VideoFrameDecoder.Factory())
+                    .build()
+            }
+            AsyncImage(
+                model = videoFrameModel,
+                contentDescription = "Video preview",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                error = rememberVectorPainter(Icons.Default.BrokenImage)
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .size(64.dp)
+                    .background(color = Color.Black.copy(alpha = 0.45f), shape = CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = "Play video",
+                    tint = Color.White,
+                    modifier = Modifier.size(36.dp)
                 )
-        )
+            }
+        } else {
+            // Zoomable image
+            AsyncImage(
+                model = imageUri,
+                contentDescription = "Image preview",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onDoubleTap = {
+                                if (scale > 1f) {
+                                    scale = 1f
+                                    offset = Offset.Zero
+                                } else {
+                                    scale = 3f
+                                }
+                            }
+                        )
+                    }
+                    .pointerInput(Unit) {
+                        detectTransformGestures { centroid, pan, zoom, _ ->
+                            val newScale = (scale * zoom).coerceIn(1f, 5f)
+                            if (newScale > 1f) {
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val newOffset = centroid - center -
+                                    (centroid - center - offset) * (newScale / scale) + pan
+                                offset = newOffset
+                            } else {
+                                offset = Offset.Zero
+                            }
+                            scale = newScale
+                        }
+                    }
+                    .graphicsLayer(
+                        scaleX = scale,
+                        scaleY = scale,
+                        translationX = offset.x,
+                        translationY = offset.y
+                    )
+            )
+        }
 
         // Back button
         IconButton(

@@ -64,6 +64,7 @@ import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Checklist
@@ -544,20 +545,28 @@ fun ChatScreen(
     }
 
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    var pendingImageUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    var pendingImageMimeType by rememberSaveable { mutableStateOf("image/jpeg") }
+    var cameraVideoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var pendingMediaUri by rememberSaveable { mutableStateOf<Uri?>(null) }
+    var pendingMediaMimeType by rememberSaveable { mutableStateOf("image/jpeg") }
 
     val galleryLauncher = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
         if (uri != null) {
-            pendingImageMimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-            pendingImageUri = uri
+            pendingMediaMimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+            pendingMediaUri = uri
         }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success) cameraUri?.let {
-            pendingImageMimeType = "image/jpeg"
-            pendingImageUri = it
+            pendingMediaMimeType = "image/jpeg"
+            pendingMediaUri = it
+        }
+    }
+
+    val cameraVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { success ->
+        if (success) cameraVideoUri?.let {
+            pendingMediaMimeType = "video/mp4"
+            pendingMediaUri = it
         }
     }
 
@@ -575,8 +584,15 @@ fun ChatScreen(
         }
     }
 
-    val galleryPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ ->
-        galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+    val cameraVideoPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            cameraVideoUri = createCameraVideoUri(context)
+            cameraVideoUri?.let { cameraVideoLauncher.launch(it) }
+        }
+    }
+
+    val galleryPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
+        galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageAndVideo))
     }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -1619,13 +1635,16 @@ fun ChatScreen(
                     onClick = {
                         scope.launch { sheetState.hide() }.invokeOnCompletion {
                             showAttachmentSheet = false
-                            val permission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-                                Manifest.permission.READ_MEDIA_IMAGES
-                            else Manifest.permission.READ_EXTERNAL_STORAGE
-                            if (ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED) {
-                                galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly))
+                            val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                                arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
+                            else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+                            val hasPermission = permissions.all {
+                                ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                            }
+                            if (hasPermission) {
+                                galleryLauncher.launch(PickVisualMediaRequest(PickVisualMedia.ImageAndVideo))
                             } else {
-                                galleryPermissionLauncher.launch(permission)
+                                galleryPermissionLauncher.launch(permissions)
                             }
                         }
                     }
@@ -1641,6 +1660,21 @@ fun ChatScreen(
                                 cameraUri?.let { cameraLauncher.launch(it) }
                             } else {
                                 cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                            }
+                        }
+                    }
+                )
+                AttachmentOption(
+                    icon = Icons.Default.Videocam,
+                    label = stringResource(R.string.attachment_record_video),
+                    onClick = {
+                        scope.launch { sheetState.hide() }.invokeOnCompletion {
+                            showAttachmentSheet = false
+                            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                                cameraVideoUri = createCameraVideoUri(context)
+                                cameraVideoUri?.let { cameraVideoLauncher.launch(it) }
+                            } else {
+                                cameraVideoPermissionLauncher.launch(Manifest.permission.CAMERA)
                             }
                         }
                     }
@@ -1803,21 +1837,22 @@ fun ChatScreen(
         }
     }
 
-    BackHandler(enabled = pendingImageUri != null) {
-        pendingImageUri = null
+    BackHandler(enabled = pendingMediaUri != null) {
+        pendingMediaUri = null
     }
 
-    AnimatedVisibility(visible = pendingImageUri != null, enter = fadeIn(), exit = fadeOut()) {
-        pendingImageUri?.let { uri ->
+    AnimatedVisibility(visible = pendingMediaUri != null, enter = fadeIn(), exit = fadeOut()) {
+        pendingMediaUri?.let { uri ->
             ImagePreviewScreen(
                 imageUri = uri,
+                mimeType = pendingMediaMimeType,
                 recentEmojis = uiState.overlays.recentEmojis,
                 onEmojiUsed = viewModel::addRecentEmoji,
                 onSend = { caption ->
-                    viewModel.sendMediaMessage(uri, pendingImageMimeType, caption)
-                    pendingImageUri = null
+                    viewModel.sendMediaMessage(uri, pendingMediaMimeType, caption)
+                    pendingMediaUri = null
                 },
-                onDismiss = { pendingImageUri = null }
+                onDismiss = { pendingMediaUri = null }
             )
         }
     }
@@ -1883,6 +1918,12 @@ private fun adjustEmojiIndices(
 private fun createCameraUri(context: Context): Uri {
     val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
     val file = File(cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+    return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+}
+
+private fun createCameraVideoUri(context: Context): Uri {
+    val cacheDir = File(context.cacheDir, "camera").also { it.mkdirs() }
+    val file = File(cacheDir, "video_${System.currentTimeMillis()}.mp4")
     return FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 }
 
