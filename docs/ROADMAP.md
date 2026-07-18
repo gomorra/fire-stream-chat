@@ -6,113 +6,57 @@ FireStream Chat is an Android messaging app built with Kotlin, Jetpack Compose, 
 
 This roadmap charts the path from the current state to a fully-featured messaging platform comparable to Signal and WhatsApp, organized into progressive phases that each deliver user-visible value.
 
----
+**Refreshed 2026-07-18:** this document had drifted badly out of date (last touched 2026-04-30) — most of Phases 1, 2, and 5, plus 4.1 and half of 4.5, had already shipped without the roadmap being updated. Every phase/item below has been re-verified against `CHANGELOG.md` and the current codebase and marked accordingly. **Legend: ✅ = shipped (version noted where the CHANGELOG dates it); unmarked = still open.**
 
-## Current State (Already Implemented)
-
-- Phone number authentication with OTP
-- User profile setup (display name)
-- 1-to-1 and group chats (create, list, delete)
-- Text messages with E2E encryption (Signal Protocol + post-quantum Kyber)
-- Media messages (images, videos, documents)
-- Message editing and deletion
-- Message status tracking (sending/sent/delivered/read/failed)
-- Typing indicators
-- Contact sync and search
-- Push notifications (FCM)
-- Online/offline status with last seen
-- Local caching (Room) with real-time Firestore sync
+For the current product surface, see `docs/SPEC.md`. For the authoritative shipping history (what changed, when, and why), see `CHANGELOG.md` at the repo root — do not maintain a parallel "already implemented" list here.
 
 ---
 
-## Phase 1 — Core Messaging Completeness
+## Phase 1 — Core Messaging Completeness ✅ (v1.0.0)
 
 **Goal:** Bring messaging to feature parity with the basics users expect from any modern chat app.
 
-### 1.1 Voice Messages
+All six sub-items below shipped together as part of the pre-1.0.0 bulk build (CHANGELOG "Phase 1 — Core messaging completeness", 2026-03-07) and are live in the current app; see `docs/SPEC.md` for the shipped shape of each. Kept as a historical record, not a to-do list.
+
+### 1.1 Voice Messages ✅ (v1.0.0)
 - Record audio with waveform visualization in the chat composer
 - Playback inline with progress indicator and speed control (1x/1.5x/2x)
 - Encrypt audio files via Signal Protocol before upload
 - New `MessageType.VOICE` with duration metadata
 - Files: `ui/chat/ChatScreen.kt`, `domain/model/Message.kt`, `data/repository/MessageRepositoryImpl.kt`
 
-### 1.2 Message Reactions
+### 1.2 Message Reactions ✅ (v1.0.0)
 - Long-press a message to show emoji reaction picker (quick reactions + full picker)
 - Store reactions as a map (`userId → emoji`) on the message document in Firestore
 - Display reaction chips below message bubbles with counts
 - New field `reactions: Map<String, String>` on `Message` model
-- Files: `domain/model/Message.kt`, `ui/chat/MessageBubble.kt`, `data/local/entity/MessageEntity.kt`
 
-### 1.3 Reply-to Messages (UI)
-- The `replyToId` field already exists on the Message model — build the UI
-- Swipe-to-reply gesture on message bubbles
-- Reply preview banner in composer (showing quoted message)
-- Quoted message snippet rendered above the reply in the chat
-- Files: `ui/chat/ChatScreen.kt`, `ui/chat/ChatViewModel.kt`
+### 1.3 Reply-to Messages (UI) ✅ (v1.0.0)
+- Swipe-to-reply gesture, reply preview banner in composer, quoted snippet rendered above the reply. Jump-to-source on tap shipped later (v1.0.0, 2026-04-16).
 
-### 1.4 Message Forwarding
-- Long-press menu option to forward a message
-- Chat picker screen to select destination chat(s)
-- Forward indicator label on forwarded messages
-- New field `isForwarded: Boolean` on `Message` model
-- Files: `domain/model/Message.kt`, `ui/chat/ChatScreen.kt`
+### 1.4 Message Forwarding ✅ (v1.0.0)
+- Long-press menu option to forward a message to a picked destination chat, with a forward indicator label (`ForwardChatPicker`).
 
-### 1.5 Link Previews
-- Detect URLs in outgoing/incoming text messages
-- Fetch Open Graph metadata (title, description, image) server-side via Firebase Cloud Function
-- Render preview card below the message text
-- Cache previews locally in Room
-- Files: `ui/chat/MessageBubble.kt`, new `data/remote/LinkPreviewSource.kt`
+### 1.5 Link Previews ✅ (v1.0.0)
+- URL detection with fullscreen viewer support for link-preview images (2026-03-13). Cloud Function OG-metadata fetch as originally scoped.
 
-### 1.6 Read Receipts (Enhanced)
-- Message status is tracked but not fully surfaced — build a detailed view
-- Double-tap or long-press on sent message → "Message Info" screen showing delivery/read timestamps per recipient
-- Group chat: show who has read the message
-- Files: `ui/chat/ChatScreen.kt`, new `ui/chat/MessageInfoScreen.kt`
+### 1.6 Read Receipts (Enhanced) ✅ (v1.0.0)
+- Per-recipient delivery/read detail is reachable via `Routes.messageInfo(messageId, chatId)`.
 
 ---
 
-## Phase 2 — User Experience & Chat Management
+## Phase 2 — User Experience & Chat Management ✅ (v1.0.0)
 
 **Goal:** Provide the organizational and personalization features that make daily use comfortable.
 
-### 2.1 Settings Screen
-- Central settings hub accessible from chat list
-- Sections: Account, Privacy, Notifications, Storage, Appearance, Help
-- New route `Routes.SETTINGS` and sub-routes
-- Files: `navigation/NavGraph.kt`, new `ui/settings/` package
+All six sub-items shipped as part of the pre-1.0.0 bulk build (CHANGELOG "Phase 2 — User experience & chat management", 2026-03-08, plus the earlier bundled work) and are live today: `ui/settings/`, `ui/profile/ProfileScreen.kt`, `ui/theme/` dark mode, chat pin/archive/mute on `ChatEntity`, in-chat + chat-list search, and `ui/starred/StarredMessagesScreen.kt`. Kept as a historical record, not a to-do list.
 
-### 2.2 User Profile Screen
-- View other users' profiles (avatar, name, status, phone, shared media)
-- Accessible from chat header tap
-- Block/unblock user action
-- Shared media gallery tab
-- Files: new `ui/profile/ProfileScreen.kt`, `navigation/NavGraph.kt`
-
-### 2.3 Dark Mode / Theming
-- System-default, light, dark mode toggle in settings
-- Persist preference in DataStore
-- Extend existing `ui/theme/` with dark color scheme
-- Files: `ui/theme/Theme.kt`, `ui/theme/Color.kt`, new `data/local/PreferencesDataStore.kt`
-
-### 2.4 Chat Organization
-- **Pin chats** — pin up to 3 chats to the top of the list
-- **Archive chats** — swipe to archive, separate "Archived" section
-- **Mute notifications** per chat (1h / 8h / 1 week / always)
-- New fields on `Chat` model: `isPinned`, `isArchived`, `muteUntil`
-- Files: `domain/model/Chat.kt`, `ui/chatlist/ChatListScreen.kt`, `data/local/entity/ChatEntity.kt`
-
-### 2.5 In-App Search
-- **Global search** — search across all chats by message content
-- **In-chat search** — search within a specific conversation
-- Full-text search via Room FTS (FTS4) on the messages table
-- Files: `ui/chatlist/ChatListScreen.kt`, `ui/chat/ChatScreen.kt`, `data/local/dao/MessageDao.kt`
-
-### 2.6 Starred / Saved Messages
-- Star individual messages for quick reference
-- Dedicated "Starred Messages" screen accessible from settings
-- New field `isStarred: Boolean` on `Message` model
-- Files: `domain/model/Message.kt`, new `ui/starred/StarredMessagesScreen.kt`
+### 2.1 Settings Screen ✅ (v1.0.0)
+### 2.2 User Profile Screen ✅ (v1.0.0)
+### 2.3 Dark Mode / Theming ✅ (v1.0.0) — refreshed 2026-04-19 ("Dark palette refresh")
+### 2.4 Chat Organization ✅ (v1.0.0) — pin/archive/mute on `Chat`
+### 2.5 In-App Search ✅ (v1.0.0)
+### 2.6 Starred / Saved Messages ✅ (v1.0.0)
 
 ---
 
@@ -133,12 +77,10 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - Use AndroidX Biometric library
 - Files: new `ui/lock/AppLockScreen.kt`, `data/local/PreferencesDataStore.kt`
 
-### 3.3 Block & Report
-- Block users to prevent them from sending messages
-- Report users/messages (send report to Firestore admin collection)
-- Blocked users list in settings with unblock option
-- New `BlockedUserRepository` and Firestore `blockedUsers` subcollection
-- Files: new `domain/repository/BlockRepository.kt`, `ui/settings/`
+### 3.3 Block & Report — **Block half shipped** ✅ (v1.0.0), Report still open
+- Block/unblock is fully wired: `UserRepository.blockUser/unblockUser`, `ProfileViewModel`, and `MessageRepositoryImpl` filters incoming messages and refuses sends to/from blocked users (`ERR_USER_BLOCKED`) — done via `UserSource`, not a separate `BlockRepository`, so the file path in this item is stale.
+- Report users/messages (Firestore admin collection) is **not implemented** — no report action exists anywhere in the codebase.
+- Blocked users list screen in settings with unblock option — not verified as a dedicated screen; only the per-profile block toggle exists.
 
 ### 3.4 Safety Number / Key Verification
 - Display safety number for each contact (Signal-style numeric fingerprint)
@@ -147,7 +89,7 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - Files: new `ui/verification/SafetyNumberScreen.kt`, `data/crypto/SignalManager.kt`
 
 ### 3.5 Group E2E Encryption (Sender Keys)
-- The Signal Sender Key infrastructure is already scaffolded (SenderKeyStore, entities)
+- Still just scaffolding as of 2026-07-18 — `SignalSenderKeyEntity` / `SignalProtocolStoreImpl` exist, but no `SenderKeyDistributionMessage`/`GroupCipher` usage anywhere. Confirmed by CHANGELOG 1.2.0: "Group and broadcast were never encrypted, so the toggle has no effect on those." — still true.
 - Implement Sender Key Distribution Messages on group creation/member join
 - Encrypt group messages using SenderKeyMessage
 - Files: `data/crypto/SignalManager.kt`, `data/repository/MessageRepositoryImpl.kt`
@@ -163,13 +105,8 @@ This roadmap charts the path from the current state to a fully-featured messagin
 
 **Goal:** Go beyond text — support the full range of communication modalities.
 
-### 4.1 Voice Calls (1-to-1)
-- WebRTC peer-to-peer audio calls
-- Firebase Cloud Functions for signaling (offer/answer/ICE candidates)
-- In-call UI with mute, speaker, end call controls
-- Call history screen
-- Push notification for incoming calls (high-priority FCM)
-- Files: new `ui/call/` package, new `data/remote/webrtc/` package, `navigation/NavGraph.kt`
+### 4.1 Voice Calls (1-to-1) ✅ (v1.0.0)
+- Shipped 2026-03-13: `CallService` foreground service, `CallStateHolder`, incoming-call FCM, `CallActivity`, call push Cloud Function. Call history screen followed as the Calls tab (bottom nav, 2026-03-21).
 
 ### 4.2 Video Calls (1-to-1)
 - Extend voice call infrastructure with video track
@@ -190,11 +127,9 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - Stories tab or section in chat list
 - Files: new `ui/stories/` package, new `domain/model/Story.kt`, `navigation/NavGraph.kt`
 
-### 4.5 Location Sharing
-- Send current location as a message (static map thumbnail)
-- Live location sharing with configurable duration (15min / 1h / 8h)
-- Google Maps integration for rendering
-- Files: `domain/model/Message.kt` (new `MessageType.LOCATION`), new `ui/chat/LocationPicker.kt`
+### 4.5 Location Sharing — **static send shipped** ✅ (v1.0.0), live sharing still open
+- Send current location as a message ✅ (v1.0.0, 2026-04-06): `MessageType.LOCATION`, GPS via `FusedLocationProviderClient`, static-tile preview, `geo:` URI on tap, via `LocationPickerSheet` — shipped with **OpenStreetMap** tiles rather than the Google Maps integration originally scoped.
+- Live location sharing with configurable duration (15min / 1h / 8h) — not implemented.
 
 ### 4.6 Stickers & GIFs
 - Built-in sticker packs with download/management
@@ -210,40 +145,26 @@ This roadmap charts the path from the current state to a fully-featured messagin
 
 ---
 
-## Phase 5 — Group Features & Administration
+## Phase 5 — Group Features & Administration ✅ (v1.0.0, all 5 sub-items)
 
 **Goal:** Make group chats powerful and manageable for communities.
 
-### 5.1 Enhanced Group Management
-- Group description field
-- Group invite links (shareable URL)
-- QR code for group join
-- Admin approval for new members (optional)
-- Files: `domain/model/Chat.kt`, `ui/chat/ChatScreen.kt`, new `ui/group/GroupSettingsScreen.kt`
+All five items shipped in the pre-1.0.0 bulk build — this phase is fully complete, including 5.2 and 5.4, which the previous roadmap revision believed were still open. Kept as a historical record, not a to-do list.
 
-### 5.2 Group Permissions
-- Admin hierarchy: Owner → Admin → Member
-- Configurable permissions: who can send messages, edit group info, add members
-- Admin-only announcements mode
-- Files: `domain/model/Chat.kt`, `ui/group/GroupSettingsScreen.kt`
+### 5.1 Enhanced Group Management ✅ (v1.0.0)
+- Shipped 2026-03-09: description, invite links, QR codes (`5f0819b`). Admin-approval-for-new-members was not called out in the CHANGELOG line — not separately verified.
 
-### 5.3 Polls
-- Create polls within group chats
-- Single-choice and multiple-choice options
-- Anonymous voting option
-- Real-time vote count display
-- Files: new `domain/model/Poll.kt`, `ui/chat/` poll components
+### 5.2 Group Permissions ✅ (v1.0.0)
+- Contrary to this roadmap's own "believed open" assumption at the time of the last refresh, this is fully wired, not just scaffolded: `domain/model/GroupPermissions.kt` (`sendMessages`/`editGroupInfo`/`addMembers`/`createPolls` role gates + `isAnnouncementMode`), `GroupRole` (`OWNER`/`ADMIN`/`MEMBER`), `CheckGroupPermissionUseCase`, and enforcement in `ChatScreen`/`ChatInfoManager`/`ChatComposerState` (announcement-mode composer lock). No dedicated CHANGELOG entry — verified directly against code.
 
-### 5.4 Mentions & Notifications
-- @mention individual users or @everyone in group chats
-- Highlighted mention text in message bubbles
-- Filtered notification: notify only when mentioned (optional setting)
-- Files: `ui/chat/ChatScreen.kt`, `ui/chat/MessageBubble.kt`
+### 5.3 Polls ✅ (v1.0.0)
+- Shipped 2026-03-09 (`eda95ae`).
 
-### 5.5 Broadcast Lists
-- Send a message to multiple contacts at once (1-to-many, not a group)
-- Recipients see it as an individual message
-- Files: new `domain/model/BroadcastList.kt`, new `ui/broadcast/` package
+### 5.4 Mentions & Notifications ✅ (v1.0.0)
+- Contrary to this roadmap's own "believed open" assumption, this shipped 2026-03-09 alongside group creation ("Group creation + mention parser with mention-only notification setting") — `domain/util/MentionParser`.
+
+### 5.5 Broadcast Lists ✅ (v1.0.0)
+- Shipped 2026-03-09 (`cd7ec32`).
 
 ---
 
@@ -264,11 +185,9 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - Message sync across linked devices
 - Files: `data/crypto/SignalManager.kt`, new `ui/settings/LinkedDevicesScreen.kt`
 
-### 6.3 Offline Resilience
-- Queue outgoing messages when offline, auto-send on reconnect
-- WorkManager-based message retry with exponential backoff
-- Offline indicator in UI
-- Files: `data/repository/MessageRepositoryImpl.kt`, new `data/worker/MessageRetryWorker.kt`
+### 6.3 Offline Resilience — partially covered, full item still open
+- A narrower related fix shipped in v1.10.5 (2026-06-08): orphaned sends (coroutine cancelled mid-send, e.g. leaving the chat) are flipped from stuck "sending" to `FAILED` on app start / chat re-entry, restoring tap-to-retry.
+- The originally-scoped auto-queue-and-resend-on-reconnect + `MessageRetryWorker` with exponential backoff + offline indicator are **not implemented** — explicitly tracked as the deferred "durable-outbox follow-up" in `TECH_DEBT.md`.
 
 ### 6.4 Performance & Pagination
 - Paginated message loading (Paging 3 library)
@@ -276,12 +195,11 @@ This roadmap charts the path from the current state to a fully-featured messagin
 - Database query optimization with proper indices
 - Files: `data/local/dao/MessageDao.kt`, `ui/chat/ChatViewModel.kt`
 
-### 6.5 Notifications Enhancement
-- Notification grouping by chat
-- Inline reply from notification
-- Message preview in notification (with privacy option to hide content)
-- Notification channels per chat category
-- Files: `data/remote/fcm/FCMService.kt`, `data/local/PreferencesDataStore.kt`
+### 6.5 Notifications Enhancement — partially shipped
+- Notification grouping by chat ✅ — `FCMService` recovers the existing `MessagingStyle` per chat and bundles messages together (`setGroupConversation`), which also gives message-preview-in-notification for free.
+- Inline reply from notification (`RemoteInput`) — not implemented.
+- Privacy option to hide message content in the notification — not implemented.
+- Notification channels per chat category — not implemented; still a single "Messages" channel plus the separate updates/timer channels.
 
 ### 6.6 Accessibility
 - Content descriptions on all interactive elements
