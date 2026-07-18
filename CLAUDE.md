@@ -130,54 +130,7 @@ Reference docs in `docs/`:
 - `DOMAIN-MODELS.md` — domain model shapes
 - `CLOUD-FUNCTIONS.md` — Firebase Cloud Functions
 
-```
-com.firestream.chat/
-├── data/
-│   ├── call/            # CallService, CallStateHolder, CallNotificationManager, WebRtcPeerConnectionFactory
-│   ├── crypto/          # SignalManager, SignalProtocolStoreImpl
-│   ├── local/
-│   │   ├── dao/         # Room DAOs (Chat, Contact, List, Message, Signal, User)
-│   │   ├── entity/      # Room entities (12 tables including 7 Signal tables)
-│   │   ├── AppDatabase.kt
-│   │   ├── Converters.kt
-│   │   └── PreferencesDataStore.kt
-│   ├── util/            # ImageCompressor, MediaFileManager, ProfileImageManager
-│   ├── worker/          # MediaBackfillWorker
-│   ├── remote/
-│   │   ├── fcm/         # FCMService, ActiveChatTracker
-│   │   └── firebase/    # FirebaseAuthSource, FirestoreChatSource, FirestoreMessageSource, etc.
-│   ├── repository/      # *Impl classes (8 repositories + PollMapper)
-│   └── share/           # SharedContentHolder, ShareContentResolver
-├── di/                  # Hilt modules (App, Database, Crypto, Network, System)
-├── domain/
-│   ├── model/           # Chat, Message, User, Contact, Poll, CallState, CallLogEntry,
-│   │                    # GroupPermissions, GroupRole, ListData, ListItem, ListDiff,
-│   │                    # MediaAttachment, SharedContent, MessageStatus, MessageType, ChatType
-│   ├── repository/      # Interfaces (Auth, Call, Chat, Contact, List, Message, Poll, User)
-│   ├── usecase/         # Organized by feature (chat, list, message)
-│   └── util/            # MentionParser
-├── navigation/          # NavGraph.kt with Routes object (18 routes)
-├── ui/                  # Feature packages, organized by screen
-│   ├── auth/            # LoginScreen, OtpScreen, ProfileSetupScreen, AuthViewModel
-│   ├── broadcast/       # CreateBroadcastScreen, CreateBroadcastViewModel
-│   ├── call/            # CallActivity, CallScreen, CallViewModel (WebRTC UI)
-│   ├── calls/           # CallsScreen, CallsViewModel (call log tab)
-│   ├── chat/            # ChatScreen, ChatViewModel + 6 managers, MessageBubble, etc.
-│   ├── chatlist/        # ChatListScreen, ChatListViewModel, ArchivedChatsScreen
-│   ├── components/      # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator
-│   ├── contacts/        # ContactsScreen, ContactsViewModel
-│   ├── group/           # GroupSettingsScreen, CreateGroupScreen, QrCodeGenerator
-│   ├── lists/           # ListsScreen, ListDetailScreen, SharedListsScreen + ViewModels
-│   ├── main/            # MainScreen (HorizontalPager host), BottomNavBar
-│   ├── profile/         # ProfileScreen, ProfileViewModel
-│   ├── settings/        # SettingsScreen, SettingsViewModel
-│   ├── share/           # SharePickerScreen, SharePickerViewModel
-│   ├── starred/         # StarredMessagesScreen, StarredMessagesViewModel
-│   └── theme/           # Color, Shape, Theme, Type
-├── AppLifecycleObserver.kt # Process-level lifecycle — drives RTDB presence
-├── FireStreamApp.kt     # @HiltAndroidApp
-└── MainActivity.kt      # Single activity entry point
-```
+The full annotated package tree (every subpackage, one-line contents) lives in [`docs/ARCHITECTURE.md` §12 "Package Layout"](docs/ARCHITECTURE.md#12-package-layout).
 
 ### Key Architectural Decisions
 
@@ -225,12 +178,7 @@ Do **not** construct route strings manually.
 
 ## Firebase Cloud Functions
 
-Four functions in `functions/index.js`. Runtime: Node.js 20.
-
-- `sendPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` creation; sends FCM push to all recipients and increments per-user unread counts.
-- `sendReactionPushNotification` — triggers on `chats/{chatId}/messages/{messageId}` updates; diffs the `reactions` map and pushes a `type: "reaction"` FCM message (1:1 → the other participant, groups → only the message author). Removals stay silent; no unread-count increment.
-- `sendCallPushNotification` — triggers on `calls/{callId}` creation with `status == "ringing"`; sends high-priority FCM to the callee.
-- `syncPresenceToFirestore` — triggers on RTDB `/presence/{userId}` writes; mirrors `isOnline`/`lastSeen` to Firestore with a `lastSeen` transaction guard to reject reordered invocations.
+Four functions in `functions/index.js` (Node.js 20) — push notifications for messages/reactions/calls, and RTDB→Firestore presence mirroring. Details: `docs/CLOUD-FUNCTIONS.md`.
 
 ## Testing
 
@@ -286,7 +234,7 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Th
 
 ### Cutting a release
 
-Distribution is sideload-only — APKs are published to GitHub Releases and consumed by the in-app updater. **`versionName` is auto-derived from `git describe --tags`** — exact tag → `X.Y.Z`, untagged HEAD → `X.Y.Z-dev+<sha>` — so the tag is the single source of truth. To ship a release: verify the top section is `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` with the intended version, drop the `[UNRELEASED] ` prefix, commit, then `git tag vX.Y.Z && git push origin main vX.Y.Z`. The `release-apk.yml` workflow builds signed APKs for both flavors and publishes them. Full keystore + secrets setup in [`docs/RELEASING.md`](docs/RELEASING.md).
+Distribution is sideload-only, via GitHub Releases + the in-app updater; **`versionName` is auto-derived from `git describe --tags`**, so the tag is the single source of truth. To cut a release: drop the `[UNRELEASED] ` prefix from the top CHANGELOG header, commit, tag `vX.Y.Z`, push. `scripts/cut-release.sh` is the preferred scripted entry point for this. Full keystore/secrets/flavor detail in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Sensitive Files
 
