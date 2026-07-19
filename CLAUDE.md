@@ -57,6 +57,7 @@ Plans do not include per-step model/effort tables. Principles:
 - **Planning, and anything security-adjacent, concurrency-heavy, or architecture-defining** belongs on the strongest available model tier (currently Fable/Opus).
 - **Everything else** is fine on the current mid-tier model — quality on small steps is enforced by the test+build gate, not model choice; using the stronger model is always safe.
 - **Spawned `Agent` calls**: choose each call's `model` by the same judgment (stronger models for security/concurrency-shaped review work).
+- **Report the model per sub-agent** — whenever an `Agent` call is made, state which model that sub-agent runs on (the explicit `model` override, or the agent definition's default if omitted), both when launching it and when summarizing its results. `subagent_type: "fork"` always inherits the parent's model — say so explicitly too. When several agents launch in parallel, list the model per agent, not once for the batch.
 
 Name tiers, not versions — do not hard-code model version numbers in this file.
 
