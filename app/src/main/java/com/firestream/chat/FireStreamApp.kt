@@ -10,6 +10,7 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.worker.MediaBackfillWorker
@@ -61,6 +62,7 @@ class FireStreamApp : Application(), Configuration.Provider {
         flavorBootstraps.forEach { it.start() }
         currentActivityHolder.register(this)
         TimerNotificationChannel.ensureCreated(this)
+        ReminderNotificationChannel.ensureCreated(this)
         Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
         recoverOrphanedSends()
         scheduleUpdateCheck()

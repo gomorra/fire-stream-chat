@@ -12,7 +12,7 @@ import com.firestream.chat.data.repository.ListRepositoryImpl
 import com.firestream.chat.data.repository.MessageRepositoryImpl
 import com.firestream.chat.data.repository.PollRepositoryImpl
 import com.firestream.chat.data.repository.UserRepositoryImpl
-import com.firestream.chat.data.reminder.NoOpReminderAlarmScheduling
+import com.firestream.chat.data.reminder.ReminderAlarmScheduler
 import com.firestream.chat.data.reminder.ReminderAlarmScheduling
 import com.firestream.chat.data.reminder.ReminderRepositoryImpl
 import com.firestream.chat.domain.repository.AppUpdateRepository
@@ -79,11 +79,9 @@ abstract class AppModule {
     @Singleton
     abstract fun bindReminderRepository(impl: ReminderRepositoryImpl): ReminderRepository
 
-    // Temporary no-op binding — Step 2 of the message-snooze-reminders plan
-    // replaces this with the real ReminderAlarmScheduler.
     @Binds
     @Singleton
-    abstract fun bindReminderAlarmScheduling(impl: NoOpReminderAlarmScheduling): ReminderAlarmScheduling
+    abstract fun bindReminderAlarmScheduling(impl: ReminderAlarmScheduler): ReminderAlarmScheduling
 }
 
 @Module

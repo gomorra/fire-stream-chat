@@ -5,8 +5,7 @@
 //   since deleted. Local-only, mirrors the star-message feature: no Firestore,
 //   no flavor code.
 // Owns: ReminderEntity rows. Delegates OS alarm arming/cancellation to
-//   ReminderAlarmScheduling (NoOp until Step 2's real ReminderAlarmScheduler
-//   lands per .claude/plans/message-snooze-reminders.md).
+//   ReminderAlarmScheduling (real impl: ReminderAlarmScheduler in data/reminder/).
 // Collaborators: ReminderDao, ReminderAlarmScheduling.
 // Don't put here: alarm/notification/boot-restore logic (data/reminder/*
 //   added in Step 2), snooze-preset time math (domain/reminder/SnoozePresets,
@@ -20,6 +19,7 @@ import com.firestream.chat.data.local.dao.ReminderDao
 import com.firestream.chat.data.local.entity.ReminderEntity
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.domain.model.Reminder
+import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.repository.ReminderRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -41,7 +41,7 @@ class ReminderRepositoryImpl @Inject constructor(
     override suspend fun getPending(): List<Reminder> =
         reminderDao.getAll().map { it.toDomain() }
 
-    override suspend fun schedule(reminder: Reminder): Result<Unit> = resultOf {
+    override suspend fun schedule(reminder: Reminder): Result<ReminderScheduleOutcome> = resultOf {
         reminderDao.upsert(ReminderEntity.fromDomain(reminder))
         alarmScheduling.schedule(reminder)
     }
@@ -56,5 +56,6 @@ class ReminderRepositoryImpl @Inject constructor(
         val updated = reminderDao.getAll().firstOrNull { it.messageId == messageId }
             ?: error("No pending reminder for message $messageId")
         alarmScheduling.schedule(updated.toDomain())
+        Unit
     }
 }

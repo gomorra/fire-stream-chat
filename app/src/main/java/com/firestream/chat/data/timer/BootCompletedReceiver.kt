@@ -4,6 +4,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.ReminderDao
+import com.firestream.chat.data.reminder.ReminderAlarmScheduler
+import com.firestream.chat.data.reminder.ReminderBootAction
+import com.firestream.chat.data.reminder.ReminderBootRestoreLogic
+import com.firestream.chat.data.reminder.ReminderNotificationPoster
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.repository.MessageRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -18,12 +23,20 @@ import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /**
- * Re-arms timer alarms after a device reboot. Without this, every running
- * timer's `setExactAndAllowWhileIdle` registration is dropped by the OS at
- * shutdown — the message stays RUNNING in Room and Firestore but never rings.
+ * Re-arms alarms after a device reboot for **both** the timer and the
+ * message-reminder features — a single boot receiver avoids a second exported
+ * BOOT_COMPLETED entry point.
  *
- * Branching delegated to [BootRestoreLogic] so the future-vs-past decision is
- * unit-testable without Robolectric.
+ *  - Timers: every running timer's `setExactAndAllowWhileIdle` registration is
+ *    dropped by the OS at shutdown — the message stays RUNNING in Room and
+ *    Firestore but never rings unless re-armed here.
+ *  - Reminders: same alarm-drop applies. Future reminders are re-scheduled; ones
+ *    whose fire time was missed during the off-period post an "(overdue)"
+ *    notification immediately and delete their row.
+ *
+ * Both branches keep their decision in a pure logic class ([BootRestoreLogic],
+ * [ReminderBootRestoreLogic]) so the future-vs-past choice is unit-testable
+ * without a Robolectric context.
  */
 @AndroidEntryPoint
 class BootCompletedReceiver : BroadcastReceiver() {
@@ -38,6 +51,12 @@ class BootCompletedReceiver : BroadcastReceiver() {
     lateinit var scheduler: TimerAlarmScheduler
 
     @Inject
+    lateinit var reminderDao: ReminderDao
+
+    @Inject
+    lateinit var reminderScheduler: ReminderAlarmScheduler
+
+    @Inject
     @ApplicationScope
     lateinit var appScope: CoroutineScope
 
@@ -48,18 +67,19 @@ class BootCompletedReceiver : BroadcastReceiver() {
         appScope.launch {
             try {
                 val now = System.currentTimeMillis()
-                val running = messageDao.getRunningTimers()
                 // Run on IO and bound the whole batch by 8s — under goAsync()'s
-                // ~10s ceiling. A slow network with N stale timers would otherwise
-                // blow past the budget; survivors at least get re-armed for the
-                // future-fire case before forced finish, since scheduler.schedule
-                // is a local AlarmManager call and runs first per dispatch().
+                // ~10s ceiling. Local AlarmManager re-arms run first per dispatch,
+                // so future-fire survivors get scheduled even if the batch is cut.
                 withContext(Dispatchers.IO) {
                     withTimeoutOrNull(8_000L) {
                         coroutineScope {
-                            running.map { entity ->
-                                async { dispatch(entity, now) }
-                            }.awaitAll()
+                            val timers = messageDao.getRunningTimers().map { entity ->
+                                async { dispatchTimer(entity, now) }
+                            }
+                            val reminders = reminderDao.getAll().map { entity ->
+                                async { dispatchReminder(context, entity, now) }
+                            }
+                            (timers + reminders).awaitAll()
                         }
                     }
                 }
@@ -69,7 +89,7 @@ class BootCompletedReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun dispatch(entity: com.firestream.chat.data.local.entity.MessageEntity, now: Long) {
+    private suspend fun dispatchTimer(entity: com.firestream.chat.data.local.entity.MessageEntity, now: Long) {
         val action = BootRestoreLogic.classify(
             messageId = entity.id,
             chatId = entity.chatId,
@@ -89,6 +109,20 @@ class BootCompletedReceiver : BroadcastReceiver() {
             is TimerBootAction.MarkCompleted ->
                 messageRepository.markTimerCompleted(action.chatId, action.messageId)
             TimerBootAction.Skip -> Unit
+        }
+    }
+
+    private suspend fun dispatchReminder(
+        context: Context,
+        entity: com.firestream.chat.data.local.entity.ReminderEntity,
+        now: Long,
+    ) {
+        when (ReminderBootRestoreLogic.classify(fireAtMs = entity.fireAtMs, nowMs = now)) {
+            ReminderBootAction.Schedule -> reminderScheduler.schedule(entity.toDomain())
+            ReminderBootAction.PostOverdue -> {
+                ReminderNotificationPoster.post(context, entity.toDomain(), overdue = true)
+                reminderDao.deleteByMessageId(entity.messageId)
+            }
         }
     }
 }

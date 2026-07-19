@@ -113,9 +113,17 @@
             android:name=".data.timer.TimerAlarmReceiver"
             android:exported="false" />
 
-        <!-- Boot-restore: re-arms running timers after a device reboot. Without
-             this, every running timer's AlarmManager registration is dropped at
-             shutdown. Exported because the system fires BOOT_COMPLETED. -->
+        <!-- Message reminders: fired by AlarmManager at the user's snooze time,
+             and by the notification's "+1 hour" / "Done" action buttons. Not
+             exported — only this app's PendingIntents trigger it. -->
+        <receiver
+            android:name=".data.reminder.ReminderAlarmReceiver"
+            android:exported="false" />
+
+        <!-- Boot-restore: re-arms running timers AND pending message reminders
+             after a device reboot. Without this, every AlarmManager registration
+             is dropped at shutdown. Exported because the system fires
+             BOOT_COMPLETED. -->
         <receiver
             android:name=".data.timer.BootCompletedReceiver"
             android:exported="true">

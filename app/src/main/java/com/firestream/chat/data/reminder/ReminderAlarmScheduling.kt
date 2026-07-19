@@ -1,33 +1,18 @@
 package com.firestream.chat.data.reminder
 
 import com.firestream.chat.domain.model.Reminder
-import javax.inject.Inject
-import javax.inject.Singleton
+import com.firestream.chat.domain.model.ReminderScheduleOutcome
 
 /**
- * Arms/disarms the OS-level alarm for a reminder. Step 2 of the
- * message-snooze-reminders plan (`.claude/plans/message-snooze-reminders.md`)
- * replaces the [NoOpReminderAlarmScheduling] binding with a real
- * `ReminderAlarmScheduler` (clone of `data/timer/TimerAlarmScheduler`) that
- * sets an exact alarm and posts the fired notification.
+ * Arms/disarms the OS-level alarm for a reminder. The real implementation is
+ * [ReminderAlarmScheduler]; kept as an interface so [ReminderRepositoryImpl] can
+ * be unit-tested against a fake without an AlarmManager.
+ *
+ * [schedule] returns a [ReminderScheduleOutcome] so the caller can plumb the
+ * `INEXACT_FALLBACK` case back to the shared `ExactAlarmBanner` flow (Android 12+
+ * exact-alarm permission denied).
  */
 interface ReminderAlarmScheduling {
-    fun schedule(reminder: Reminder)
+    fun schedule(reminder: Reminder): ReminderScheduleOutcome
     fun cancel(messageId: String)
-}
-
-/**
- * Temporary no-op implementation so Step 1 can wire the DI graph and Room
- * persistence end-to-end before the real alarm pipeline exists. Reminders are
- * durably written to Room but nothing actually fires until Step 2 lands.
- */
-@Singleton
-class NoOpReminderAlarmScheduling @Inject constructor() : ReminderAlarmScheduling {
-    override fun schedule(reminder: Reminder) {
-        // Intentionally no-op — see Step 2 of the plan.
-    }
-
-    override fun cancel(messageId: String) {
-        // Intentionally no-op — see Step 2 of the plan.
-    }
 }
