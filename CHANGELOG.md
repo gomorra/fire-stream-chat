@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.14.0] — 2026-07-18
+## [1.14.0] — 2026-07-18
 
 ### Changed
 - **Seamless emoji panel.** The keyboard now slides down to reveal the emoji panel sitting beneath it and slides back up over it, WhatsApp-style — the panel matches the keyboard's height and stays mounted, replacing the old collapse-and-reopen jump. Tapping the text field with the panel open raises the keyboard over it, and back closes keyboard → panel → chat in order. (`7f75c83`)
