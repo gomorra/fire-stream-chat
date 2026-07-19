@@ -1,6 +1,7 @@
 package com.firestream.chat.di
 
 import com.firestream.chat.domain.command.ChatCommand
+import com.firestream.chat.ui.chat.command.RemindCommand
 import com.firestream.chat.ui.chat.command.TimerCommand
 import dagger.Binds
 import dagger.Module
@@ -21,4 +22,8 @@ abstract class CommandModule {
     @Binds
     @IntoSet
     abstract fun bindTimerCommand(impl: TimerCommand): ChatCommand
+
+    @Binds
+    @IntoSet
+    abstract fun bindRemindCommand(impl: RemindCommand): ChatCommand
 }

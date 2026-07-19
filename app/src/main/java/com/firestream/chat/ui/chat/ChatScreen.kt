@@ -152,6 +152,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.ui.chat.command.resolveRemindTarget
+import com.firestream.chat.ui.chat.widget.RemindWidget
 import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -1481,24 +1483,60 @@ fun ChatScreen(
             // Active command widget mounted above the composer (e.g. the timer
             // hh:mm:ss picker when `.timer.set` is the active leaf).
             uiState.commands.activeWidget?.let { widget ->
-                widget.Render(
-                    chatId = viewModel.chatId,
-                    composerText = messageText,
-                    onSend = { payload ->
-                        viewModel.onCommandSubmit(payload)
-                        messageText = ""
-                        inputCursor = TextRange(0)
-                        inputComposition = null
-                        pendingEmojiSizes = emptyMap()
-                    },
-                    onCancel = {
-                        viewModel.dismissCommandWidget()
-                        messageText = ""
-                        inputCursor = TextRange(0)
-                        inputComposition = null
-                        pendingEmojiSizes = emptyMap()
-                    },
-                )
+                val clearComposerInput = {
+                    messageText = ""
+                    inputCursor = TextRange(0)
+                    inputComposition = null
+                    pendingEmojiSizes = emptyMap()
+                }
+                when (widget) {
+                    // The `.remind` widget needs the target message + sender name,
+                    // which the generic ChatCommandWidget.Render contract can't supply.
+                    // ChatScreen owns the slices, so it resolves the target (reply-target
+                    // if selected, else newest) and calls snoozeMessage directly — a
+                    // LOCAL action, mirroring the long-press SnoozePickerSheet path; no
+                    // message is sent to the recipient.
+                    is RemindWidget -> {
+                        val target = resolveRemindTarget(
+                            uiState.composer.replyToMessage,
+                            uiState.messages.messages,
+                        )
+                        // Same name source as ChatMessageActions.senderNameFor:
+                        // participantAvatars covers both 1:1 and group chats;
+                        // participantNameMap is group-only.
+                        val senderName = target?.senderId?.let { id ->
+                            if (id == uiState.session.currentUserId) "You"
+                            else uiState.session.participantAvatars[id]?.displayName
+                                ?: uiState.session.chatName
+                        }
+                        widget.RenderContent(
+                            targetMessage = target,
+                            senderName = senderName,
+                            detectSnoozeTime = { text -> viewModel.detectSnoozeTime(text) },
+                            onConfirm = { fireAtMs ->
+                                target?.let { viewModel.snoozeMessage(it, fireAtMs) }
+                                viewModel.dismissCommandWidget()
+                                clearComposerInput()
+                            },
+                            onCancel = {
+                                viewModel.dismissCommandWidget()
+                                clearComposerInput()
+                            },
+                        )
+                    }
+                    else -> widget.Render(
+                        chatId = viewModel.chatId,
+                        composerText = messageText,
+                        onSend = { payload ->
+                            viewModel.onCommandSubmit(payload)
+                            clearComposerInput()
+                        },
+                        onCancel = {
+                            viewModel.dismissCommandWidget()
+                            clearComposerInput()
+                        },
+                    )
+                }
             }
 
             // Input row — hidden when the user has blocked the recipient; the
