@@ -210,6 +210,11 @@ fun ChatScreen(
     // Indices are based on messageText.length at insertion time and cleared on send/cancel.
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     var inputCursor by remember { mutableStateOf(TextRange(0)) }
+    // The IME's composing region, echoed back into every rebuilt TextFieldValue.
+    // Must be nulled on programmatic text writes (send/clear/dictation/emoji/…) —
+    // but never silently dropped on IME edits, or Compose restarts the input
+    // session per keystroke (see buildComposerValue / docs/GOTCHAS.md).
+    var inputComposition by remember { mutableStateOf<TextRange?>(null) }
     // Per-session anchor for live dictation. -1 = no active dictation session.
     // First commit sets the anchor at inputCursor.start; each subsequent partial
     // replaces text from anchor to anchor+lastLen.
@@ -489,6 +494,7 @@ fun ChatScreen(
         if (editing != null) {
             messageText = editing.content
             inputCursor = TextRange(editing.content.length)
+            inputComposition = null
             pendingEmojiSizes = editing.emojiSizes
         }
     }
@@ -662,6 +668,7 @@ fun ChatScreen(
             messageText = apply.newText
             lastDictationWriteText = apply.newText
             inputCursor = TextRange(apply.newCursorIndex)
+            inputComposition = null
         }
     }
 
@@ -1235,6 +1242,7 @@ fun ChatScreen(
                         viewModel.cancelEdit()
                         messageText = ""
                         inputCursor = TextRange(0)
+                        inputComposition = null
                         pendingEmojiSizes = emptyMap()
                     }) {
                         Icon(
@@ -1369,6 +1377,7 @@ fun ChatScreen(
                                 val selected = viewModel.selectMention(user, messageText)
                                 messageText = selected
                                 inputCursor = TextRange(selected.length)
+                                inputComposition = null
                             }
                         )
                         HorizontalDivider()
@@ -1410,6 +1419,7 @@ fun ChatScreen(
                                      else newPath.displayString() + "."
                     messageText = mirrorText
                     inputCursor = TextRange(mirrorText.length)
+                    inputComposition = null
                     pendingEmojiSizes = emptyMap()
                     viewModel.onComposerTextChangedForCommands(mirrorText)
                 },
@@ -1425,12 +1435,14 @@ fun ChatScreen(
                         viewModel.onCommandSubmit(payload)
                         messageText = ""
                         inputCursor = TextRange(0)
+                        inputComposition = null
                         pendingEmojiSizes = emptyMap()
                     },
                     onCancel = {
                         viewModel.dismissCommandWidget()
                         messageText = ""
                         inputCursor = TextRange(0)
+                        inputComposition = null
                         pendingEmojiSizes = emptyMap()
                     },
                 )
@@ -1466,6 +1478,7 @@ fun ChatScreen(
                 val clearInput = {
                     messageText = ""
                     inputCursor = TextRange(0)
+                    inputComposition = null
                     pendingEmojiSizes = emptyMap()
                 }
                 val emojiInputSize = MaterialTheme.typography.bodyMedium.fontSize
@@ -1473,14 +1486,8 @@ fun ChatScreen(
                     val cappedSizes = pendingEmojiSizes.mapValues { (_, v) -> v.coerceAtMost(INPUT_EMOJI_SIZE_CAP) }
                     addEmojiSpans(messageText, emojiInputSize, cappedSizes)
                 }
-                val inputValue = remember(inputAnnotated, inputCursor) {
-                    TextFieldValue(
-                        annotatedString = inputAnnotated,
-                        selection = TextRange(
-                            inputCursor.start.coerceIn(0, messageText.length),
-                            inputCursor.end.coerceIn(0, messageText.length)
-                        )
-                    )
+                val inputValue = remember(inputAnnotated, inputCursor, inputComposition) {
+                    buildComposerValue(inputAnnotated, inputCursor, inputComposition)
                 }
                 Box(
                     modifier = Modifier
@@ -1498,6 +1505,7 @@ fun ChatScreen(
                                 viewModel.cancelDictation()
                             }
                             inputCursor = newValue.selection
+                            inputComposition = newValue.composition
                             val newText = newValue.text
                             if (newText != messageText) {
                                 pendingEmojiSizes = adjustEmojiIndices(messageText, newText, pendingEmojiSizes)
@@ -1638,6 +1646,7 @@ fun ChatScreen(
                             val insertIdx = messageText.length
                             messageText += emoji
                             inputCursor = TextRange(messageText.length)
+                            inputComposition = null
                             if (size != 1.0f) {
                                 pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
                             }
@@ -1651,6 +1660,7 @@ fun ChatScreen(
                                 val removedIdx = boundary
                                 messageText = messageText.substring(0, boundary)
                                 inputCursor = TextRange(messageText.length)
+                                inputComposition = null
                                 pendingEmojiSizes = pendingEmojiSizes - removedIdx
                             }
                         },
