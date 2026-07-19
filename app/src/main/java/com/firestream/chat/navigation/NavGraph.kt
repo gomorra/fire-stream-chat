@@ -59,6 +59,7 @@ import com.firestream.chat.ui.main.MainScreen
 import com.firestream.chat.ui.profile.ProfileScreen
 import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
+import com.firestream.chat.ui.reminders.ScheduledRemindersScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 import kotlinx.coroutines.flow.first
 
@@ -130,6 +131,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
+    const val SCHEDULED_REMINDERS = "scheduled_reminders"
     const val ARCHIVED_CHATS = "archived_chats"
     // Bottom nav tabs (no longer a separate nav route — handled by MainScreen tab state)
     // const val CALLS = "calls"
@@ -543,6 +545,7 @@ fun FireStreamNavGraph(
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
                 onStarredMessagesClick = { navController.navigate(Routes.STARRED_MESSAGES) },
+                onScheduledRemindersClick = { navController.navigate(Routes.SCHEDULED_REMINDERS) },
                 onArchivedChatsClick = { navController.navigate(Routes.ARCHIVED_CHATS) },
                 onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) },
                 onSignedOut = {
@@ -565,6 +568,16 @@ fun FireStreamNavGraph(
         // Phase 2: Starred Messages
         composable(Routes.STARRED_MESSAGES) {
             StarredMessagesScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Scheduled Reminders
+        composable(Routes.SCHEDULED_REMINDERS) {
+            ScheduledRemindersScreen(
+                onBackClick = { navController.popBackStack() },
+                onReminderClick = { chatId, recipientId, messageId ->
+                    navController.navigate(Routes.chat(chatId, recipientId, targetMessageId = messageId))
+                }
+            )
         }
 
         // Phase 5: Group Settings

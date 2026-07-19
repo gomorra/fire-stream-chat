@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.outlined.Notifications as OutlinedNotifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Replay
@@ -107,6 +108,7 @@ import kotlinx.coroutines.withContext
 fun SettingsScreen(
     onBackClick: () -> Unit,
     onStarredMessagesClick: () -> Unit,
+    onScheduledRemindersClick: () -> Unit = {},
     onArchivedChatsClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
     onSignedOut: () -> Unit = {},
@@ -222,6 +224,13 @@ fun SettingsScreen(
                 title = "Starred Messages",
                 subtitle = "Messages you've starred for quick reference",
                 onClick = onStarredMessagesClick
+            )
+
+            SettingsItem(
+                icon = Icons.Outlined.OutlinedNotifications,
+                title = "Scheduled Reminders",
+                subtitle = "Message snoozes you've scheduled",
+                onClick = onScheduledRemindersClick
             )
 
             SettingsItem(
