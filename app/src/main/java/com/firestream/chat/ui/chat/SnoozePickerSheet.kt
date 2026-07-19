@@ -34,6 +34,7 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,10 +61,12 @@ private val presetTimeFormat = SimpleDateFormat("EEE, MMM d · h:mm a", Locale.g
 /**
  * The message-snooze picker: [SnoozePresets.compute] rows plus a "Pick date & time"
  * row that opens Material3's [DatePicker] then a custom [TimePicker] dialog (M3 has
- * no built-in TimePickerDialog). No detection source yet — [SnoozePresets.compute]
- * is called with `detectedFireAtMs = null` here; Step 7 wires smart-time detection
- * by launching a suspend detect() call before this composition and passing its
- * result into the same call site, so this is a one-line change later.
+ * no built-in TimePickerDialog).
+ *
+ * The base presets render immediately (`detectedFireAtMs = null`); a `LaunchedEffect`
+ * keyed on [message]'s id then runs [detectSnoozeTime] and, if it finds a future
+ * date/time reference in the message text, recomputes the preset list with a
+ * "Detected" row prepended — never blocking the sheet's initial appearance.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,10 +74,20 @@ internal fun SnoozePickerSheet(
     message: Message,
     onDismiss: () -> Unit,
     onTimeSelected: (Long) -> Unit,
+    detectSnoozeTime: suspend (String) -> Long? = { null },
 ) {
     val sheetState = rememberModalBottomSheetState()
     val zoneId = remember { ZoneId.systemDefault() }
-    val presets = remember { SnoozePresets.compute(System.currentTimeMillis(), zoneId) }
+    val nowMs = remember(message.id) { System.currentTimeMillis() }
+    var detectedFireAtMs by remember(message.id) { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(message.id) {
+        detectedFireAtMs = detectSnoozeTime(message.content)
+    }
+
+    val presets = remember(detectedFireAtMs) {
+        SnoozePresets.compute(nowMs, zoneId, detectedFireAtMs)
+    }
 
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
@@ -208,28 +221,24 @@ private fun QuotedMessagePreview(message: Message) {
 
 @Composable
 private fun PresetRow(preset: SnoozePreset, onClick: () -> Unit) {
+    val formattedTime = presetTimeFormat.format(Date(preset.fireAtMs))
     val (icon, label) = when (preset.kind) {
-        SnoozePreset.Kind.DETECTED -> Icons.Outlined.AutoAwesome to "Detected time"
+        // The time is folded into the label itself for DETECTED (rather than the
+        // subtitle, like the other rows) so it reads as "Detected: <time>" per spec.
+        SnoozePreset.Kind.DETECTED -> Icons.Outlined.AutoAwesome to "Detected: $formattedTime"
         SnoozePreset.Kind.IN_1_HOUR -> Icons.Outlined.Schedule to "In 1 hour"
         SnoozePreset.Kind.THIS_EVENING -> Icons.Outlined.DarkMode to "This evening"
         SnoozePreset.Kind.TOMORROW_MORNING -> Icons.Outlined.WbSunny to "Tomorrow morning"
     }
-    val iconTint = if (preset.kind == SnoozePreset.Kind.DETECTED) {
-        MaterialTheme.colorScheme.tertiary
-    } else {
-        MaterialTheme.colorScheme.primary
-    }
-    val iconContainer = if (preset.kind == SnoozePreset.Kind.DETECTED) {
-        MaterialTheme.colorScheme.tertiaryContainer
-    } else {
-        MaterialTheme.colorScheme.primaryContainer
-    }
+    val isDetected = preset.kind == SnoozePreset.Kind.DETECTED
+    val iconTint = if (isDetected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
+    val iconContainer = if (isDetected) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer
     PickerRow(
         icon = icon,
         iconTint = iconTint,
         iconContainer = iconContainer,
         label = label,
-        subtitle = presetTimeFormat.format(Date(preset.fireAtMs)),
+        subtitle = if (isDetected) null else formattedTime,
         onClick = onClick,
     )
 }

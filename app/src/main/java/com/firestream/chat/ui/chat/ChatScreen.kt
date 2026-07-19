@@ -1907,6 +1907,7 @@ fun ChatScreen(
                 viewModel.snoozeMessage(targetMsg, fireAtMs)
                 snoozeTargetMessage = null
             },
+            detectSnoozeTime = { text -> viewModel.detectSnoozeTime(text) },
         )
     }
 

@@ -1,9 +1,11 @@
 package com.firestream.chat.ui.chat
 
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeMessageRepository
+import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -30,6 +32,9 @@ class ChatMessageActionsEditTest {
     private val chatId = "chat1"
     private val repository = FakeMessageRepository()
     private val reminderRepository = mockk<ReminderRepository>(relaxed = true)
+    private val dateTimeDetector = mockk<DateTimeDetector>(relaxed = true) {
+        coEvery { detect(any(), any()) } returns null
+    }
     private val uiState = MutableStateFlow(ChatUiState())
 
     private fun actions() = ChatMessageActions(
@@ -37,6 +42,7 @@ class ChatMessageActionsEditTest {
         recipientId = "recipient1",
         messageRepository = repository,
         reminderRepository = reminderRepository,
+        dateTimeDetector = dateTimeDetector,
         _uiState = uiState,
         scope = TestScope(mainDispatcherRule.testDispatcher),
     )

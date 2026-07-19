@@ -11,6 +11,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.PollRepository
@@ -20,6 +21,7 @@ import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
 import com.firestream.chat.test.fakes.FakeUserRepository
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -56,6 +58,9 @@ class ChatViewModelReadReceiptTest {
     private val listRepository = mockk<ListRepository>()
     private val pollRepository = mockk<PollRepository>()
     private val reminderRepository = mockk<ReminderRepository>()
+    private val dateTimeDetector = mockk<DateTimeDetector>(relaxed = true) {
+        coEvery { detect(any(), any()) } returns null
+    }
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
@@ -214,6 +219,7 @@ class ChatViewModelReadReceiptTest {
         listRepository = listRepository,
         messageRepository = messageRepository,
         reminderRepository = reminderRepository,
+        dateTimeDetector = dateTimeDetector,
         pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,

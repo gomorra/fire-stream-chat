@@ -8,6 +8,7 @@ import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
+import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.PollRepository
@@ -18,6 +19,7 @@ import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
 import com.firestream.chat.test.fakes.FakeUserRepository
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
@@ -53,6 +55,9 @@ class ChatViewModelFullscreenImageTest {
     private val pollRepository = mockk<PollRepository>(relaxed = true)
     private val reminderRepository = mockk<ReminderRepository>(relaxed = true) {
         every { observePendingIdsForChat(any()) } returns flowOf(emptySet())
+    }
+    private val dateTimeDetector = mockk<DateTimeDetector>(relaxed = true) {
+        coEvery { detect(any(), any()) } returns null
     }
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
@@ -92,6 +97,7 @@ class ChatViewModelFullscreenImageTest {
         listRepository = listRepository,
         messageRepository = messageRepository,
         reminderRepository = reminderRepository,
+        dateTimeDetector = dateTimeDetector,
         pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,

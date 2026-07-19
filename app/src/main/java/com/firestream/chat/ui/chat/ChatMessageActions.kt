@@ -9,6 +9,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.Reminder
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
+import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
 
@@ -17,6 +18,7 @@ internal class ChatMessageActions(
     private val recipientId: String,
     private val messageRepository: MessageRepository,
     private val reminderRepository: ReminderRepository,
+    private val dateTimeDetector: DateTimeDetector,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope,
     // Bridges INEXACT_FALLBACK back to ChatViewModel, which surfaces the in-app
@@ -121,6 +123,14 @@ internal class ChatMessageActions(
                 .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
         }
     }
+
+    /**
+     * Best-effort detection of a date/time reference in [text] (e.g. "tomorrow at
+     * 5pm") for the snooze picker's "Detected" preset. Never throws — see
+     * [DateTimeDetector]'s contract; a `null` result means "show no detected
+     * preset", not an error.
+     */
+    suspend fun detectSnoozeTime(text: String): Long? = dateTimeDetector.detect(text, System.currentTimeMillis())
 
     // Best-effort sender name for the notification that fires later, after the
     // live message may have been deleted. "You" for the current user's own

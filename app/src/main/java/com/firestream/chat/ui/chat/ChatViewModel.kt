@@ -21,6 +21,7 @@ import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.model.User
+import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.SpeechRecognizerManager
 import com.firestream.chat.domain.repository.AuthRepository
@@ -86,6 +87,7 @@ class ChatViewModel @Inject constructor(
     private val listRepository: ListRepository,
     private val messageRepository: MessageRepository,
     private val reminderRepository: ReminderRepository,
+    private val dateTimeDetector: DateTimeDetector,
     private val pollRepository: PollRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
@@ -155,7 +157,7 @@ class ChatViewModel @Inject constructor(
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
     private val searchManager = ChatSearchManager(chatId, searchMessagesUseCase, _uiState, viewModelScope)
     private val messageActions = ChatMessageActions(
-        chatId, recipientId, messageRepository, reminderRepository, _uiState, viewModelScope,
+        chatId, recipientId, messageRepository, reminderRepository, dateTimeDetector, _uiState, viewModelScope,
         onReminderScheduled = { outcome ->
             if (outcome == ReminderScheduleOutcome.INEXACT_FALLBACK) {
                 commandsManager.setExactAlarmBannerVisible(true)
@@ -253,6 +255,7 @@ class ChatViewModel @Inject constructor(
     fun togglePin(messageId: String, pinned: Boolean) = messageActions.togglePin(messageId, pinned)
     fun snoozeMessage(message: Message, fireAtMs: Long) = messageActions.snoozeMessage(message, fireAtMs)
     fun cancelReminder(messageId: String) = messageActions.cancelReminder(messageId)
+    suspend fun detectSnoozeTime(text: String): Long? = messageActions.detectSnoozeTime(text)
 
     // ── Search ──
     fun onSearchQueryChange(query: String) = searchManager.onSearchQueryChange(query)
