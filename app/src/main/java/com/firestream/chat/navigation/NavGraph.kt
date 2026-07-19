@@ -100,12 +100,30 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.isLaunchRestore():
         targetRestoredArg = targetState.arguments?.getBoolean("restored") == true,
     )
 
+/**
+ * A pending notification deep link into a chat. [MainActivity] holds this as
+ * observable state and passes it into [FireStreamNavGraph]; a fresh instance
+ * (unique [token]) is produced for every tap — the cold-start launch intent AND
+ * every subsequent tap that arrives via `onNewIntent` while the activity is
+ * already alive (warm foreground/background delivery, risk R1). The graph's
+ * re-drive `LaunchedEffect` keys on this object, so a new token re-fires it even
+ * when the same chat is tapped twice.
+ */
+data class DeepLinkRequest(
+    val chatId: String,
+    val senderId: String,
+    val messageId: String?,
+    // Monotonic within a process; makes every request instance distinct so the
+    // re-drive effect re-runs even when chatId/senderId/messageId repeat.
+    val token: Long = System.nanoTime(),
+)
+
 object Routes {
     const val LOGIN = "login"
     const val OTP = "otp/{verificationId}/{phoneNumber}"
     const val PROFILE_SETUP = "profile_setup"
     const val CHAT_LIST = "chat_list"
-    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}&restored={restored}"
+    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}&restored={restored}&targetMessageId={targetMessageId}"
     const val CONTACTS = "contacts"
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
     // Phase 2 routes
@@ -132,7 +150,9 @@ object Routes {
         recipientId: String,
         fromNotification: Boolean = false,
         restored: Boolean = false,
-    ) = "chat/$chatId/$recipientId?fromNotification=$fromNotification&restored=$restored"
+        targetMessageId: String? = null,
+    ) = "chat/$chatId/$recipientId?fromNotification=$fromNotification&restored=$restored" +
+        "&targetMessageId=${targetMessageId ?: ""}"
 
     fun messageInfo(messageId: String, chatId: String) =
         "message_info/$messageId/$chatId"
@@ -148,8 +168,12 @@ object Routes {
 
 @Composable
 fun FireStreamNavGraph(
-    initialChatId: String? = null,
-    initialSenderId: String? = null,
+    // The notification deep link to open on launch, if any. On cold start its
+    // chat/sender/message seed the pending* state below and open via the
+    // LOGIN → CHAT_LIST → CHAT launch sequence (splash held until content). A
+    // NEW instance arriving later (MainActivity.onNewIntent, warm delivery) is
+    // navigated directly by the re-drive effect — see risk R1.
+    deepLinkRequest: DeepLinkRequest? = null,
     isShareIntent: Boolean = false,
     openSettings: Boolean = false,
     focusUpdate: Boolean = false,
@@ -160,6 +184,12 @@ fun FireStreamNavGraph(
     onLaunchSettled: () -> Unit = {}
 ) {
     val navController = rememberNavController()
+    // Cold-start seed values, captured once by the rememberSaveable initializers
+    // below. Warm re-drives (a new deepLinkRequest object) go through the
+    // top-level re-drive effect further down, not these.
+    val initialChatId = deepLinkRequest?.chatId
+    val initialSenderId = deepLinkRequest?.senderId
+    val initialTargetMessageId = deepLinkRequest?.messageId
     val messageInfoHolder = androidx.compose.runtime.remember {
         androidx.compose.runtime.mutableStateOf<Message?>(null)
     }
@@ -169,6 +199,9 @@ fun FireStreamNavGraph(
 
     val pendingChatId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialChatId) }
     val pendingSenderId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialSenderId) }
+    // Scroll-to-message target for the cold-start deep link; cleared with the
+    // chat/sender ids when the CHAT_LIST hub consumes the pending open.
+    val pendingTargetMessageId = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(initialTargetMessageId) }
     val pendingShare = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(isShareIntent) }
     // Only true when the chat route originates from a notification tap (MainActivity
     // intent extras), not from the last-open-chat restore path. Consumed once and reset.
@@ -208,6 +241,39 @@ fun FireStreamNavGraph(
         // restore IS pending, the destination screen releases it on reveal.
         if (pendingChatId.value == null && pendingListId.value == null) {
             onLaunchSettled()
+        }
+    }
+
+    // Token of the deep link already folded into the pending* seeds above (the
+    // cold-start request). The re-drive effect below ignores it and acts only on
+    // a LATER request — a notification tapped while the activity is already alive
+    // (MainActivity.onNewIntent). Warm delivery can't route through the CHAT_LIST
+    // hub because that composable isn't composing while the user sits in a chat,
+    // so it navigates directly here. (Risk R1: without this, a foreground tap was
+    // silently dropped.)
+    val handledDeepLinkToken = androidx.compose.runtime.saveable.rememberSaveable {
+        androidx.compose.runtime.mutableStateOf(deepLinkRequest?.token)
+    }
+    LaunchedEffect(deepLinkRequest) {
+        val req = deepLinkRequest ?: return@LaunchedEffect
+        if (req.token == handledDeepLinkToken.value) return@LaunchedEffect
+        handledDeepLinkToken.value = req.token
+        // Already sitting in this exact chat? Re-navigate single-top so the entry
+        // is replaced with the new targetMessageId (the chat recomposes and jumps)
+        // instead of stacking a duplicate. A different chat pushes normally so the
+        // back stack is preserved.
+        val current = navController.currentBackStackEntry
+        val alreadyInThisChat = current?.destination?.route == Routes.CHAT &&
+            current.arguments?.getString("chatId") == req.chatId
+        navController.navigate(
+            Routes.chat(
+                req.chatId,
+                req.senderId,
+                fromNotification = true,
+                targetMessageId = req.messageId,
+            )
+        ) {
+            launchSingleTop = alreadyInThisChat
         }
     }
 
@@ -305,6 +371,7 @@ fun FireStreamNavGraph(
                     pendingChatId = pendingChatId.value,
                     pendingSenderId = pendingSenderId.value,
                     pendingFromNotification = pendingFromNotification.value,
+                    pendingTargetMessageId = pendingTargetMessageId.value,
                     pendingListId = pendingListId.value,
                     restoreDecisionComplete = restoreDecisionComplete.value,
                     navigatedFromThisEntry = navigatedFromThisEntry.value,
@@ -327,6 +394,7 @@ fun FireStreamNavGraph(
                     is ChatListPendingAction.OpenChat -> {
                         pendingChatId.value = null
                         pendingSenderId.value = null
+                        pendingTargetMessageId.value = null
                         pendingFromNotification.value = false
                         navigatedFromThisEntry.value = true
                         // A pending chat without the notification flag can only come
@@ -337,6 +405,7 @@ fun FireStreamNavGraph(
                                 action.recipientId,
                                 action.fromNotification,
                                 restored = !action.fromNotification,
+                                targetMessageId = action.targetMessageId,
                             )
                         )
                     }
@@ -405,6 +474,13 @@ fun FireStreamNavGraph(
                 navArgument("restored") {
                     type = NavType.BoolType
                     defaultValue = false
+                },
+                // Deep-link target for scroll-to-message (reminder / FCM tap).
+                // Read by ChatViewModel from the SavedStateHandle, not here.
+                navArgument("targetMessageId") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = null
                 }
             )
         ) { backStackEntry ->

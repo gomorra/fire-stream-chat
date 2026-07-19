@@ -12,6 +12,7 @@ internal sealed interface ChatListPendingAction {
         val chatId: String,
         val recipientId: String,
         val fromNotification: Boolean,
+        val targetMessageId: String? = null,
     ) : ChatListPendingAction
     data class OpenListDetail(val listId: String) : ChatListPendingAction
     data object ClearRestoreTarget : ChatListPendingAction
@@ -40,6 +41,7 @@ internal fun resolveChatListPendingAction(
     pendingChatId: String?,
     pendingSenderId: String?,
     pendingFromNotification: Boolean,
+    pendingTargetMessageId: String? = null,
     pendingListId: String?,
     restoreDecisionComplete: Boolean,
     navigatedFromThisEntry: Boolean,
@@ -52,6 +54,7 @@ internal fun resolveChatListPendingAction(
         chatId = pendingChatId,
         recipientId = pendingSenderId,
         fromNotification = pendingFromNotification,
+        targetMessageId = pendingTargetMessageId,
     )
 
     pendingListId != null -> ChatListPendingAction.OpenListDetail(pendingListId)

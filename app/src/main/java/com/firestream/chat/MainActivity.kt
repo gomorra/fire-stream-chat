@@ -21,6 +21,7 @@ import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.navigation.DeepLinkRequest
 import com.firestream.chat.navigation.FireStreamNavGraph
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -33,6 +34,7 @@ class MainActivity : ComponentActivity() {
     companion object {
         const val EXTRA_CHAT_ID: String = "chatId"
         const val EXTRA_SENDER_ID: String = "senderId"
+        const val EXTRA_MESSAGE_ID: String = "messageId"
         private const val SPLASH_SETTLE_TIMEOUT_MS = 1500L
     }
 
@@ -51,6 +53,14 @@ class MainActivity : ComponentActivity() {
     // safety net so a missed signal can never trap the user behind the splash.
     private val launchSettled = mutableStateOf(false)
 
+    // The current notification deep link, observed by FireStreamNavGraph. Seeded
+    // from the launch intent in onCreate (cold start) and replaced by
+    // onNewIntent when a notification is tapped while the activity is already
+    // alive (warm foreground/background delivery — the critical R1 case). A fresh
+    // DeepLinkRequest carries a unique token so the graph re-drives even for the
+    // same chat.
+    private val deepLinkRequest = mutableStateOf<DeepLinkRequest?>(null)
+
     override fun onResume() {
         super.onResume()
         // Redundant with AppLifecycleObserver.onStart(), but guarantees online status is set
@@ -68,8 +78,13 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
-        val initialChatId = intent.getStringExtra(EXTRA_CHAT_ID)
-        val initialSenderId = intent.getStringExtra(EXTRA_SENDER_ID)
+        // Only seed the deep link on a genuine fresh create. On a config-change /
+        // process-death recreation (savedInstanceState != null) the launch intent
+        // is re-delivered, but the deep link was already consumed — rebuilding it
+        // would re-navigate. Warm taps come through onNewIntent instead.
+        if (savedInstanceState == null) {
+            deepLinkRequest.value = deepLinkFromIntent(intent)
+        }
         val openSettings = intent.getBooleanExtra("openSettings", false)
         val focusUpdate = intent.getBooleanExtra("focusUpdate", false)
         val isShareIntent = intent?.action in listOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)
@@ -85,8 +100,7 @@ class MainActivity : ComponentActivity() {
             }
             FireStreamTheme(darkTheme = useDark) {
                 FireStreamNavGraph(
-                    initialChatId = initialChatId,
-                    initialSenderId = initialSenderId,
+                    deepLinkRequest = deepLinkRequest.value,
                     isShareIntent = isShareIntent,
                     openSettings = openSettings,
                     focusUpdate = focusUpdate,
@@ -97,6 +111,31 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+
+    // A notification tapped while this activity is already alive is delivered
+    // here (launchMode is standard, but the notification PendingIntents carry
+    // FLAG_ACTIVITY_SINGLE_TOP, so an on-top instance is reused). setIntent keeps
+    // getIntent() consistent; updating deepLinkRequest with a fresh token makes
+    // FireStreamNavGraph re-drive to the target chat. Risk R1: without this a
+    // foreground tap was silently dropped.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        deepLinkFromIntent(intent)?.let { deepLinkRequest.value = it }
+    }
+
+    /**
+     * Builds a [DeepLinkRequest] from notification extras. Both chatId and
+     * senderId are required (the CHAT route needs a recipient path segment and
+     * resolveChatListPendingAction gates on both) — every notification producer
+     * sets them; anything else is not a chat deep link.
+     */
+    private fun deepLinkFromIntent(intent: Intent?): DeepLinkRequest? {
+        val chatId = intent?.getStringExtra(EXTRA_CHAT_ID) ?: return null
+        val senderId = intent.getStringExtra(EXTRA_SENDER_ID) ?: return null
+        val messageId = intent.getStringExtra(EXTRA_MESSAGE_ID)
+        return DeepLinkRequest(chatId = chatId, senderId = senderId, messageId = messageId)
+    }
 
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

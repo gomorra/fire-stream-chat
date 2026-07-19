@@ -116,7 +116,7 @@ class FCMService : FirebaseMessagingService() {
             }
 
             val messageContent = data["messageContent"]
-            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent)
+            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent, messageId = messageId)
         }
     }
 
@@ -183,7 +183,10 @@ class FCMService : FirebaseMessagingService() {
         isGroup: Boolean,
         messageType: String = "TEXT",
         messageContent: String? = null,
-        overrideText: String? = null
+        overrideText: String? = null,
+        // Latest message's id for this chat — carried into the tap intent so the
+        // chat scrolls to and highlights it. Null for reaction pushes (no target).
+        messageId: String? = null
     ) {
         val channelId = "fire_stream_messages"
         val notifId = chatId.hashCode()
@@ -218,6 +221,10 @@ class FCMService : FirebaseMessagingService() {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
             putExtra(MainActivity.EXTRA_SENDER_ID, senderId)
+            // MessagingStyle bundles per chat and the PendingIntent is rebuilt with
+            // FLAG_UPDATE_CURRENT on every push, so the extra always reflects the
+            // latest message — tap lands on and highlights the newest message.
+            if (messageId != null) putExtra(MainActivity.EXTRA_MESSAGE_ID, messageId)
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
         val pendingIntent = PendingIntent.getActivity(

@@ -163,6 +163,7 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -313,6 +314,17 @@ fun ChatScreen(
         }
     }
 
+    // Deep-link jump target (reminder / FCM notification tap), collected as
+    // state: a warm tap while this chat is already on top re-navigates
+    // launchSingleTop, reusing the entry + ViewModel, so the value can change in
+    // place. The route always carries the query key, so blank ⇒ null.
+    val targetMessageId = viewModel.targetMessageId.collectAsState().value
+        ?.takeIf { it.isNotBlank() }
+    // Consumed-once flag for the deep-link jump, keyed on the target id: a new
+    // target (warm re-tap) resets it so the new jump runs; rotation restores the
+    // saved value so the same jump doesn't re-fire.
+    var targetJumpConsumed by rememberSaveable(targetMessageId) { mutableStateOf(false) }
+
     // Scroll the LazyColumn (reverseLayout=true) to `reversedIdx` and nudge the
     // item to the centre of the viewport. One frame of delay lets the scroll settle
     // before reading itemInfo.
@@ -384,8 +396,13 @@ fun ChatScreen(
         val messages = uiState.messages.messages
         val savedIndex = viewModel.savedScrollIndex
         val persistedPos = (persistedScroll as? PersistedScrollState.Ready)?.pos
+        // A pending deep-link jump suppresses the persisted-position restore
+        // (like fromNotification): land on the newest message, then the jump
+        // effect scrolls to the target once it loads — so the restore doesn't
+        // fight the jump.
+        val targetJumpPending = targetMessageId != null && !targetJumpConsumed
         val (initialIndex, initialOffset) = when {
-            fromNotification -> 0 to 0
+            fromNotification || targetJumpPending -> 0 to 0
             savedIndex in messages.indices ->
                 messages.toReversedIndex(savedIndex) to viewModel.savedScrollOffset
             persistedPos != null && persistedPos.index in messages.indices ->
@@ -421,6 +438,30 @@ fun ChatScreen(
                 .collect { size ->
                     if (size > 0) listState.scrollToItem(0)
                 }
+        }
+    }
+
+    // Notification deep link: once the target message has loaded from Room,
+    // scroll to and flash it (reusing jumpToSourceMessage's 1.5s highlight).
+    // Runs after the initial scroll positioning (which suppresses the persisted
+    // restore for a targeted open — see the initial-scroll block above) so the
+    // jump isn't overwritten. An older message may not be in the first cached
+    // batch, so wait up to 3s for it to appear before giving up.
+    LaunchedEffect(targetMessageId, initialScrollDone) {
+        val targetId = targetMessageId ?: return@LaunchedEffect
+        if (targetJumpConsumed || !initialScrollDone) return@LaunchedEffect
+        val found = withTimeoutOrNull(3000L) {
+            snapshotFlow { uiState.messages.messages.any { it.id == targetId } }
+                .first { it }
+        }
+        targetJumpConsumed = true
+        if (found == true) {
+            jumpToSourceMessage(targetId)
+        } else {
+            snackbarHostState.showSnackbar(
+                "Message no longer available",
+                duration = SnackbarDuration.Short,
+            )
         }
     }
 

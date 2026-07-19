@@ -99,6 +99,17 @@ class ChatViewModel @Inject constructor(
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
     val recipientId: String = checkNotNull(savedStateHandle["recipientId"])
 
+    // Set when the chat is opened from a reminder/message notification deep link
+    // (see Routes.chat(targetMessageId = …)). ChatScreen consumes it once to
+    // scroll to and flash that message; null for an ordinary open. The route
+    // always carries the query key (empty when absent), so blank ⇒ null (mapped
+    // in ChatScreen). Exposed as a StateFlow, not a one-shot read: a warm
+    // notification tap for a chat that is already on top re-navigates
+    // launchSingleTop, which reuses this ViewModel — a plain `val` read at init
+    // would keep the stale target and the jump would never fire.
+    val targetMessageId: StateFlow<String?> =
+        savedStateHandle.getStateFlow("targetMessageId", null)
+
     val savedScrollIndex: Int get() = savedStateHandle["scrollIndex"] ?: -1
     val savedScrollOffset: Int get() = savedStateHandle["scrollOffset"] ?: 0
 

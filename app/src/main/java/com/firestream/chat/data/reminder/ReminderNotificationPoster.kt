@@ -64,8 +64,7 @@ internal object ReminderNotificationPoster {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra(MainActivity.EXTRA_CHAT_ID, reminder.chatId)
             putExtra(MainActivity.EXTRA_SENDER_ID, reminder.recipientId)
-            // Step 4 replaces "messageId" with MainActivity.EXTRA_MESSAGE_ID.
-            putExtra("messageId", reminder.messageId)
+            putExtra(MainActivity.EXTRA_MESSAGE_ID, reminder.messageId)
         }
         return PendingIntent.getActivity(
             context,
