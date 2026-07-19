@@ -1,6 +1,6 @@
 // region: AGENT-NOTE
 // Responsibility: Application-data Room database (`fire_stream_chat.db`).
-//   5 entities: Users, Messages, Chats, Contacts, Lists. Signal Protocol tables
+//   6 entities: Users, Messages, Chats, Contacts, Lists, Reminders. Signal Protocol tables
 //   were split out into SignalDatabase (`signal.db`) at version 19 so destructive
 //   migrations on this DB no longer wipe key material.
 // Owns: @Database `version` field — bump on any column/table add/remove/rename
@@ -22,11 +22,13 @@ import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.ReminderDao
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.ContactEntity
 import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.ReminderEntity
 import com.firestream.chat.data.local.entity.UserEntity
 
 @Database(
@@ -35,9 +37,10 @@ import com.firestream.chat.data.local.entity.UserEntity
         MessageEntity::class,
         ChatEntity::class,
         ContactEntity::class,
-        ListEntity::class
+        ListEntity::class,
+        ReminderEntity::class
     ],
-    version = 22,
+    version = 23,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -47,6 +50,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun contactDao(): ContactDao
     abstract fun listDao(): ListDao
+    abstract fun reminderDao(): ReminderDao
 
     companion object {
         // Signal Protocol tables moved to a dedicated SignalDatabase so that destructive

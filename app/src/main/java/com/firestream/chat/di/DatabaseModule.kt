@@ -8,6 +8,7 @@ import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.ReminderDao
 import com.firestream.chat.data.local.dao.SignalDao
 import com.firestream.chat.data.local.dao.UserDao
 import dagger.Module
@@ -61,4 +62,7 @@ object DatabaseModule {
 
     @Provides
     fun provideListDao(db: AppDatabase): ListDao = db.listDao()
+
+    @Provides
+    fun provideReminderDao(db: AppDatabase): ReminderDao = db.reminderDao()
 }
