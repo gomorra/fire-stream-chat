@@ -20,8 +20,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -193,7 +191,7 @@ internal data class MessageBubbleCallbacks(
     val onRetrySend: (() -> Unit)? = null,
 )
 
-@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class, ExperimentalAnimationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalAnimationApi::class)
 @Composable
 internal fun MessageBubble(
     message: Message,
@@ -240,11 +238,6 @@ internal fun MessageBubble(
     var hapticFired by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
-    val groupedReactions = remember(message.reactions) {
-        message.reactions.values
-            .groupBy { it }
-            .mapValues { it.value.size }
-    }
 
     Column(
         modifier = Modifier
@@ -1068,27 +1061,11 @@ internal fun MessageBubble(
             )
         }
 
-        if (groupedReactions.isNotEmpty()) {
-            val reactionFontSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE * 1.2f
-            FlowRow(
-                modifier = Modifier.padding(top = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                groupedReactions.forEach { (emoji, count) ->
-                    val myReaction = message.reactions[currentUserId] == emoji
-                    Text(
-                        text = if (count > 1) "$emoji $count" else emoji,
-                        fontSize = reactionFontSize.value.sp,
-                        color = if (myReaction) MaterialTheme.colorScheme.primary
-                            else Color.Unspecified,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .clickable { /* handled by reaction picker */ }
-                            .padding(horizontal = 4.dp, vertical = 2.dp)
-                    )
-                }
-            }
-        }
+        ReactionRow(
+            reactions = message.reactions,
+            currentUserId = currentUserId,
+            onClick = { /* handled by reaction picker */ }
+        )
     }
 }
 
