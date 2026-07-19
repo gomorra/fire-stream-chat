@@ -3,13 +3,16 @@ package com.firestream.chat.ui.chat
 import android.content.Context
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.domain.repository.ListRepository
+import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
+import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -30,6 +33,11 @@ class ChatMessageLoaderUnreadTest {
     private val messageRepository = FakeMessageRepository()
     private val listRepository = mockk<ListRepository>(relaxed = true)
     private val linkPreviewSource = mockk<LinkPreviewSource>(relaxed = true)
+    private val reminderRepository = mockk<ReminderRepository>(relaxed = true) {
+        // Explicit stub: a relaxed-mock Flow never emits, which would hang the
+        // loader's combine() forever waiting for a first value from this side.
+        every { observePendingIdsForChat(any()) } returns flowOf(emptySet())
+    }
     private val context = mockk<Context>(relaxed = true)
 
     private val uiState = MutableStateFlow(ChatUiState(session = SessionState(currentUserId = "uid1")))
@@ -40,6 +48,7 @@ class ChatMessageLoaderUnreadTest {
         linkPreviewSource = linkPreviewSource,
         chatRepository = chatRepository,
         messageRepository = messageRepository,
+        reminderRepository = reminderRepository,
         context = context,
         _uiState = uiState,
         scope = scope,

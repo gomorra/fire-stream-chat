@@ -1,8 +1,10 @@
 package com.firestream.chat.ui.chat
 
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeMessageRepository
+import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -27,11 +29,14 @@ class ChatMessageActionsEditTest {
 
     private val chatId = "chat1"
     private val repository = FakeMessageRepository()
+    private val reminderRepository = mockk<ReminderRepository>(relaxed = true)
     private val uiState = MutableStateFlow(ChatUiState())
 
     private fun actions() = ChatMessageActions(
         chatId = chatId,
+        recipientId = "recipient1",
         messageRepository = repository,
+        reminderRepository = reminderRepository,
         _uiState = uiState,
         scope = TestScope(mainDispatcherRule.testDispatcher),
     )

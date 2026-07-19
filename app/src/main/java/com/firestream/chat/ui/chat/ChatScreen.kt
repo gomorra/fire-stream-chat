@@ -304,6 +304,9 @@ fun ChatScreen(
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
 
+    // Snooze picker sheet state
+    var snoozeTargetMessage by remember { mutableStateOf<Message?>(null) }
+
     // Highlight the source message when the user taps a reply preview.
     // Cleared after the animation window so the border fades out.
     var highlightedMessageId by remember { mutableStateOf<String?>(null) }
@@ -1187,10 +1190,19 @@ fun ChatScreen(
                                                 onRetrySend = if (isOwn && message.status == MessageStatus.FAILED) {
                                                     { viewModel.retrySend(message) }
                                                 } else null,
+                                                onSnooze = if (message.deletedAt == null &&
+                                                    message.id !in uiState.messages.pendingReminderIds
+                                                ) {
+                                                    { snoozeTargetMessage = message }
+                                                } else null,
+                                                onCancelReminder = if (message.id in uiState.messages.pendingReminderIds) {
+                                                    { viewModel.cancelReminder(message.id) }
+                                                } else null,
                                             ),
                                             state = MessageBubbleState(
                                                 uploadProgress = uploadProgressMap[message.id],
                                                 isHighlighted = highlightedMessageId == message.id,
+                                                hasReminder = message.id in uiState.messages.pendingReminderIds,
                                             ),
                                         )
 
@@ -1883,6 +1895,18 @@ fun ChatScreen(
                 forwardTargetMessage = null
             },
             users = uiState.session.chatParticipants
+        )
+    }
+
+    // Snooze picker sheet
+    snoozeTargetMessage?.let { targetMsg ->
+        SnoozePickerSheet(
+            message = targetMsg,
+            onDismiss = { snoozeTargetMessage = null },
+            onTimeSelected = { fireAtMs ->
+                viewModel.snoozeMessage(targetMsg, fireAtMs)
+                snoozeTargetMessage = null
+            },
         )
     }
 

@@ -11,6 +11,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.PollRepository
+import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.MainDispatcherRule
@@ -50,6 +51,9 @@ class ChatViewModelFullscreenImageTest {
     private val authRepository = mockk<AuthRepository>(relaxed = true)
     private val listRepository = mockk<ListRepository>(relaxed = true)
     private val pollRepository = mockk<PollRepository>(relaxed = true)
+    private val reminderRepository = mockk<ReminderRepository>(relaxed = true) {
+        every { observePendingIdsForChat(any()) } returns flowOf(emptySet())
+    }
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
@@ -87,6 +91,7 @@ class ChatViewModelFullscreenImageTest {
         chatRepository = chatRepository,
         listRepository = listRepository,
         messageRepository = messageRepository,
+        reminderRepository = reminderRepository,
         pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,

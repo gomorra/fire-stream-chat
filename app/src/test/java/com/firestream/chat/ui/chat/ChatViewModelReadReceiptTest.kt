@@ -14,6 +14,7 @@ import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.PollRepository
+import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.fakes.FakeChatRepository
@@ -54,6 +55,7 @@ class ChatViewModelReadReceiptTest {
     private val authRepository = mockk<AuthRepository>()
     private val listRepository = mockk<ListRepository>()
     private val pollRepository = mockk<PollRepository>()
+    private val reminderRepository = mockk<ReminderRepository>()
     private val preferencesDataStore = mockk<PreferencesDataStore>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val activeChatTracker = mockk<ActiveChatTracker>(relaxed = true)
@@ -76,6 +78,7 @@ class ChatViewModelReadReceiptTest {
         every { preferencesDataStore.recentEmojisFlow } returns flowOf(emptyList())
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(com.firestream.chat.data.local.DictationLanguage.GERMAN)
         every { preferencesDataStore.lastChatScrollFlow } returns flowOf(null)
+        every { reminderRepository.observePendingIdsForChat(any()) } returns flowOf(emptySet())
 
         chatRepository.chatByIdResult = Result.success(Chat(id = "chat1", type = ChatType.INDIVIDUAL))
 
@@ -210,6 +213,7 @@ class ChatViewModelReadReceiptTest {
         chatRepository = chatRepository,
         listRepository = listRepository,
         messageRepository = messageRepository,
+        reminderRepository = reminderRepository,
         pollRepository = pollRepository,
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,

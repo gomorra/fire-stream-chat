@@ -19,6 +19,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.SpeechRecognizerManager
@@ -27,6 +28,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
+import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
@@ -83,6 +85,7 @@ class ChatViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
     private val messageRepository: MessageRepository,
+    private val reminderRepository: ReminderRepository,
     private val pollRepository: PollRepository,
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
@@ -151,12 +154,20 @@ class ChatViewModel @Inject constructor(
     // Managers
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
     private val searchManager = ChatSearchManager(chatId, searchMessagesUseCase, _uiState, viewModelScope)
-    private val messageActions = ChatMessageActions(chatId, messageRepository, _uiState, viewModelScope)
+    private val messageActions = ChatMessageActions(
+        chatId, recipientId, messageRepository, reminderRepository, _uiState, viewModelScope,
+        onReminderScheduled = { outcome ->
+            if (outcome == ReminderScheduleOutcome.INEXACT_FALLBACK) {
+                commandsManager.setExactAlarmBannerVisible(true)
+            }
+        },
+    )
     private val messageSender = ChatMessageSender(
         chatId, recipientId, chatRepository, messageRepository, _uiState, viewModelScope
     )
     private val messageLoader = ChatMessageLoader(
-        chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, context, _uiState, viewModelScope
+        chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, reminderRepository,
+        context, _uiState, viewModelScope
     )
     private val infoManager = ChatInfoManager(
         chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
@@ -240,6 +251,8 @@ class ChatViewModel @Inject constructor(
         messageActions.forwardMessage(message, targetChatId, targetRecipientId)
     fun toggleStar(message: Message) = messageActions.toggleStar(message)
     fun togglePin(messageId: String, pinned: Boolean) = messageActions.togglePin(messageId, pinned)
+    fun snoozeMessage(message: Message, fireAtMs: Long) = messageActions.snoozeMessage(message, fireAtMs)
+    fun cancelReminder(messageId: String) = messageActions.cancelReminder(messageId)
 
     // ── Search ──
     fun onSearchQueryChange(query: String) = searchManager.onSearchQueryChange(query)

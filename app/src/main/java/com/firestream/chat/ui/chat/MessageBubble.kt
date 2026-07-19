@@ -59,6 +59,8 @@ import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
@@ -152,6 +154,10 @@ private val CenteredLineHeight = LineHeightStyle(
 internal data class MessageBubbleState(
     val uploadProgress: Float? = null,
     val isHighlighted: Boolean = false,
+    // True when a snooze reminder is pending for this message. Drives both the
+    // bell indicator in the metadata row and the Snooze ⇄ Cancel reminder menu
+    // swap (see MessageBubbleCallbacks.onSnooze / onCancelReminder).
+    val hasReminder: Boolean = false,
 )
 
 @Immutable
@@ -189,6 +195,11 @@ internal data class MessageBubbleCallbacks(
     // Retry a previously-failed send. Wired only when status == FAILED — null
     // for any other state, so callers don't need to gate the call site.
     val onRetrySend: (() -> Unit)? = null,
+    // Open the snooze picker sheet. Null when a reminder is already pending for
+    // this message (state.hasReminder) — the menu shows onCancelReminder instead.
+    val onSnooze: (() -> Unit)? = null,
+    // Cancel the pending reminder. Null when no reminder is pending.
+    val onCancelReminder: (() -> Unit)? = null,
 )
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalAnimationApi::class)
@@ -870,6 +881,18 @@ internal fun MessageBubble(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                         }
+                        if (state.hasReminder) {
+                            // Mirrors the "Forwarded" indicator's icon size/spacing above —
+                            // the closest existing bubble-decoration precedent (star/pin have
+                            // no bubble-level indicator, only dropdown menu entries).
+                            Icon(
+                                imageVector = Icons.Default.Notifications,
+                                contentDescription = "Reminder set",
+                                tint = textColor.copy(alpha = 0.7f),
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                        }
                         if (message.type != MessageType.CALL) {
                             Text(
                                 text = formatTimestamp(message.timestamp),
@@ -1002,6 +1025,25 @@ internal fun MessageBubble(
                         ) {
                             Icon(Icons.Default.AlarmOff, null, modifier = Modifier.padding(end = 4.dp))
                             Text("Cancel timer")
+                        }
+                    }
+                    if (state.hasReminder && callbacks.onCancelReminder != null) {
+                        FilledTonalButton(
+                            onClick = { showMenu = false; callbacks.onCancelReminder.invoke() },
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        ) {
+                            Icon(Icons.Default.NotificationsOff, null, modifier = Modifier.padding(end = 4.dp))
+                            Text("Cancel reminder")
+                        }
+                    } else {
+                        callbacks.onSnooze?.let {
+                            FilledTonalButton(
+                                onClick = { showMenu = false; it() },
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            ) {
+                                Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp))
+                                Text("Snooze")
+                            }
                         }
                     }
                     callbacks.onEdit?.let {

@@ -8,6 +8,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.data.remote.LinkPreviewSource
@@ -18,6 +19,7 @@ import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.ReminderRepository
 
 internal class ChatMessageLoader(
     private val chatId: String,
@@ -25,6 +27,7 @@ internal class ChatMessageLoader(
     private val linkPreviewSource: LinkPreviewSource,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val reminderRepository: ReminderRepository,
     private val context: Context,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope
@@ -90,17 +93,21 @@ internal class ChatMessageLoader(
     private fun loadMessages() {
         scope.launch {
             messageRepository.getMessages(chatId)
+                .combine(reminderRepository.observePendingIdsForChat(chatId)) { messages, pendingReminderIds ->
+                    messages to pendingReminderIds
+                }
                 .catch { e ->
                     _uiState.update {
                         it.copy(session = it.session.copy(isLoading = false, error = AppError.from(e)))
                     }
                 }
-                .collectLatest { messages ->
+                .collectLatest { (messages, pendingReminderIds) ->
                     _uiState.update {
                         it.copy(
                             messages = it.messages.copy(
                                 messages = messages,
-                                pinnedMessages = messages.filter { msg -> msg.isPinned }
+                                pinnedMessages = messages.filter { msg -> msg.isPinned },
+                                pendingReminderIds = pendingReminderIds
                             ),
                             session = it.session.copy(isLoading = false)
                         )
