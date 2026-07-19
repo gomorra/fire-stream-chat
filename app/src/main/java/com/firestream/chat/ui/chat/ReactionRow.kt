@@ -23,7 +23,7 @@ import androidx.compose.ui.unit.sp
 // Chip height is ~26 dp (bodyMedium 14 sp × EMOJI_INLINE_SCALE 1.3 × 1.2 + 2 dp×2 vertical
 // padding), so 5 dp overlap is ~18%. Fixed dp (not a fraction of measured height) so a wrapped
 // two-line FlowRow still only overlaps by one chip's worth.
-private val REACTION_OVERLAP = 15.dp
+private val REACTION_OVERLAP = 11.dp
 
 // A plain Modifier.offset is draw-only and would leave phantom empty space below the row where
 // it used to sit; this reduces the reported layout height AND shifts the placement up by the
