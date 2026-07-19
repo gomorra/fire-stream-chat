@@ -2,6 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.16.0] — 2026-07-19
+
+### Added
+
+- **Message reminders (snooze).** Long-press any message → Snooze → pick a preset (In 1 hour · This evening · Tomorrow morning), a custom date & time, or — when the message itself mentions a time like "tomorrow at 5pm" — an automatically detected preset. At the chosen time a local notification shows the sender and message, with "+1 hour" and "Done" actions; tapping it opens the chat, scrolls to the message, and highlights it. Pending reminders show a bell on the bubble, can be cancelled from the same menu, are listed in Settings → Scheduled Reminders (tap to jump, swipe to cancel), survive reboots, and can also be set via the `.remind` composer command targeting the reply-target or newest message. Reminders are device-local, like starred messages. (`dd519e5`, `2bd57c1`, `82e24f2`, `b4f2f4d`, `9315e43`, `7a4e73f`, `a3669f5`)
+- **Notification taps jump to the exact message.** Tapping a push notification (and any reminder notification) now scrolls to and highlights the specific message instead of just opening the chat — including when the app is already open, which previously dropped the tap silently. (`239f0a9`)
+
 ## [1.15.0] — 2026-07-19
 
 ### Changed

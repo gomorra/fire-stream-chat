@@ -248,6 +248,37 @@ Composer-driven `.command` grammar plus the timer as the first command. Typing `
 
 ---
 
+## Message Reminders (snooze)
+
+Long-press → Snooze schedules a device-local exact alarm for a message; the fired notification (sender + text snapshot, "+1 hour"/"Done" actions) deep-links back to the chat, which scrolls to and highlights the message. Clone of the timer alarm pipeline, but notification-grade (not alarm-grade) and local-only (no Firestore, like starred messages).
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/model/Reminder.kt` + `ReminderScheduleOutcome.kt` | Domain model with message/sender snapshot fields; EXACT vs INEXACT_FALLBACK outcome |
+| `app/src/main/java/com/firestream/chat/domain/repository/ReminderRepository.kt` | schedule / cancel / reschedule / observePending / observePendingIdsForChat |
+| `app/src/main/java/com/firestream/chat/domain/reminder/SnoozePreset.kt` + `SnoozePresets.kt` | Pure preset computation (In 1 hour / This evening / Tomorrow morning; past presets roll to next day; detected time prepended) |
+| `app/src/main/java/com/firestream/chat/domain/reminder/DateTimeDetector.kt` + `DetectedTimeParser.kt` | Pure detection contract + EN/DE span-text → future-instant parser |
+| `app/src/main/java/com/firestream/chat/data/reminder/AndroidDateTimeDetector.kt` | TextClassifier locates date/time spans; parser resolves the value (best-effort, null on anything) |
+| `app/src/main/java/com/firestream/chat/data/local/entity/ReminderEntity.kt` + `dao/ReminderDao.kt` | `reminders` table, PK messageId (one pending reminder per message) — AppDatabase v23 |
+| `app/src/main/java/com/firestream/chat/data/reminder/ReminderRepositoryImpl.kt` | Room row + alarm armed/cancelled together |
+| `app/src/main/java/com/firestream/chat/data/reminder/ReminderAlarmScheduler.kt` + `ReminderAlarmScheduling.kt` | Exact-alarm wrapper (clone of TimerAlarmScheduler), idempotent per messageId |
+| `app/src/main/java/com/firestream/chat/data/reminder/ReminderAlarmReceiver.kt` | FIRED (post + consume row) / SNOOZE_1H (rebuild from intent snapshots, re-arm now+1h) / DONE |
+| `app/src/main/java/com/firestream/chat/data/reminder/ReminderNotificationPoster.kt` + `ReminderNotificationChannel.kt` | Shared notification builder (tag `message_reminder`); `message_reminders` channel — notification-grade, NOT alarm-grade |
+| `app/src/main/java/com/firestream/chat/data/reminder/ReminderActionLogic.kt` + `ReminderBootRestoreLogic.kt` | Pure +1h math; pure boot classify (re-arm future / post overdue) |
+| `app/src/main/java/com/firestream/chat/data/timer/BootCompletedReceiver.kt` | Now restores BOTH timers and reminders after reboot |
+| `app/src/main/java/com/firestream/chat/ui/chat/SnoozePickerSheet.kt` + `SnoozeOptions.kt` | ModalBottomSheet picker; `SnoozeOptionsList` shared with the `.remind` widget (presets + date/time dialogs) |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | Snooze ⇄ Cancel-reminder menu button + bell indicator (via holder fields — param ceiling!) |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageLoader.kt` + `ChatMessagesState.kt` | `pendingReminderIds` combined into the MessagesState slice |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | snoozeMessage / cancelReminder / detectSnoozeTime; sender-name + media-snapshot resolution |
+| `app/src/main/java/com/firestream/chat/ui/chat/command/RemindCommand.kt` + `widget/RemindWidget.kt` | `.remind` leaf command; composer widget targeting reply-target-else-newest |
+| `app/src/main/java/com/firestream/chat/ui/reminders/ScheduledRemindersScreen.kt` + `ScheduledRemindersViewModel.kt` | Overview list (Settings → Scheduled Reminders): tap to jump, swipe to cancel |
+| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` + `MainActivity.kt` | `targetMessageId` route param + `EXTRA_MESSAGE_ID`; `DeepLinkRequest` re-drive incl. `onNewIntent` warm delivery |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | Forwards messageId so push taps also scroll-to-message |
+
+**Entry points:** long-press bubble → Snooze → `SnoozePickerSheet` → `ChatViewModel.snoozeMessage()`; or `.remind` in the composer → `RemindWidget`. Fired path: `ReminderAlarmReceiver` → notification → `MainActivity` (`EXTRA_MESSAGE_ID`) → `Routes.chat(targetMessageId)` → `ChatScreen` jump + highlight.
+
+---
+
 ## Video Sharing
 
 Chats can send video — record with the camera or pick one from the gallery. Videos are typed `VIDEO`, guarded at 3 min / 100 MB before the optimistic insert, then transcoded to a configurable quality (480p/720p/1080p, default 720p, set in Settings) with a JPEG thumbnail extracted and uploaded alongside. Bubbles show the thumbnail with a play overlay and duration badge, IMAGE-matched sizing/progress/retry; tapping opens a fullscreen ExoPlayer overlay that mirrors the existing image viewer.
