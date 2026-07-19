@@ -2,6 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.15.0] — 2026-07-19
+
+### Changed
+- **Reactions now overlap the bubble.** Emoji reaction chips used to float fully below the message bubble with a small gap; they now sit tucked 5dp up into the bubble's bottom edge for a more compact, attached look. The duplicated chip-rendering code in `MessageBubble` and `ListBubble` was also consolidated into a shared `ReactionRow` composable. (`9e1b373`)
+
 ## [1.14.0] — 2026-07-18
 
 ### Changed
