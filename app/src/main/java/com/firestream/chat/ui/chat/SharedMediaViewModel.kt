@@ -20,12 +20,20 @@ class SharedMediaViewModel @Inject constructor(
 
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
 
-    val mediaUrls: StateFlow<List<String>> = messageRepository.getMessages(chatId)
+    val media: StateFlow<List<SharedMediaItem>> = messageRepository.getMessages(chatId)
         .map { messages ->
             messages
                 .filter { it.type == MessageType.IMAGE && it.mediaUrl != null && it.deletedAt == null }
                 .sortedByDescending { it.timestamp }
-                .mapNotNull { it.mediaUrl }
+                .map { SharedMediaItem(mediaUrl = it.mediaUrl!!, localUri = it.localUri) }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }
+
+/**
+ * A single image shown in the Shared Media grid. Carries the on-disk [localUri]
+ * (when the full file has been downloaded) alongside the remote [mediaUrl] so
+ * the grid can decode the local copy and hand it to the fullscreen viewer,
+ * mirroring the local-first resolution used everywhere else in the app.
+ */
+data class SharedMediaItem(val mediaUrl: String, val localUri: String?)
