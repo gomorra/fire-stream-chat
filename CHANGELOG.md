@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Instant profile avatars.** Avatars in the chat list, contacts, calls, group screens and profile no longer pop in after a delay. A configured Coil image loader now keeps each decoded avatar warm in memory under a stable per-photo cache key, so an avatar is decoded once and rendered instantly on every subsequent appearance — with a smooth crossfade instead of a blank-then-flash — and only re-fetches when the user actually changes their photo. (`2f15c77`)
+- **Instant profile avatars.** Avatars in the chat list, contacts, calls, group screens and profile no longer pop in after a delay. A configured Coil image loader now keeps each decoded avatar warm in memory under a stable per-photo cache key, so an avatar is decoded once and rendered instantly on every subsequent appearance — with a smooth crossfade instead of a blank-then-flash — and only re-fetches when the user actually changes their photo. (`4ac4bff`)
 
 ## [1.16.0] — 2026-07-19
 
