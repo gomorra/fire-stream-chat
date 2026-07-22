@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,10 +36,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,10 +51,15 @@ internal fun SharedMediaScreen(
     onBackClick: () -> Unit,
     viewModel: SharedMediaViewModel = hiltViewModel()
 ) {
-    val mediaUrls by viewModel.mediaUrls.collectAsState()
-    var fullscreenUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val media by viewModel.media.collectAsState()
+    val context = LocalContext.current
+    // Selected tile as (mediaUrl, localUri); reuses the fullscreen viewer's saver
+    // so the open image survives activity recreation (rotation).
+    var fullscreen by rememberSaveable(stateSaver = FullscreenImageArgsSaver) {
+        mutableStateOf<Pair<String?, String?>?>(null)
+    }
 
-    BackHandler(enabled = fullscreenUrl != null) { fullscreenUrl = null }
+    BackHandler(enabled = fullscreen != null) { fullscreen = null }
 
     Scaffold(
         topBar = {
@@ -67,7 +78,7 @@ internal fun SharedMediaScreen(
             )
         }
     ) { padding ->
-        if (mediaUrls.isEmpty()) {
+        if (media.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -90,24 +101,47 @@ internal fun SharedMediaScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(mediaUrls) { url ->
+                items(media) { item ->
+                    // Prefer the on-disk full file when present, else the remote
+                    // URL — the same synchronous resolution rememberMessageImageModel
+                    // and FullscreenImageViewer use. allowHardware(false) is the key
+                    // fix: it stops a fast-scrolled grid of large (old, uncompressed)
+                    // images from exhausting the process hardware-bitmap budget, which
+                    // was rendering those tiles black. Coil still downsamples to the
+                    // tile size from the layout constraints.
+                    val request = remember(item) {
+                        val localFile = item.localUri
+                            ?.let { File(it) }
+                            ?.takeIf { it.exists() && it.isFile && it.canRead() }
+                        ImageRequest.Builder(context)
+                            .data(localFile ?: item.mediaUrl)
+                            .allowHardware(false)
+                            .crossfade(true)
+                            .build()
+                    }
                     AsyncImage(
-                        model = url,
+                        model = request,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        error = rememberVectorPainter(Icons.Default.BrokenImage),
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .clickable { fullscreenUrl = url }
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { fullscreen = item.mediaUrl to item.localUri }
                     )
                 }
             }
         }
     }
 
-    AnimatedVisibility(visible = fullscreenUrl != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenUrl?.let { url ->
-            FullscreenImageViewer(imageUrl = url, onDismiss = { fullscreenUrl = null })
+    AnimatedVisibility(visible = fullscreen != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreen?.let { (url, localUri) ->
+            FullscreenImageViewer(
+                imageUrl = url,
+                localUri = localUri,
+                onDismiss = { fullscreen = null },
+            )
         }
     }
 }
