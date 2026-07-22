@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.16.1] — 2026-07-22
+
+### Fixed
+
+- **Instant profile avatars.** Avatars in the chat list, contacts, calls, group screens and profile no longer pop in after a delay. A configured Coil image loader now keeps each decoded avatar warm in memory under a stable per-photo cache key, so an avatar is decoded once and rendered instantly on every subsequent appearance — with a smooth crossfade instead of a blank-then-flash — and only re-fetches when the user actually changes their photo. (`4ac4bff`)
+
 ## [1.16.0] — 2026-07-19
 
 ### Added

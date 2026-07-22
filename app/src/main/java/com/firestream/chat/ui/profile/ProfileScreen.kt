@@ -72,7 +72,7 @@ import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
-import com.firestream.chat.ui.components.resolveAvatarModel
+import com.firestream.chat.ui.components.rememberAvatarRequest
 import com.firestream.chat.ui.theme.OnlineGreen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -148,12 +148,10 @@ fun ProfileScreen(
                                 .clickable(enabled = user.avatarUrl != null || user.localAvatarPath != null) { fullscreenAvatar = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            val avatarModel = remember(user.localAvatarPath, user.avatarUrl) {
-                                resolveAvatarModel(user.localAvatarPath, user.avatarUrl)
-                            }
-                            if (avatarModel != null) {
+                            val avatarRequest = rememberAvatarRequest(user.localAvatarPath, user.avatarUrl)
+                            if (avatarRequest != null) {
                                 AsyncImage(
-                                    model = avatarModel,
+                                    model = avatarRequest,
                                     contentDescription = "Avatar",
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier.fillMaxSize()

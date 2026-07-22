@@ -11,8 +11,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import java.io.File
 
 /**
@@ -27,6 +29,42 @@ fun resolveAvatarModel(localAvatarPath: String?, avatarUrl: String?): Any? =
         if (file.exists()) file else avatarUrl
     } else avatarUrl
 
+/**
+ * Stable Coil cache key for an avatar, or null when there's no image.
+ *
+ * The key must stay identical whether we load from the local [File] or the remote
+ * [avatarUrl] (so repeated appearances hit Coil's memory cache instantly), yet it must
+ * change when the photo changes (so a new photo reloads). [avatarUrl] satisfies both:
+ * Firebase Storage rotates its `?token=` on every re-upload, so the URL string is a
+ * stable-but-change-sensitive identity. The local file path is NOT usable — it is
+ * `<id>.jpg`, reused across uploads, so keying on it would serve a stale bitmap after a
+ * photo change. Fall back to [localAvatarPath] only when no URL is known.
+ */
+fun avatarCacheKey(localAvatarPath: String?, avatarUrl: String?): String? =
+    avatarUrl ?: localAvatarPath
+
+/**
+ * Builds a keyed Coil [ImageRequest] for an avatar, or null when there's no image (the
+ * caller renders a letter/icon placeholder). The [memoryCacheKey]/[diskCacheKey] are the
+ * stable [avatarCacheKey], which lets Coil serve a warm decoded bitmap on the first
+ * composition frame — eliminating the blank-then-pop flash — and reload only when the
+ * photo actually changes.
+ */
+@Composable
+fun rememberAvatarRequest(localAvatarPath: String?, avatarUrl: String?): ImageRequest? {
+    val context = LocalContext.current
+    return remember(localAvatarPath, avatarUrl) {
+        val data = resolveAvatarModel(localAvatarPath, avatarUrl) ?: return@remember null
+        val key = avatarCacheKey(localAvatarPath, avatarUrl)
+        ImageRequest.Builder(context)
+            .data(data)
+            .memoryCacheKey(key)
+            .diskCacheKey(key)
+            .crossfade(true)
+            .build()
+    }
+}
+
 @Composable
 fun UserAvatar(
     avatarUrl: String?,
@@ -36,13 +74,11 @@ fun UserAvatar(
     modifier: Modifier = Modifier,
     localAvatarPath: String? = null
 ) {
-    val imageModel = remember(localAvatarPath, avatarUrl) {
-        resolveAvatarModel(localAvatarPath, avatarUrl)
-    }
+    val request = rememberAvatarRequest(localAvatarPath, avatarUrl)
 
-    if (imageModel != null) {
+    if (request != null) {
         AsyncImage(
-            model = imageModel,
+            model = request,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
             modifier = modifier
