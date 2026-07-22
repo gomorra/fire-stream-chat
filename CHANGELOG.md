@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.17.0] — 2026-07-22
+
+### Added
+
+- **Swipeable fullscreen shared media.** Opening a shared-media image fullscreen — from a chat's Shared Media screen or a contact's profile — now lets you swipe left/right through the whole gallery instead of dismissing and tapping the next thumbnail. Pinch/double-tap to zoom still works, and paging pauses while an image is zoomed so you can pan freely. (`cbe935c`)
+
 ## [1.16.2] — 2026-07-22
 
 ### Fixed

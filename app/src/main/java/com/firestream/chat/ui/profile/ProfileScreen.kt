@@ -68,8 +68,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
+import com.firestream.chat.ui.chat.FullscreenImagePager
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.chat.FullscreenMediaItem
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
 import com.firestream.chat.ui.components.rememberAvatarRequest
@@ -89,11 +90,9 @@ fun ProfileScreen(
     var showBlockDialog by remember { mutableStateOf(false) }
     var showPhotoSourceDialog by remember { mutableStateOf(false) }
     var fullscreenAvatar by rememberSaveable { mutableStateOf(false) }
-    // (mediaUrl, localUri) of the tapped shared-media item — saveable strings
-    // instead of the Message so the viewer survives rotation.
-    var fullscreenMedia by rememberSaveable(stateSaver = FullscreenImageArgsSaver) {
-        mutableStateOf<Pair<String?, String?>?>(null)
-    }
+    // Index into uiState.sharedMedia of the tapped item — the swipeable gallery
+    // pager starts there. Just the index so the viewer survives rotation.
+    var fullscreenMediaIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var editingName by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     var editingAbout by remember { mutableStateOf(false) }
@@ -407,7 +406,7 @@ fun ProfileScreen(
                     } else {
                         SharedMediaGrid(
                             media = uiState.sharedMedia,
-                            onMediaClick = { fullscreenMedia = it.mediaUrl to it.localUri },
+                            onMediaClick = { fullscreenMediaIndex = it },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp)
@@ -445,14 +444,14 @@ fun ProfileScreen(
         }
     }
 
-    // Fullscreen shared media viewer
-    BackHandler(enabled = fullscreenMedia != null) { fullscreenMedia = null }
-    AnimatedVisibility(visible = fullscreenMedia != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenMedia?.let { (mediaUrl, localUri) ->
-            FullscreenImageViewer(
-                imageUrl = mediaUrl ?: "",
-                localUri = localUri,
-                onDismiss = { fullscreenMedia = null }
+    // Fullscreen shared media viewer — swipeable gallery through all shared media
+    BackHandler(enabled = fullscreenMediaIndex != null) { fullscreenMediaIndex = null }
+    AnimatedVisibility(visible = fullscreenMediaIndex != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenMediaIndex?.let { idx ->
+            FullscreenImagePager(
+                items = uiState.sharedMedia.map { FullscreenMediaItem(it.mediaUrl, it.localUri) },
+                initialIndex = idx,
+                onDismiss = { fullscreenMediaIndex = null },
             )
         }
     }
@@ -590,17 +589,18 @@ private fun EditableProfileField(
 @Composable
 private fun SharedMediaGrid(
     media: List<Message>,
-    onMediaClick: (Message) -> Unit,
+    onMediaClick: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val rows = media.chunked(3)
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        rows.forEach { rowItems ->
+        rows.forEachIndexed { rowIndex, rowItems ->
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                rowItems.forEach { message ->
+                rowItems.forEachIndexed { colIndex, message ->
+                    val index = rowIndex * 3 + colIndex
                     AsyncImage(
                         model = message.localUri ?: message.mediaThumbnailUrl ?: message.mediaUrl,
                         contentDescription = "Shared media",
@@ -610,7 +610,7 @@ private fun SharedMediaGrid(
                             .aspectRatio(1f)
                             .clip(RoundedCornerShape(4.dp))
                             .clickable(enabled = message.mediaUrl != null || message.localUri != null) {
-                                onMediaClick(message)
+                                onMediaClick(index)
                             }
                     )
                 }
