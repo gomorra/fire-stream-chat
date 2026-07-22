@@ -8,6 +8,12 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Swipeable fullscreen shared media.** Opening a shared-media image fullscreen — from a chat's Shared Media screen or a contact's profile — now lets you swipe left/right through the whole gallery instead of dismissing and tapping the next thumbnail. Pinch/double-tap to zoom still works, and paging pauses while an image is zoomed so you can pan freely. (`cbe935c`)
 
+## [1.16.2] — 2026-07-22
+
+### Fixed
+
+- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`bc9d6bc`)
+
 ## [1.16.1] — 2026-07-22
 
 ### Fixed

@@ -261,11 +261,21 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ### Shared-media grid omits VIDEO messages
 
-**The smell.** `SharedMediaViewModel.mediaUrls` filters `MessageType.IMAGE` only, so videos shared in a chat never appear in the shared-media grid (`app/src/main/java/com/firestream/chat/ui/chat/` shared-media path). Introduced knowingly when video sharing landed (2026-07-18): videos render, play, and auto-download in the conversation, but the media grid ignores them.
+**The smell.** `SharedMediaViewModel.media` filters `MessageType.IMAGE` only, so videos shared in a chat never appear in the shared-media grid (`app/src/main/java/com/firestream/chat/ui/chat/` shared-media path). Introduced knowingly when video sharing landed (2026-07-18): videos render, play, and auto-download in the conversation, but the media grid ignores them.
 
 **Why we're not fixing it.** Adding video to the grid is a scope decision, not a bug fix — it needs a thumbnail-in-grid design (VideoFrameDecoder vs. mediaThumbnailUrl), a play affordance, and a tap-through to the fullscreen player. Bolting it on during the video-sharing plan would have grown Step 5 well past its reviewed shape.
 
 **When to revisit.** First user report of "where are my videos in shared media", or the next time SharedMediaScreen is touched for any other reason — the bubble's `rememberMessageVideoThumbModel` is directly reusable there.
+
+---
+
+### No real image thumbnails — grid decodes full-resolution images
+
+**The smell.** Images have no thumbnail. `mediaThumbnailUrl` is generated and stored for **VIDEO only** (`MessageRepositoryImpl` send pipeline, `isVideo` branch); the image branch leaves it null, and `MediaAttachment.thumbnailUri` is defined but unused. So the Shared Media grid and every image bubble decode the full-resolution `mediaUrl` (or on-disk full file) and rely on Coil downsampling at decode time. The July 2026 black-tile fix made this safe (hardware bitmaps disabled + local-file preference in the grid) but did not eliminate the underlying waste: every gallery tile still fetches/decodes a full-size image.
+
+**Why we're not fixing it.** A real image-thumbnail pipeline is a cross-layer feature — generate a small JPEG on send (mirroring the existing video-thumbnail path), upload it, thread `mediaThumbnailUrl` through Firestore/PocketBase sources and both schemas, backfill old messages, and prefer it in the grid. That's a multi-file feature, not a bug fix, and the decode fix already resolves the user-visible black-tile symptom.
+
+**When to revisit.** When gallery bandwidth/scroll-jank on large chats becomes a real complaint, or the next time the send pipeline is reworked — the video path (`VideoTranscoder` thumbnail extraction, `mediaThumbnailUrl` plumbing) is the template to copy.
 
 ---
 
