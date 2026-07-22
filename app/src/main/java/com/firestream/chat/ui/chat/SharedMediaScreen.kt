@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,9 +46,9 @@ internal fun SharedMediaScreen(
     viewModel: SharedMediaViewModel = hiltViewModel()
 ) {
     val mediaUrls by viewModel.mediaUrls.collectAsState()
-    var fullscreenUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    var fullscreenIndex by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    BackHandler(enabled = fullscreenUrl != null) { fullscreenUrl = null }
+    BackHandler(enabled = fullscreenIndex != null) { fullscreenIndex = null }
 
     Scaffold(
         topBar = {
@@ -90,7 +90,7 @@ internal fun SharedMediaScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(mediaUrls) { url ->
+                itemsIndexed(mediaUrls) { index, url ->
                     AsyncImage(
                         model = url,
                         contentDescription = null,
@@ -98,16 +98,20 @@ internal fun SharedMediaScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .clickable { fullscreenUrl = url }
+                            .clickable { fullscreenIndex = index }
                     )
                 }
             }
         }
     }
 
-    AnimatedVisibility(visible = fullscreenUrl != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreenUrl?.let { url ->
-            FullscreenImageViewer(imageUrl = url, onDismiss = { fullscreenUrl = null })
+    AnimatedVisibility(visible = fullscreenIndex != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenIndex?.let { idx ->
+            FullscreenImagePager(
+                items = mediaUrls.map { FullscreenMediaItem(imageUrl = it) },
+                initialIndex = idx,
+                onDismiss = { fullscreenIndex = null },
+            )
         }
     }
 }
