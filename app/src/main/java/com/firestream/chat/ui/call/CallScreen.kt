@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import coil.compose.AsyncImage
-import com.firestream.chat.ui.components.resolveAvatarModel
+import com.firestream.chat.ui.components.rememberAvatarRequest
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
@@ -285,9 +285,7 @@ private fun EndedContent() {
 
 @Composable
 private fun CallUserAvatar(name: String, avatarUrl: String?, localAvatarPath: String?) {
-    val model = remember(localAvatarPath, avatarUrl) {
-        resolveAvatarModel(localAvatarPath, avatarUrl)
-    }
+    val request = rememberAvatarRequest(localAvatarPath, avatarUrl)
     Box(
         modifier = Modifier
             .size(100.dp)
@@ -295,9 +293,9 @@ private fun CallUserAvatar(name: String, avatarUrl: String?, localAvatarPath: St
             .background(MaterialTheme.colorScheme.primaryContainer),
         contentAlignment = Alignment.Center
     ) {
-        if (model != null) {
+        if (request != null) {
             AsyncImage(
-                model = model,
+                model = request,
                 contentDescription = name,
                 modifier = Modifier.fillMaxSize()
             )

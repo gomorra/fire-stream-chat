@@ -9,6 +9,10 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import coil.ImageLoader
+import coil.ImageLoaderFactory
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
@@ -20,16 +24,20 @@ import com.firestream.chat.di.FlavorBootstrap
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltAndroidApp
-class FireStreamApp : Application(), Configuration.Provider {
+class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory {
 
     @Inject
     lateinit var appLifecycleObserver: AppLifecycleObserver
+
+    @Inject
+    lateinit var okHttpClient: OkHttpClient
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
@@ -50,6 +58,33 @@ class FireStreamApp : Application(), Configuration.Provider {
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
+            .build()
+
+    // Coil's app-wide ImageLoader. Without this, avatars run on Coil's defaults
+    // with no stable cache key, so they re-decode/re-fetch (and flash blank) on
+    // every appearance. A generous in-memory cache plus per-avatar cache keys
+    // (see rememberAvatarRequest) keeps each decoded avatar warm; the local-file
+    // layer (ProfileImageManager) still owns persistent/offline storage and
+    // change invalidation. respectCacheHeaders(false): Firebase Storage URLs are
+    // immutable per download token, so we never want Coil to revalidate — a
+    // changed photo rotates the token, which rotates our cache key instead.
+    // Called lazily on first Coil use (after onCreate), so okHttpClient is ready.
+    override fun newImageLoader(): ImageLoader =
+        ImageLoader.Builder(this)
+            .okHttpClient(okHttpClient)
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(50L * 1024 * 1024)
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .crossfade(true)
             .build()
 
     override fun onCreate() {
