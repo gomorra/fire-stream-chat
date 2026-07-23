@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **In-chat reaction cues.** When someone reacts to one of your messages while you're in the chat, you now get a visible cue instead of nothing. If the reacted message is on screen, its bubble briefly flashes the same pink highlight border you get when tapping a reaction notification. If it's scrolled off screen, a pink jump-to-reaction button appears in the bottom-right — sharing the scroll-to-bottom button's spot when you're at the bottom and lifting just above it when you're scrolled up — with its arrow pointing up or down toward the reacted message; tapping it scrolls there and flashes the highlight. Only reactions others add to your own messages trigger a cue. (`1e620db`)
+- **In-chat reaction cues.** When someone reacts to one of your messages while you're in the chat, you now get a visible cue instead of nothing. If the reacted message is on screen, its bubble briefly flashes the same pink highlight border you get when tapping a reaction notification. If it's scrolled off screen, a pink jump-to-reaction button appears in the bottom-right — sharing the scroll-to-bottom button's spot when you're at the bottom and lifting just above it when you're scrolled up — with its arrow pointing up or down toward the reacted message; tapping it scrolls there and flashes the highlight. Only reactions others add to your own messages trigger a cue. (`78c95b8`)
 
 ## [1.17.2] — 2026-07-23
 
