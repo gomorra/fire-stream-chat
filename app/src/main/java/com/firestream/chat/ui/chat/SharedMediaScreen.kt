@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.firestream.chat.ui.components.ScaledImageDecoder
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,18 +105,18 @@ internal fun SharedMediaScreen(
                 items(media) { item ->
                     // Prefer the on-disk full file when present, else the remote
                     // URL — the same synchronous resolution rememberMessageImageModel
-                    // and FullscreenImageViewer use. allowHardware(false) is the key
-                    // fix: it stops a fast-scrolled grid of large (old, uncompressed)
-                    // images from exhausting the process hardware-bitmap budget, which
-                    // was rendering those tiles black. Coil still downsamples to the
-                    // tile size from the layout constraints.
+                    // and FullscreenImageViewer use. decoderFactory routes the tile
+                    // through ImageDecoder (see ScaledImageDecoder): large old
+                    // originals subsample to a black bitmap under Coil's default
+                    // BitmapFactory path, which was rendering those tiles black while
+                    // the barely-downsampled fullscreen decode of the same image works.
                     val request = remember(item) {
                         val localFile = item.localUri
                             ?.let { File(it) }
                             ?.takeIf { it.exists() && it.isFile && it.canRead() }
                         ImageRequest.Builder(context)
                             .data(localFile ?: item.mediaUrl)
-                            .allowHardware(false)
+                            .decoderFactory(ScaledImageDecoder.Factory())
                             .crossfade(true)
                             .build()
                     }

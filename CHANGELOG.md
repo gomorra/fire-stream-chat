@@ -2,11 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.16.2] — 2026-07-22
+## [UNRELEASED] [1.16.2] — 2026-07-23
 
 ### Fixed
 
-- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`bc9d6bc`)
+- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. Coil's default decoder reached the small tile via a heavy power-of-two subsample, and that heavily-subsampled decode returns a black bitmap for certain large/camera-original images (the barely-downsampled fullscreen decode of the same image is fine, which is why tapping worked). Grid tiles now decode through Android's `ImageDecoder`, which does a proper high-quality scaled decode instead of the subsample that goes black — still a small, memory-cheap bitmap. Tiles also prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black on a genuine load failure. (`bc9d6bc`, `7574726`)
 
 ## [1.16.1] — 2026-07-22
 
