@@ -72,8 +72,11 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Pinch-to-zoom + caption before send |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer |
-| `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaScreen.kt` | Shared-media gallery in profile |
+| `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaScreen.kt` | Shared-media gallery (chat three-dot menu) |
 | `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaViewModel.kt` | Image stream for the gallery |
+| `app/src/main/java/com/firestream/chat/ui/components/SharedMediaTile.kt` | Shared grid-tile composable used by both `SharedMediaScreen` and `ProfileScreen` |
+| `app/src/main/java/com/firestream/chat/ui/components/ScaledImageDecoder.kt` | Coil decoder via Android `ImageDecoder` — avoids the `BitmapFactory` subsample-to-black bug on large old images |
+| `app/src/main/java/com/firestream/chat/ui/profile/ProfileScreen.kt` | Profile / chat-detail screen — its Shared Media section reuses `SharedMediaTile` |
 | `app/src/test/java/com/firestream/chat/data/util/MediaFileManagerTest.kt` | Local file path semantics |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryLocalUriTest.kt` | `localUri` Room round-trip |
 

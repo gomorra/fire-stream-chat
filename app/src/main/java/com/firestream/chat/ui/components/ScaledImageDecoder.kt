@@ -71,7 +71,12 @@ class ScaledImageDecoder(
             result: SourceResult,
             options: Options,
             imageLoader: ImageLoader,
-        ): Decoder = ScaledImageDecoder(result.source, options)
+        ): Decoder? {
+            // ImageDecoder can't decode video; let Coil fall through to its
+            // default (coil-video) decoder for a thumbnail-less shared video.
+            if (result.mimeType?.startsWith("video/") == true) return null
+            return ScaledImageDecoder(result.source, options)
+        }
     }
 }
 

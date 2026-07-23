@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.17.3] — 2026-07-23
+
+### Fixed
+
+- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`5815b28`)
+
 ## [1.17.2] — 2026-07-23
 
 ### Fixed
