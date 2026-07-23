@@ -3,8 +3,13 @@ package com.firestream.chat.ui.chat
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateCentroidSize
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -46,13 +51,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import coil.request.ImageRequest
 import java.io.File
+import kotlin.math.abs
 
 // Saver for the (remote url, local path) pair host screens keep in
 // rememberSaveable, so the viewer survives activity recreation (rotation)
@@ -209,7 +217,7 @@ private fun ZoomableImage(
                 )
             }
             .pointerInput(Unit) {
-                detectTransformGestures { centroid, pan, zoom, _ ->
+                detectZoomAndPan(isZoomed = { scale > 1f }) { centroid, pan, zoom ->
                     val newScale = (scale * zoom).coerceIn(1f, 10f)
                     if (newScale > 1f) {
                         // Keep the content point under the centroid fixed:
@@ -254,6 +262,63 @@ private fun ZoomableImage(
         } else {
             ErrorState(label = "No image data")
         }
+    }
+}
+
+/**
+ * Pinch-zoom / pan detector that cooperates with an enclosing [HorizontalPager].
+ *
+ * It is modeled on Compose's own `detectTransformGestures`, but only **consumes**
+ * pointer events when the image should own the gesture: a pinch (2+ pointers, so
+ * zoom works even starting from 1x) or a pan while already zoomed ([isZoomed]).
+ * A single-finger drag at 1x is left **unconsumed**, so — because pointer events
+ * reach descendants before ancestors in the main pass — the drag bubbles up to the
+ * pager and pages. The plain `detectTransformGestures` consumes every drag past
+ * touch slop, which swallowed the swipe and was why paging never triggered.
+ */
+private suspend fun PointerInputScope.detectZoomAndPan(
+    isZoomed: () -> Boolean,
+    onGesture: (centroid: Offset, pan: Offset, zoom: Float) -> Unit,
+) {
+    awaitEachGesture {
+        var zoom = 1f
+        var pan = Offset.Zero
+        var pastTouchSlop = false
+        val touchSlop = viewConfiguration.touchSlop
+
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val event = awaitPointerEvent()
+            val canceled = event.changes.any { it.isConsumed }
+            if (!canceled) {
+                val zoomChange = event.calculateZoom()
+                val panChange = event.calculatePan()
+
+                if (!pastTouchSlop) {
+                    zoom *= zoomChange
+                    pan += panChange
+                    val centroidSize = event.calculateCentroidSize(useCurrent = false)
+                    val zoomMotion = abs(1 - zoom) * centroidSize
+                    val panMotion = pan.getDistance()
+                    if (zoomMotion > touchSlop || panMotion > touchSlop) {
+                        pastTouchSlop = true
+                    }
+                }
+
+                if (pastTouchSlop) {
+                    // Own (and consume) the gesture only for a pinch or a pan while
+                    // zoomed; otherwise leave the single-finger 1x drag for the pager.
+                    val multiTouch = event.changes.count { it.pressed } > 1
+                    if (multiTouch || isZoomed()) {
+                        val centroid = event.calculateCentroid(useCurrent = false)
+                        if (zoomChange != 1f || panChange != Offset.Zero) {
+                            onGesture(centroid, panChange, zoomChange)
+                        }
+                        event.changes.forEach { if (it.positionChanged()) it.consume() }
+                    }
+                }
+            }
+        } while (!canceled && event.changes.any { it.pressed })
     }
 }
 
