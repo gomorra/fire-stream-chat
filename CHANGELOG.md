@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.17.2] — 2026-07-23
+
+### Fixed
+
+- **Fullscreen shared media now actually swipes.** The swipeable gallery added in 1.17.0 never paged — the fullscreen image's transform-gesture detector consumed every horizontal drag before the pager could see it, so left/right swipe did nothing. The image now only claims a gesture when it's a pinch or a pan while already zoomed; a plain single-finger swipe at 1× falls through to the pager and pages, while pinch-zoom, pan, double-tap zoom and tap-to-dismiss are unchanged. (`5315dad`)
+
 ## [1.17.1] — 2026-07-23
 
 ### Fixed
