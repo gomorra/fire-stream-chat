@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Image
@@ -185,6 +186,10 @@ private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.get
 // chronological space (0 = oldest). Since reversal is an involution, the
 // same function works both directions.
 private fun List<Message>.toReversedIndex(idx: Int): Int = lastIndex - idx
+
+// Which way the jump-to-reaction FAB's arrow points: UP if the reacted message
+// is above the current viewport, DOWN if below.
+private enum class ReactionFabDirection { UP, DOWN }
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -318,6 +323,11 @@ fun ChatScreen(
             highlightedMessageId = null
         }
     }
+
+    // A reaction landed on one of my messages that's currently off-screen: hold
+    // its id so the pink jump-to-reaction FAB appears. Cleared when the user taps
+    // the FAB or scrolls the message into view (see the auto-clear effect below).
+    var pendingReactionMessageId by remember { mutableStateOf<String?>(null) }
 
     // Deep-link jump target (reminder / FCM notification tap), collected as
     // state: a warm tap while this chat is already on top re-navigates
@@ -533,6 +543,39 @@ fun ChatScreen(
                 )
             }
         }
+    }
+
+    // A reaction on one of my messages arrived while I'm in the chat. If the
+    // reacted bubble is currently on screen, flash its pink border in place;
+    // otherwise remember it so the pink jump-to-reaction FAB can offer to scroll
+    // there. Reactions on already-visible messages take priority over any pending
+    // off-screen one.
+    LaunchedEffect(Unit) {
+        viewModel.reactionAlerts.collect { alert ->
+            val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == alert.messageId }
+            if (chronoIdx < 0) return@collect
+            val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
+            val onScreen = listState.layoutInfo.visibleItemsInfo.any { it.index == reversedIdx }
+            if (onScreen) {
+                highlightedMessageId = alert.messageId
+                if (pendingReactionMessageId == alert.messageId) pendingReactionMessageId = null
+            } else {
+                pendingReactionMessageId = alert.messageId
+            }
+        }
+    }
+
+    // Dismiss the jump-to-reaction FAB once its target scrolls into view on its own.
+    LaunchedEffect(pendingReactionMessageId) {
+        val id = pendingReactionMessageId ?: return@LaunchedEffect
+        snapshotFlow {
+            val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == id }
+            if (chronoIdx < 0) return@snapshotFlow true // message gone → drop the FAB
+            val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
+            listState.layoutInfo.visibleItemsInfo.any { it.index == reversedIdx }
+        }
+            .distinctUntilChanged()
+            .collect { visible -> if (visible) pendingReactionMessageId = null }
     }
 
     LaunchedEffect(uiState.composer.editingMessage) {
@@ -1262,6 +1305,54 @@ fun ChatScreen(
                                 Icon(
                                     imageVector = Icons.Default.KeyboardArrowDown,
                                     contentDescription = "Scroll to bottom"
+                                )
+                            }
+                        }
+
+                        // Jump-to-reaction FAB — appears when a reaction lands on one
+                        // of my messages that's off-screen. Always bottom-right: it
+                        // shares the scroll-to-bottom FAB's spot when that one is
+                        // hidden (at the bottom), and lifts above it when it's showing
+                        // (scrolled up). The arrow points up if the reacted message is
+                        // above the viewport, down if below.
+                        val pendingReactionDirection by remember(pendingReactionMessageId, uiState.messages.messages) {
+                            derivedStateOf {
+                                val id = pendingReactionMessageId ?: return@derivedStateOf null
+                                val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == id }
+                                if (chronoIdx < 0) return@derivedStateOf null
+                                val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
+                                val visInfo = listState.layoutInfo.visibleItemsInfo
+                                val firstVisible = visInfo.firstOrNull()?.index
+                                val lastVisible = visInfo.lastOrNull()?.index
+                                when {
+                                    firstVisible == null || lastVisible == null -> ReactionFabDirection.UP
+                                    reversedIdx > lastVisible -> ReactionFabDirection.UP    // older → above view
+                                    reversedIdx < firstVisible -> ReactionFabDirection.DOWN // newer → below view
+                                    else -> null // on screen; auto-clear effect will drop it
+                                }
+                            }
+                        }
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = pendingReactionDirection != null,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                // Lift above the scroll-to-bottom FAB when it's visible.
+                                .padding(end = 12.dp, bottom = if (showScrollToBottom) 72.dp else 12.dp),
+                            enter = fadeIn() + scaleIn(),
+                            exit = fadeOut() + scaleOut()
+                        ) {
+                            SmallFloatingActionButton(
+                                onClick = {
+                                    pendingReactionMessageId?.let { jumpToSourceMessage(it) }
+                                    pendingReactionMessageId = null
+                                },
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ) {
+                                Icon(
+                                    imageVector = if (pendingReactionDirection == ReactionFabDirection.DOWN)
+                                        Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                    contentDescription = "Jump to reaction"
                                 )
                             }
                         }

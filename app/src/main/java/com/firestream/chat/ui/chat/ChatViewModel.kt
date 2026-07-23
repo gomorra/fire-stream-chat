@@ -171,6 +171,10 @@ class ChatViewModel @Inject constructor(
         chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, reminderRepository,
         context, _uiState, viewModelScope
     )
+
+    // Reactions another user just added to one of my messages, forwarded to the
+    // chat screen so it can flash the bubble or show a jump-to-reaction FAB.
+    internal val reactionAlerts: SharedFlow<ReactionAlert> get() = messageLoader.reactionAlerts
     private val infoManager = ChatInfoManager(
         chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
         checkGroupPermissionUseCase, _uiState, viewModelScope
