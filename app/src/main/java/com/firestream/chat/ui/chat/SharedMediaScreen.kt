@@ -15,7 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BrokenImage
@@ -54,13 +54,11 @@ internal fun SharedMediaScreen(
 ) {
     val media by viewModel.media.collectAsState()
     val context = LocalContext.current
-    // Selected tile as (mediaUrl, localUri); reuses the fullscreen viewer's saver
-    // so the open image survives activity recreation (rotation).
-    var fullscreen by rememberSaveable(stateSaver = FullscreenImageArgsSaver) {
-        mutableStateOf<Pair<String?, String?>?>(null)
-    }
+    // Index into `media` of the tapped tile; the swipeable gallery pager opens
+    // there. Just the index so the open image survives activity recreation.
+    var fullscreenIndex by rememberSaveable { mutableStateOf<Int?>(null) }
 
-    BackHandler(enabled = fullscreen != null) { fullscreen = null }
+    BackHandler(enabled = fullscreenIndex != null) { fullscreenIndex = null }
 
     Scaffold(
         topBar = {
@@ -102,7 +100,7 @@ internal fun SharedMediaScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
-                items(media) { item ->
+                itemsIndexed(media) { index, item ->
                     // Prefer the on-disk full file when present, else the remote
                     // URL — the same synchronous resolution rememberMessageImageModel
                     // and FullscreenImageViewer use. decoderFactory routes the tile
@@ -129,19 +127,19 @@ internal fun SharedMediaScreen(
                             .fillMaxWidth()
                             .aspectRatio(1f)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { fullscreen = item.mediaUrl to item.localUri }
+                            .clickable { fullscreenIndex = index }
                     )
                 }
             }
         }
     }
 
-    AnimatedVisibility(visible = fullscreen != null, enter = fadeIn(), exit = fadeOut()) {
-        fullscreen?.let { (url, localUri) ->
-            FullscreenImageViewer(
-                imageUrl = url,
-                localUri = localUri,
-                onDismiss = { fullscreen = null },
+    AnimatedVisibility(visible = fullscreenIndex != null, enter = fadeIn(), exit = fadeOut()) {
+        fullscreenIndex?.let { idx ->
+            FullscreenImagePager(
+                items = media.map { FullscreenMediaItem(it.mediaUrl, it.localUri) },
+                initialIndex = idx,
+                onDismiss = { fullscreenIndex = null },
             )
         }
     }

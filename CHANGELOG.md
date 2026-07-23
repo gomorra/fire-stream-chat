@@ -2,11 +2,23 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.16.2] — 2026-07-23
+## [UNRELEASED] [1.17.1] — 2026-07-23
 
 ### Fixed
 
-- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. Coil's default decoder reached the small tile via a heavy power-of-two subsample, and that heavily-subsampled decode returns a black bitmap for certain large/camera-original images (the barely-downsampled fullscreen decode of the same image is fine, which is why tapping worked). Grid tiles now decode through Android's `ImageDecoder`, which does a proper high-quality scaled decode instead of the subsample that goes black — still a small, memory-cheap bitmap. Tiles also prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black on a genuine load failure. (`bc9d6bc`, `7574726`)
+- **Shared Media thumbnails — the real fix.** The 1.16.2 attempt (disabling hardware bitmaps) did not resolve this — tiles for large, old images still rendered black. The true cause is that Coil's default `BitmapFactory` decoder reaches the small tile via a heavy power-of-two subsample, and that heavily-subsampled decode returns a black bitmap for certain large/camera-original images (the barely-downsampled fullscreen decode of the same image is fine, which is why tapping always worked). Grid tiles now decode through Android's `ImageDecoder`, which does a proper high-quality scaled decode instead of the subsample that goes black — still a small, memory-cheap bitmap. (`394e402`)
+
+## [1.17.0] — 2026-07-22
+
+### Added
+
+- **Swipeable fullscreen shared media.** Opening a shared-media image fullscreen — from a chat's Shared Media screen or a contact's profile — now lets you swipe left/right through the whole gallery instead of dismissing and tapping the next thumbnail. Pinch/double-tap to zoom still works, and paging pauses while an image is zoomed so you can pan freely. (`cbe935c`)
+
+## [1.16.2] — 2026-07-22
+
+### Fixed
+
+- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`bc9d6bc`)
 
 ## [1.16.1] — 2026-07-22
 
