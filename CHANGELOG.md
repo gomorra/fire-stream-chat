@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Cached profiles no longer flicker when opening a chat.** Entering a 1:1 chat with someone you've seen before now paints their name and avatar instantly from the local cache, instead of briefly showing the generic "Chat" title and a blank person-icon avatar until the live profile stream round-trips from Firestore. The top bar is seeded straight from the Room cache on open and the live stream still keeps it current. (`<hash>`)
+- **Cached profiles no longer flicker when opening a chat.** Entering a 1:1 chat with someone you've seen before now paints their name and avatar instantly from the local cache, instead of briefly showing the generic "Chat" title and a blank person-icon avatar until the live profile stream round-trips from Firestore. The top bar is seeded straight from the Room cache on open and the live stream still keeps it current. (`aa10b3b`)
 
 ## [1.18.0] — 2026-07-23
 
