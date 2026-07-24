@@ -6,6 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
+- **Shared media stops re-downloading old images.** Opening a chat's Shared Media gallery now guarantees a durable on-disk copy of every image it shows, so remote-only pictures (older photos that were never saved locally, or whose cached file was evicted) no longer get re-fetched from the network on every re-entry. The backfill runs the moment the gallery opens and — unlike the background auto-download — ignores the auto-download preference, since the grid is already fetching those files over the network to render them. (`0805772`)
 - **Cached profiles no longer flicker when opening a chat.** Entering a 1:1 chat with someone you've seen before now paints their name and avatar instantly from the local cache, instead of briefly showing the generic "Chat" title and a blank person-icon avatar until the live profile stream round-trips from Firestore. The top bar is seeded straight from the Room cache on open and the live stream still keeps it current. (`aa10b3b`)
 
 ## [1.18.0] — 2026-07-23

@@ -1601,21 +1601,44 @@ class MessageRepositoryImpl @Inject constructor(
                 val option = preferencesDataStore.autoDownloadFlow.first()
                 if (option == AutoDownloadOption.NEVER) return@launch
                 if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) return@launch
-
-                val pending = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
-                for (entity in pending) {
-                    try {
-                        val url = entity.mediaUrl ?: continue
-                        val file = mediaFileManager.downloadAndSave(chatId, entity.id, url)
-                        messageDao.updateLocalUri(entity.id, file.absolutePath)
-                    } catch (e: Exception) {
-                        e.rethrowIfCancellation()
-                        Log.w(TAG, "downloadPendingMediaForChat: download failed for msg=${entity.id} chat=$chatId", e)
-                    }
-                }
+                savePendingMediaForChat(chatId)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 Log.w(TAG, "downloadPendingMediaForChat: scan failed for chat=$chatId", e)
+            }
+        }
+    }
+
+    override suspend fun ensureLocalCopiesForChat(chatId: String) {
+        // Unconditional counterpart of downloadPendingMediaForChat: no
+        // auto-download-preference gate, because the caller (the Shared Media
+        // gallery) is an explicit user view already fetching these files to
+        // render them — persisting a local copy just stops the re-download on
+        // every re-entry.
+        try {
+            savePendingMediaForChat(chatId)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w(TAG, "ensureLocalCopiesForChat: scan failed for chat=$chatId", e)
+        }
+    }
+
+    /**
+     * Download and persist a local copy for every pending media row in [chatId].
+     * Preference gating is the caller's responsibility; this helper always
+     * downloads. The per-row try/catch keeps one failed download from aborting
+     * the rest.
+     */
+    private suspend fun savePendingMediaForChat(chatId: String) {
+        val pending = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
+        for (entity in pending) {
+            try {
+                val url = entity.mediaUrl ?: continue
+                val file = mediaFileManager.downloadAndSave(chatId, entity.id, url)
+                messageDao.updateLocalUri(entity.id, file.absolutePath)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "savePendingMediaForChat: download failed for msg=${entity.id} chat=$chatId", e)
             }
         }
     }

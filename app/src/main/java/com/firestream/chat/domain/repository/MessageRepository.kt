@@ -43,6 +43,17 @@ interface MessageRepository {
     // Shared media
     fun getSharedMedia(chatId: String): Flow<List<Message>>
     fun getSharedMediaForUser(userId: String): Flow<List<Message>>
+    /**
+     * Persist a durable on-disk copy (populating `localUri`) of every
+     * not-yet-downloaded image/video/document in [chatId], **bypassing** the
+     * auto-download preference. Called when the user explicitly opens the Shared
+     * Media gallery: that grid already fetches these files over the network to
+     * render them, so saving a local copy stops the same (often large, old,
+     * remote-only) images being re-downloaded on every re-entry. Best-effort and
+     * idempotent — rows that already have a local file are skipped, and a single
+     * failed download never aborts the rest.
+     */
+    suspend fun ensureLocalCopiesForChat(chatId: String)
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
     // Lists
