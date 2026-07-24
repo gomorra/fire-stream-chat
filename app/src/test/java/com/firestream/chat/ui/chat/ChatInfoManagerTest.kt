@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.test.MainDispatcherRule
@@ -12,6 +13,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -78,6 +80,50 @@ class ChatInfoManagerTest {
         manager(recipientId = "").refreshBlockState()
 
         assertEquals(initialState, uiState.value)
+    }
+
+    // ── seedRecipientFromCache: instant top-bar paint on chat open ──────────────
+
+    @Test
+    fun `start seeds recipient name and avatar from cache before any live emission`() = runTest {
+        // A previously-seen recipient is in the local cache. observeUser is never
+        // emitted here, so a passing assertion proves the top bar paints from
+        // cache and does not depend on the async live stream.
+        userRepository.setUser(
+            User(uid = "recipient1", displayName = "Alice", avatarUrl = "https://x/a.jpg", localAvatarPath = "/cache/a.jpg")
+        )
+
+        manager().start()
+
+        assertEquals("Alice", uiState.value.session.chatName)
+        assertEquals("https://x/a.jpg", uiState.value.session.recipientAvatarUrl)
+        assertEquals("/cache/a.jpg", uiState.value.session.recipientLocalAvatarPath)
+    }
+
+    @Test
+    fun `live emission overrides the cache seed`() = runTest {
+        userRepository.setUser(User(uid = "recipient1", displayName = "Alice", avatarUrl = "https://x/a.jpg"))
+
+        manager().start()
+        assertEquals("Alice", uiState.value.session.chatName)
+
+        userRepository.emitUser(
+            User(uid = "recipient1", displayName = "Alice Updated", avatarUrl = "https://x/a2.jpg")
+        )
+
+        assertEquals("Alice Updated", uiState.value.session.chatName)
+        assertEquals("https://x/a2.jpg", uiState.value.session.recipientAvatarUrl)
+    }
+
+    @Test
+    fun `start does not seed for blank recipientId (group chats)`() = runTest {
+        // A cache entry exists under the empty id, but the group-chat path must
+        // not query it — chatName stays null until loadChatInfo fills it.
+        userRepository.setUser(User(uid = "", displayName = "ShouldNotAppear"))
+
+        manager(recipientId = "").start()
+
+        assertNull(uiState.value.session.chatName)
     }
 
     @Test

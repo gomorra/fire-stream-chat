@@ -23,6 +23,13 @@ class FakeUserRepository(
     /** When non-null, `isUserBlocked` throws this instead of consulting [blockedIds]. */
     var blockCheckError: Throwable? = null
 
+    /** Room-style cache backing [getUserById]; tests seed it via [setUser]. */
+    private val cachedUsers: MutableMap<String, User> = mutableMapOf()
+
+    fun setUser(user: User) {
+        cachedUsers[user.uid] = user
+    }
+
     private val userFlow = MutableSharedFlow<User>(
         replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -46,7 +53,8 @@ class FakeUserRepository(
     // --- Unused by current tests; throw to surface accidental usage. ---
 
     override suspend fun getUserById(userId: String): Result<User> =
-        error("FakeUserRepository.getUserById not implemented")
+        cachedUsers[userId]?.let { Result.success(it) }
+            ?: Result.failure(NoSuchElementException("No cached user for $userId"))
 
     override suspend fun uploadAvatar(uri: String): Result<String> =
         error("FakeUserRepository.uploadAvatar not implemented")

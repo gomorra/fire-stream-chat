@@ -54,8 +54,43 @@ internal class ChatInfoManager(
         loadChatInfo()
         observeRecentEmojis()
         if (recipientId.isNotBlank()) {
+            seedRecipientFromCache()
             observeRecipient()
             refreshBlockState()
+        }
+    }
+
+    /**
+     * Paint the recipient's cached name + avatar into the top bar on the first
+     * frame, so entering a chat is seamless instead of briefly showing the
+     * "Chat" title and the person-icon placeholder until the async observeUser
+     * (Firestore) round-trips.
+     *
+     * [UserRepository.getUserById] is Room-cache-first, so a previously-seen
+     * recipient resolves with no network call. This runs in its own coroutine,
+     * in parallel with [observeRecipient], so a cache miss (which falls back to
+     * a remote fetch) can never delay the live listener. The live stream stays
+     * authoritative — the guard yields to a live emission that already populated
+     * the bar so a stale cache value can't clobber fresh data.
+     */
+    private fun seedRecipientFromCache() {
+        scope.launch {
+            val cached = userRepository.getUserById(recipientId).getOrNull() ?: return@launch
+            _uiState.update { state ->
+                if (state.session.recipientAvatarUrl != null || !state.session.chatName.isNullOrBlank()) {
+                    state
+                } else {
+                    val avatar = ParticipantAvatar(cached.displayName, cached.avatarUrl, cached.localAvatarPath)
+                    state.copy(
+                        session = state.session.copy(
+                            chatName = cached.displayName.takeIf { it.isNotBlank() } ?: state.session.chatName,
+                            recipientAvatarUrl = cached.avatarUrl,
+                            recipientLocalAvatarPath = cached.localAvatarPath,
+                            participantAvatars = state.session.participantAvatars + (cached.uid to avatar),
+                        )
+                    )
+                }
+            }
         }
     }
 

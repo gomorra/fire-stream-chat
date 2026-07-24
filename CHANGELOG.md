@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.18.1] — 2026-07-24
+
+### Fixed
+
+- **Cached profiles no longer flicker when opening a chat.** Entering a 1:1 chat with someone you've seen before now paints their name and avatar instantly from the local cache, instead of briefly showing the generic "Chat" title and a blank person-icon avatar until the live profile stream round-trips from Firestore. The top bar is seeded straight from the Room cache on open and the live stream still keeps it current. (`<hash>`)
+
 ## [1.18.0] — 2026-07-23
 
 ### Added
