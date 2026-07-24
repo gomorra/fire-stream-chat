@@ -71,6 +71,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.chat.FullscreenImagePager
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import com.firestream.chat.ui.chat.FullscreenMediaItem
+import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
 import com.firestream.chat.ui.components.rememberAvatarRequest
@@ -601,17 +602,17 @@ private fun SharedMediaGrid(
             ) {
                 rowItems.forEachIndexed { colIndex, message ->
                     val index = rowIndex * 3 + colIndex
-                    AsyncImage(
-                        model = message.localUri ?: message.mediaThumbnailUrl ?: message.mediaUrl,
+                    SharedMediaTile(
+                        mediaUrl = message.mediaUrl,
+                        localUri = message.localUri,
+                        thumbnailUrl = message.mediaThumbnailUrl,
                         contentDescription = "Shared media",
-                        contentScale = ContentScale.Crop,
+                        enabled = message.mediaUrl != null || message.localUri != null,
                         modifier = Modifier
                             .weight(1f)
                             .aspectRatio(1f)
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable(enabled = message.mediaUrl != null || message.localUri != null) {
-                                onMediaClick(index)
-                            }
+                            .clip(RoundedCornerShape(4.dp)),
+                        onClick = { onMediaClick(index) },
                     )
                 }
                 repeat(3 - rowItems.size) {

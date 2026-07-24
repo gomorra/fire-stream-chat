@@ -8,6 +8,12 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **In-chat reaction cues.** When someone reacts to one of your messages while you're in the chat, you now get a visible cue instead of nothing. If the reacted message is on screen, its bubble briefly flashes the same pink highlight border you get when tapping a reaction notification. If it's scrolled off screen, a pink jump-to-reaction button appears in the bottom-right — sharing the scroll-to-bottom button's spot when you're at the bottom and lifting just above it when you're scrolled up — with its arrow pointing up or down toward the reacted message; tapping it scrolls there and flashes the highlight. Only reactions others add to your own messages trigger a cue. (`78c95b8`)
 
+## [1.17.3] — 2026-07-23
+
+### Fixed
+
+- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`5815b28`)
+
 ## [1.17.2] — 2026-07-23
 
 ### Fixed
