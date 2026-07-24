@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.test.fakes.FakeMessageRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,6 +40,7 @@ class SharedMediaViewModelTest {
     private fun viewModel() = SharedMediaViewModel(
         savedStateHandle = SavedStateHandle(mapOf("chatId" to chatId)),
         messageRepository = messageRepository,
+        appScope = CoroutineScope(testDispatcher),
     )
 
     private fun imageMessage(
@@ -98,5 +100,13 @@ class SharedMediaViewModelTest {
         assertEquals(listOf("new", "mid", "old").map { "https://cdn/$it.jpg" }, result.map { it.mediaUrl })
         assertEquals(listOf(null, "/data/mid.jpg", "/data/old.jpg"), result.map { it.localUri })
         job.cancel()
+    }
+
+    @Test
+    fun `opening the gallery triggers a local-copy backfill for the chat`() = runTest(testDispatcher) {
+        viewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf(chatId), messageRepository.ensureLocalCopiesCalls)
     }
 }

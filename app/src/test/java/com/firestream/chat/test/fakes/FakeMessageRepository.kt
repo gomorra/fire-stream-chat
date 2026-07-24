@@ -25,6 +25,7 @@ internal class FakeMessageRepository : MessageRepository {
     val markAsReadCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
     val markAsDeliveredCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
     val retryCalls: MutableList<Pair<String, String>> = mutableListOf()
+    val ensureLocalCopiesCalls: MutableList<String> = mutableListOf()
     var lastSentMessage: Message? = null
     var lastSentRecipientId: String? = null
     var lastSentMimeType: String? = null
@@ -41,6 +42,7 @@ internal class FakeMessageRepository : MessageRepository {
         markAsReadCalls.clear()
         markAsDeliveredCalls.clear()
         retryCalls.clear()
+        ensureLocalCopiesCalls.clear()
         lastSentMessage = null
         lastSentRecipientId = null
         lastSentMimeType = null
@@ -70,6 +72,10 @@ internal class FakeMessageRepository : MessageRepository {
         messagesByChat.map { byChat ->
             byChat.values.flatten().filter { it.senderId == userId && it.mediaUrl != null }
         }
+
+    override suspend fun ensureLocalCopiesForChat(chatId: String) {
+        ensureLocalCopiesCalls.add(chatId)
+    }
 
     override fun getCallLog(): Flow<List<Message>> = emptyFlow()
 

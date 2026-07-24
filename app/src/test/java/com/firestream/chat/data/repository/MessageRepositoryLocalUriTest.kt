@@ -156,6 +156,60 @@ class MessageRepositoryLocalUriTest {
         job.cancel()
     }
 
+    // ── ensureLocalCopiesForChat (Shared Media view backfill) ────────────────
+
+    @Test
+    fun `ensureLocalCopiesForChat downloads pending media even when auto-download is NEVER`() = runTest {
+        // Preference is NEVER (set in setUp) — the explicit gallery view must
+        // still persist local copies, unlike the auto-download path.
+        val pending = MessageEntity(
+            id = "msgA", chatId = "chat1", senderId = "sender1",
+            content = "", type = "IMAGE",
+            mediaUrl = "https://firebasestorage.example/msgA.jpg",
+            mediaThumbnailUrl = null, localUri = null,
+            status = "SENT", replyToId = null, timestamp = 1000L, editedAt = null,
+        )
+        coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(pending)
+        val savedFile = java.io.File("/storage/emulated/0/Pictures/FireStream Images/msgA.jpg")
+        coEvery {
+            mediaFileManager.downloadAndSave("chat1", "msgA", "https://firebasestorage.example/msgA.jpg")
+        } returns savedFile
+        coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
+
+        repository.ensureLocalCopiesForChat("chat1")
+        advanceUntilIdle()
+
+        coVerify { mediaFileManager.downloadAndSave("chat1", "msgA", "https://firebasestorage.example/msgA.jpg") }
+        coVerify { messageDao.updateLocalUri("msgA", savedFile.absolutePath) }
+    }
+
+    @Test
+    fun `ensureLocalCopiesForChat continues past a failed download`() = runTest {
+        val failing = MessageEntity(
+            id = "bad", chatId = "chat1", senderId = "s", content = "", type = "IMAGE",
+            mediaUrl = "https://firebasestorage.example/bad.jpg", mediaThumbnailUrl = null,
+            localUri = null, status = "SENT", replyToId = null, timestamp = 1L, editedAt = null,
+        )
+        val ok = MessageEntity(
+            id = "good", chatId = "chat1", senderId = "s", content = "", type = "IMAGE",
+            mediaUrl = "https://firebasestorage.example/good.jpg", mediaThumbnailUrl = null,
+            localUri = null, status = "SENT", replyToId = null, timestamp = 2L, editedAt = null,
+        )
+        coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(failing, ok)
+        coEvery {
+            mediaFileManager.downloadAndSave("chat1", "bad", any())
+        } throws java.io.IOException("network down")
+        val goodFile = java.io.File("/storage/emulated/0/Pictures/FireStream Images/good.jpg")
+        coEvery { mediaFileManager.downloadAndSave("chat1", "good", any()) } returns goodFile
+        coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
+
+        repository.ensureLocalCopiesForChat("chat1")
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { messageDao.updateLocalUri("bad", any()) }
+        coVerify { messageDao.updateLocalUri("good", goodFile.absolutePath) }
+    }
+
     @Test
     fun `existing incoming message with unchanged editedAt is skipped`() = runTest {
         val existingEntity = MessageEntity(
