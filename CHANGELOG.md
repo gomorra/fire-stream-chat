@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Reaction notifications now jump to the reacted message.** Tapping a push notification for a reaction (received while the app is closed or in the background) opened the chat but landed on the newest message instead of the one that was reacted to. The reaction's message id — already sent in the push payload — is now carried into the tap, so opening the notification scrolls straight to that bubble and highlights it with the pink frame, matching how message and reminder notifications already behave. (`PENDINGHASH`)
+- **Reaction notifications now jump to the reacted message.** Tapping a push notification for a reaction (received while the app is closed or in the background) opened the chat but landed on the newest message instead of the one that was reacted to. The reaction's message id — already sent in the push payload — is now carried into the tap, so opening the notification scrolls straight to that bubble and highlights it with the pink frame, matching how message and reminder notifications already behave. (`3f465c9`)
 
 ## [1.18.3] — 2026-07-24
 
