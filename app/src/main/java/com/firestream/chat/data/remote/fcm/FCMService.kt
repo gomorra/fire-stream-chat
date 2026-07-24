@@ -128,6 +128,9 @@ class FCMService : FirebaseMessagingService() {
         val messageAuthorId = data["messageAuthorId"]
         val chatType = data["chatType"] ?: "INDIVIDUAL"
         val chatName = data["chatName"]?.takeIf { it.isNotBlank() }
+        // The reacted message's id — carried into the tap intent so opening the
+        // notification scrolls to and highlights that bubble (not just the chat).
+        val messageId = data["messageId"]?.takeIf { it.isNotBlank() }
 
         // The user is watching this chat — they see the reaction appear live.
         if (activeChatTracker.isActive(chatId)) return
@@ -157,7 +160,8 @@ class FCMService : FirebaseMessagingService() {
                 senderName = senderName,
                 chatName = chatName,
                 isGroup = chatType == ChatType.GROUP.name,
-                overrideText = "Reacted $emoji to $target"
+                overrideText = "Reacted $emoji to $target",
+                messageId = messageId
             )
         }
     }
@@ -184,8 +188,9 @@ class FCMService : FirebaseMessagingService() {
         messageType: String = "TEXT",
         messageContent: String? = null,
         overrideText: String? = null,
-        // Latest message's id for this chat — carried into the tap intent so the
-        // chat scrolls to and highlights it. Null for reaction pushes (no target).
+        // Target message id carried into the tap intent so the chat scrolls to
+        // and highlights it: the latest message for message pushes, the reacted
+        // message for reaction pushes. Null when there is no specific target.
         messageId: String? = null
     ) {
         val channelId = "fire_stream_messages"

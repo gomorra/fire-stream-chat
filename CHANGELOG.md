@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [1.18.4] — 2026-07-24
+
+### Fixed
+
+- **Reaction notifications now jump to the reacted message.** Tapping a push notification for a reaction (received while the app is closed or in the background) opened the chat but landed on the newest message instead of the one that was reacted to. The reaction's message id — already sent in the push payload — is now carried into the tap, so opening the notification scrolls straight to that bubble and highlights it with the pink frame, matching how message and reminder notifications already behave. (`PENDINGHASH`)
+
 ## [1.18.3] — 2026-07-24
 
 ### Fixed
