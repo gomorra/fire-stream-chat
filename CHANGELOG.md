@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **In-chat reaction cues now actually fire.** The cues added in 1.18.0 (pink bubble flash / jump-to-reaction button) never triggered on-device: detection ran through a separate event channel that didn't reach the screen. Detection now runs directly off the rendered message list — the same state that already shows the reaction chip — so a reaction on your message reliably flashes the bubble when it's visible or raises the pink up/down button when it's off-screen. Also hardened against firing for pre-existing reactions when a chat first opens. (`PENDINGHASH`)
+- **In-chat reaction cues now actually fire.** The cues added in 1.18.0 (pink bubble flash / jump-to-reaction button) never triggered on-device: detection ran through a separate event channel that didn't reach the screen. Detection now runs directly off the rendered message list — the same state that already shows the reaction chip — so a reaction on your message reliably flashes the bubble when it's visible or raises the pink up/down button when it's off-screen. Also hardened against firing for pre-existing reactions when a chat first opens. (`4cc5b0b`)
 
 ## [1.18.2] — 2026-07-24
 
