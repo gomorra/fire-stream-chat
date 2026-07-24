@@ -5,10 +5,7 @@ import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
@@ -23,41 +20,6 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
-
-/**
- * A reaction that another user just added to (or changed on) one of the current
- * user's own messages, surfaced so the chat screen can highlight the bubble or
- * offer a jump-to-reaction affordance. [emoji] is the newly added/changed emoji.
- */
-internal data class ReactionAlert(val messageId: String, val emoji: String)
-
-/**
- * Diffs two message lists and returns the reactions that are *new to me*: a
- * reaction added or changed by someone other than [currentUserId] on a message
- * the current user authored. Mirrors the Cloud Function's added-or-changed
- * semantics (`diffAddedReactions`) — removals and the user's own reactions are
- * ignored. Pure and side-effect free so it can be unit-tested without Compose.
- */
-internal fun detectNewOwnReactions(
-    previous: List<Message>,
-    current: List<Message>,
-    currentUserId: String
-): List<ReactionAlert> {
-    if (currentUserId.isBlank()) return emptyList()
-    val previousById = previous.associateBy { it.id }
-    val alerts = mutableListOf<ReactionAlert>()
-    for (message in current) {
-        if (message.senderId != currentUserId) continue
-        val before = previousById[message.id]?.reactions ?: emptyMap()
-        var newest: String? = null
-        for ((reactorId, emoji) in message.reactions) {
-            if (reactorId == currentUserId) continue
-            if (before[reactorId] != emoji) newest = emoji // added or changed
-        }
-        if (newest != null) alerts += ReactionAlert(message.id, newest)
-    }
-    return alerts
-}
 
 internal class ChatMessageLoader(
     private val chatId: String,
@@ -78,15 +40,6 @@ internal class ChatMessageLoader(
     private var lastResetIncomingId: String? = null
     private val observedListIds = mutableSetOf<String>()
     private val processedUnshareIds = mutableSetOf<String>()
-
-    // Baseline for reaction-diff detection. `null` until the first emission so we
-    // don't fire alerts for reactions that already existed when the chat opened.
-    private var previousMessages: List<Message>? = null
-
-    // Side-channel: reactions another user just added to one of my messages, so
-    // ChatScreen can flash the bubble (if visible) or show a jump-to-reaction FAB.
-    private val _reactionAlerts = MutableSharedFlow<ReactionAlert>(extraBufferCapacity = 16)
-    val reactionAlerts: SharedFlow<ReactionAlert> = _reactionAlerts.asSharedFlow()
 
     fun start() {
         loadMessages()
@@ -159,25 +112,12 @@ internal class ChatMessageLoader(
                             session = it.session.copy(isLoading = false)
                         )
                     }
-                    emitReactionAlerts(messages)
                     maybeResetUnread()
                     markIncomingMessagesAsRead(messages)
                     fetchLinkPreviewsFor(messages)
                     observeListMessages(messages)
                 }
         }
-    }
-
-    // Compares each new message-list emission against the previous one and emits
-    // an alert for any reaction another user just added to one of my messages.
-    // The first emission only establishes the baseline (no alerts) so pre-existing
-    // reactions don't fire on chat open.
-    private fun emitReactionAlerts(messages: List<Message>) {
-        val previous = previousMessages
-        previousMessages = messages
-        if (previous == null) return
-        val currentUserId = _uiState.value.session.currentUserId
-        detectNewOwnReactions(previous, messages, currentUserId).forEach { _reactionAlerts.tryEmit(it) }
     }
 
     private fun markIncomingMessagesAsRead(messages: List<Message>) {

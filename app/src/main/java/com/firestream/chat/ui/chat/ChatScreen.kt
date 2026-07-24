@@ -545,24 +545,33 @@ fun ChatScreen(
         }
     }
 
-    // A reaction on one of my messages arrived while I'm in the chat. If the
-    // reacted bubble is currently on screen, flash its pink border in place;
-    // otherwise remember it so the pink jump-to-reaction FAB can offer to scroll
-    // there. Reactions on already-visible messages take priority over any pending
-    // off-screen one.
+    // Detect reactions others add to my messages while I'm in the chat, straight
+    // from the rendered message list (the same state that shows the reaction chip),
+    // so detection can't drift out of sync with what's on screen. On-screen reacted
+    // bubble → flash its pink border in place; off-screen → remember it so the pink
+    // jump-to-reaction FAB can offer to scroll there. The first emission only sets
+    // the baseline so pre-existing reactions don't fire when the chat opens.
+    var reactionBaseline by remember { mutableStateOf<List<Message>?>(null) }
     LaunchedEffect(Unit) {
-        viewModel.reactionAlerts.collect { alert ->
-            val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == alert.messageId }
-            if (chronoIdx < 0) return@collect
-            val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
-            val onScreen = listState.layoutInfo.visibleItemsInfo.any { it.index == reversedIdx }
-            if (onScreen) {
-                highlightedMessageId = alert.messageId
-                if (pendingReactionMessageId == alert.messageId) pendingReactionMessageId = null
-            } else {
-                pendingReactionMessageId = alert.messageId
+        snapshotFlow { uiState.messages.messages }
+            .collect { messages ->
+                val previous = reactionBaseline
+                reactionBaseline = messages
+                if (previous == null) return@collect
+                val alerts = detectNewOwnReactions(previous, messages, uiState.session.currentUserId)
+                for (alert in alerts) {
+                    val chronoIdx = messages.indexOfFirst { it.id == alert.messageId }
+                    if (chronoIdx < 0) continue
+                    val reversedIdx = messages.toReversedIndex(chronoIdx)
+                    val onScreen = listState.layoutInfo.visibleItemsInfo.any { it.index == reversedIdx }
+                    if (onScreen) {
+                        highlightedMessageId = alert.messageId
+                        if (pendingReactionMessageId == alert.messageId) pendingReactionMessageId = null
+                    } else {
+                        pendingReactionMessageId = alert.messageId
+                    }
+                }
             }
-        }
     }
 
     // Dismiss the jump-to-reaction FAB once its target scrolls into view on its own.

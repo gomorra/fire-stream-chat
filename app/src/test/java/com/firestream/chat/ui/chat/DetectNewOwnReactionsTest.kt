@@ -69,9 +69,19 @@ class DetectNewOwnReactionsTest {
     }
 
     @Test
-    fun `new message that arrives already carrying another user's reaction is detected`() {
+    fun `message not present in previous is treated as baseline, not a new reaction`() {
+        // Guards the empty→loaded transition on chat open: a message appearing for
+        // the first time must not fire alerts for reactions it already carries.
         val previous = emptyList<Message>()
         val current = listOf(msg("m1", me, mapOf(other to "🔥")))
+
+        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+    }
+
+    @Test
+    fun `reaction added to an already-loaded message is detected`() {
+        val previous = listOf(msg("m1", me), msg("m2", me, mapOf(other to "👍")))
+        val current = listOf(msg("m1", me, mapOf(other to "🔥")), msg("m2", me, mapOf(other to "👍")))
 
         assertEquals(listOf(ReactionAlert("m1", "🔥")), detectNewOwnReactions(previous, current, me))
     }
