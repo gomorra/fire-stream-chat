@@ -96,6 +96,15 @@ current lock-screen takeover may already be silently degraded.
   `EXTRA_SILENT` (keep it, or replace and derive — decided in Step 2).
 - `TimerAlarmReceiver`: apply `FLAG_INSISTENT` for `INSISTENT`, pick the channel for the
   chosen sound, and **add a "Dismiss" action** — mandatory, see R2.
+- **Auto-silence after N minutes — also mandatory, see R7.** `FLAG_INSISTENT` loops until
+  the notification is cancelled and has *no* framework timeout, so an unattended timer
+  would ring and vibrate forever. `NotificationCompat.Builder.setTimeoutAfter(ms)` cancels
+  the notification (and with it the insistent sound) without anyone present; confirm in the
+  Step 1 spike that cancelling really does stop the loop on this device. Default ~2–3 min
+  (AOSP DeskClock uses 10, which is long for a chat timer). Note the interaction with the
+  re-alert below: the timeout applies per posted notification, so each re-alert restarts it
+  — total worst-case noise is `timeout × (1 + re-alerts)`, and that product is what needs
+  to stay sane, not the individual value.
 - Channel work per Step 1's outcome (one channel per sound option, since sound is
   frozen per channel; created up-front in `FireStreamApp`).
 - **Fix the boot-restore losses** (`BootCompletedReceiver.kt:102-107`): the re-arm passes
@@ -151,6 +160,14 @@ Steps 3 and 4 both depend only on Step 2 and run in parallel. Step 5 waits for b
   tests.
 - **R5 — Room 23 → 24 wipes the local cache** via `fallbackToDestructiveMigration()`.
   Expected and normal here, but worth stating: messages re-sync from Firestore.
+- **R7 — Insistent ringing never stops on its own.** There is no framework cap: the loop
+  runs until the notification is cancelled. Unattended (phone in a bag, timer fired in
+  another room) that means indefinite ringing and vibration, and a flat battery. The
+  auto-silence in Step 3 is a hard requirement, not a nicety — this risk, not R2, is the
+  one that bites when nobody is there to press Dismiss. For reference, today's behaviour is
+  the opposite extreme: a 3.0s one-shot vibration (`[0, 1000, 500, 1000, 500]`, no repeat
+  index) plus a single non-looping play of the default alarm ringtone, then silence
+  forever, with no app-side timeout anywhere.
 - **R6 — `USE_FULL_SCREEN_INTENT` may not be granted** on Android 14+ sideloaded
   installs (Step 1 checks). If it isn't, the lock-screen takeover needs a settings
   deep-link prompt — scope that separately rather than folding it in.
