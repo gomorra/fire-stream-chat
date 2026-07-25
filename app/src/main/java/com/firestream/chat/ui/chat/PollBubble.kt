@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,7 +35,9 @@ fun PollBubble(
     isOwnMessage: Boolean,
     currentUserId: String,
     onVote: (optionIds: List<String>) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    // Pink jump-target frame, same as MessageBubble's — see jumpHighlightBorderColor.
+    isHighlighted: Boolean = false
 ) {
     val poll = message.pollData ?: return
     val isDark = com.firestream.chat.ui.theme.LocalIsDarkTheme.current
@@ -48,6 +51,13 @@ fun PollBubble(
     val totalVotes = remember(poll) { poll.options.sumOf { it.voterIds.size } }
     val hasVoted = remember(poll, currentUserId) { poll.options.any { it.voterIds.contains(currentUserId) } }
 
+    val bubbleShape = RoundedCornerShape(
+        topStart = 16.dp,
+        topEnd = 16.dp,
+        bottomStart = if (isOwnMessage) 16.dp else 4.dp,
+        bottomEnd = if (isOwnMessage) 4.dp else 16.dp
+    )
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment
@@ -55,14 +65,11 @@ fun PollBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = 300.dp)
-                .background(
-                    color = bubbleColor,
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                        bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                    )
+                .background(color = bubbleColor, shape = bubbleShape)
+                .border(
+                    width = 2.dp,
+                    color = jumpHighlightBorderColor(isHighlighted),
+                    shape = bubbleShape
                 )
                 .padding(12.dp)
         ) {

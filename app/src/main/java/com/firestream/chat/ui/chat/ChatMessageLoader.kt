@@ -119,7 +119,7 @@ internal class ChatMessageLoader(
                                 // Keep an unconsumed cue alive: ChatScreen acts on it a
                                 // frame later, and read-receipt/status writes emit again
                                 // in between — clobbering it here would drop the cue.
-                                newOwnReaction = cue ?: it.messages.newOwnReaction
+                                newIncomingReaction = cue ?: it.messages.newIncomingReaction
                             ),
                             session = it.session.copy(isLoading = false)
                         )
@@ -134,8 +134,8 @@ internal class ChatMessageLoader(
 
     /**
      * Diffs [messages] against the previous emission and returns the newest reaction
-     * another user just added to one of my messages, or `null`. The first emission
-     * only establishes the baseline.
+     * another user just added to any message in this chat, or `null`. The first
+     * emission only establishes the baseline.
      *
      * When several arrive in one emission we surface the last: one cue at a time is
      * all the UI can point at, and the newest is the one worth jumping to.
@@ -144,7 +144,7 @@ internal class ChatMessageLoader(
         val previous = previousMessages
         previousMessages = messages
         if (previous == null) return null
-        val cue = detectNewOwnReactions(previous, messages, _uiState.value.session.currentUserId)
+        val cue = detectNewIncomingReactions(previous, messages, _uiState.value.session.currentUserId)
             .lastOrNull()
         if (cue != null) Log.d(TAG, "reaction cue: chat=$chatId msg=${cue.messageId} emoji=${cue.emoji}")
         return cue
@@ -152,7 +152,7 @@ internal class ChatMessageLoader(
 
     /** Clears the cue once ChatScreen has flashed the bubble or raised the FAB. */
     fun consumeReactionCue() {
-        _uiState.update { it.copy(messages = it.messages.copy(newOwnReaction = null)) }
+        _uiState.update { it.copy(messages = it.messages.copy(newIncomingReaction = null)) }
     }
 
     private fun markIncomingMessagesAsRead(messages: List<Message>) {

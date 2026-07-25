@@ -6,11 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Unit tests for [detectNewOwnReactions] — the pure diff that surfaces reactions
+ * Unit tests for [detectNewIncomingReactions] — the pure diff that surfaces reactions
  * another user just added to one of MY messages, driving the in-chat highlight /
  * jump-to-reaction FAB.
  */
-class DetectNewOwnReactionsTest {
+class DetectNewIncomingReactionsTest {
 
     private val me = "me"
     private val other = "other"
@@ -23,7 +23,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me))
         val current = listOf(msg("m1", me, mapOf(other to "❤️")))
 
-        val alerts = detectNewOwnReactions(previous, current, me)
+        val alerts = detectNewIncomingReactions(previous, current, me)
 
         assertEquals(listOf(ReactionAlert("m1", "❤️")), alerts)
     }
@@ -33,15 +33,35 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me))
         val current = listOf(msg("m1", me, mapOf(me to "👍")))
 
-        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, me).isEmpty())
     }
 
     @Test
-    fun `reaction on someone else's message is ignored`() {
+    fun `my own reaction on someone else's message is ignored`() {
         val previous = listOf(msg("m1", other))
         val current = listOf(msg("m1", other, mapOf(me to "👍")))
 
-        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, me).isEmpty())
+    }
+
+    @Test
+    fun `another user reacting to their own message is detected`() {
+        // Direction must not matter: reactions on the other side's bubbles are chat
+        // activity worth a cue too. Restricting this to my own messages is exactly
+        // what made half the reactions pass silently through 1.18.5.
+        val previous = listOf(msg("m1", other))
+        val current = listOf(msg("m1", other, mapOf(other to "👍")))
+
+        assertEquals(listOf(ReactionAlert("m1", "👍")), detectNewIncomingReactions(previous, current, me))
+    }
+
+    @Test
+    fun `a third party reacting to someone else's message is detected`() {
+        val third = "third"
+        val previous = listOf(msg("m1", other))
+        val current = listOf(msg("m1", other, mapOf(third to "🎉")))
+
+        assertEquals(listOf(ReactionAlert("m1", "🎉")), detectNewIncomingReactions(previous, current, me))
     }
 
     @Test
@@ -49,7 +69,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me, mapOf(other to "👍")))
         val current = listOf(msg("m1", me, mapOf(other to "❤️")))
 
-        assertEquals(listOf(ReactionAlert("m1", "❤️")), detectNewOwnReactions(previous, current, me))
+        assertEquals(listOf(ReactionAlert("m1", "❤️")), detectNewIncomingReactions(previous, current, me))
     }
 
     @Test
@@ -57,7 +77,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me, mapOf(other to "👍")))
         val current = listOf(msg("m1", me))
 
-        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, me).isEmpty())
     }
 
     @Test
@@ -65,7 +85,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me, mapOf(other to "👍")))
         val current = listOf(msg("m1", me, mapOf(other to "👍")))
 
-        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, me).isEmpty())
     }
 
     @Test
@@ -75,7 +95,7 @@ class DetectNewOwnReactionsTest {
         val previous = emptyList<Message>()
         val current = listOf(msg("m1", me, mapOf(other to "🔥")))
 
-        assertTrue(detectNewOwnReactions(previous, current, me).isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, me).isEmpty())
     }
 
     @Test
@@ -83,7 +103,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", me), msg("m2", me, mapOf(other to "👍")))
         val current = listOf(msg("m1", me, mapOf(other to "🔥")), msg("m2", me, mapOf(other to "👍")))
 
-        assertEquals(listOf(ReactionAlert("m1", "🔥")), detectNewOwnReactions(previous, current, me))
+        assertEquals(listOf(ReactionAlert("m1", "🔥")), detectNewIncomingReactions(previous, current, me))
     }
 
     @Test
@@ -91,7 +111,7 @@ class DetectNewOwnReactionsTest {
         val previous = listOf(msg("m1", ""))
         val current = listOf(msg("m1", "", mapOf(other to "👍")))
 
-        assertTrue(detectNewOwnReactions(previous, current, "").isEmpty())
+        assertTrue(detectNewIncomingReactions(previous, current, "").isEmpty())
     }
 
     @Test
@@ -102,7 +122,7 @@ class DetectNewOwnReactionsTest {
             msg("m2", me, mapOf(other to "😂")),
         )
 
-        val alerts = detectNewOwnReactions(previous, current, me)
+        val alerts = detectNewIncomingReactions(previous, current, me)
 
         assertEquals(setOf(ReactionAlert("m1", "❤️"), ReactionAlert("m2", "😂")), alerts.toSet())
     }

@@ -2,6 +2,7 @@ package com.firestream.chat.ui.chat
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,7 +52,9 @@ internal fun ListBubble(
     currentUserId: String,
     onClick: () -> Unit,
     onUnsharedListClick: () -> Unit = {},
-    onLongPress: () -> Unit = {}
+    onLongPress: () -> Unit = {},
+    // Pink jump-target frame, same as MessageBubble's — see jumpHighlightBorderColor.
+    isHighlighted: Boolean = false
 ) {
     val isDark = LocalIsDarkTheme.current
     val bubbleColor = if (isOwnMessage) {
@@ -60,6 +63,13 @@ internal fun ListBubble(
     val textColor = MaterialTheme.colorScheme.onSurface
     val alignment = if (isOwnMessage) Alignment.End else Alignment.Start
 
+    val bubbleShape = RoundedCornerShape(
+        topStart = 16.dp,
+        topEnd = 16.dp,
+        bottomStart = if (isOwnMessage) 16.dp else 4.dp,
+        bottomEnd = if (isOwnMessage) 4.dp else 16.dp
+    )
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment
@@ -67,14 +77,11 @@ internal fun ListBubble(
         Box(
             modifier = Modifier
                 .widthIn(max = 300.dp)
-                .background(
-                    color = bubbleColor,
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (isOwnMessage) 16.dp else 4.dp,
-                        bottomEnd = if (isOwnMessage) 4.dp else 16.dp
-                    )
+                .background(color = bubbleColor, shape = bubbleShape)
+                .border(
+                    width = 2.dp,
+                    color = jumpHighlightBorderColor(isHighlighted),
+                    shape = bubbleShape
                 )
                 .combinedClickable(
                     onClick = {

@@ -202,6 +202,25 @@ internal data class MessageBubbleCallbacks(
     val onCancelReminder: (() -> Unit)? = null,
 )
 
+/**
+ * Animated border colour for the ~1.5s "jump target" frame — the pink flash shown
+ * after scrolling to a message via a reply preview, a reaction cue, or a notification
+ * tap. Fades in fast (200ms) and out slowly (600ms).
+ *
+ * Shared so every bubble type flashes identically: [ListBubble] and [PollBubble]
+ * render their own surfaces and never receive [MessageBubbleState], so they used to
+ * be the only types that arrived from a jump with no highlight at all.
+ */
+@Composable
+internal fun jumpHighlightBorderColor(isHighlighted: Boolean): Color {
+    val color by animateColorAsState(
+        targetValue = if (isHighlighted) MaterialTheme.colorScheme.tertiary else Color.Transparent,
+        animationSpec = tween(durationMillis = if (isHighlighted) 200 else 600),
+        label = "jumpToSourceHighlight"
+    )
+    return color
+}
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalAnimationApi::class)
 @Composable
 internal fun MessageBubble(
@@ -295,11 +314,7 @@ internal fun MessageBubble(
             },
         horizontalAlignment = if (isOwnMessage) Alignment.End else Alignment.Start
     ) {
-        val highlightColor by animateColorAsState(
-            targetValue = if (state.isHighlighted) MaterialTheme.colorScheme.tertiary else Color.Transparent,
-            animationSpec = tween(durationMillis = if (state.isHighlighted) 200 else 600),
-            label = "jumpToSourceHighlight"
-        )
+        val highlightColor = jumpHighlightBorderColor(state.isHighlighted)
         Box {
             Box(
                 modifier = Modifier

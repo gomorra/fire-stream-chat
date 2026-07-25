@@ -28,11 +28,11 @@ import org.junit.Test
 
 /**
  * Covers the *delivery* of in-chat reaction cues: that a reaction another user adds
- * to one of my messages lands on `ChatUiState.messages.newOwnReaction`, on the same
+ * to any message in the chat lands on `ChatUiState.messages.newIncomingReaction`, on the same
  * slice as the message list, so ChatScreen can flash the bubble or raise the
  * jump-to-reaction FAB.
  *
- * The diff itself is covered by [DetectNewOwnReactionsTest]; that logic was already
+ * The diff itself is covered by [DetectNewIncomingReactionsTest]; that logic was already
  * correct and unit-tested while the feature was still dead on-device twice over
  * (1.18.0 shipped it over a loader SharedFlow, 1.18.3 over a ChatScreen snapshotFlow
  * baseline — neither reached the screen). Delivery is the part that kept breaking, so
@@ -96,7 +96,7 @@ class ChatMessageLoaderReactionCueTest {
     private fun msg(id: String, senderId: String, reactions: Map<String, String> = emptyMap()) =
         Message(id = id, chatId = "chat1", senderId = senderId, reactions = reactions)
 
-    private val cue get() = uiState.value.messages.newOwnReaction
+    private val cue get() = uiState.value.messages.newIncomingReaction
 
     @Test
     fun `reaction from another user on my message lands on the messages slice`() = runTest {
@@ -124,7 +124,7 @@ class ChatMessageLoaderReactionCueTest {
         advanceUntilIdle()
 
         val slice = uiState.value.messages
-        assertEquals(ReactionAlert("m1", "🔥"), slice.newOwnReaction)
+        assertEquals(ReactionAlert("m1", "🔥"), slice.newIncomingReaction)
         assertEquals(mapOf(other to "🔥"), slice.messages.single { it.id == "m1" }.reactions)
     }
 
@@ -153,7 +153,7 @@ class ChatMessageLoaderReactionCueTest {
     }
 
     @Test
-    fun `reaction on someone else's message fires no cue`() = runTest {
+    fun `my own reaction on someone else's message fires no cue`() = runTest {
         startLoader()
         messageRepository.emit("chat1", listOf(msg("m1", other)))
         advanceUntilIdle()
@@ -162,6 +162,19 @@ class ChatMessageLoaderReactionCueTest {
         advanceUntilIdle()
 
         assertNull(cue)
+    }
+
+    @Test
+    fun `reaction on the other user's own message fires a cue`() = runTest {
+        // Either direction must raise a cue — not just reactions on my own bubbles.
+        startLoader()
+        messageRepository.emit("chat1", listOf(msg("m1", other)))
+        advanceUntilIdle()
+
+        messageRepository.emit("chat1", listOf(msg("m1", other, mapOf(other to "👍"))))
+        advanceUntilIdle()
+
+        assertEquals(ReactionAlert("m1", "👍"), cue)
     }
 
     @Test

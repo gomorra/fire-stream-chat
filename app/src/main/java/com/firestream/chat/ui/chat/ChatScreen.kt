@@ -343,8 +343,15 @@ fun ChatScreen(
     // Scroll the LazyColumn (reverseLayout=true) to `reversedIdx` and nudge the
     // item to the centre of the viewport. One frame of delay lets the scroll settle
     // before reading itemInfo.
-    suspend fun scrollToAndCenter(reversedIdx: Int) {
-        listState.scrollToItem(reversedIdx)
+    //
+    // [animate] controls the travel to the item: true glides via animateScrollToItem
+    // — the same motion as the scroll-to-bottom FAB — false snaps instantly. Only the
+    // notification open snaps, because the chat is still settling there and an
+    // animated sweep away from the just-restored position reads as a glitch. The
+    // centring nudge is always animated.
+    suspend fun scrollToAndCenter(reversedIdx: Int, animate: Boolean = true) {
+        if (animate) listState.animateScrollToItem(reversedIdx)
+        else listState.scrollToItem(reversedIdx)
         delay(16)
         val viewportHeight = listState.layoutInfo.viewportSize.height
         val itemInfo = listState.layoutInfo.visibleItemsInfo
@@ -354,12 +361,21 @@ fun ChatScreen(
         }
     }
 
-    fun jumpToSourceMessage(sourceId: String) {
+    fun jumpToSourceMessage(sourceId: String, animate: Boolean = true) {
         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
         if (chronoIdx < 0) return
-        highlightedMessageId = sourceId
         scope.launch {
-            scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
+            // Flash on arrival, not at tap time: the highlight window is only 1.5s, so
+            // starting it before the travel spends most of it scrolling and the user
+            // reaches an already-faded bubble. The `finally` keeps the cue even when
+            // the travel is cut short — grabbing the list cancels a programmatic
+            // scroll, and an interrupted jump with no flash at all leaves the user
+            // with nothing to look at.
+            try {
+                scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx), animate)
+            } finally {
+                highlightedMessageId = sourceId
+            }
         }
     }
 
@@ -471,7 +487,7 @@ fun ChatScreen(
         }
         targetJumpConsumed = true
         if (found == true) {
-            jumpToSourceMessage(targetId)
+            jumpToSourceMessage(targetId, animate = false)
         } else {
             snackbarHostState.showSnackbar(
                 "Message no longer available",
@@ -550,9 +566,9 @@ fun ChatScreen(
     // ChatMessageLoader.detectReactionCue). On-screen reacted bubble → flash its
     // pink border in place; off-screen → hold the id so the pink jump-to-reaction
     // FAB can offer to scroll there.
-    val newOwnReaction = uiState.messages.newOwnReaction
-    LaunchedEffect(newOwnReaction) {
-        val alert = newOwnReaction ?: return@LaunchedEffect
+    val newIncomingReaction = uiState.messages.newIncomingReaction
+    LaunchedEffect(newIncomingReaction) {
+        val alert = newIncomingReaction ?: return@LaunchedEffect
         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == alert.messageId }
         if (chronoIdx < 0) {
             viewModel.consumeReactionCue()
@@ -1146,7 +1162,8 @@ fun ChatScreen(
                                         isOwnMessage = isOwn,
                                         currentUserId = uiState.session.currentUserId,
                                         onVote = { optionIds -> viewModel.votePoll(message.id, optionIds) },
-                                        onClose = { viewModel.closePoll(message.id) }
+                                        onClose = { viewModel.closePoll(message.id) },
+                                        isHighlighted = highlightedMessageId == message.id
                                     )
                                 } else if (message.type == MessageType.LIST) {
                                     ListBubble(
@@ -1166,7 +1183,8 @@ fun ChatScreen(
                                                 )
                                             }
                                         },
-                                        onLongPress = { reactionTargetMessage = message }
+                                        onLongPress = { reactionTargetMessage = message },
+                                        isHighlighted = highlightedMessageId == message.id
                                     )
                                 } else {
                                     Box {

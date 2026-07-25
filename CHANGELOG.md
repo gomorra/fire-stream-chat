@@ -7,6 +7,12 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **Jump-to-reaction button now actually appears.** Third attempt at the in-chat reaction cues from 1.18.0: when someone reacted to one of your messages while you had the chat open, the pink jump-to-reaction button never showed up — 1.18.0 delivered the cue over a side channel and 1.18.3 rebuilt it as an on-screen diff, and neither reached the button. The cue now travels on the message state itself, alongside the very list it was detected from — the same state that draws the reaction chip you can already see — and the screen waits for the message list to be measured before deciding whether the reacted bubble is visible (flash it in place) or off-screen (raise the button). Previously that decision could be made before anything had been measured, which read as "visible" and silently swallowed the cue. Delivery now has direct test coverage, which is what was missing both earlier times. (`dc1dd24`)
+- **Jumping to a message now flashes every bubble type.** Tapping the pink jump-to-reaction button, a reply preview, or a reaction notification highlighted the destination with the pink frame only for ordinary bubbles — shared lists and polls render their own surfaces and never received the highlight at all, so jumping to one landed with no visual cue. All bubble types now flash identically. The 1.5-second flash also starts on arrival instead of at the moment you tap, so the whole window is spent looking at the message rather than being partly consumed by the scroll. (`PENDINGHASH`)
+- **The jump-to-reaction button scrolls smoothly.** It snapped to the reacted message instead of gliding, unlike the scroll-to-bottom button right beside it. Both now use the same animated scroll. Opening a chat from a notification still positions instantly, where an animated sweep away from the just-restored position would look like a glitch. (`PENDINGHASH`)
+
+### Changed
+
+- **Reaction cues now fire in both directions.** A reaction only raised an in-chat cue when someone reacted to a message *you* sent; reactions on the other person's own messages passed silently, even though the push notification for them was already being sent in one-to-one chats. Any reaction another person adds now raises the cue regardless of whose message it landed on, so the in-chat behaviour matches the notification. Your own reactions still never cue you. (`PENDINGHASH`)
 
 ## [1.18.4] — 2026-07-24
 
