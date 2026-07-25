@@ -72,11 +72,7 @@ class TimerAlarmReceiver : BroadcastReceiver() {
         otherUserId: String?,
         caption: String?,
     ) {
-        val openChatIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
-            if (otherUserId != null) putExtra(MainActivity.EXTRA_SENDER_ID, otherUserId)
-        }
+        val openChatIntent = buildOpenChatIntent(context, messageId, chatId, otherUserId)
         val openChatPending = PendingIntent.getActivity(
             context,
             messageId.hashCode(),
@@ -103,5 +99,31 @@ class TimerAlarmReceiver : BroadcastReceiver() {
 
     companion object {
         private const val NOTIFICATION_TAG: String = "timer_alarm"
+
+        /**
+         * Intent behind the notification tap: open [chatId] **and** hand the chat
+         * screen a jump target so it scrolls to the timer bubble and flashes it
+         * (`ChatScreen`'s deep-link effect, same 1.5s highlight the reply-preview
+         * and reminder jumps use).
+         *
+         * [MainActivity.EXTRA_MESSAGE_ID] is what makes it a *targeted* open —
+         * without it the deep link only carried chat + sender, so a tap landed on
+         * the newest message and the timer that just rang was left unmarked.
+         *
+         * `otherUserId` is still conditional: `MainActivity.deepLinkFromIntent`
+         * requires a sender id, so a timer scheduled with none (empty recipient)
+         * opens the app without navigating — pre-existing, shared with the FCM path.
+         */
+        internal fun buildOpenChatIntent(
+            context: Context,
+            messageId: String,
+            chatId: String,
+            otherUserId: String?,
+        ): Intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
+            putExtra(MainActivity.EXTRA_MESSAGE_ID, messageId)
+            if (otherUserId != null) putExtra(MainActivity.EXTRA_SENDER_ID, otherUserId)
+        }
     }
 }
