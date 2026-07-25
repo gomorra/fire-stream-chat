@@ -186,16 +186,12 @@ private fun AlarmRow(state: TimerSetWidgetState) {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         FieldLabel("Alarm")
-        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-            TimerAlarmStyle.entries.forEachIndexed { index, option ->
-                SegmentedButton(
-                    selected = state.style == option,
-                    onClick = { state.style = option },
-                    shape = SegmentedButtonDefaults.itemShape(index, TimerAlarmStyle.entries.size),
-                    label = { Text(option.label, maxLines = 1) },
-                )
-            }
-        }
+        SegmentedChoiceRow(
+            options = TimerAlarmStyle.entries,
+            selected = state.style,
+            onSelect = { state.style = it },
+            label = { it.label },
+        )
 
         AnimatedVisibility(
             visible = state.isSoundPickerVisible,
@@ -204,16 +200,12 @@ private fun AlarmRow(state: TimerSetWidgetState) {
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FieldLabel("Sound")
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    TimerAlarmSound.entries.forEachIndexed { index, option ->
-                        SegmentedButton(
-                            selected = state.sound == option,
-                            onClick = { state.sound = option },
-                            shape = SegmentedButtonDefaults.itemShape(index, TimerAlarmSound.entries.size),
-                            label = { Text(option.label, maxLines = 1) },
-                        )
-                    }
-                }
+                SegmentedChoiceRow(
+                    options = TimerAlarmSound.entries,
+                    selected = state.sound,
+                    onSelect = { state.sound = it },
+                    label = { it.label },
+                )
             }
         }
 
@@ -222,6 +214,26 @@ private fun AlarmRow(state: TimerSetWidgetState) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/** Full-width single-choice row over a small fixed option set. */
+@Composable
+private fun <T> SegmentedChoiceRow(
+    options: List<T>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    label: (T) -> String,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = selected == option,
+                onClick = { onSelect(option) },
+                shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                label = { Text(label(option), maxLines = 1) },
+            )
+        }
     }
 }
 

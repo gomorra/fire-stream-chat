@@ -52,24 +52,10 @@ data class Message(
     val timerState: TimerState? = null,
     // Frozen remaining ms when state = PAUSED; null while RUNNING or in a terminal state.
     val timerRemainingMs: Long? = null,
-    // When true the alarm notification is suppressed on completion (bubble still flips to COMPLETED).
-    // Superseded by timerAlarmStyle; still written (and read as the fallback) so clients
-    // that predate the enum keep honouring silent timers. Read via alarmStyle, not directly.
-    val timerSilent: Boolean = false,
-    // How the alarm rings, and with which sound. Null on messages written before these
-    // fields existed — resolve through [alarmStyle] / [alarmSound], never raw.
-    val timerAlarmStyle: TimerAlarmStyle? = null,
-    val timerAlarmSound: TimerAlarmSound? = null,
-) {
-    /**
-     * The style to actually ring with: the explicit choice when present, else
-     * derived from the legacy [timerSilent] boolean. Every consumer should read
-     * this rather than [timerAlarmStyle], so pre-enum messages still ring right.
-     */
-    val alarmStyle: TimerAlarmStyle
-        get() = timerAlarmStyle ?: TimerAlarmStyle.fromLegacySilent(timerSilent)
-
-    /** The sound to ring with; legacy messages fall back to the default alarm. */
-    val alarmSound: TimerAlarmSound
-        get() = timerAlarmSound ?: TimerAlarmSound.DEFAULT
-}
+    // How the alarm rings on completion, and with which sound — the sender's choice,
+    // synced to every participant. Always resolved: the wire format's older
+    // `timerSilent` boolean is folded in at the data boundary by
+    // `resolveTimerAlarmStyle`, so nothing above that layer sees a legacy timer.
+    val timerAlarmStyle: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
+    val timerAlarmSound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
+)

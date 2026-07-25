@@ -279,6 +279,16 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### "Who is the other participant" is reimplemented at ~11 call sites
+
+**The smell.** `participants.filter { it != currentUserId }` (or `.firstOrNull { … }`) appears independently in at least `ChatUtils.kt:106`, `ChatListViewModel.kt:122`, `CallsViewModel.kt:76`, `ListShareSheet.kt:57/91`, `ForwardChatPicker.kt:48`, and now `BootRestoreLogic.resolveOtherUserId`. Flagged by the altitude reviewer during the timer-alarm work (2026-07-25). The copies do not agree on group chats: every prior one takes `firstOrNull` (an arbitrary "other" member), while the new one takes `singleOrNull` (null unless it's genuinely 1:1). That divergence is deliberate where it landed — a deep link needs the *real* 1:1 partner, and `firstOrNull` on a group would produce a wrong-but-plausible sender id that navigates to the wrong place — but it does mean the codebase now answers the same question two ways.
+
+**Why we're not fixing it now.** The right form is one `Chat.otherParticipantId(currentUserId)` on the domain model with the group semantics decided once. That is a ~11-site refactor spanning ViewModels, UI pickers, and data — well outside the timer diff that surfaced it, and each site needs a judgement call about which semantics it actually wanted, which is exactly the kind of thing that goes wrong when done in bulk without per-site review.
+
+**When to revisit.** Next time a bug is traced to one of these copies, or when group-chat support in calls/deep-links is next touched. Do it as its own change with each call site re-decided explicitly, not as a drive-by.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

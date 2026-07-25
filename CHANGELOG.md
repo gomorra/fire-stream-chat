@@ -2,6 +2,20 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.20.0] — 2026-07-25
+
+### Added
+
+- **Choose how insistently a timer rings.** Setting a timer now offers three alarm styles alongside the duration. **Insistent** keeps ringing until you dismiss it — with a Dismiss button on the notification and an automatic cut-off after two minutes, so a timer that fires while the phone is in another room can't ring itself flat. **Normal** rings once and then nudges you twice more, a minute apart, but only for as long as you leave the notification untouched: tapping or swiping it stops the reminders. **Silent** stays quiet as before. You can also pick the sound — the alarm tone, your ringtone, or a gentle chime — and the alarm and ringtone options now vibrate for about seven seconds rather than three, while the gentle one stays a brief double-tap so it's actually gentle. The choice belongs to whoever sets the timer and travels with it, so a timer you share rings the same way on both phones; the sound travels as a *choice* rather than a file, so each phone plays its own version of it. (`5176172`, `0f67c0a`, `6a902ff`)
+
+### Changed
+
+- **Timer alarms now have three notification channels instead of one.** Android freezes a notification channel's sound and vibration when it's created and never lets them be edited, so offering a choice of sound means one channel per sound. The old single "Timer alarms" channel is removed on first launch and replaced by "Timer alarms", "Timer alarms (ringtone)" and "Timer alarms (gentle)" — if you had customised the old one in Android's settings, that customisation won't carry over. All three still play through the alarm stream, so a timer sounds even when the phone is set to vibrate-only. (`0f67c0a`)
+
+### Fixed
+
+- **Timers keep their alarm settings across a reboot.** Restarting the phone re-armed every running timer with its context stripped: a silent timer would start ringing, and tapping the resulting notification couldn't open the chat at all, because the re-armed alarm no longer knew who the conversation was with. A reboot now restores the whole alarm — style, sound, and chat partner. (`0f67c0a`)
+
 ## [1.19.0] — 2026-07-25
 
 ### Added
@@ -10,7 +24,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Timer notifications now jump to the timer that rang.** Tapping a "Timer ended" notification opened the chat but landed on the newest message, leaving you to find the timer yourself — in a busy conversation the bubble that just fired could be well out of view. The notification now carries the timer message's id, so opening it scrolls straight to that bubble and flashes it with the pink frame for 1.5 seconds, matching how reply previews, reaction cues, and reminder notifications already behave.
+- **Timer notifications now jump to the timer that rang.** Tapping a "Timer ended" notification opened the chat but landed on the newest message, leaving you to find the timer yourself — in a busy conversation the bubble that just fired could be well out of view. The notification now carries the timer message's id, so opening it scrolls straight to that bubble and flashes it with the pink frame for 1.5 seconds, matching how reply previews, reaction cues, and reminder notifications already behave. (`09aabc0`)
 
 - **Jump-to-reaction button now actually appears.** Third attempt at the in-chat reaction cues from 1.18.0: when someone reacted to one of your messages while you had the chat open, the pink jump-to-reaction button never showed up — 1.18.0 delivered the cue over a side channel and 1.18.3 rebuilt it as an on-screen diff, and neither reached the button. The cue now travels on the message state itself, alongside the very list it was detected from — the same state that draws the reaction chip you can already see — and the screen waits for the message list to be measured before deciding whether the reacted bubble is visible (flash it in place) or off-screen (raise the button). Previously that decision could be made before anything had been measured, which read as "visible" and silently swallowed the cue. Delivery now has direct test coverage, which is what was missing both earlier times. (`dc1dd24`)
 - **Jumping to a message now flashes every bubble type.** Tapping the pink jump-to-reaction button, a reply preview, or a reaction notification highlighted the destination with the pink frame only for ordinary bubbles — shared lists and polls render their own surfaces and never received the highlight at all, so jumping to one landed with no visual cue. All bubble types now flash identically. The 1.5-second flash also starts on arrival instead of at the moment you tap, so the whole window is spent looking at the message rather than being partly consumed by the scroll. (`3309b41`)

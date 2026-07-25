@@ -224,6 +224,8 @@ Sideload-style updates: a tag-driven CI workflow publishes signed APKs + per-fla
 
 Composer-driven `.command` grammar plus the timer as the first command. Typing `.` at message start opens a vertical palette of registered commands; `.timer.set` mounts an hh:mm:ss wheel widget that, on send, persists a TIMER message and schedules a synchronized `AlarmManager` alarm on both devices that rings at the server-stamped fire time.
 
+The sender also picks the alarm's **style** and **sound** (`TimerAlarmStyle` / `TimerAlarmSound`), and both sync to every participant so a shared timer rings identically on both phones. Sound is symbolic, never a `content://` URI — a device-local URI wouldn't resolve on the recipient's phone. Two invariants worth knowing before touching this: the legacy `Message.timerSilent` boolean is still written in agreement with the style enum (older clients read only that), and channel sound/vibration are frozen at creation, which is why there is one channel per sound.
+
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/domain/command/ChatCommand.kt` | Command interface + `ChatCommandWidget` + `CommandPayload` sealed type |
@@ -236,15 +238,16 @@ Composer-driven `.command` grammar plus the timer as the first command. Typing `
 | `app/src/main/java/com/firestream/chat/ui/chat/CommandChip.kt` | AssistChip render of the `.command.subcommand` portion in the composer |
 | `app/src/main/java/com/firestream/chat/ui/chat/ExactAlarmBanner.kt` | In-app banner deep-linking to system "Alarms & reminders" settings on Android 12+ when SCHEDULE_EXACT_ALARM is denied |
 | `app/src/main/java/com/firestream/chat/ui/chat/command/TimerCommand.kt` | `ChatCommand` impl for `.timer` + `.timer.set` (multibound via `di/CommandModule.kt`) |
-| `app/src/main/java/com/firestream/chat/ui/chat/widget/TimerPickerWidget.kt` | hh:mm:ss wheel-picker widget mounted above composer |
-| `app/src/main/java/com/firestream/chat/ui/chat/widget/TimerSetWidgetState.kt` | Widget-local state + duration math |
+| `app/src/main/java/com/firestream/chat/ui/chat/widget/TimerPickerWidget.kt` | hh:mm:ss wheel-picker widget mounted above composer + alarm style/sound segmented rows |
+| `app/src/main/java/com/firestream/chat/ui/chat/widget/TimerSetWidgetState.kt` | Widget-local state + duration math + alarm style/sound selection |
 | `app/src/main/java/com/firestream/chat/ui/chat/TimerMessageBubble.kt` | Bubble content for TIMER — alarm icon + live countdown / "Timer ended" / struck-through "Cancelled" + caption |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatTimerReactor.kt` | Observes `ChatUiState.messages` for TIMER state changes; schedules / cancels alarms idempotently for both sender and recipient |
-| `app/src/main/java/com/firestream/chat/data/timer/TimerAlarmScheduler.kt` | Thin AlarmManager wrapper with exact-vs-inexact fallback |
-| `app/src/main/java/com/firestream/chat/data/timer/TimerAlarmReceiver.kt` | BroadcastReceiver fired by AlarmManager → posts alarm-style notification + flips state to COMPLETED |
-| `app/src/main/java/com/firestream/chat/data/timer/TimerNotificationChannel.kt` | `timer_alarms` channel (IMPORTANCE_HIGH, default alarm sound, alarm vibration) |
-| `app/src/main/java/com/firestream/chat/data/timer/BootCompletedReceiver.kt` + `BootRestoreLogic.kt` | Re-registers RUNNING-and-still-future timers after device reboot |
+| `app/src/main/java/com/firestream/chat/data/timer/TimerAlarmScheduler.kt` | Thin AlarmManager wrapper with exact-vs-inexact fallback; also queues/cancels the NORMAL-style re-alert nag |
+| `app/src/main/java/com/firestream/chat/data/timer/TimerAlarmReceiver.kt` | BroadcastReceiver for fire / re-alert / dismiss → posts the alarm notification (insistent + auto-silence for INSISTENT) + flips state to COMPLETED. Holds `TimerAlarmRequest`, which decodes the intent extras incl. the pre-enum legacy fallback |
+| `app/src/main/java/com/firestream/chat/data/timer/TimerNotificationChannel.kt` | One `timer_alarm_v2_*` channel **per `TimerAlarmSound`** (channel sound/vibration are frozen at creation); deletes the superseded `timer_alarms`. All ALARM-grade audio attributes |
+| `app/src/main/java/com/firestream/chat/data/timer/BootCompletedReceiver.kt` + `BootRestoreLogic.kt` | Re-registers RUNNING-and-still-future timers after device reboot, carrying style/sound/`otherUserId` so the alarm survives intact |
 | `app/src/main/java/com/firestream/chat/domain/model/Message.kt` + `TimerState.kt` | TIMER message type + `timerDurationMs` / `timerStartedAtMs` / `timerState` fields |
+| `app/src/main/java/com/firestream/chat/domain/model/TimerAlarm.kt` | `TimerAlarmStyle` (SILENT/NORMAL/INSISTENT) + `TimerAlarmSound` (ALARM/RINGTONE/GENTLE) — the sender's synced alarm choice. Read via `Message.alarmStyle` / `.alarmSound`, never the raw nullable fields |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendTimerMessage` / `cancelTimer` / `pauseTimer` / `resumeTimer` / `markTimerCompleted` (server-stamped fire time) |
 | `app/src/main/AndroidManifest.xml` | `SCHEDULE_EXACT_ALARM` / `USE_EXACT_ALARM` / `RECEIVE_BOOT_COMPLETED` permissions + receiver registrations |
 

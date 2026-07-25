@@ -12,6 +12,8 @@ import com.firestream.chat.data.util.parseTimerAlarmStyle
 import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Poll
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.PollOption
 import org.json.JSONArray
 import org.json.JSONObject
@@ -55,9 +57,11 @@ data class MessageEntity(
     val timerStartedAtMs: Long? = null,
     val timerState: String? = null,
     val timerRemainingMs: Long? = null,
-    val timerSilent: Boolean = false,
-    val timerAlarmStyle: String? = null,
-    val timerAlarmSound: String? = null,
+    // Enum names, not the legacy timerSilent boolean: v25 is reached by destructive
+    // migration, so no row here predates the alarm enums and there is nothing to
+    // fall back from. Legacy resolution belongs at the remote boundary only.
+    val timerAlarmStyle: String = TimerAlarmStyle.DEFAULT.name,
+    val timerAlarmSound: String = TimerAlarmSound.DEFAULT.name,
 ) {
     fun toDomain() = Message(
         id = id,
@@ -94,9 +98,8 @@ data class MessageEntity(
         timerStartedAtMs = timerStartedAtMs,
         timerState = timerState?.let { parseTimerState(it) },
         timerRemainingMs = timerRemainingMs,
-        timerSilent = timerSilent,
-        timerAlarmStyle = timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
-        timerAlarmSound = timerAlarmSound?.let { parseTimerAlarmSound(it) },
+        timerAlarmStyle = parseTimerAlarmStyle(timerAlarmStyle) ?: TimerAlarmStyle.DEFAULT,
+        timerAlarmSound = parseTimerAlarmSound(timerAlarmSound) ?: TimerAlarmSound.DEFAULT,
     )
 
     companion object {
@@ -135,9 +138,8 @@ data class MessageEntity(
             timerStartedAtMs = message.timerStartedAtMs,
             timerState = message.timerState?.name,
             timerRemainingMs = message.timerRemainingMs,
-            timerSilent = message.timerSilent,
-            timerAlarmStyle = message.timerAlarmStyle?.name,
-            timerAlarmSound = message.timerAlarmSound?.name,
+            timerAlarmStyle = message.timerAlarmStyle.name,
+            timerAlarmSound = message.timerAlarmSound.name,
         )
 
         private fun pollToJson(poll: Poll): String {

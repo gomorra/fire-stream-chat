@@ -95,3 +95,22 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **A `com.android.test` submodule can't use a versioned `alias()`** for an
   already-loaded plugin — AGP rejects it. Use bare `id("com.android.test")` without a
   version (see `:baselineprofile`).
+- **A `NotificationChannel`'s sound and vibration are frozen at creation.** Editing the
+  code that builds one changes nothing on a device where it already exists —
+  `createNotificationChannel` silently ignores sound/vibration/importance changes to a
+  live channel. The only ways to change them are a **new channel id** or deleting and
+  recreating (and Android *remembers deleted channels*: recreating the same id restores
+  the user's old settings, so deletion isn't an escape hatch either). Two consequences:
+  per-notification variation in sound has to be one-channel-per-variant (see
+  `TimerNotificationChannel`, one per `TimerAlarmSound`), and **verifying a channel change
+  requires upgrading over an existing install, never a clean one** — a fresh install
+  always looks correct.
+- **Notification sound follows the channel's `AudioAttributes`, not the ringer mode.**
+  `USAGE_ALARM` routes to `STREAM_ALARM`, which vibrate/silent mode deliberately does not
+  zero — that's why alarm clocks still sound on a silenced phone. Pair it with
+  `CATEGORY_ALARM` to also pass Do Not Disturb (alarms are DND-allowed by default). This
+  is a property of the *channel*, so it's subject to the freeze above.
+- **`FLAG_INSISTENT` loops the sound until the notification is cancelled, with no
+  platform timeout.** Nothing stops it on its own — unattended, it rings until the battery
+  dies. Always pair it with `setTimeoutAfter(...)` as a backstop plus an explicit dismiss
+  affordance; a Dismiss action alone only helps when somebody is present.

@@ -88,14 +88,9 @@ internal fun formatTimerDuration(ms: Long): String {
  */
 @Composable
 private fun AlarmStyleBadge(message: Message, accentColor: Color) {
-    val icon = when (message.alarmStyle) {
-        TimerAlarmStyle.SILENT -> Icons.Default.NotificationsOff
-        TimerAlarmStyle.INSISTENT -> Icons.Default.NotificationsActive
-        TimerAlarmStyle.NORMAL -> return
-    }
-    val description = when (message.alarmStyle) {
-        TimerAlarmStyle.SILENT -> "Silent timer"
-        TimerAlarmStyle.INSISTENT -> "Rings until dismissed"
+    val (icon, description) = when (message.timerAlarmStyle) {
+        TimerAlarmStyle.SILENT -> Icons.Default.NotificationsOff to "Silent timer"
+        TimerAlarmStyle.INSISTENT -> Icons.Default.NotificationsActive to "Rings until dismissed"
         TimerAlarmStyle.NORMAL -> return
     }
     Spacer(modifier = Modifier.width(4.dp))

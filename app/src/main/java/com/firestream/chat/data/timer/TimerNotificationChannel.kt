@@ -37,13 +37,24 @@ internal object TimerNotificationChannel {
      * behind just shows the user a stale entry in system settings that controls
      * nothing.
      */
-    private const val LEGACY_CHANNEL_ID: String = "timer_alarms"
-
     private const val CHANNEL_ID_PREFIX: String = "timer_alarm_v2_"
+
+    /**
+     * Every channel this feature has ever owned starts with this. Retirement works
+     * by *subtraction* — anything matching that isn't currently live gets deleted —
+     * so bumping [CHANNEL_ID_PREFIX] for the next frozen-property change is a
+     * one-line edit instead of a fresh round of "remember to delete the old ids".
+     * Note the pre-v2 channel was `timer_alarms`, which this prefix also covers.
+     */
+    private const val OWNED_CHANNEL_PREFIX: String = "timer_alarm"
 
     /** ~6.8s: six 800ms buzzes separated by 400ms gaps. */
     private val ALARM_VIBRATION_PATTERN: LongArray =
         longArrayOf(0, 800, 400, 800, 400, 800, 400, 800, 400, 800, 400, 800)
+
+    /** ~1.2s: two short taps. A "gentle" alarm that buzzed for 7s wouldn't be. */
+    private val GENTLE_VIBRATION_PATTERN: LongArray =
+        longArrayOf(0, 300, 300, 300)
 
     /** Channel carrying [sound]. Stable across launches — it's part of the id. */
     fun channelIdFor(sound: TimerAlarmSound): String =
@@ -52,8 +63,8 @@ internal object TimerNotificationChannel {
     fun ensureCreated(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
 
-        // Idempotent and safe when the channel was never created (fresh install).
-        nm.deleteNotificationChannel(LEGACY_CHANNEL_ID)
+        val liveIds = TimerAlarmSound.entries.map(::channelIdFor).toSet()
+        retireStaleChannels(nm, liveIds)
 
         val alarmAudio: AudioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ALARM)
@@ -64,47 +75,78 @@ internal object TimerNotificationChannel {
             val id = channelIdFor(sound)
             if (nm.getNotificationChannel(id) != null) continue
 
+            val spec = specFor(sound)
             val channel = NotificationChannel(
                 id,
-                nameFor(sound),
+                spec.name,
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = descriptionFor(sound)
-                setSound(uriFor(sound), alarmAudio)
+                description = spec.description
+                setSound(resolveUri(spec.ringtoneType), alarmAudio)
                 enableVibration(true)
-                vibrationPattern = ALARM_VIBRATION_PATTERN
+                vibrationPattern = spec.vibrationPattern
             }
             nm.createNotificationChannel(channel)
         }
     }
 
     /**
+     * Drops channels this feature owns but no longer posts to. Read-then-delete
+     * rather than an unconditional delete: after the first upgraded launch there
+     * is nothing to remove, and `deleteNotificationChannel` isn't free on the
+     * system side (it rescans notifications and schedules a policy-file write).
+     */
+    private fun retireStaleChannels(nm: NotificationManager, liveIds: Set<String>) {
+        nm.notificationChannels
+            .map { it.id }
+            .filter { it.startsWith(OWNED_CHANNEL_PREFIX) && it !in liveIds }
+            .forEach(nm::deleteNotificationChannel)
+    }
+
+    /**
+     * Everything a channel freezes at creation, in one place.
+     *
+     * A channel owns *(sound, vibration, importance)*, not just sound — keeping the
+     * triple together is what lets [TimerAlarmSound.GENTLE] actually be gentle
+     * rather than a soft chime followed by seven seconds of alarm-grade buzzing.
+     */
+    private data class ChannelSpec(
+        val ringtoneType: Int,
+        val name: String,
+        val description: String,
+        val vibrationPattern: LongArray,
+    )
+
+    private fun specFor(sound: TimerAlarmSound): ChannelSpec = when (sound) {
+        TimerAlarmSound.ALARM -> ChannelSpec(
+            RingtoneManager.TYPE_ALARM,
+            "Timer alarms",
+            "Chat timers that ring with the alarm sound",
+            ALARM_VIBRATION_PATTERN,
+        )
+        TimerAlarmSound.RINGTONE -> ChannelSpec(
+            RingtoneManager.TYPE_RINGTONE,
+            "Timer alarms (ringtone)",
+            "Chat timers that ring with the phone ringtone",
+            ALARM_VIBRATION_PATTERN,
+        )
+        TimerAlarmSound.GENTLE -> ChannelSpec(
+            RingtoneManager.TYPE_NOTIFICATION,
+            "Timer alarms (gentle)",
+            "Chat timers that play a short chime",
+            GENTLE_VIBRATION_PATTERN,
+        )
+    }
+
+    /**
      * Resolves the symbolic choice to a system sound on *this* device — the reason
      * [TimerAlarmSound] travels as an enum rather than a URI.
      *
-     * Each default can be null when the user has set that category to "None", so
-     * we fall back to the alarm default and finally to null, which leaves the
-     * channel silent rather than crashing at creation.
+     * A default can be null when the user has set that category to "None", so we
+     * fall back to the alarm default and finally to null, which leaves the channel
+     * silent rather than crashing at creation.
      */
-    private fun uriFor(sound: TimerAlarmSound): Uri? {
-        val type = when (sound) {
-            TimerAlarmSound.ALARM -> RingtoneManager.TYPE_ALARM
-            TimerAlarmSound.RINGTONE -> RingtoneManager.TYPE_RINGTONE
-            TimerAlarmSound.GENTLE -> RingtoneManager.TYPE_NOTIFICATION
-        }
-        return RingtoneManager.getDefaultUri(type)
+    private fun resolveUri(ringtoneType: Int): Uri? =
+        RingtoneManager.getDefaultUri(ringtoneType)
             ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-    }
-
-    private fun nameFor(sound: TimerAlarmSound): String = when (sound) {
-        TimerAlarmSound.ALARM -> "Timer alarms"
-        TimerAlarmSound.RINGTONE -> "Timer alarms (ringtone)"
-        TimerAlarmSound.GENTLE -> "Timer alarms (gentle)"
-    }
-
-    private fun descriptionFor(sound: TimerAlarmSound): String = when (sound) {
-        TimerAlarmSound.ALARM -> "Chat timers that ring with the alarm sound"
-        TimerAlarmSound.RINGTONE -> "Chat timers that ring with the phone ringtone"
-        TimerAlarmSound.GENTLE -> "Chat timers that play a short chime"
-    }
 }

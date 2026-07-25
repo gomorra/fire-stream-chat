@@ -95,8 +95,8 @@ internal class ChatTimerReactor(
             caption = msg.content.takeIf { it.isNotBlank() },
             chatId = chatId,
             otherUserId = recipientId.takeIf { it.isNotEmpty() },
-            style = msg.alarmStyle,
-            sound = msg.alarmSound,
+            style = msg.timerAlarmStyle,
+            sound = msg.timerAlarmSound,
         )
         onScheduleResult(result)
     }

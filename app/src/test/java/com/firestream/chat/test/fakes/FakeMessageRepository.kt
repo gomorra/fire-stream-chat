@@ -309,9 +309,6 @@ internal class FakeMessageRepository : MessageRepository {
             timerDurationMs = durationMs,
             timerStartedAtMs = System.currentTimeMillis(),
             timerState = com.firestream.chat.domain.model.TimerState.RUNNING,
-            // Mirrors the production write: the legacy boolean stays in agreement
-            // with the enum so tests exercising older-client reads behave alike.
-            timerSilent = style.isSilent,
             timerAlarmStyle = style,
             timerAlarmSound = sound,
         )

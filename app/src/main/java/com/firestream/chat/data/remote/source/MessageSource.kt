@@ -123,8 +123,7 @@ interface MessageSource {
      * Send a TIMER message. The remote impl writes timerStartedAtMs as
      * server-stamped (e.g. Firestore `FieldValue.serverTimestamp()`) and reads
      * it back so both devices schedule against the same instant.
-     */
-    /**
+     *
      * [style] and [sound] are the sender's synced alarm choice. Implementations
      * must *also* write the legacy `timerSilent` boolean (`style.isSilent`) so a
      * client predating those fields still suppresses a silent timer.

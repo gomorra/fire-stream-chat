@@ -7,10 +7,12 @@ package com.firestream.chat.domain.model
  * timer two people share rings the same way on both phones — the urgency is
  * the sender's intent, not a per-device preference.
  *
- * Supersedes the older boolean `Message.timerSilent`, which is still written
- * alongside it (`SILENT` ⇒ `true`) so a client that predates this enum keeps
- * honouring at least the silent/not-silent distinction. Reads go the other
- * way through [fromLegacySilent].
+ * Supersedes the older boolean `timerSilent`, which lives on only as a wire
+ * field: it is still *written* alongside the enum (`SILENT` ⇒ `true`) so a
+ * client that predates this type keeps honouring the silent/not-silent
+ * distinction, and still *read* as the fallback for documents written before
+ * the enum existed. Both directions are handled at the data boundary
+ * (`resolveTimerAlarmStyle`), so `Message` carries only this.
  */
 enum class TimerAlarmStyle {
     /** No notification at all — the bubble still flips to COMPLETED. */

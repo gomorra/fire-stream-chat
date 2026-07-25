@@ -9,6 +9,8 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.util.resolveTimerAlarmSound
+import com.firestream.chat.data.util.resolveTimerAlarmStyle
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.model.TimerAlarmSound
 import com.firestream.chat.domain.model.TimerAlarmStyle
@@ -106,16 +108,24 @@ class TimerAlarmReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Nagging applies to [TimerAlarmStyle.NORMAL] only. An insistent timer is
-     * already making continuous noise, so a nag on top of it would be meaningless;
-     * a silent one never posts a notification to nag about.
+     * Queue the next ring of [alarm]'s escalation, if it has one left.
+     *
+     * Both audible styles escalate through this same re-post chain. It would be
+     * tempting to skip it for [TimerAlarmStyle.INSISTENT] on the grounds that
+     * `FLAG_INSISTENT` already loops the sound — but that flag is the one part of
+     * this feature whose behaviour is not verified on real hardware, and OEMs vary.
+     * If it turned out not to loop, an insistent timer without this chain would
+     * ring exactly once with no follow-up: *quieter than NORMAL*, while the picker
+     * promises it keeps going. Driving both from the chain makes the flag purely
+     * additive — it makes an insistent alarm continuous rather than repeating, and
+     * nothing depends on it working.
      */
     private fun queueRealert(alarm: TimerAlarmRequest, attempt: Int) {
-        if (alarm.style != TimerAlarmStyle.NORMAL) return
-        if (attempt > MAX_REALERTS) return
+        val escalation = escalationFor(alarm.style) ?: return
+        if (attempt > escalation.maxRepeats) return
         scheduler.scheduleRealert(
             messageId = alarm.messageId,
-            fireAtMs = System.currentTimeMillis() + REALERT_INTERVAL_MS,
+            fireAtMs = System.currentTimeMillis() + escalation.intervalMs,
             caption = alarm.caption,
             chatId = alarm.chatId,
             otherUserId = alarm.otherUserId,
@@ -162,7 +172,9 @@ class TimerAlarmReceiver : BroadcastReceiver() {
             )
 
         // See the class KDoc: an insistent ring has no natural end, so it gets one.
-        if (insistent) builder.setTimeoutAfter(AUTO_SILENCE_MS)
+        // The window shrinks with each re-post so the *total* stays AUTO_SILENCE_MS
+        // rather than restarting the clock on every ring of the chain.
+        if (insistent) builder.setTimeoutAfter(alarm.remainingRingMs())
 
         val notification = builder.build().apply {
             if (insistent) flags = flags or Notification.FLAG_INSISTENT
@@ -195,14 +207,12 @@ class TimerAlarmReceiver : BroadcastReceiver() {
          * How long an insistent alarm may ring unattended. AOSP's clock app uses
          * 10 minutes, which is a long time for a chat timer — 2 minutes is enough
          * to cross a room without being punitive if nobody is home.
+         *
+         * Held to exactly `INSISTENT` interval × (repeats + 1) so the escalation
+         * chain and the auto-silence deadline end together instead of one cutting
+         * the other short. `TimerEscalationTest` pins that.
          */
         internal const val AUTO_SILENCE_MS: Long = 2 * 60 * 1000L
-
-        /** Gap between a NORMAL timer's nags. */
-        internal const val REALERT_INTERVAL_MS: Long = 60 * 1000L
-
-        /** Nags after the first ring, so a timer rings at most 1 + this many times. */
-        internal const val MAX_REALERTS: Int = 2
 
         /**
          * Intent behind the notification tap: open [chatId] **and** hand the chat
@@ -233,6 +243,24 @@ class TimerAlarmReceiver : BroadcastReceiver() {
 }
 
 /**
+ * How often a fired-but-unacknowledged alarm rings again, and how many times.
+ *
+ * One policy per style, driving one mechanism — see `queueRealert` for why
+ * INSISTENT escalates through the chain rather than relying on `FLAG_INSISTENT`.
+ */
+internal data class AlarmEscalation(val intervalMs: Long, val maxRepeats: Int)
+
+/** Null for [TimerAlarmStyle.SILENT], which posts nothing to escalate. */
+internal fun escalationFor(style: TimerAlarmStyle): AlarmEscalation? = when (style) {
+    TimerAlarmStyle.SILENT -> null
+    // Sparse and finite: a nudge for someone who's simply away from the phone.
+    TimerAlarmStyle.NORMAL -> AlarmEscalation(intervalMs = 60_000L, maxRepeats = 2)
+    // Dense and bounded by the auto-silence window: 30s × (3 + the initial ring)
+    // is exactly TimerAlarmReceiver.AUTO_SILENCE_MS.
+    TimerAlarmStyle.INSISTENT -> AlarmEscalation(intervalMs = 30_000L, maxRepeats = 3)
+}
+
+/**
  * The alarm parameters carried on a scheduler intent, parsed once.
  *
  * Extracted from the receiver so the extras→values decoding — in particular the
@@ -247,6 +275,17 @@ internal data class TimerAlarmRequest(
     val sound: TimerAlarmSound,
     val realertAttempt: Int,
 ) {
+    /**
+     * How much of the auto-silence window is left at this point in the chain.
+     * Derived from [realertAttempt] rather than carried as a deadline extra, so
+     * there is no absolute timestamp to go stale if the alarm fires late.
+     */
+    fun remainingRingMs(): Long {
+        val escalation = escalationFor(style) ?: return 0L
+        val elapsed = realertAttempt * escalation.intervalMs
+        return (TimerAlarmReceiver.AUTO_SILENCE_MS - elapsed).coerceAtLeast(escalation.intervalMs)
+    }
+
     companion object {
         /**
          * Returns null when the intent lacks the ids the alarm can't work without.
@@ -261,21 +300,16 @@ internal data class TimerAlarmRequest(
             val messageId = intent.getStringExtra(TimerAlarmScheduler.EXTRA_MESSAGE_ID) ?: return null
             val chatId = intent.getStringExtra(TimerAlarmScheduler.EXTRA_CHAT_ID) ?: return null
 
-            val legacySilent = intent.getBooleanExtra(TimerAlarmScheduler.EXTRA_SILENT, false)
-            val style = intent.getStringExtra(TimerAlarmScheduler.EXTRA_ALARM_STYLE)
-                ?.let { name -> runCatching { TimerAlarmStyle.valueOf(name) }.getOrNull() }
-                ?: TimerAlarmStyle.fromLegacySilent(legacySilent)
-            val sound = intent.getStringExtra(TimerAlarmScheduler.EXTRA_ALARM_SOUND)
-                ?.let { name -> runCatching { TimerAlarmSound.valueOf(name) }.getOrNull() }
-                ?: TimerAlarmSound.DEFAULT
-
             return TimerAlarmRequest(
                 messageId = messageId,
                 chatId = chatId,
                 caption = intent.getStringExtra(TimerAlarmScheduler.EXTRA_CAPTION),
                 otherUserId = intent.getStringExtra(TimerAlarmScheduler.EXTRA_OTHER_USER_ID),
-                style = style,
-                sound = sound,
+                style = resolveTimerAlarmStyle(
+                    rawStyle = intent.getStringExtra(TimerAlarmScheduler.EXTRA_ALARM_STYLE),
+                    legacySilent = intent.getBooleanExtra(TimerAlarmScheduler.EXTRA_SILENT, false),
+                ),
+                sound = resolveTimerAlarmSound(intent.getStringExtra(TimerAlarmScheduler.EXTRA_ALARM_SOUND)),
                 realertAttempt = intent.getIntExtra(TimerAlarmScheduler.EXTRA_REALERT_ATTEMPT, 0),
             )
         }

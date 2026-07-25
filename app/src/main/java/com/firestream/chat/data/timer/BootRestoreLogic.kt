@@ -80,5 +80,5 @@ internal object BootRestoreLogic {
      * group, so boot restore and the live path agree.
      */
     fun resolveOtherUserId(participants: List<String>, currentUserId: String?): String? =
-        participants.filter { it != currentUserId }.singleOrNull()
+        participants.singleOrNull { it != currentUserId }
 }

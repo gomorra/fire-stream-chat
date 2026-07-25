@@ -81,8 +81,25 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 withContext(Dispatchers.IO) {
                     withTimeoutOrNull(8_000L) {
                         coroutineScope {
-                            val timers = messageDao.getRunningTimers().map { entity ->
-                                async { dispatchTimer(entity, now) }
+                            val runningTimers = messageDao.getRunningTimers()
+                            // Resolve the deep-link partner for every affected chat in
+                            // one batch up front. Doing it per timer inside the fan-out
+                            // meant N identical primary-key reads competing for Room's
+                            // executor during the boot storm, all of them discarded for
+                            // timers that turn out to have already expired.
+                            val currentUserId = authSource.currentUserId
+                            val participantsByChat = chatDao
+                                .getChatsByIds(runningTimers.map { it.chatId }.distinct())
+                                .associate { it.id to it.participants }
+                            val timers = runningTimers.map { entity ->
+                                async {
+                                    dispatchTimer(
+                                        entity = entity,
+                                        now = now,
+                                        participants = participantsByChat[entity.chatId].orEmpty(),
+                                        currentUserId = currentUserId,
+                                    )
+                                }
                             }
                             val reminders = reminderDao.getAll().map { entity ->
                                 async { dispatchReminder(context, entity, now) }
@@ -97,15 +114,17 @@ class BootCompletedReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun dispatchTimer(entity: com.firestream.chat.data.local.entity.MessageEntity, now: Long) {
+    private suspend fun dispatchTimer(
+        entity: com.firestream.chat.data.local.entity.MessageEntity,
+        now: Long,
+        participants: List<String>,
+        currentUserId: String?,
+    ) {
         // Re-derive the alarm's full context from the persisted row rather than
         // re-arming a stripped-down copy: the message carries the synced style and
         // sound, and the chat's participant list yields the deep-link partner.
         val domain = entity.toDomain()
-        val otherUserId = BootRestoreLogic.resolveOtherUserId(
-            participants = chatDao.getChatById(entity.chatId)?.participants.orEmpty(),
-            currentUserId = authSource.currentUserId,
-        )
+        val otherUserId = BootRestoreLogic.resolveOtherUserId(participants, currentUserId)
         val action = BootRestoreLogic.classify(
             messageId = entity.id,
             chatId = entity.chatId,
@@ -114,8 +133,8 @@ class BootCompletedReceiver : BroadcastReceiver() {
             timerDurationMs = entity.timerDurationMs,
             nowMs = now,
             otherUserId = otherUserId,
-            style = domain.alarmStyle,
-            sound = domain.alarmSound,
+            style = domain.timerAlarmStyle,
+            sound = domain.timerAlarmSound,
         )
         when (action) {
             is TimerBootAction.Schedule -> scheduler.schedule(

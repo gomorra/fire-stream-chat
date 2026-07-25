@@ -49,3 +49,22 @@ internal fun parseTimerAlarmSound(raw: String): TimerAlarmSound? =
         Log.w(TAG, "Unknown timer alarm sound '$raw' — defaulting to ${TimerAlarmSound.DEFAULT}")
         null
     }
+
+// The single place the legacy fallback rule lives. Every boundary that can see a
+// timer written before the alarm enums existed resolves through these: the
+// RawMessage→Message mappers (Firestore docs from an older client) and
+// TimerAlarmRequest (a PendingIntent scheduled by an older build, still armed
+// across an app update). Keeping one implementation is what stops the two from
+// drifting into disagreeing about what an old silent timer should do.
+
+/**
+ * [rawStyle] wins when present and recognised; otherwise the legacy
+ * `timerSilent` boolean decides. An unrecognised name deliberately falls through
+ * to [legacySilent] rather than to a default — ringing when the sender asked for
+ * silence is the failure that actually annoys.
+ */
+internal fun resolveTimerAlarmStyle(rawStyle: String?, legacySilent: Boolean): TimerAlarmStyle =
+    rawStyle?.let { parseTimerAlarmStyle(it) } ?: TimerAlarmStyle.fromLegacySilent(legacySilent)
+
+internal fun resolveTimerAlarmSound(rawSound: String?): TimerAlarmSound =
+    rawSound?.let { parseTimerAlarmSound(it) } ?: TimerAlarmSound.DEFAULT
