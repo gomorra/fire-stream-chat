@@ -1,5 +1,23 @@
 # Prominent, Customizable Timer Alarm
 
+> **SHIPPED 2026-07-25** — `5176172` (data), `0f67c0a` (delivery), `6a902ff` (UI),
+> `cf98eb2` (review fixes). Two deviations from the plan below, both deliberate:
+>
+> 1. **Step 1's on-device spike was never run** — it needs a human to hear a ring and
+>    feel a buzz. Rather than block, the implementation was built to be correct under
+>    either outcome: the long vibration pattern lives in the channel (so "vibrate
+>    longer" doesn't depend on `FLAG_INSISTENT` repeating the waveform), and — after
+>    the altitude review caught that the *sound* half had no such fallback — INSISTENT
+>    escalates through the same re-post chain as NORMAL, so the flag is additive
+>    rather than load-bearing. **The spike is still worth running**, but nothing now
+>    breaks if the answer is "it doesn't loop".
+> 2. **Room went 23 → 25, not 23 → 24.** The review moved legacy resolution out of
+>    `Message`, which reshaped the v24 schema mid-flight; bumping again avoids an
+>    identity-hash crash for anyone who already installed the intermediate build.
+>
+> Remaining on-device verification is listed under **Verification** below and is the
+> only outstanding work.
+
 ## Context
 
 The `.timer` alarm is easy to miss. Two separate complaints were raised; the first is
