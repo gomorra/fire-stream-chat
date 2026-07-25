@@ -17,6 +17,11 @@
 
 package com.firestream.chat.ui.chat.widget
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +41,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +58,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.command.ChatCommandWidget
 import com.firestream.chat.domain.command.CommandPayload
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
@@ -87,11 +97,19 @@ class TimerSetWidget @Inject constructor() : ChatCommandWidget {
         ) {
             HeaderRow(state)
             WheelRow(state)
+            AlarmRow(state)
             ActionRow(
                 isSendEnabled = state.isSendEnabled,
                 onCancel = onCancel,
                 onSend = {
-                    onSend(CommandPayload.Timer(durationMs = state.durationMs, caption = captionForSend, silent = state.silent))
+                    onSend(
+                        CommandPayload.Timer(
+                            durationMs = state.durationMs,
+                            caption = captionForSend,
+                            style = state.style,
+                            sound = state.sound,
+                        ),
+                    )
                 },
             )
         }
@@ -149,23 +167,99 @@ private fun WheelRow(state: TimerSetWidgetState) {
             modifier = Modifier.weight(1f),
         )
     }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+}
+
+/**
+ * Alarm urgency, and — unless the timer is silent — which sound it rings with.
+ * Both are the *sender's* choice and ring the same way on every participant's
+ * phone, which is why they sit here next to the duration rather than in Settings.
+ *
+ * The sound row is revealed rather than always-present: a silent timer has no
+ * sound to pick, and the panel is mounted above the keyboard where every row
+ * costs real estate. Expanding it is also the one bit of motion in this widget,
+ * so it reads as a consequence of the choice above it.
+ */
+@Composable
+private fun AlarmRow(state: TimerSetWidgetState) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        androidx.compose.material3.Switch(
-            checked = state.silent,
-            onCheckedChange = { state.silent = it }
-        )
-        Spacer(Modifier.width(8.dp))
+        FieldLabel("Alarm")
+        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            TimerAlarmStyle.entries.forEachIndexed { index, option ->
+                SegmentedButton(
+                    selected = state.style == option,
+                    onClick = { state.style = option },
+                    shape = SegmentedButtonDefaults.itemShape(index, TimerAlarmStyle.entries.size),
+                    label = { Text(option.label, maxLines = 1) },
+                )
+            }
+        }
+
+        AnimatedVisibility(
+            visible = state.isSoundPickerVisible,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FieldLabel("Sound")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    TimerAlarmSound.entries.forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = state.sound == option,
+                            onClick = { state.sound = option },
+                            shape = SegmentedButtonDefaults.itemShape(index, TimerAlarmSound.entries.size),
+                            label = { Text(option.label, maxLines = 1) },
+                        )
+                    }
+                }
+            }
+        }
+
         Text(
-            text = "Silent (no alarm)",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
+            text = state.style.helpText,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }
+
+@Composable
+private fun FieldLabel(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Medium,
+    )
+}
+
+private val TimerAlarmStyle.label: String
+    get() = when (this) {
+        TimerAlarmStyle.SILENT -> "Silent"
+        TimerAlarmStyle.NORMAL -> "Normal"
+        TimerAlarmStyle.INSISTENT -> "Insistent"
+    }
+
+/**
+ * Says what each choice actually *does*, because the consequences differ enough
+ * to matter — "Insistent" that rings until you stop it is a promise worth making
+ * explicit before someone sends one to another person's phone.
+ */
+private val TimerAlarmStyle.helpText: String
+    get() = when (this) {
+        TimerAlarmStyle.SILENT -> "No sound or vibration — the bubble just ends."
+        TimerAlarmStyle.NORMAL -> "Rings once, then reminds you twice if you don't respond."
+        TimerAlarmStyle.INSISTENT -> "Keeps ringing until dismissed, or 2 minutes."
+    }
+
+private val TimerAlarmSound.label: String
+    get() = when (this) {
+        TimerAlarmSound.ALARM -> "Alarm"
+        TimerAlarmSound.RINGTONE -> "Ringtone"
+        TimerAlarmSound.GENTLE -> "Gentle"
+    }
 
 private val WheelHeight = 144.dp     // 3 visible items × 48.dp
 private val WheelItemHeight = 48.dp

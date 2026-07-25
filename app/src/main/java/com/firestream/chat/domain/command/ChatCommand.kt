@@ -1,6 +1,8 @@
 package com.firestream.chat.domain.command
 
 import androidx.compose.runtime.Composable
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 
 interface ChatCommand {
     val id: String
@@ -22,5 +24,10 @@ interface ChatCommandWidget {
 }
 
 sealed interface CommandPayload {
-    data class Timer(val durationMs: Long, val caption: String?, val silent: Boolean = false) : CommandPayload
+    data class Timer(
+        val durationMs: Long,
+        val caption: String?,
+        val style: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
+        val sound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
+    ) : CommandPayload
 }

@@ -1,6 +1,8 @@
 package com.firestream.chat.ui.chat.widget
 
 import androidx.compose.runtime.mutableIntStateOf
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 
 /**
  * State holder for the `.timer.set` widget. Plain class (not @HiltViewModel) so it
@@ -38,16 +40,30 @@ internal class TimerSetWidgetState {
     val isSendEnabled: Boolean
         get() = durationMs > 0L
 
-    private val _silent = androidx.compose.runtime.mutableStateOf(false)
-    var silent: Boolean
-        get() = _silent.value
-        set(value) { _silent.value = value }
+    /**
+     * How the alarm rings. Synced to every participant when the timer is sent —
+     * see [TimerAlarmStyle] — so this is the sender choosing for both phones.
+     */
+    private val _style = androidx.compose.runtime.mutableStateOf(TimerAlarmStyle.DEFAULT)
+    var style: TimerAlarmStyle
+        get() = _style.value
+        set(value) { _style.value = value }
+
+    private val _sound = androidx.compose.runtime.mutableStateOf(TimerAlarmSound.DEFAULT)
+    var sound: TimerAlarmSound
+        get() = _sound.value
+        set(value) { _sound.value = value }
+
+    /** A silent timer has no sound to choose, so the picker hides that row. */
+    val isSoundPickerVisible: Boolean
+        get() = !style.isSilent
 
     fun reset() {
         _hours.intValue = 0
         _minutes.intValue = 0
         _seconds.intValue = 0
-        _silent.value = false
+        _style.value = TimerAlarmStyle.DEFAULT
+        _sound.value = TimerAlarmSound.DEFAULT
     }
 
     companion object {

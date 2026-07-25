@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessAlarm
 import androidx.compose.material.icons.filled.AlarmOff
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PauseCircleOutline
@@ -46,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
 import kotlinx.coroutines.delay
 
@@ -76,6 +78,33 @@ internal fun formatTimerDuration(ms: Long): String {
     } else {
         "%02d:%02d".format(minutes, seconds)
     }
+}
+
+/**
+ * Marks a running/paused timer whose alarm behaviour differs from the default, so
+ * the recipient can see what's coming before it arrives — the style is the
+ * *sender's* synced choice, and "this will ring until you stop it" is worth
+ * telegraphing. A NORMAL timer shows nothing: it's the unremarkable case.
+ */
+@Composable
+private fun AlarmStyleBadge(message: Message, accentColor: Color) {
+    val icon = when (message.alarmStyle) {
+        TimerAlarmStyle.SILENT -> Icons.Default.NotificationsOff
+        TimerAlarmStyle.INSISTENT -> Icons.Default.NotificationsActive
+        TimerAlarmStyle.NORMAL -> return
+    }
+    val description = when (message.alarmStyle) {
+        TimerAlarmStyle.SILENT -> "Silent timer"
+        TimerAlarmStyle.INSISTENT -> "Rings until dismissed"
+        TimerAlarmStyle.NORMAL -> return
+    }
+    Spacer(modifier = Modifier.width(4.dp))
+    Icon(
+        imageVector = icon,
+        contentDescription = description,
+        tint = accentColor.copy(alpha = 0.7f),
+        modifier = Modifier.size(12.dp),
+    )
 }
 
 @Composable
@@ -142,15 +171,7 @@ internal fun TimerBubbleContent(
                                 color = accentColor.copy(alpha = 0.7f),
                                 style = MaterialTheme.typography.labelSmall,
                             )
-                            if (message.timerSilent) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Default.NotificationsOff,
-                                    contentDescription = "Silent timer",
-                                    tint = accentColor.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
+                            AlarmStyleBadge(message, accentColor)
                         }
                     }
                     TimerState.PAUSED -> {
@@ -166,15 +187,7 @@ internal fun TimerBubbleContent(
                                 color = accentColor.copy(alpha = 0.7f),
                                 style = MaterialTheme.typography.labelSmall,
                             )
-                            if (message.timerSilent) {
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Default.NotificationsOff,
-                                    contentDescription = "Silent timer",
-                                    tint = accentColor.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
+                            AlarmStyleBadge(message, accentColor)
                         }
                     }
                     TimerState.COMPLETED -> {

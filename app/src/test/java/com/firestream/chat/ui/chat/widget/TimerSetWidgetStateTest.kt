@@ -1,5 +1,7 @@
 package com.firestream.chat.ui.chat.widget
 
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -136,5 +138,66 @@ class TimerSetWidgetStateTest {
         // Defensive: if somehow the widget mounted on non-command text, treat the
         // whole thing as the caption rather than dropping it.
         assertEquals("not a command", extractCaption("not a command"))
+    }
+
+    // ── Alarm style / sound ─────────────────────────────────────────────────
+
+    @Test
+    fun `defaults to a normal alarm with the default sound`() {
+        val state = TimerSetWidgetState()
+
+        assertEquals(TimerAlarmStyle.NORMAL, state.style)
+        assertEquals(TimerAlarmSound.ALARM, state.sound)
+    }
+
+    @Test
+    fun `sound picker hides for a silent timer and returns for the others`() {
+        val state = TimerSetWidgetState()
+        assertTrue(state.isSoundPickerVisible)
+
+        state.style = TimerAlarmStyle.SILENT
+        assertFalse("a silent timer has no sound to choose", state.isSoundPickerVisible)
+
+        state.style = TimerAlarmStyle.INSISTENT
+        assertTrue(state.isSoundPickerVisible)
+    }
+
+    @Test
+    fun `choosing silent then changing your mind keeps the earlier sound`() {
+        // The sound row only hides; it must not reset, or a user toggling through
+        // Silent to compare options silently loses their pick.
+        val state = TimerSetWidgetState()
+        state.sound = TimerAlarmSound.RINGTONE
+
+        state.style = TimerAlarmStyle.SILENT
+        state.style = TimerAlarmStyle.NORMAL
+
+        assertEquals(TimerAlarmSound.RINGTONE, state.sound)
+    }
+
+    @Test
+    fun `reset clears the alarm choice along with the duration`() {
+        val state = TimerSetWidgetState()
+        state.minutes = 5
+        state.style = TimerAlarmStyle.INSISTENT
+        state.sound = TimerAlarmSound.GENTLE
+
+        state.reset()
+
+        assertEquals(0, state.minutes)
+        assertEquals(TimerAlarmStyle.NORMAL, state.style)
+        assertEquals(TimerAlarmSound.ALARM, state.sound)
+    }
+
+    @Test
+    fun `alarm choice does not gate sending`() {
+        // Send is enabled by duration alone — every style is a valid thing to send.
+        val state = TimerSetWidgetState()
+        state.seconds = 30
+
+        for (style in TimerAlarmStyle.entries) {
+            state.style = style
+            assertTrue("style=$style", state.isSendEnabled)
+        }
     }
 }

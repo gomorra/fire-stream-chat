@@ -20,7 +20,6 @@ import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
-import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.data.util.MediaFileManager
@@ -340,7 +339,8 @@ class ChatViewModel @Inject constructor(
                 payload.durationMs,
                 payload.caption,
                 recipientId,
-                style = TimerAlarmStyle.fromLegacySilent(payload.silent),
+                style = payload.style,
+                sound = payload.sound,
             )
                 .onFailure { e ->
                     _uiState.update {
