@@ -68,6 +68,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **MockK `relaxed = true` returns a mock, not `null`, for nullable types.** A
   `Foo?`-returning stub silently defeats `?: return` guards; stub explicitly with
   `coEvery { fn(any()) } returns null` when the null path is the one under test.
+- **`backgroundScope` + `advanceUntilIdle()` does not deliver flow emissions.** When
+  testing a component that owns a never-completing collector (`Chat*Manager`,
+  `ChatMessageLoader`), passing `backgroundScope` as its scope makes every emission
+  vanish — the collector appears to run but the state under test stays at its initial
+  value, which reads exactly like a broken production diff. Passing the `runTest`
+  scope itself instead hangs the test on the collector (`UncompletedCoroutinesError`).
+  Use a root scope sharing the test dispatcher —
+  `CoroutineScope(coroutineContext + SupervisorJob())` — and cancel it in `@After`.
+  See `ChatMessageLoaderReactionCueTest.startLoader()`.
 
 ## Platform / dependencies
 
