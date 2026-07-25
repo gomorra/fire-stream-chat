@@ -115,9 +115,21 @@ class TimerAlarmSchedulerTest {
     }
 
     @Test
-    fun `cancel calls AlarmManager cancel when a PendingIntent exists`() {
+    fun `cancel drops both the timer alarm and its queued re-alert`() {
         // FLAG_NO_CREATE returns the existing PI (mocked here) rather than null.
+        // Two cancels, not one: a fired-but-unacknowledged timer may have a nag
+        // queued behind it, and cancelling the timer has to take that with it or
+        // the re-alert arrives for a timer that no longer exists. Both lookups
+        // resolve to the same mock here, so the count is what distinguishes them.
         scheduler.cancel("m1")
+
+        verify(exactly = 2) { alarmManager.cancel(pendingIntent) }
+        verify(exactly = 2) { pendingIntent.cancel() }
+    }
+
+    @Test
+    fun `cancelRealert drops only the nag`() {
+        scheduler.cancelRealert("m1")
 
         verify(exactly = 1) { alarmManager.cancel(pendingIntent) }
         verify(exactly = 1) { pendingIntent.cancel() }

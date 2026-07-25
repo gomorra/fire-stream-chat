@@ -3,12 +3,14 @@ package com.firestream.chat.data.timer
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.dao.ReminderDao
 import com.firestream.chat.data.reminder.ReminderAlarmScheduler
 import com.firestream.chat.data.reminder.ReminderBootAction
 import com.firestream.chat.data.reminder.ReminderBootRestoreLogic
 import com.firestream.chat.data.reminder.ReminderNotificationPoster
+import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.repository.MessageRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -43,6 +45,12 @@ class BootCompletedReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var messageDao: MessageDao
+
+    @Inject
+    lateinit var chatDao: ChatDao
+
+    @Inject
+    lateinit var authSource: AuthSource
 
     @Inject
     lateinit var messageRepository: MessageRepository
@@ -90,6 +98,14 @@ class BootCompletedReceiver : BroadcastReceiver() {
     }
 
     private suspend fun dispatchTimer(entity: com.firestream.chat.data.local.entity.MessageEntity, now: Long) {
+        // Re-derive the alarm's full context from the persisted row rather than
+        // re-arming a stripped-down copy: the message carries the synced style and
+        // sound, and the chat's participant list yields the deep-link partner.
+        val domain = entity.toDomain()
+        val otherUserId = BootRestoreLogic.resolveOtherUserId(
+            participants = chatDao.getChatById(entity.chatId)?.participants.orEmpty(),
+            currentUserId = authSource.currentUserId,
+        )
         val action = BootRestoreLogic.classify(
             messageId = entity.id,
             chatId = entity.chatId,
@@ -97,6 +113,9 @@ class BootCompletedReceiver : BroadcastReceiver() {
             timerStartedAtMs = entity.timerStartedAtMs,
             timerDurationMs = entity.timerDurationMs,
             nowMs = now,
+            otherUserId = otherUserId,
+            style = domain.alarmStyle,
+            sound = domain.alarmSound,
         )
         when (action) {
             is TimerBootAction.Schedule -> scheduler.schedule(
@@ -104,7 +123,9 @@ class BootCompletedReceiver : BroadcastReceiver() {
                 fireAtMs = action.fireAtMs,
                 caption = action.caption,
                 chatId = action.chatId,
-                otherUserId = null,
+                otherUserId = action.otherUserId,
+                style = action.style,
+                sound = action.sound,
             )
             is TimerBootAction.MarkCompleted ->
                 messageRepository.markTimerCompleted(action.chatId, action.messageId)
