@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.18.5] — 2026-07-25
+
+### Fixed
+
+- **Jump-to-reaction button now actually appears.** Third attempt at the in-chat reaction cues from 1.18.0: when someone reacted to one of your messages while you had the chat open, the pink jump-to-reaction button never showed up — 1.18.0 delivered the cue over a side channel and 1.18.3 rebuilt it as an on-screen diff, and neither reached the button. The cue now travels on the message state itself, alongside the very list it was detected from — the same state that draws the reaction chip you can already see — and the screen waits for the message list to be measured before deciding whether the reacted bubble is visible (flash it in place) or off-screen (raise the button). Previously that decision could be made before anything had been measured, which read as "visible" and silently swallowed the cue. Delivery now has direct test coverage, which is what was missing both earlier times. (`PENDINGHASH`)
+
 ## [1.18.4] — 2026-07-24
 
 ### Fixed

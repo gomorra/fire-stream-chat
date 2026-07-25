@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import android.content.Context
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -38,6 +39,12 @@ internal class ChatMessageLoader(
     private var screenVisible = false
     private var atBottom: Boolean = true
     private var lastResetIncomingId: String? = null
+
+    // Baseline for reaction-diff detection, held as a plain field (no Compose
+    // snapshot semantics) so the diff can't be defeated by conflation or by a
+    // baseline that updates out from under it. `null` until the first emission so
+    // reactions that already existed when the chat opened never fire a cue.
+    private var previousMessages: List<Message>? = null
     private val observedListIds = mutableSetOf<String>()
     private val processedUnshareIds = mutableSetOf<String>()
 
@@ -102,12 +109,17 @@ internal class ChatMessageLoader(
                     }
                 }
                 .collectLatest { (messages, pendingReminderIds) ->
+                    val cue = detectReactionCue(messages)
                     _uiState.update {
                         it.copy(
                             messages = it.messages.copy(
                                 messages = messages,
                                 pinnedMessages = messages.filter { msg -> msg.isPinned },
-                                pendingReminderIds = pendingReminderIds
+                                pendingReminderIds = pendingReminderIds,
+                                // Keep an unconsumed cue alive: ChatScreen acts on it a
+                                // frame later, and read-receipt/status writes emit again
+                                // in between — clobbering it here would drop the cue.
+                                newOwnReaction = cue ?: it.messages.newOwnReaction
                             ),
                             session = it.session.copy(isLoading = false)
                         )
@@ -118,6 +130,29 @@ internal class ChatMessageLoader(
                     observeListMessages(messages)
                 }
         }
+    }
+
+    /**
+     * Diffs [messages] against the previous emission and returns the newest reaction
+     * another user just added to one of my messages, or `null`. The first emission
+     * only establishes the baseline.
+     *
+     * When several arrive in one emission we surface the last: one cue at a time is
+     * all the UI can point at, and the newest is the one worth jumping to.
+     */
+    private fun detectReactionCue(messages: List<Message>): ReactionAlert? {
+        val previous = previousMessages
+        previousMessages = messages
+        if (previous == null) return null
+        val cue = detectNewOwnReactions(previous, messages, _uiState.value.session.currentUserId)
+            .lastOrNull()
+        if (cue != null) Log.d(TAG, "reaction cue: chat=$chatId msg=${cue.messageId} emoji=${cue.emoji}")
+        return cue
+    }
+
+    /** Clears the cue once ChatScreen has flashed the bubble or raised the FAB. */
+    fun consumeReactionCue() {
+        _uiState.update { it.copy(messages = it.messages.copy(newOwnReaction = null)) }
     }
 
     private fun markIncomingMessagesAsRead(messages: List<Message>) {
@@ -224,5 +259,9 @@ internal class ChatMessageLoader(
                 }
             }
         }
+    }
+
+    private companion object {
+        private const val TAG = "ChatMessageLoader"
     }
 }

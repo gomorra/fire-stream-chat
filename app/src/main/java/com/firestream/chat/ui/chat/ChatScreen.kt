@@ -545,33 +545,36 @@ fun ChatScreen(
         }
     }
 
-    // Detect reactions others add to my messages while I'm in the chat, straight
-    // from the rendered message list (the same state that shows the reaction chip),
-    // so detection can't drift out of sync with what's on screen. On-screen reacted
-    // bubble → flash its pink border in place; off-screen → remember it so the pink
-    // jump-to-reaction FAB can offer to scroll there. The first emission only sets
-    // the baseline so pre-existing reactions don't fire when the chat opens.
-    var reactionBaseline by remember { mutableStateOf<List<Message>?>(null) }
-    LaunchedEffect(Unit) {
-        snapshotFlow { uiState.messages.messages }
-            .collect { messages ->
-                val previous = reactionBaseline
-                reactionBaseline = messages
-                if (previous == null) return@collect
-                val alerts = detectNewOwnReactions(previous, messages, uiState.session.currentUserId)
-                for (alert in alerts) {
-                    val chronoIdx = messages.indexOfFirst { it.id == alert.messageId }
-                    if (chronoIdx < 0) continue
-                    val reversedIdx = messages.toReversedIndex(chronoIdx)
-                    val onScreen = listState.layoutInfo.visibleItemsInfo.any { it.index == reversedIdx }
-                    if (onScreen) {
-                        highlightedMessageId = alert.messageId
-                        if (pendingReactionMessageId == alert.messageId) pendingReactionMessageId = null
-                    } else {
-                        pendingReactionMessageId = alert.messageId
-                    }
-                }
-            }
+    // A reaction another user just added to one of my messages, delivered on the
+    // MessagesState slice alongside the very list it was diffed from (see
+    // ChatMessageLoader.detectReactionCue). On-screen reacted bubble → flash its
+    // pink border in place; off-screen → hold the id so the pink jump-to-reaction
+    // FAB can offer to scroll there.
+    val newOwnReaction = uiState.messages.newOwnReaction
+    LaunchedEffect(newOwnReaction) {
+        val alert = newOwnReaction ?: return@LaunchedEffect
+        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == alert.messageId }
+        if (chronoIdx < 0) {
+            viewModel.consumeReactionCue()
+            return@LaunchedEffect
+        }
+        val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
+        // Wait for a laid-out list before ruling on visible-vs-off-screen. On the
+        // frame a reaction lands visibleItemsInfo can still be empty, and reading it
+        // too early silently swallows the cue: "not visible" is indistinguishable
+        // from "nothing measured yet", so an off-screen reaction would flash a bubble
+        // nobody can see instead of raising the FAB.
+        val visibleIndices = withTimeoutOrNull(1000L) {
+            snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index } }
+                .first { it.isNotEmpty() }
+        }
+        if (visibleIndices != null && reversedIdx in visibleIndices) {
+            highlightedMessageId = alert.messageId
+            if (pendingReactionMessageId == alert.messageId) pendingReactionMessageId = null
+        } else {
+            pendingReactionMessageId = alert.messageId
+        }
+        viewModel.consumeReactionCue()
     }
 
     // Dismiss the jump-to-reaction FAB once its target scrolls into view on its own.
@@ -1330,14 +1333,16 @@ fun ChatScreen(
                                 val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == id }
                                 if (chronoIdx < 0) return@derivedStateOf null
                                 val reversedIdx = uiState.messages.messages.toReversedIndex(chronoIdx)
-                                val visInfo = listState.layoutInfo.visibleItemsInfo
-                                val firstVisible = visInfo.firstOrNull()?.index
-                                val lastVisible = visInfo.lastOrNull()?.index
+                                val visibleIndices = listState.layoutInfo.visibleItemsInfo.map { it.index }
+                                val lastVisible = visibleIndices.maxOrNull()
                                 when {
-                                    firstVisible == null || lastVisible == null -> ReactionFabDirection.UP
+                                    // On screen; the auto-clear effect will drop the id.
+                                    reversedIdx in visibleIndices -> null
+                                    // Nothing measured yet — show it rather than hide the
+                                    // only cue the user gets; the arrow settles next frame.
+                                    lastVisible == null -> ReactionFabDirection.UP
                                     reversedIdx > lastVisible -> ReactionFabDirection.UP    // older → above view
-                                    reversedIdx < firstVisible -> ReactionFabDirection.DOWN // newer → below view
-                                    else -> null // on screen; auto-clear effect will drop it
+                                    else -> ReactionFabDirection.DOWN                       // newer → below view
                                 }
                             }
                         }

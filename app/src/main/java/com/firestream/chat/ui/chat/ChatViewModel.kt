@@ -230,6 +230,12 @@ class ChatViewModel @Inject constructor(
     }
     fun setAtBottom(atBottom: Boolean) = messageLoader.setAtBottom(atBottom)
 
+    /**
+     * Clears `messages.newOwnReaction` once ChatScreen has turned it into a cue
+     * (bubble flash or jump-to-reaction FAB), so the next reaction fires a fresh one.
+     */
+    internal fun consumeReactionCue() = messageLoader.consumeReactionCue()
+
     // ── Block state ──
     fun refreshBlockState() = infoManager.refreshBlockState()
 

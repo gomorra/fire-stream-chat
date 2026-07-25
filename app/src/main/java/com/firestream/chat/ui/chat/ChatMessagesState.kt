@@ -9,4 +9,12 @@ internal data class MessagesState(
     // messageIds with a pending snooze reminder in this chat. Combined into the
     // message flow by ChatMessageLoader (see ReminderRepository.observePendingIdsForChat).
     val pendingReminderIds: Set<String> = emptySet(),
+    // A reaction another user just added to one of my messages, awaiting its in-chat
+    // cue (bubble flash if the message is visible, jump-to-reaction FAB if not).
+    // Deliberately carried on this slice — the same state that renders the reaction
+    // chip — rather than over a side channel: both earlier deliveries (a loader
+    // SharedFlow in 1.18.0, a ChatScreen snapshotFlow diff in 1.18.3) never reached
+    // the screen. Set by ChatMessageLoader in the same update as the list it was
+    // diffed from; cleared via consumeReactionCue() once ChatScreen has acted.
+    val newOwnReaction: ReactionAlert? = null,
 )
