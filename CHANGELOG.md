@@ -2,7 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.18.5] — 2026-07-25
+## [UNRELEASED] [1.19.0] — 2026-07-25
+
+### Added
+
+- **Swipe through a chat's photos from any image.** Opening a picture in a chat no longer shows just that one picture: the fullscreen view is now the same swipeable gallery as Shared Media, spanning every image in the conversation, opened at the one you tapped. Swipe left and right to move through them — oldest to newest, the same direction the chat reads — with pinch-zoom and the Save button following whichever photo is on screen. Closing the viewer lands the chat exactly where the photo you were looking at was sent, flashing that message so you can see where you came out; close without swiping and the list stays put, since you never left. Link-preview thumbnails still open on their own, as they aren't part of the chat's media.
 
 ### Fixed
 

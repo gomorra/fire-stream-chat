@@ -44,8 +44,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -71,10 +73,14 @@ internal val FullscreenImageArgsSaver = listSaver<Pair<String?, String?>?, Strin
 )
 
 // A single fullscreen media entry (remote url + optional local path), used by
-// the swipeable gallery pager below.
+// the swipeable gallery pager below. [messageId] is the message the image was
+// sent in, carried so a host screen showing an in-chat gallery can scroll back
+// to the message the user swiped to; screens with no message context (the
+// Shared Media grid, avatars) leave it null.
 internal data class FullscreenMediaItem(
     val imageUrl: String?,
     val localUri: String? = null,
+    val messageId: String? = null,
 )
 
 @Composable
@@ -115,6 +121,10 @@ internal fun FullscreenImageViewer(
  * `userScrollEnabled` on whether the current page is zoomed — at 1x the pager
  * swipes freely; once zoomed (scale > 1f) paging is disabled so the image pans.
  * Pages reset their zoom when scrolled out of view.
+ *
+ * [onPageChanged] reports the settled page so a host can follow along (the chat
+ * screen uses it to scroll to the swiped-to message on close). [onSaveToDownloads]
+ * is handed the item currently on screen, not a fixed one.
  */
 @Composable
 internal fun FullscreenImagePager(
@@ -122,6 +132,8 @@ internal fun FullscreenImagePager(
     initialIndex: Int,
     onDismiss: () -> Unit,
     snackbarHostState: SnackbarHostState? = null,
+    onPageChanged: ((Int) -> Unit)? = null,
+    onSaveToDownloads: ((FullscreenMediaItem) -> Unit)? = null,
 ) {
     if (items.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
@@ -131,6 +143,15 @@ internal fun FullscreenImagePager(
         initialPage = initialIndex.coerceIn(0, items.lastIndex),
     ) { items.size }
     var currentPageZoomed by remember { mutableStateOf(false) }
+
+    // Fires once on open too (with the initial page), so the host never has to
+    // seed the index itself. rememberUpdatedState keeps the effect from holding
+    // a stale lambda when the host recomposes with a new one.
+    val currentOnPageChanged by rememberUpdatedState(onPageChanged)
+    LaunchedEffect(pagerState) {
+        snapshotFlow { pagerState.currentPage }
+            .collect { page -> currentOnPageChanged?.invoke(page) }
+    }
 
     Box(
         modifier = Modifier
@@ -155,6 +176,9 @@ internal fun FullscreenImagePager(
         }
         FullscreenOverlayControls(
             onDismiss = onDismiss,
+            onSaveToDownloads = onSaveToDownloads?.let { save ->
+                { items.getOrNull(pagerState.currentPage)?.let(save) }
+            },
             snackbarHostState = snackbarHostState,
         )
     }

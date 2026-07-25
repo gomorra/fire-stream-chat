@@ -71,7 +71,8 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage`, `downloadAndSave` (in-flight dedup map), per-chat scan |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Pinch-to-zoom + caption before send |
-| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer |
+| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan vs. paging gesture split) |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
 | `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaScreen.kt` | Shared-media gallery (chat three-dot menu) |
 | `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaViewModel.kt` | Image stream for the gallery |
 | `app/src/main/java/com/firestream/chat/ui/components/SharedMediaTile.kt` | Shared grid-tile composable used by both `SharedMediaScreen` and `ProfileScreen` |

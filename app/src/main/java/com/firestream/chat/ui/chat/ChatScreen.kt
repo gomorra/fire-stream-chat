@@ -115,6 +115,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.MutableIntState
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -361,6 +362,12 @@ fun ChatScreen(
         }
     }
 
+    // The message whose image the fullscreen gallery is currently showing. The
+    // pager reports every page change here, so closing the viewer can land the
+    // chat on the image the user swiped to. Saveable so it survives rotation
+    // alongside the ViewModel-held FullscreenImage.
+    var fullscreenMediaMessageId by rememberSaveable { mutableStateOf<String?>(null) }
+
     fun jumpToSourceMessage(sourceId: String, animate: Boolean = true) {
         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
         if (chronoIdx < 0) return
@@ -377,6 +384,22 @@ fun ChatScreen(
                 highlightedMessageId = sourceId
             }
         }
+    }
+
+    // Closing the fullscreen gallery lands the chat on the image you were last
+    // looking at: swiping through the chat's media moves you through the chat,
+    // so the list has to follow you out. Snapped rather than glided — the
+    // overlay is fading out over the list, and a long sweep under that fade
+    // reads as a glitch. The bubble flash from jumpToSourceMessage marks where
+    // you came out. No jump when the open image is still the one you tapped
+    // (never swiped) — it's already on screen, and re-centring it is motion for
+    // nothing.
+    fun closeFullscreenImage() {
+        val landOn = fullscreenMediaMessageId
+        val openedOn = fullscreenImage?.messageId
+        viewModel.dismissFullscreenImage()
+        fullscreenMediaMessageId = null
+        if (landOn != null && landOn != openedOn) jumpToSourceMessage(landOn, animate = false)
     }
 
     // Save scroll position when leaving so it can be restored on re-entry.
@@ -1226,6 +1249,7 @@ fun ChatScreen(
                                                             imageUrl = message.mediaUrl,
                                                             localUri = message.localUri,
                                                             canSaveToDownloads = true,
+                                                            messageId = message.id,
                                                         )
                                                     )
                                                 },
@@ -2073,7 +2097,7 @@ fun ChatScreen(
     }
 
     BackHandler(enabled = fullscreenImage != null) {
-        viewModel.dismissFullscreenImage()
+        closeFullscreenImage()
     }
 
     // The IME is a system window that floats above the black overlay (the
@@ -2086,15 +2110,42 @@ fun ChatScreen(
 
     AnimatedVisibility(visible = fullscreenImage != null, enter = fadeIn(), exit = fadeOut()) {
         fullscreenImage?.let { req ->
-            FullscreenImageViewer(
-                imageUrl = req.imageUrl,
-                localUri = req.localUri,
-                onDismiss = { viewModel.dismissFullscreenImage() },
-                onSaveToDownloads = if (req.canSaveToDownloads) {
-                    { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
-                } else null,
-                snackbarHostState = fullscreenSnackbarHostState,
-            )
+            // Built only while the viewer is open — nothing else needs the list.
+            val galleryItems = remember(uiState.messages.messages) {
+                chatImageGallery(uiState.messages.messages)
+            }
+            val startIndex = galleryItems.indexOfFirst { it.messageId == req.messageId }
+            if (startIndex >= 0) {
+                // Keyed on the tapped message so each open starts a fresh pager at
+                // that image, never restoring the page left over from a previous one.
+                key(req.messageId) {
+                    FullscreenImagePager(
+                        items = galleryItems,
+                        initialIndex = startIndex,
+                        onDismiss = { closeFullscreenImage() },
+                        snackbarHostState = fullscreenSnackbarHostState,
+                        onPageChanged = { page ->
+                            fullscreenMediaMessageId = galleryItems.getOrNull(page)?.messageId
+                        },
+                        onSaveToDownloads = { item ->
+                            viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
+                        },
+                    )
+                }
+            } else {
+                // Not part of the chat's media, so there is nothing to swipe
+                // through: a link-preview thumbnail, or an image whose message was
+                // deleted while it was open.
+                FullscreenImageViewer(
+                    imageUrl = req.imageUrl,
+                    localUri = req.localUri,
+                    onDismiss = { closeFullscreenImage() },
+                    onSaveToDownloads = if (req.canSaveToDownloads) {
+                        { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
+                    } else null,
+                    snackbarHostState = fullscreenSnackbarHostState,
+                )
+            }
         }
     }
 
