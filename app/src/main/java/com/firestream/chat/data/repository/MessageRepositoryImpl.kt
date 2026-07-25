@@ -38,6 +38,8 @@ import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
 import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.parseTimerAlarmSound
+import com.firestream.chat.data.util.parseTimerAlarmStyle
 import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
@@ -45,6 +47,8 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -214,6 +218,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 timerState = raw.timerState?.let { parseTimerState(it) },
                                 timerRemainingMs = raw.timerRemainingMs,
                                 timerSilent = raw.timerSilent,
+                                timerAlarmStyle = raw.timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
+                                timerAlarmSound = raw.timerAlarmSound?.let { parseTimerAlarmSound(it) },
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
                             continue
@@ -294,6 +300,8 @@ class MessageRepositoryImpl @Inject constructor(
                                 timerState = raw.timerState?.let { parseTimerState(it) },
                                 timerRemainingMs = raw.timerRemainingMs,
                                 timerSilent = raw.timerSilent,
+                                timerAlarmStyle = raw.timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
+                                timerAlarmSound = raw.timerAlarmSound?.let { parseTimerAlarmSound(it) },
                             )
                             messageDao.insertMessage(MessageEntity.fromDomain(message))
 
@@ -1338,7 +1346,8 @@ class MessageRepositoryImpl @Inject constructor(
         durationMs: Long,
         caption: String?,
         recipientId: String,
-        silent: Boolean,
+        style: TimerAlarmStyle,
+        sound: TimerAlarmSound,
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
@@ -1361,7 +1370,9 @@ class MessageRepositoryImpl @Inject constructor(
             timerDurationMs = durationMs,
             timerStartedAtMs = timestamp,
             timerState = TimerState.RUNNING,
-            timerSilent = silent,
+            timerSilent = style.isSilent,
+            timerAlarmStyle = style,
+            timerAlarmSound = sound,
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
 
@@ -1372,14 +1383,14 @@ class MessageRepositoryImpl @Inject constructor(
                 durationMs = durationMs,
                 caption = caption,
                 timestamp = timestamp,
-                silent = silent,
+                style = style,
+                sound = sound,
             )
 
             val sent = optimistic.copy(
                 id = result.messageId,
                 status = MessageStatus.SENT,
                 timerStartedAtMs = result.startedAtMs,
-                timerSilent = silent,
             )
             messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
             chatDao.updateLastMessage(
@@ -1537,6 +1548,8 @@ class MessageRepositoryImpl @Inject constructor(
                     timerState = raw.timerState?.let { parseTimerState(it) },
                     timerRemainingMs = raw.timerRemainingMs,
                     timerSilent = raw.timerSilent,
+                    timerAlarmStyle = raw.timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
+                    timerAlarmSound = raw.timerAlarmSound?.let { parseTimerAlarmSound(it) },
                 )
                 messageDao.insertMessage(MessageEntity.fromDomain(message))
                 continue
@@ -1590,6 +1603,8 @@ class MessageRepositoryImpl @Inject constructor(
                 timerState = raw.timerState?.let { parseTimerState(it) },
                 timerRemainingMs = raw.timerRemainingMs,
                 timerSilent = raw.timerSilent,
+                timerAlarmStyle = raw.timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
+                timerAlarmSound = raw.timerAlarmSound?.let { parseTimerAlarmSound(it) },
             )
             messageDao.insertMessage(MessageEntity.fromDomain(message))
         }

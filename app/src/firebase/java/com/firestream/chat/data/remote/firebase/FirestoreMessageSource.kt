@@ -458,7 +458,8 @@ class FirestoreMessageSource @Inject constructor(
         durationMs: Long,
         caption: String?,
         timestamp: Long,
-        silent: Boolean,
+        style: com.firestream.chat.domain.model.TimerAlarmStyle,
+        sound: com.firestream.chat.domain.model.TimerAlarmSound,
     ): TimerSendResult {
         val content = caption.orEmpty()
         val data = hashMapOf<String, Any?>(
@@ -470,7 +471,12 @@ class FirestoreMessageSource @Inject constructor(
             "timerDurationMs" to durationMs,
             "timerStartedAtMs" to FieldValue.serverTimestamp(),
             "timerState" to com.firestream.chat.domain.model.TimerState.RUNNING.name,
-            "timerSilent" to silent,
+            // Legacy boolean written alongside the enum: a client that predates
+            // timerAlarmStyle reads only this, and must still stay quiet for a
+            // silent timer. Never write one without the other.
+            "timerSilent" to style.isSilent,
+            "timerAlarmStyle" to style.name,
+            "timerAlarmSound" to sound.name,
         )
         val docRef = firestore
             .collection("chats").document(chatId)
@@ -581,6 +587,8 @@ class FirestoreMessageSource @Inject constructor(
             timerState = data["timerState"] as? String,
             timerRemainingMs = (data["timerRemainingMs"] as? Number)?.toLong(),
             timerSilent = data["timerSilent"] as? Boolean ?: false,
+            timerAlarmStyle = data["timerAlarmStyle"] as? String,
+            timerAlarmSound = data["timerAlarmSound"] as? String,
         )
     }
 

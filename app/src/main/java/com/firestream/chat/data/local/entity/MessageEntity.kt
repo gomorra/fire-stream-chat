@@ -7,6 +7,8 @@ import com.firestream.chat.data.local.Converters
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.data.util.parseMessageStatus
 import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.parseTimerAlarmSound
+import com.firestream.chat.data.util.parseTimerAlarmStyle
 import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Poll
@@ -54,6 +56,8 @@ data class MessageEntity(
     val timerState: String? = null,
     val timerRemainingMs: Long? = null,
     val timerSilent: Boolean = false,
+    val timerAlarmStyle: String? = null,
+    val timerAlarmSound: String? = null,
 ) {
     fun toDomain() = Message(
         id = id,
@@ -91,6 +95,8 @@ data class MessageEntity(
         timerState = timerState?.let { parseTimerState(it) },
         timerRemainingMs = timerRemainingMs,
         timerSilent = timerSilent,
+        timerAlarmStyle = timerAlarmStyle?.let { parseTimerAlarmStyle(it) },
+        timerAlarmSound = timerAlarmSound?.let { parseTimerAlarmSound(it) },
     )
 
     companion object {
@@ -130,6 +136,8 @@ data class MessageEntity(
             timerState = message.timerState?.name,
             timerRemainingMs = message.timerRemainingMs,
             timerSilent = message.timerSilent,
+            timerAlarmStyle = message.timerAlarmStyle?.name,
+            timerAlarmSound = message.timerAlarmSound?.name,
         )
 
         private fun pollToJson(poll: Poll): String {

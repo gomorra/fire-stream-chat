@@ -1,6 +1,8 @@
 package com.firestream.chat.data.remote.source
 
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -122,13 +124,19 @@ interface MessageSource {
      * server-stamped (e.g. Firestore `FieldValue.serverTimestamp()`) and reads
      * it back so both devices schedule against the same instant.
      */
+    /**
+     * [style] and [sound] are the sender's synced alarm choice. Implementations
+     * must *also* write the legacy `timerSilent` boolean (`style.isSilent`) so a
+     * client predating those fields still suppresses a silent timer.
+     */
     suspend fun sendTimerMessage(
         chatId: String,
         senderId: String,
         durationMs: Long,
         caption: String?,
         timestamp: Long,
-        silent: Boolean = false,
+        style: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
+        sound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
     ): TimerSendResult
 
     suspend fun updateTimerState(chatId: String, messageId: String, state: String)

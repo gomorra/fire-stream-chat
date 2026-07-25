@@ -2,6 +2,8 @@ package com.firestream.chat.data.util
 
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
 import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
@@ -26,6 +28,20 @@ class EnumParsersTest {
     @Test
     fun `unknown message status defaults to SENT`() {
         assertEquals(MessageStatus.SENT, parseMessageStatus("TELEPORTED"))
+    }
+
+    @Test
+    fun `known alarm style and sound values parse`() {
+        assertEquals(TimerAlarmStyle.INSISTENT, parseTimerAlarmStyle("INSISTENT"))
+        assertEquals(TimerAlarmSound.RINGTONE, parseTimerAlarmSound("RINGTONE"))
+    }
+
+    @Test
+    fun `unknown alarm style and sound parse to null so the caller can fall back`() {
+        // null, not a default: Message.alarmStyle then resolves via the legacy
+        // timerSilent boolean, which is the safer signal for an unknown future value.
+        assertNull(parseTimerAlarmStyle("THERMONUCLEAR"))
+        assertNull(parseTimerAlarmSound("AIR_HORN"))
     }
 
     @Test

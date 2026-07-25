@@ -50,4 +50,6 @@ data class RawMessage(
     val timerState: String? = null,
     val timerRemainingMs: Long? = null,
     val timerSilent: Boolean = false,
+    val timerAlarmStyle: String? = null,
+    val timerAlarmSound: String? = null,
 )

@@ -2,6 +2,8 @@ package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.TimerAlarmSound
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -67,7 +69,14 @@ interface MessageRepository {
     // Background sync
     suspend fun syncAllChatMessages(chatIds: List<String>)
     // Timers (.timer.set)
-    suspend fun sendTimerMessage(chatId: String, durationMs: Long, caption: String?, recipientId: String, silent: Boolean = false): Result<Message>
+    suspend fun sendTimerMessage(
+        chatId: String,
+        durationMs: Long,
+        caption: String?,
+        recipientId: String,
+        style: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
+        sound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
+    ): Result<Message>
     suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit>
     suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit>
     /** Freeze a running timer; [remainingMs] is snapshotted from the live countdown. */

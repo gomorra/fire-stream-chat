@@ -20,6 +20,7 @@ import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
+import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.data.util.MediaFileManager
@@ -334,7 +335,13 @@ class ChatViewModel @Inject constructor(
     private fun sendTimerCommand(payload: CommandPayload.Timer) {
         viewModelScope.launch {
             _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
-            messageRepository.sendTimerMessage(chatId, payload.durationMs, payload.caption, recipientId, payload.silent)
+            messageRepository.sendTimerMessage(
+                chatId,
+                payload.durationMs,
+                payload.caption,
+                recipientId,
+                style = TimerAlarmStyle.fromLegacySilent(payload.silent),
+            )
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(

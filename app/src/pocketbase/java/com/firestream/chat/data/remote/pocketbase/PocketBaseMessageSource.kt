@@ -247,7 +247,8 @@ class PocketBaseMessageSource @Inject constructor(
         durationMs: Long,
         caption: String?,
         timestamp: Long,
-        silent: Boolean,
+        style: com.firestream.chat.domain.model.TimerAlarmStyle,
+        sound: com.firestream.chat.domain.model.TimerAlarmSound,
     ): com.firestream.chat.data.remote.source.TimerSendResult =
         throw NotImplementedError("PB v0: timers deferred")
 
