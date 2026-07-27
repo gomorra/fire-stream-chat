@@ -1057,7 +1057,7 @@ internal fun MessageBubble(
                                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                             ) {
                                 Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp))
-                                Text("Snooze")
+                                Text("Reminder")
                             }
                         }
                     }

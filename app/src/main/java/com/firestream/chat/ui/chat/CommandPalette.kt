@@ -26,17 +26,23 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.firestream.chat.domain.command.ChatCommand
+import com.firestream.chat.domain.command.CommandMatch
 import com.firestream.chat.domain.command.CommandPath
 
 @Composable
 internal fun CommandPalette(
     visible: Boolean,
     currentPath: CommandPath,
-    candidates: List<ChatCommand>,
-    onCommandTap: (ChatCommand) -> Unit,
+    filter: String,
+    candidates: List<CommandMatch>,
+    onCommandTap: (CommandMatch) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Set when the current level matched nothing and the registry fell back to the
+    // subtree — the rows are then somewhere below the path in the header, so they
+    // render as full paths and the header says where they came from.
+    val showingNested = candidates.any { it.isDeep }
+
     AnimatedVisibility(
         visible = visible,
         enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
@@ -52,14 +58,17 @@ internal fun CommandPalette(
                 .background(MaterialTheme.colorScheme.surface)
                 .heightIn(max = 280.dp)
         ) {
-            CommandPaletteHeader(currentPath)
+            CommandPaletteHeader(currentPath, showingNested)
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             if (candidates.isEmpty()) {
-                EmptyState(currentPath)
+                EmptyState(currentPath, filter)
             } else {
                 LazyColumn {
-                    items(candidates, key = { it.id }) { cmd ->
-                        CommandRow(cmd, onClick = { onCommandTap(cmd) })
+                    // Keyed by full path, not id: a fallback search can surface two
+                    // commands sharing a leaf id (`.timer.set` and `.alarm.set`), and
+                    // duplicate keys throw in LazyColumn.
+                    items(candidates, key = { it.path.displayString() }) { match ->
+                        CommandRow(match, onClick = { onCommandTap(match) })
                     }
                 }
             }
@@ -68,13 +77,13 @@ internal fun CommandPalette(
 }
 
 @Composable
-private fun CommandPaletteHeader(path: CommandPath) {
+private fun CommandPaletteHeader(path: CommandPath, showingNested: Boolean) {
     val title = if (path.isRoot) "Commands" else path.displayString()
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 10.dp),
-        contentAlignment = Alignment.CenterStart,
+        verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
             text = title,
@@ -82,12 +91,23 @@ private fun CommandPaletteHeader(path: CommandPath) {
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.SemiBold,
         )
+        if (showingNested) {
+            Text(
+                text = "Nested matches",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
 @Composable
-private fun EmptyState(path: CommandPath) {
-    val msg = if (path.isRoot) "No commands available" else "No matches"
+private fun EmptyState(path: CommandPath, filter: String) {
+    // "No commands available" only fits a genuinely empty registry. Once the user has
+    // typed something, an empty list means their search missed — at root as much as
+    // anywhere else, and now that the search descends the subtree it means nothing in
+    // the whole tree matched.
+    val msg = if (path.isRoot && filter.isBlank()) "No commands available" else "No matches"
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -99,7 +119,8 @@ private fun EmptyState(path: CommandPath) {
 }
 
 @Composable
-private fun CommandRow(command: ChatCommand, onClick: () -> Unit) {
+private fun CommandRow(match: CommandMatch, onClick: () -> Unit) {
+    val command = match.command
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -108,7 +129,9 @@ private fun CommandRow(command: ChatCommand, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         Text(
-            text = command.displayName,
+            // A nested match shows its full path — its bare display name (".set")
+            // wouldn't say which command it belongs to.
+            text = if (match.isDeep) match.path.displayString() else command.displayName,
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,

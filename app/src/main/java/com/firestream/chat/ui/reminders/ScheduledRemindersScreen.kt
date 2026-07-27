@@ -85,7 +85,7 @@ fun ScheduledRemindersScreen(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            text = "Long-press a message and tap Snooze to set a reminder",
+                            text = "Long-press a message and tap Reminder to set one",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 4.dp)

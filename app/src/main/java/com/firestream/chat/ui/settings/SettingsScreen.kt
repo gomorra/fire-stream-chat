@@ -229,7 +229,7 @@ fun SettingsScreen(
             SettingsItem(
                 icon = Icons.Outlined.OutlinedNotifications,
                 title = "Scheduled Reminders",
-                subtitle = "Message snoozes you've scheduled",
+                subtitle = "Message reminders you've scheduled",
                 onClick = onScheduledRemindersClick
             )
 

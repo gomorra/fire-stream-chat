@@ -33,7 +33,7 @@ class ChatCommandsManagerTest {
         val cmds = state.value.commands
         assertTrue(cmds.isPaletteOpen)
         assertEquals(CommandPath.ROOT, cmds.currentPath)
-        assertEquals(listOf("timer", "torch"), cmds.candidates.map { it.id })
+        assertEquals(listOf("timer", "torch"), cmds.candidates.map { it.command.id })
     }
 
     @Test
@@ -55,7 +55,7 @@ class ChatCommandsManagerTest {
         val cmds = state.value.commands
         assertTrue(cmds.isPaletteOpen)
         assertEquals(CommandPath.of("timer"), cmds.currentPath)
-        assertEquals(listOf("set", "send"), cmds.candidates.map { it.id })
+        assertEquals(listOf("set", "send"), cmds.candidates.map { it.command.id })
     }
 
     @Test
@@ -77,7 +77,7 @@ class ChatCommandsManagerTest {
         manager.navigateBack()
 
         assertEquals(CommandPath.ROOT, state.value.commands.currentPath)
-        assertEquals(listOf("timer", "torch"), state.value.commands.candidates.map { it.id })
+        assertEquals(listOf("timer", "torch"), state.value.commands.candidates.map { it.command.id })
     }
 
     @Test
@@ -98,7 +98,7 @@ class ChatCommandsManagerTest {
 
         val cmds = state.value.commands
         assertEquals("ti", cmds.filter)
-        assertEquals(listOf("timer"), cmds.candidates.map { it.id })
+        assertEquals(listOf("timer"), cmds.candidates.map { it.command.id })
     }
 
     @Test
@@ -127,7 +127,7 @@ class ChatCommandsManagerTest {
         assertTrue(cmds.isPaletteOpen)
         assertEquals(CommandPath.ROOT, cmds.currentPath)
         assertEquals("tim", cmds.filter)
-        assertEquals(listOf("timer"), cmds.candidates.map { it.id })
+        assertEquals(listOf("timer"), cmds.candidates.map { it.command.id })
     }
 
     @Test
@@ -138,7 +138,7 @@ class ChatCommandsManagerTest {
         assertTrue(cmds.isPaletteOpen)
         assertEquals(CommandPath.of("timer"), cmds.currentPath)
         assertEquals("", cmds.filter)
-        assertEquals(listOf("set", "send"), cmds.candidates.map { it.id })
+        assertEquals(listOf("set", "send"), cmds.candidates.map { it.command.id })
     }
 
     @Test
@@ -156,6 +156,69 @@ class ChatCommandsManagerTest {
         manager.onComposerTextChanged(".bogus.command")
 
         assertFalse(state.value.commands.isPaletteOpen)
+    }
+
+    @Test
+    fun `onComposerTextChanged offers a nested match when no root command matches`() {
+        manager.onComposerTextChanged(".set")
+
+        val cmds = state.value.commands
+        assertTrue(cmds.isPaletteOpen)
+        assertEquals(CommandPath.ROOT, cmds.currentPath)
+        assertEquals("set", cmds.filter)
+        assertEquals(listOf(CommandPath.of("timer", "set")), cmds.candidates.map { it.path })
+        assertTrue(cmds.candidates.single().isDeep)
+    }
+
+    @Test
+    fun `a nested match never mounts its widget on its own`() {
+        // `.set` resolves to the `.timer.set` leaf, but the composer still reads
+        // ".set" — mounting here would desync the two. The widget mounts only after
+        // the tap rewrites the composer to ".timer.set".
+        manager.onComposerTextChanged(".set")
+
+        assertNull(state.value.commands.activeWidget)
+        assertTrue(state.value.commands.isPaletteOpen)
+    }
+
+    @Test
+    fun `nested search offers every match under the level`() {
+        manager.onComposerTextChanged(".s")
+
+        val cmds = state.value.commands
+        assertEquals(
+            listOf(CommandPath.of("timer", "set"), CommandPath.of("timer", "send")),
+            cmds.candidates.map { it.path },
+        )
+    }
+
+    @Test
+    fun `navigateTo jumps straight to an absolute path`() {
+        manager.onComposerTextChanged(".set")
+        manager.navigateTo(CommandPath.of("timer", "set"))
+
+        val cmds = state.value.commands
+        assertFalse(cmds.isPaletteOpen)
+        assertSame(timerWidget, cmds.activeWidget)
+        assertEquals(CommandPath.of("timer", "set"), cmds.currentPath)
+    }
+
+    @Test
+    fun `navigateTo ignores an unknown path`() {
+        manager.openPalette()
+        manager.navigateTo(CommandPath.of("timer", "bogus"))
+
+        assertEquals(CommandPath.ROOT, state.value.commands.currentPath)
+        assertNull(state.value.commands.activeWidget)
+    }
+
+    @Test
+    fun `a filter matching nothing anywhere leaves the palette empty`() {
+        manager.onComposerTextChanged(".zzz")
+
+        val cmds = state.value.commands
+        assertTrue(cmds.isPaletteOpen)
+        assertTrue(cmds.candidates.isEmpty())
     }
 
     @Test
