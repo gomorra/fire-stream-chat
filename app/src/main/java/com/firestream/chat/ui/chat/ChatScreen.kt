@@ -1614,10 +1614,16 @@ fun ChatScreen(
             CommandPalette(
                 visible = uiState.commands.isPaletteOpen,
                 currentPath = uiState.commands.currentPath,
+                filter = uiState.commands.filter,
                 candidates = uiState.commands.candidates,
-                onCommandTap = { cmd ->
-                    val newPath = uiState.commands.currentPath.append(cmd.id)
-                    val mirrorText = if (cmd.children.isEmpty()) newPath.displayString()
+                onCommandTap = { match ->
+                    // The match's own path, not currentPath + one segment: a nested
+                    // match (`.timer.set` offered while browsing root) sits below the
+                    // level being browsed, so the composer has to jump to its full
+                    // path. Mirroring the canonical text back through the parser is
+                    // what then mounts the widget.
+                    val newPath = match.path
+                    val mirrorText = if (match.command.children.isEmpty()) newPath.displayString()
                                      else newPath.displayString() + "."
                     messageText = mirrorText
                     inputCursor = TextRange(mirrorText.length)

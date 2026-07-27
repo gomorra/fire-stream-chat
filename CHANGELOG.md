@@ -2,7 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.20.1] — 2026-07-27
+## [UNRELEASED] [1.21.0] — 2026-07-27
+
+### Added
+
+- **The `.command` palette now finds nested commands by their verb alone.** Typing `.set` used to come up empty, because `set` isn't a command in its own right — it lives under `.timer`, and the palette only ever searched the level you were standing on. It now falls back to searching the levels below: when nothing at the current level matches, the palette offers what it found further down, listed by full path (`.timer.set`) so it's clear where the command actually lives, and headed "Nested matches" so it's clear why a row you didn't type is there. Tapping one fills the composer with the full command. The level you're on still wins outright — as long as something there matches, nothing nested is shown — and a nested result never opens itself; it waits for a tap, so the palette and what you typed can't drift apart. Also fixes the palette claiming "No commands available" whenever a search missed, which was true of an empty app and of nothing else.
 
 ### Changed
 

@@ -74,6 +74,116 @@ class CommandRegistryTest {
         assertTrue(registry.filterChildren(CommandPath.of("timer"), "z").isEmpty())
     }
 
+    @Test
+    fun `search returns direct children when the current level matches`() {
+        val set = cmd("set")
+        val timer = cmd("timer", children = listOf(set))
+        val registry = CommandRegistry(setOf(timer))
+
+        val results = registry.search(CommandPath.ROOT, "tim")
+
+        assertEquals(listOf("timer"), results.map { it.command.id })
+        assertEquals(listOf(CommandPath.of("timer")), results.map { it.path })
+        assertTrue(results.none { it.isDeep })
+    }
+
+    @Test
+    fun `search falls back to the subtree when the current level misses`() {
+        val set = cmd("set")
+        val timer = cmd("timer", children = listOf(set))
+        val remind = cmd("remind")
+        val registry = CommandRegistry(setOf(timer, remind))
+
+        val results = registry.search(CommandPath.ROOT, "set")
+
+        assertEquals(listOf("set"), results.map { it.command.id })
+        assertEquals(CommandPath.of("timer", "set"), results.single().path)
+        assertTrue(results.single().isDeep)
+    }
+
+    @Test
+    fun `search does not fall back while the current level still matches`() {
+        // "s" matches the root command `.send` directly, so the nested `.timer.set`
+        // must stay hidden — the level the user is browsing wins outright.
+        val set = cmd("set")
+        val timer = cmd("timer", children = listOf(set))
+        val send = cmd("send")
+        val registry = CommandRegistry(setOf(timer, send))
+
+        val results = registry.search(CommandPath.ROOT, "s")
+
+        assertEquals(listOf("send"), results.map { it.command.id })
+        assertTrue(results.none { it.isDeep })
+    }
+
+    @Test
+    fun `search does not fall back on a blank filter`() {
+        // A leaf has no children; a bare `.` there must not spill the whole tree in.
+        val set = cmd("set")
+        val timer = cmd("timer", children = listOf(set))
+        val registry = CommandRegistry(setOf(timer))
+
+        assertTrue(registry.search(CommandPath.of("timer", "set"), "").isEmpty())
+    }
+
+    @Test
+    fun `search fallback ranks shallower matches first`() {
+        val deep = cmd("stop", children = emptyList())
+        val mid = cmd("nested", children = listOf(deep))
+        val shallow = cmd("start")
+        val timer = cmd("timer", children = listOf(mid, shallow))
+        val registry = CommandRegistry(setOf(timer))
+
+        val results = registry.search(CommandPath.ROOT, "st")
+
+        assertEquals(listOf("start", "stop"), results.map { it.command.id })
+        assertEquals(
+            listOf(CommandPath.of("timer", "start"), CommandPath.of("timer", "nested", "stop")),
+            results.map { it.path },
+        )
+    }
+
+    @Test
+    fun `search fallback keeps same-id matches under different parents apart`() {
+        val timerSet = cmd("set")
+        val alarmSet = cmd("set")
+        val timer = cmd("timer", children = listOf(timerSet))
+        val alarm = cmd("alarm", children = listOf(alarmSet))
+        val registry = CommandRegistry(setOf(timer, alarm))
+
+        val results = registry.search(CommandPath.ROOT, "set")
+
+        // Both surface, and their paths differ — the palette keys rows on the path
+        // precisely because the ids collide here.
+        assertEquals(
+            listOf(CommandPath.of("alarm", "set"), CommandPath.of("timer", "set")),
+            results.map { it.path },
+        )
+    }
+
+    @Test
+    fun `search fallback below a non-root path stays inside that subtree`() {
+        val deep = cmd("gentle")
+        val sound = cmd("sound", children = listOf(deep))
+        val timer = cmd("timer", children = listOf(sound))
+        val otherGentle = cmd("gentle")
+        val torch = cmd("torch", children = listOf(otherGentle))
+        val registry = CommandRegistry(setOf(timer, torch))
+
+        val results = registry.search(CommandPath.of("timer"), "gen")
+
+        assertEquals(CommandPath.of("timer", "sound", "gentle"), results.single().path)
+    }
+
+    @Test
+    fun `search returns nothing when the filter matches nowhere in the tree`() {
+        val set = cmd("set")
+        val timer = cmd("timer", children = listOf(set))
+        val registry = CommandRegistry(setOf(timer))
+
+        assertTrue(registry.search(CommandPath.ROOT, "zzz").isEmpty())
+    }
+
     private class TestCommand(
         override val id: String,
         override val children: List<ChatCommand>,

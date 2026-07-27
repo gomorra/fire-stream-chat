@@ -33,19 +33,29 @@ internal class ChatCommandsManager(
     fun closePalette() = reset(closeWidget = false)
 
     /**
-     * Navigate into a command. If the command has children, the palette stays
-     * open and shows the children. If it's a leaf with a widget, the palette
-     * closes and the widget mounts.
+     * Navigate into a direct child of the current path. Convenience wrapper over
+     * [navigateTo] for the common "tap a row at this level" case.
      */
     fun navigateInto(commandId: String) {
-        val current = _uiState.value.commands
-        val newPath = current.currentPath.append(commandId)
-        val command: ChatCommand = registry.resolve(newPath) ?: return
+        navigateTo(_uiState.value.commands.currentPath.append(commandId))
+    }
+
+    /**
+     * Navigate to an absolute [path]. If the command has children, the palette stays
+     * open and shows the children. If it's a leaf with a widget, the palette closes
+     * and the widget mounts.
+     *
+     * Absolute rather than relative because a fallback subtree match can sit several
+     * levels below the path being browsed — tapping `.timer.set` from root has to
+     * land on `.timer.set`, not on `.set`.
+     */
+    fun navigateTo(path: CommandPath) {
+        val command: ChatCommand = registry.resolve(path) ?: return
 
         if (command.children.isNotEmpty()) {
-            showAt(newPath, filter = "")
+            showAt(path, filter = "")
         } else {
-            mountWidget(command.widget, newPath)
+            mountWidget(command.widget, path)
         }
     }
 
@@ -77,6 +87,7 @@ internal class ChatCommandsManager(
      *  - ".timer."                    → navigate into "timer", filter "".
      *  - ".timer.s"                   → navigate into "timer", filter "s".
      *  - ".timer.set" (leaf)          → mount widget, palette closed.
+     *  - ".set" (no root match)       → palette at root listing `.timer.set`.
      */
     fun onComposerTextChanged(text: String) {
         val parsed = parseCommandText(text)
@@ -95,6 +106,12 @@ internal class ChatCommandsManager(
         }
 
         if (parsed.pendingFilter.isNotEmpty()) {
+            // Deliberately filterChildren and not search(): auto-mounting is for exact
+            // matches at THIS level only. A fallback subtree match must never mount
+            // itself — typing ".set" would then mount the timer picker while the
+            // composer still read ".set", leaving the two out of sync and backspacing
+            // incoherent. Deep matches mount only once tapped, which rewrites the
+            // composer to the canonical ".timer.set" first.
             val exactLeaf = registry.filterChildren(path, parsed.pendingFilter)
                 .firstOrNull { it.id == parsed.pendingFilter && it.children.isEmpty() && it.widget != null }
             if (exactLeaf != null) {
@@ -136,7 +153,7 @@ internal class ChatCommandsManager(
     }
 
     private fun showAt(path: CommandPath, filter: String) {
-        val newCandidates = registry.filterChildren(path, filter)
+        val newCandidates = registry.search(path, filter)
         _uiState.update { state ->
             val current = state.commands
             // StateFlow only emits on inequality; returning the unchanged
