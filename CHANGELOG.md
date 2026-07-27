@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.20.1] — 2026-07-27
+
+### Changed
+
+- **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled".
+
 ## [1.20.0] — 2026-07-25
 
 ### Added

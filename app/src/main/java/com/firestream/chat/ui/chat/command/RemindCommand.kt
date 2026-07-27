@@ -8,7 +8,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Leaf `.remind` command — a power-user alternative to long-press → Snooze. Unlike
+ * Leaf `.remind` command — a power-user alternative to long-press → Reminder. Unlike
  * `.timer` (whose set/pause/cancel verbs force a child), `.remind` has a single verb,
  * so it is a leaf that mounts [RemindWidget] directly when `.remind` is typed or
  * tapped in the palette (see ChatCommandsManager.onComposerTextChanged's exact-leaf

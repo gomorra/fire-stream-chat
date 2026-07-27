@@ -1,7 +1,7 @@
 // region: AGENT-NOTE
 // Responsibility: card mounted above the composer when the user selects the
 //   `.remind` command. Offers the same snooze presets as SnoozePickerSheet
-//   (long-press → Snooze) for a target message, as a power-user entry point.
+//   (long-press → Reminder) for a target message, as a power-user entry point.
 // Owns: ephemeral picker state (the smart-detected time is fetched per Render via a
 //   LaunchedEffect keyed on the target id). No ChatUiState access — the target
 //   message and sender name are resolved by ChatScreen (which owns the slices) and
