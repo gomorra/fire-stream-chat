@@ -56,7 +56,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -1772,13 +1771,11 @@ fun ChatScreen(
                             // of overflowing the fixed 20.sp bodyMedium lineHeight and being clipped.
                             lineHeight = TextUnit.Unspecified
                         ),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                handleSend(viewModel, uiState, messageText, pendingEmojiSizes)
-                                clearInput()
-                            }
-                        ),
+                        // ImeAction.Default (not Send): on a non-singleLine field Compose
+                        // adds IME_FLAG_NO_ENTER_ACTION, so the IME shows a newline key and
+                        // Enter inserts a line break instead of sending. Sending stays on the
+                        // send button — an Enter-as-send composer can't type a multi-line message.
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
                         maxLines = 4,
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         decorationBox = { innerTextField ->

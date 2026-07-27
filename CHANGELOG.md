@@ -10,6 +10,8 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
+- **The chat keyboard now offers a line-break key instead of a send key.** The Enter key in the message composer used to be a Send button, which meant a message could never contain a line break — pressing it fired the message off mid-thought. Enter now inserts a newline, so lists, addresses and paragraphs can be typed the way they read; sending is what the send button next to the composer has always been for. The same applies while editing a message, since it's the same field.
+
 - **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled".
 
 ## [1.20.0] — 2026-07-25
