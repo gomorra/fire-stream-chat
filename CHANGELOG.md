@@ -2,6 +2,20 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.23.0] — 2026-09-07
+
+### Added
+
+- **Search in a conversation now has filter chips, so it doubles as a browser.** Searching a chat used to mean typing a word and reading a list of text rows — no help at all when what you actually want is "the photos", or "that PDF someone sent in March". A row of chips now sits under the search box — Photos, Videos, Links, Docs, Voice, Starred, Date — and a chip on its own, with nothing typed, browses: photos and videos come back as a thumbnail grid you can tap straight into, documents and links as rows showing the filename or the URL rather than the sentence around it. Chips combine with what you type, so "report" with Docs selected searches filenames only. The Date chip opens a range picker and then wears the range you chose, and the line above the results spells out every active filter with an × to clear them, because chips scroll off-screen and a filter you can't see is a filter you'll blame the app for. Counts are capped, so a full page reads "200+" rather than claiming an exact total it doesn't have. (`56cb67a`, `0fad83b`, `344da67`, `905aa24`)
+
+### Changed
+
+- **"Shared Media" now opens search, pre-filtered to photos, instead of its own screen.** The three-dot menu item lands you in the same media grid the Photos chip does — so you can narrow it by date, or switch to videos, without backing out and starting again. The separate screen is gone; keeping two per-chat media browsers with different sources only guaranteed they would drift apart. The Shared Media grid on a profile is unaffected: that one is per-person rather than per-chat. (`b594d7c`)
+
+### Fixed
+
+- **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
+
 ## [1.22.0] — 2026-09-07
 
 ### Added

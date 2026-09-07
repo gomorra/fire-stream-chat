@@ -373,9 +373,18 @@ fun ChatScreen(
     // alongside the ViewModel-held FullscreenImage.
     var fullscreenMediaMessageId by rememberSaveable { mutableStateOf<String?>(null) }
 
-    fun jumpToSourceMessage(sourceId: String, animate: Boolean = true) {
+    /**
+     * Travels to [sourceId] in the conversation and flashes it on arrival.
+     *
+     * Returns false when the message is not in the loaded window, so callers
+     * whose targets can legitimately be absent can say so instead of the tap
+     * doing nothing at all. The three older callers — replies, reactions and
+     * the fullscreen-viewer exit — always target the loaded window and ignore
+     * the result.
+     */
+    fun jumpToSourceMessage(sourceId: String, animate: Boolean = true): Boolean {
         val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == sourceId }
-        if (chronoIdx < 0) return
+        if (chronoIdx < 0) return false
         scope.launch {
             // Flash on arrival, not at tap time: the highlight window is only 1.5s, so
             // starting it before the travel spends most of it scrolling and the user
@@ -389,6 +398,7 @@ fun ChatScreen(
                 highlightedMessageId = sourceId
             }
         }
+        return true
     }
 
     // Closing the fullscreen gallery lands the chat on the image you were last
@@ -436,15 +446,17 @@ fun ChatScreen(
         if (index >= 0) searchGalleryIndex = index
     }
 
-    // Tapping a non-media result travels to the message in the conversation.
+    // Tapping a non-media result travels to the message in the conversation,
+    // via jumpToSourceMessage so the arrival flash marks where you landed.
+    //
+    // Search is the one caller whose targets come from a *different* query than
+    // the list it jumps into: getMessagesByChatId has no LIMIT, so the whole
+    // history is in memory and every local hit is currently present — but the
+    // search query is capped, and the day message paging lands, search is the
+    // caller that breaks first. Hence the false branch, which keeps the results
+    // rather than dead-tapping.
     fun openSearchResult(message: Message) {
-        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == message.id }
-        if (chronoIdx >= 0) {
-            scope.launch {
-                scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
-            }
-        }
-        viewModel.clearSearch()
+        viewModel.onSearchResultOpened(reached = jumpToSourceMessage(message.id))
     }
 
     // Save scroll position when leaving so it can be restored on re-entry.

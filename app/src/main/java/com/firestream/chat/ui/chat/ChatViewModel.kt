@@ -289,6 +289,27 @@ class ChatViewModel @Inject constructor(
     fun toggleSearch() = searchManager.toggleSearch()
     fun clearSearch() = searchManager.clearSearch()
 
+    /**
+     * The outcome of travelling to a tapped search result.
+     *
+     * On success the overlay closes, as it always has. On failure it stays
+     * open — the user's results took a query to produce and are worth more than
+     * a tidy screen — and a snackbar says why nothing happened, so the tap
+     * isn't silently inert.
+     *
+     * This can only bite once the search query and the message list disagree
+     * about what is loaded; see the call site in ChatScreen.
+     */
+    fun onSearchResultOpened(reached: Boolean) {
+        if (reached) {
+            clearSearch()
+        } else {
+            viewModelScope.launch {
+                _snackbarEvent.emit(SnackbarEvent(message = "Message no longer available"))
+            }
+        }
+    }
+
     // Guarantees a durable local copy of the chat's media the first time a media
     // browse opens: the grid is about to fetch these files over the network to
     // render them anyway, so saving them stops the same (often large, old,
