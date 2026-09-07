@@ -89,15 +89,14 @@ Do not reimplement either with a custom review prompt.
 ### Post-step code review
 
 **After each significant phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
-1. `./gradlew test` — unit tests must pass
-2. `./gradlew assembleDebug` — build must be clean
-3. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin (stronger models for the trigger categories below).
+1. **Write unit tests** when the step/phase introduced **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes. Bug fixes always get a regression test, written *before* the fix — see Change Safety below.
+2. `./gradlew test` — unit tests must pass
+3. `./gradlew assembleDebug` — build must be clean
+4. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin (stronger models for the trigger categories below).
    - **Triggers** (any one is sufficient): (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines).
-4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
-5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
-6. `./gradlew test` — unit tests must pass
-7. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
-8. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+   - **If `/simplify` changed anything, re-run steps 2–3.** Its fixes are production code and must not be committed unverified.
+5. `git commit` — **commit immediately once green; do not wait for user instruction.** One commit, carrying the code *and* its tests. Never split logic into one commit and its tests into the next: every commit must stand on its own as green.
+6. Update MEMORY.md — record what was done, key patterns established, remove stale entries
 
 ### Token efficiency
 
