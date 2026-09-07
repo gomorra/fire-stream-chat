@@ -51,3 +51,4 @@ firebase.log
 !.claude/hooks/block-heredoc-commit.sh
 !.claude/settings.json
 !.claude/plans/
+!.claude/skills/
