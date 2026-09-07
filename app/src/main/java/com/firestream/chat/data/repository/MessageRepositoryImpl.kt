@@ -32,6 +32,7 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
@@ -61,7 +62,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,8 +72,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -88,6 +91,15 @@ private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 private const val TAG = "MessageRepo"
+
+// How long a block-state read stays good for. Blocking is a human-speed action,
+// so this trades a few seconds of staleness for removing a backend round trip
+// from in front of every snapshot reconcile and every send.
+private const val BLOCK_CACHE_TTL_MS = 30_000L
+
+// Receipt writes for a chat's unread backlog go out concurrently; the cap keeps
+// a large backlog from opening an unbounded number of connections at once.
+private const val RECEIPT_WRITE_CONCURRENCY = 8
 
 // How long a list-update bubble stays "open" for further merging. Once the gap
 // between the previous list update and the next one exceeds this window, the
@@ -117,6 +129,65 @@ class MessageRepositoryImpl @Inject constructor(
     private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
     override val uploadProgress: StateFlow<Map<String, Float>> = _uploadProgress.asStateFlow()
 
+    // Block state is read on the two hottest paths in the app — once per backend
+    // snapshot on receive, once per send — and each read was a round-trip to the
+    // backend. Both now go through a short-lived cache: the block list changes at
+    // human speed, so a few seconds of staleness costs nothing while the round
+    // trip sat directly in front of the message the user is waiting to see.
+    private val blockCacheMutex = Mutex()
+    private var blockedIdsCache: Set<String>? = null
+    private var blockedIdsCacheUid: String? = null
+    private var blockedIdsCachedAt = 0L
+    private val blockedPairCache = HashMap<String, Pair<Boolean, Long>>()
+
+    /**
+     * The set of users [userId] has blocked, cached for [BLOCK_CACHE_TTL_MS].
+     * Fails open (empty set) on error: a transient fetch failure must not hide
+     * every message, at the cost of blocked senders rendering until the next
+     * successful refresh.
+     */
+    private suspend fun blockedUserIds(userId: String, chatId: String): Set<String> {
+        if (userId.isEmpty()) return emptySet()
+        blockCacheMutex.withLock {
+            val cached = blockedIdsCache
+            if (cached != null && blockedIdsCacheUid == userId &&
+                System.currentTimeMillis() - blockedIdsCachedAt < BLOCK_CACHE_TTL_MS
+            ) {
+                return cached
+            }
+            return try {
+                userSource.getBlockedUserIds(userId).also {
+                    blockedIdsCache = it
+                    blockedIdsCacheUid = userId
+                    blockedIdsCachedAt = System.currentTimeMillis()
+                }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.w(TAG, "observeMessages: block-list fetch failed for chat=$chatId — block filtering degraded", e)
+                emptySet()
+            }
+        }
+    }
+
+    /**
+     * Whether [senderId] has blocked [recipientId], cached for
+     * [BLOCK_CACHE_TTL_MS]. Unlike [blockedUserIds] this does *not* fail open —
+     * a fetch error propagates, so a send is refused rather than delivered to
+     * someone who may have blocked the sender.
+     */
+    private suspend fun isBlocked(senderId: String, recipientId: String): Boolean {
+        val key = "$senderId|$recipientId"
+        blockCacheMutex.withLock {
+            val cached = blockedPairCache[key]
+            if (cached != null && System.currentTimeMillis() - cached.second < BLOCK_CACHE_TTL_MS) {
+                return cached.first
+            }
+            return userSource.isUserBlocked(senderId, recipientId).also {
+                blockedPairCache[key] = it to System.currentTimeMillis()
+            }
+        }
+    }
+
     override fun getMessages(chatId: String): Flow<List<Message>> {
         val currentUid = authSource.currentUserId ?: ""
 
@@ -137,188 +208,38 @@ class MessageRepositoryImpl @Inject constructor(
                     t.rethrowIfCancellation()
                     Log.w(TAG, "observeMessages: Signal init failed — incoming encrypted messages may not decrypt", t)
                 }
-                messageSource.observeMessages(chatId).collectLatest { rawList ->
-                    val blockedUserIds = try {
-                        if (currentUid.isNotEmpty()) userSource.getBlockedUserIds(currentUid) else emptySet()
-                    } catch (e: Exception) {
-                        e.rethrowIfCancellation()
-                        // Fail open: a transient fetch error must not hide every message,
-                        // but it means blocked senders may render until the next emission.
-                        Log.w(TAG, "observeMessages: block-list fetch failed for chat=$chatId — block filtering degraded", e)
-                        emptySet()
-                    }
-                    for (raw in rawList) {
-                        // Skip messages from users the current user has blocked.
-                        // Log so "message isn't appearing" scenarios are diagnosable via logcat.
-                        if (raw.senderId != currentUid && raw.senderId in blockedUserIds) {
-                            Log.d(TAG, "observeMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
-                            continue
-                        }
-
-                        val existing = messageDao.getMessageById(raw.id)
-
-                        // Handle deletion update for any message (own or incoming)
-                        if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
-                            messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
-                            continue
-                        }
-
-                        // Update reactions from remote even if message is already cached
-                        if (existing != null && existing.reactions != raw.reactions) {
-                            val reactionsJson = JSONObject().apply {
-                                raw.reactions.forEach { (k, v) -> put(k, v) }
-                            }.toString()
-                            messageDao.updateReactions(raw.id, reactionsJson)
-                        }
-
-                        if (raw.senderId == currentUid) {
-                            if (existing != null) {
-                                // Update status from remote if it changed (e.g. DELIVERED, READ)
-                                val remoteStatus = parseMessageStatus(raw.status)
-                                if (existing.status != remoteStatus.name) {
-                                    messageDao.updateMessageStatus(raw.id, remoteStatus.name)
-                                }
+                // Every backend snapshot carries the *whole* message collection, so
+                // reconciling it is O(chat length). Remember the exact RawMessage we
+                // last reconciled for each id and skip the ones that did not change:
+                // a receipt write on one message would otherwise re-walk (and hit Room
+                // once per message for) the entire history. Scoped to this collection,
+                // so re-entering the chat always does a full pass.
+                val reconciled = HashMap<String, RawMessage>()
+                messageSource.observeMessages(chatId)
+                    // conflate(), not collectLatest(): a snapshot is complete state, so
+                    // dropping intermediate ones is free — but *cancelling* a reconcile
+                    // pass mid-list is not. A burst of receipt writes (one snapshot per
+                    // write) used to restart the loop from index 0 every time, so the
+                    // newest message at the tail could be cancelled before its Room
+                    // insert on every pass and never appear until the burst stopped.
+                    .conflate()
+                    .collect { rawList ->
+                        val blocked = blockedUserIds(currentUid, chatId)
+                        for (raw in rawList) {
+                            // Skip messages from users the current user has blocked.
+                            // Log so "message isn't appearing" scenarios are diagnosable via logcat.
+                            // Checked before the unchanged-skip so an unblock re-admits
+                            // the message on the next snapshot instead of staying hidden.
+                            if (raw.senderId != currentUid && raw.senderId in blocked) {
+                                Log.d(TAG, "observeMessages: filtered blocked sender=${raw.senderId} msg=${raw.id} chat=$chatId")
                                 continue
                             }
-                            // Skip if there's a pending optimistic message being replaced
-                            val pending = messageDao.getPendingSendingMessage(raw.chatId, raw.timestamp, raw.senderId)
-                            if (pending != null) continue
-                            val content = raw.content ?: "[Sent message]"
-                            val message = Message(
-                                id = raw.id,
-                                chatId = raw.chatId,
-                                senderId = raw.senderId,
-                                content = content,
-                                type = parseMessageType(raw.type),
-                                mediaUrl = raw.mediaUrl,
-                                mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                                status = parseMessageStatus(raw.status),
-                                replyToId = raw.replyToId,
-                                timestamp = raw.timestamp,
-                                editedAt = raw.editedAt,
-                                reactions = raw.reactions,
-                                isForwarded = raw.isForwarded,
-                                duration = raw.duration,
-                                readBy = raw.readBy,
-                                deliveredTo = raw.deliveredTo,
-                                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                                mentions = raw.mentions,
-                                deletedAt = raw.deletedAt,
-                                emojiSizes = raw.emojiSizes,
-                                listId = raw.listId,
-                                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                                isPinned = raw.isPinned,
-                                mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight,
-                                latitude = raw.latitude,
-                                longitude = raw.longitude,
-                                isHd = raw.isHd,
-                                timerDurationMs = raw.timerDurationMs,
-                                timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { parseTimerState(it) },
-                                timerRemainingMs = raw.timerRemainingMs,
-                                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-                            )
-                            messageDao.insertMessage(MessageEntity.fromDomain(message))
-                            continue
-                        }
+                            if (reconciled[raw.id] == raw) continue
 
-                        if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) continue
-
-                        // Determine whether this message needs Signal decryption.
-                        val needsDecryption = raw.ciphertext != null && raw.signalType != null
-                                && !(raw.editedAt != null && raw.content != null)
-
-                        // Guard: skip messages with no usable content (unless deleted).
-                        if (raw.deletedAt == null && !needsDecryption && raw.content == null) continue
-
-                        // Wrap decrypt+save in NonCancellable so that a collectLatest
-                        // cancellation (from a new Firestore snapshot) cannot interrupt
-                        // between Signal decryption (which advances the ratchet) and the
-                        // Room insert (which records that decryption happened). Without
-                        // this, a re-emitted snapshot would attempt to decrypt the same
-                        // ciphertext again against an already-advanced ratchet, causing
-                        // sporadic "unable to decrypt" errors.
-                        withContext(NonCancellable) {
-                            val content = when {
-                                raw.deletedAt != null -> ""
-                                else -> try {
-                                    when {
-                                        raw.editedAt != null && raw.content != null -> raw.content
-                                        needsDecryption ->
-                                            signalManager.decrypt(
-                                                raw.senderId,
-                                                EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
-                                            )
-                                        else -> raw.content!!
-                                    }
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "observeMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", e)
-                                    "[Encrypted message — unable to decrypt]"
-                                }
-                            }
-
-                            // Preserve local-only fields that are not stored in Firestore
-                            val preservedLocalUri = existing?.localUri
-                            val preservedIsStarred = existing?.isStarred ?: false
-
-                            val message = Message(
-                                id = raw.id,
-                                chatId = raw.chatId,
-                                senderId = raw.senderId,
-                                content = content,
-                                type = parseMessageType(raw.type),
-                                mediaUrl = raw.mediaUrl,
-                                mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                                localUri = preservedLocalUri,
-                                isStarred = preservedIsStarred,
-                                status = parseMessageStatus(raw.status),
-                                replyToId = raw.replyToId,
-                                timestamp = raw.timestamp,
-                                editedAt = raw.editedAt,
-                                reactions = raw.reactions,
-                                isForwarded = raw.isForwarded,
-                                duration = raw.duration,
-                                readBy = raw.readBy,
-                                deliveredTo = raw.deliveredTo,
-                                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                                mentions = raw.mentions,
-                                deletedAt = raw.deletedAt,
-                                emojiSizes = raw.emojiSizes,
-                                listId = raw.listId,
-                                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                                isPinned = raw.isPinned,
-                                mediaWidth = raw.mediaWidth,
-                                mediaHeight = raw.mediaHeight,
-                                latitude = raw.latitude,
-                                longitude = raw.longitude,
-                                isHd = raw.isHd,
-                                timerDurationMs = raw.timerDurationMs,
-                                timerStartedAtMs = raw.timerStartedAtMs,
-                                timerState = raw.timerState?.let { parseTimerState(it) },
-                                timerRemainingMs = raw.timerRemainingMs,
-                                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-                            )
-                            messageDao.insertMessage(MessageEntity.fromDomain(message))
-
-                            // Auto-download media for incoming messages
-                            if (message.mediaUrl != null && message.localUri == null &&
-                                message.type in AUTO_DOWNLOAD_TYPES
-                            ) {
-                                tryAutoDownload(message)
-                            }
-
-                            // Sync shared/unshared list to Room so ListsScreen updates immediately
-                            if (message.type == MessageType.LIST && message.listId != null &&
-                                (message.listDiff?.shared == true || message.listDiff?.unshared == true)
-                            ) {
-                                listRepository.get().fetchAndCacheList(message.listId!!)
-                            }
+                            reconcileRawMessage(raw, currentUid, chatId)
+                            reconciled[raw.id] = raw
                         }
                     }
-                }
             } catch (t: Throwable) {
                 t.rethrowIfCancellation()
                 Log.e(TAG, "observeMessages: remote pipeline failed for chat=$chatId — serving cached messages only", t)
@@ -328,7 +249,186 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.getMessagesByChatId(chatId)
                 .conflate()
                 .map { entities -> entities.map { it.toDomain() } }
+                // toDomain() re-parses several JSON columns per row, for the whole
+                // chat, on every emission. Collectors run on viewModelScope's main
+                // dispatcher, so without this the mapping janks the frame that a
+                // status write or a new message lands on.
+                .flowOn(Dispatchers.Default)
                 .collect { send(it) }
+        }
+    }
+
+    /**
+     * Reconciles one backend snapshot row into Room: soft-deletes, reaction and
+     * status updates, the optimistic-echo guard for our own sends, and
+     * decrypt-then-insert for incoming messages.
+     *
+     * Every early `return` means "nothing left to do for this [raw] in this
+     * state" — the caller records the raw as reconciled once this returns
+     * normally, so a throw here leaves it to be retried on the next snapshot.
+     */
+    private suspend fun reconcileRawMessage(raw: RawMessage, currentUid: String, chatId: String) {
+        val existing = messageDao.getMessageById(raw.id)
+
+        // Handle deletion update for any message (own or incoming)
+        if (existing != null && existing.deletedAt == null && raw.deletedAt != null) {
+            messageDao.softDeleteMessage(raw.id, raw.deletedAt!!)
+            return
+        }
+
+        // Update reactions from remote even if message is already cached
+        if (existing != null && existing.reactions != raw.reactions) {
+            val reactionsJson = JSONObject().apply {
+                raw.reactions.forEach { (k, v) -> put(k, v) }
+            }.toString()
+            messageDao.updateReactions(raw.id, reactionsJson)
+        }
+
+        if (raw.senderId == currentUid) {
+            if (existing != null) {
+                // Update status from remote if it changed (e.g. DELIVERED, READ)
+                val remoteStatus = parseMessageStatus(raw.status)
+                if (existing.status != remoteStatus.name) {
+                    messageDao.updateMessageStatus(raw.id, remoteStatus.name)
+                }
+                return
+            }
+            // Skip if there's a pending optimistic message being replaced
+            val pending = messageDao.getPendingSendingMessage(raw.chatId, raw.timestamp, raw.senderId)
+            if (pending != null) return
+            val content = raw.content ?: "[Sent message]"
+            val message = Message(
+                id = raw.id,
+                chatId = raw.chatId,
+                senderId = raw.senderId,
+                content = content,
+                type = parseMessageType(raw.type),
+                mediaUrl = raw.mediaUrl,
+                mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                status = parseMessageStatus(raw.status),
+                replyToId = raw.replyToId,
+                timestamp = raw.timestamp,
+                editedAt = raw.editedAt,
+                reactions = raw.reactions,
+                isForwarded = raw.isForwarded,
+                duration = raw.duration,
+                readBy = raw.readBy,
+                deliveredTo = raw.deliveredTo,
+                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                mentions = raw.mentions,
+                deletedAt = raw.deletedAt,
+                emojiSizes = raw.emojiSizes,
+                listId = raw.listId,
+                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
+                isPinned = raw.isPinned,
+                mediaWidth = raw.mediaWidth,
+                mediaHeight = raw.mediaHeight,
+                latitude = raw.latitude,
+                longitude = raw.longitude,
+                isHd = raw.isHd,
+                timerDurationMs = raw.timerDurationMs,
+                timerStartedAtMs = raw.timerStartedAtMs,
+                timerState = raw.timerState?.let { parseTimerState(it) },
+                timerRemainingMs = raw.timerRemainingMs,
+                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
+                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(message))
+            return
+        }
+
+        if (existing != null && existing.editedAt == raw.editedAt && existing.deletedAt == raw.deletedAt) return
+
+        // Determine whether this message needs Signal decryption.
+        val needsDecryption = raw.ciphertext != null && raw.signalType != null
+                && !(raw.editedAt != null && raw.content != null)
+
+        // Guard: skip messages with no usable content (unless deleted).
+        if (raw.deletedAt == null && !needsDecryption && raw.content == null) return
+
+        // Wrap decrypt+save in NonCancellable so that cancelling the
+        // collector (the user leaving the chat) cannot interrupt between
+        // Signal decryption (which advances the ratchet) and the Room
+        // insert (which records that decryption happened). Without this,
+        // a re-emitted snapshot would attempt to decrypt the same
+        // ciphertext again against an already-advanced ratchet, causing
+        // sporadic "unable to decrypt" errors.
+        withContext(NonCancellable) {
+            val content = when {
+                raw.deletedAt != null -> ""
+                else -> try {
+                    when {
+                        raw.editedAt != null && raw.content != null -> raw.content
+                        needsDecryption ->
+                            signalManager.decrypt(
+                                raw.senderId,
+                                EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                            )
+                        else -> raw.content!!
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "observeMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", e)
+                    "[Encrypted message — unable to decrypt]"
+                }
+            }
+
+            // Preserve local-only fields that are not stored in Firestore
+            val preservedLocalUri = existing?.localUri
+            val preservedIsStarred = existing?.isStarred ?: false
+
+            val message = Message(
+                id = raw.id,
+                chatId = raw.chatId,
+                senderId = raw.senderId,
+                content = content,
+                type = parseMessageType(raw.type),
+                mediaUrl = raw.mediaUrl,
+                mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                localUri = preservedLocalUri,
+                isStarred = preservedIsStarred,
+                status = parseMessageStatus(raw.status),
+                replyToId = raw.replyToId,
+                timestamp = raw.timestamp,
+                editedAt = raw.editedAt,
+                reactions = raw.reactions,
+                isForwarded = raw.isForwarded,
+                duration = raw.duration,
+                readBy = raw.readBy,
+                deliveredTo = raw.deliveredTo,
+                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                mentions = raw.mentions,
+                deletedAt = raw.deletedAt,
+                emojiSizes = raw.emojiSizes,
+                listId = raw.listId,
+                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
+                isPinned = raw.isPinned,
+                mediaWidth = raw.mediaWidth,
+                mediaHeight = raw.mediaHeight,
+                latitude = raw.latitude,
+                longitude = raw.longitude,
+                isHd = raw.isHd,
+                timerDurationMs = raw.timerDurationMs,
+                timerStartedAtMs = raw.timerStartedAtMs,
+                timerState = raw.timerState?.let { parseTimerState(it) },
+                timerRemainingMs = raw.timerRemainingMs,
+                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
+                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
+            )
+            messageDao.insertMessage(MessageEntity.fromDomain(message))
+
+            // Auto-download media for incoming messages
+            if (message.mediaUrl != null && message.localUri == null &&
+                message.type in AUTO_DOWNLOAD_TYPES
+            ) {
+                tryAutoDownload(message)
+            }
+
+            // Sync shared/unshared list to Room so ListsScreen updates immediately
+            if (message.type == MessageType.LIST && message.listId != null &&
+                (message.listDiff?.shared == true || message.listDiff?.unshared == true)
+            ) {
+                listRepository.get().fetchAndCacheList(message.listId!!)
+            }
         }
     }
 
@@ -453,7 +553,7 @@ class MessageRepositoryImpl @Inject constructor(
         emojiSizes: Map<Int, Float>
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val tempId = UUID.randomUUID().toString()
@@ -525,7 +625,7 @@ class MessageRepositoryImpl @Inject constructor(
      */
     override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val parsedUri = Uri.parse(uri)
@@ -703,7 +803,7 @@ class MessageRepositoryImpl @Inject constructor(
             throw IllegalStateException("Cannot retry message in state ${message.status}")
         }
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val chatId = message.chatId
@@ -974,7 +1074,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val tempId = UUID.randomUUID().toString()
@@ -1013,7 +1113,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val parsedUri = Uri.parse(uri)
@@ -1091,30 +1191,46 @@ class MessageRepositoryImpl @Inject constructor(
     private fun wordBoundaryRegex(query: String) =
         Regex("\\b${Regex.escape(query)}\\b", RegexOption.IGNORE_CASE)
 
+    /**
+     * Fans [ids] out over [write] instead of awaiting one round trip per id.
+     * Receipt writes are independent, so serialising them made opening a chat
+     * with N unread messages cost N sequential round trips before the ticks
+     * settled — and produced N snapshots for the reconcile loop to chew on.
+     * A per-id failure is logged and skipped, matching the previous behaviour.
+     */
+    private suspend fun forEachReceipt(
+        ids: List<String>,
+        chatId: String,
+        label: String,
+        write: suspend (String) -> Unit
+    ): Unit = coroutineScope {
+        val permits = Semaphore(RECEIPT_WRITE_CONCURRENCY)
+        ids.map { id ->
+            async {
+                try {
+                    permits.withPermit { write(id) }
+                } catch (e: Exception) {
+                    e.rethrowIfCancellation()
+                    Log.w(TAG, "$label failed for msg=$id chat=$chatId", e)
+                }
+            }
+        }.awaitAll()
+    }
+
     override suspend fun markChatAsDelivered(chatId: String): Result<Unit> = resultOf {
         val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val now = System.currentTimeMillis()
         val undeliveredIds = messageSource.getUndeliveredMessageIds(chatId, userId)
-        for (id in undeliveredIds) {
-            try {
-                messageSource.markDelivered(chatId, id, userId, now)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                Log.w(TAG, "markDelivered failed for msg=$id chat=$chatId", e)
-            }
+        forEachReceipt(undeliveredIds, chatId, "markDelivered") {
+            messageSource.markDelivered(chatId, it, userId, now)
         }
     }
 
     override suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit> = resultOf {
         val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val now = System.currentTimeMillis()
-        for (id in messageIds) {
-            try {
-                messageSource.markDelivered(chatId, id, userId, now)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                Log.w(TAG, "markDelivered failed for msg=$id chat=$chatId", e)
-            }
+        forEachReceipt(messageIds, chatId, "markDelivered") {
+            messageSource.markDelivered(chatId, it, userId, now)
         }
         // Batch-update Room in one shot so the DAO flow emits only once
         messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
@@ -1123,13 +1239,8 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> = resultOf {
         val userId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val now = System.currentTimeMillis()
-        for (id in messageIds) {
-            try {
-                messageSource.markRead(chatId, id, userId, now)
-            } catch (e: Exception) {
-                e.rethrowIfCancellation()
-                Log.w(TAG, "markRead failed for msg=$id chat=$chatId", e)
-            }
+        forEachReceipt(messageIds, chatId, "markRead") {
+            messageSource.markRead(chatId, it, userId, now)
         }
         // Batch-update Room in one shot so the DAO flow emits only once
         messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
@@ -1300,7 +1411,7 @@ class MessageRepositoryImpl @Inject constructor(
         comment: String
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         val tempId = UUID.randomUUID().toString()
@@ -1348,7 +1459,7 @@ class MessageRepositoryImpl @Inject constructor(
         sound: TimerAlarmSound,
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && userSource.isUserBlocked(senderId, recipientId)) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
         }
         require(durationMs > 0L) { "Timer duration must be positive" }

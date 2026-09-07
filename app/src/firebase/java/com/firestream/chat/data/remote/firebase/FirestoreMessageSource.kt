@@ -15,6 +15,7 @@
 
 package com.firestream.chat.data.remote.firebase
 
+import android.util.Log
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.TimerSendResult
@@ -35,6 +36,7 @@ private const val POLL_CONTENT = "📊 Poll"
 private const val LIST_CONTENT = "📋 List"
 private const val CALL_CONTENT = "📞 Voice call"
 private const val TIMER_CONTENT = "⏱ Timer"
+private const val TAG = "FirestoreMessageSource"
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
@@ -59,6 +61,36 @@ class FirestoreMessageSource @Inject constructor(
         MessageType.TIMER -> if (plain.isNotBlank()) "⏱ $plain" else TIMER_CONTENT
         else -> plain.ifBlank { "Message" }
     }
+
+    /**
+     * Denormalised `chats/{id}.lastMessage*` writeback for a message that was
+     * just added or rewritten. Pass `senderId = null` to leave
+     * `lastMessageSenderId` untouched (an in-place edit does not change it).
+     *
+     * Deliberately **not** awaited. Awaiting it put a second sequential
+     * round trip between the message reaching the backend and the sender's
+     * bubble flipping SENDING → SENT, doubling perceived send latency; it also
+     * meant a failing preview write (a missing chat document, say) surfaced as
+     * a send failure and marked an already-delivered message FAILED. Firestore
+     * applies the update to its local cache immediately and retries until it
+     * lands, and `MessageRepositoryImpl` mirrors the same fields into Room, so
+     * the chat list updates without waiting on this either way.
+     */
+    private fun writeBackChatPreview(
+        chatId: String,
+        content: String,
+        timestamp: Long,
+        senderId: String?,
+    ) {
+        val fields = mutableMapOf<String, Any>(
+            "lastMessageContent" to content,
+            "lastMessageTimestamp" to timestamp,
+        )
+        if (senderId != null) fields["lastMessageSenderId"] = senderId
+        firestore.collection("chats").document(chatId).update(fields)
+            .addOnFailureListener { Log.w(TAG, "chat preview writeback failed for chat=$chatId", it) }
+    }
+
     override fun observeMessages(chatId: String): Flow<List<RawMessage>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection("chats").document(chatId)
@@ -137,13 +169,7 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to lastContentFor(type, plainContent),
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId
-            )
-        ).await()
+        writeBackChatPreview(chatId, lastContentFor(type, plainContent), timestamp, senderId)
 
         return docRef.id
     }
@@ -193,13 +219,7 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to lastContentFor(type, content),
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId
-            )
-        ).await()
+        writeBackChatPreview(chatId, lastContentFor(type, content), timestamp, senderId)
 
         return docRef.id
     }
@@ -291,13 +311,7 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to POLL_CONTENT,
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId
-            )
-        ).await()
+        writeBackChatPreview(chatId, POLL_CONTENT, timestamp, senderId)
 
         return docRef.id
     }
@@ -358,13 +372,7 @@ class FirestoreMessageSource @Inject constructor(
             .collection("messages")
             .add(data)
             .await()
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to lastContentFor(MessageType.CALL),
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId
-            )
-        ).await()
+        writeBackChatPreview(chatId, lastContentFor(MessageType.CALL), timestamp, senderId)
         return docRef.id
     }
 
@@ -393,13 +401,7 @@ class FirestoreMessageSource @Inject constructor(
             .add(data)
             .await()
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to content,
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId
-            )
-        ).await()
+        writeBackChatPreview(chatId, content, timestamp, senderId)
 
         return docRef.id
     }
@@ -420,12 +422,7 @@ class FirestoreMessageSource @Inject constructor(
                 "editedAt" to timestamp
             )).await()
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to content,
-                "lastMessageTimestamp" to timestamp
-            )
-        ).await()
+        writeBackChatPreview(chatId, content, timestamp, senderId = null)
     }
 
     override suspend fun pinMessage(chatId: String, messageId: String, pinned: Boolean) {
@@ -492,13 +489,7 @@ class FirestoreMessageSource @Inject constructor(
         val resolvedStartedAtMs = (snapshot.getTimestamp("timerStartedAtMs"))?.toDate()?.time
             ?: timestamp
 
-        firestore.collection("chats").document(chatId).update(
-            mapOf(
-                "lastMessageContent" to lastContentFor(MessageType.TIMER, content),
-                "lastMessageTimestamp" to timestamp,
-                "lastMessageSenderId" to senderId,
-            )
-        ).await()
+        writeBackChatPreview(chatId, lastContentFor(MessageType.TIMER, content), timestamp, senderId)
 
         return TimerSendResult(messageId = docRef.id, startedAtMs = resolvedStartedAtMs)
     }
