@@ -75,9 +75,9 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
-| `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaScreen.kt` | Shared-media gallery (chat three-dot menu) |
-| `app/src/main/java/com/firestream/chat/ui/chat/SharedMediaViewModel.kt` | Image stream for the gallery |
-| `app/src/main/java/com/firestream/chat/ui/components/SharedMediaTile.kt` | Shared grid-tile composable used by both `SharedMediaScreen` and `ProfileScreen` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatSearchResults.kt` | Per-type search-result rendering — the media grid the three-dot "Shared Media" item now lands in |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatSearchFilterBar.kt` | Search prefilter chips, date-range picker, active-filter summary |
+| `app/src/main/java/com/firestream/chat/ui/components/SharedMediaTile.kt` | Shared grid-tile composable used by both the search media grid and `ProfileScreen` |
 | `app/src/main/java/com/firestream/chat/ui/components/ScaledImageDecoder.kt` | Coil decoder via Android `ImageDecoder` — avoids the `BitmapFactory` subsample-to-black bug on large old images |
 | `app/src/main/java/com/firestream/chat/ui/profile/ProfileScreen.kt` | Profile / chat-detail screen — its Shared Media section reuses `SharedMediaTile` |
 | `app/src/test/java/com/firestream/chat/data/util/MediaFileManagerTest.kt` | Local file path semantics |

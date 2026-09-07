@@ -57,8 +57,8 @@ interface MessageRepository {
     /**
      * Persist a durable on-disk copy (populating `localUri`) of every
      * not-yet-downloaded image/video/document in [chatId], **bypassing** the
-     * auto-download preference. Called when the user explicitly opens the Shared
-     * Media gallery: that grid already fetches these files over the network to
+     * auto-download preference. Called when the user explicitly opens a media
+     * browse in in-chat search: that grid already fetches these files over the network to
      * render them, so saving a local copy stops the same (often large, old,
      * remote-only) images being re-downloaded on every re-entry. Best-effort and
      * idempotent — rows that already have a local file are skipped, and a single

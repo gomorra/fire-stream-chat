@@ -209,7 +209,6 @@ fun ChatScreen(
     onMessageInfoClick: (Message, List<String>) -> Unit = { _, _ -> },
     onProfileClick: (userId: String) -> Unit = {},
     onGroupSettingsClick: () -> Unit = {},
-    onSharedMediaClick: () -> Unit = {},
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
     fromNotification: Boolean = false,
@@ -960,7 +959,9 @@ fun ChatScreen(
                                 FilledTonalButton(
                                     onClick = {
                                         showOverflowMenu = false
-                                        onSharedMediaClick()
+                                        // Search pre-filtered to Photos, rather
+                                        // than a screen of its own.
+                                        viewModel.openSharedMedia()
                                     },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {

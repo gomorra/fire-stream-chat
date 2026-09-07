@@ -47,7 +47,6 @@ import com.firestream.chat.ui.auth.ProfileSetupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
-import com.firestream.chat.ui.chat.SharedMediaScreen
 import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
@@ -140,7 +139,6 @@ object Routes {
     const val CREATE_BROADCAST = "create_broadcast"
     const val CREATE_GROUP = "create_group"
     const val SHARE_PICKER = "share_picker"
-    const val SHARED_MEDIA = "shared_media/{chatId}"
     const val LIST_DETAIL = "list_detail/{listId}?autoFocus={autoFocus}&restored={restored}"
     const val SHARED_LISTS = "shared_lists/{chatId}"
 
@@ -162,7 +160,6 @@ object Routes {
     fun userProfile(userId: String) = "user_profile/$userId"
 
     fun groupSettings(chatId: String) = "group_settings/$chatId"
-    fun sharedMedia(chatId: String) = "shared_media/$chatId"
     fun listDetail(listId: String, autoFocus: Boolean = false, restored: Boolean = false) =
         "list_detail/$listId?autoFocus=$autoFocus&restored=$restored"
     fun sharedLists(chatId: String) = "shared_lists/$chatId"
@@ -501,7 +498,6 @@ fun FireStreamNavGraph(
                     navController.navigate(Routes.userProfile(userId))
                 },
                 onGroupSettingsClick = { navController.navigate(Routes.groupSettings(chatId)) },
-                onSharedMediaClick = { navController.navigate(Routes.sharedMedia(chatId)) },
                 onSharedListsClick = { navController.navigate(Routes.sharedLists(chatId)) },
                 onListClick = { listId ->
                     navController.navigate(Routes.listDetail(listId)) {
@@ -589,14 +585,6 @@ fun FireStreamNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onAddMemberClick = { navController.navigate(Routes.CONTACTS) }
             )
-        }
-
-        // Shared Media
-        composable(
-            route = Routes.SHARED_MEDIA,
-            arguments = listOf(navArgument("chatId") { type = NavType.StringType })
-        ) {
-            SharedMediaScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Phase 5: Create Group

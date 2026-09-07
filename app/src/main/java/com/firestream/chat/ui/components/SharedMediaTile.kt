@@ -16,9 +16,10 @@ import coil.request.ImageRequest
 import java.io.File
 
 /**
- * A single shared-media thumbnail tile, used by both the standalone Shared Media
- * screen (chat three-dot menu) and the Shared Media section of the profile /
- * chat-detail screen so the two render identically.
+ * A single shared-media thumbnail tile, used by both the in-chat search media
+ * grid (which the three-dot "Shared Media" item opens, pre-filtered to Photos)
+ * and the Shared Media section of the profile / chat-detail screen, so the two
+ * render identically.
  *
  * The tile decodes through [ScaledImageDecoder] (Android `ImageDecoder`) rather
  * than Coil's default `BitmapFactory` path: heavily subsampling a large,

@@ -1764,10 +1764,10 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun ensureLocalCopiesForChat(chatId: String) {
         // Unconditional counterpart of downloadPendingMediaForChat: no
-        // auto-download-preference gate, because the caller (the Shared Media
-        // gallery) is an explicit user view already fetching these files to
-        // render them — persisting a local copy just stops the re-download on
-        // every re-entry.
+        // auto-download-preference gate, because the caller (a media browse in
+        // in-chat search) is an explicit user view already fetching these files
+        // to render them — persisting a local copy just stops the re-download
+        // on every re-entry.
         try {
             savePendingMediaForChat(chatId)
         } catch (e: Exception) {

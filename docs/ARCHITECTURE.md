@@ -107,7 +107,7 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 24 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `SharedMediaScreen`, `SharedMediaViewModel`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
+- **ChatScreen** is split into 24 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatSearchFilterBar`, `ChatSearchResults`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -328,7 +328,6 @@ graph TD
     Chat -->|View Profile| Profile
     Chat -->|Group Settings| GroupSettings[GroupSettingsScreen]
     Chat -->|Voice Call| CallActivity[CallActivity - separate Activity]
-    Chat -->|Shared Media| SharedMedia[SharedMediaScreen]
     Chat -->|Shared Lists| SharedLists[SharedListsScreen]
 
     GroupSettings -->|Add Member| Contacts
@@ -361,7 +360,6 @@ graph TD
 | `CREATE_GROUP`     | —                            | Group creation                     |
 | `CREATE_BROADCAST` | —                            | Broadcast list creation            |
 | `SHARE_PICKER`     | —                            | External share target              |
-| `SHARED_MEDIA`     | chatId                       | Shared images gallery for a chat   |
 | `LIST_DETAIL`      | listId, autoFocus            | List editing / detail view         |
 | `SHARED_LISTS`     | chatId                       | Lists shared into a specific chat  |
 
@@ -450,7 +448,7 @@ com.firestream.chat/
 │   │                            # ForwardChatPicker, LocationPickerSheet,
 │   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
-│   │                            # SharedMediaScreen, SharedMediaViewModel,
+│   │                            # ChatSearchFilterBar, ChatSearchResults,
 │   │                            # MessageInfoScreen, ChatUtils, BubbleTailShape,
 │   │                            # MentionFormatter, MessageGrouping
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,

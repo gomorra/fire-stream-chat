@@ -19,6 +19,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.model.User
@@ -268,9 +269,45 @@ class ChatViewModel @Inject constructor(
 
     // ── Search ──
     fun onSearchQueryChange(query: String) = searchManager.onSearchQueryChange(query)
-    fun onSearchFilterChange(filter: MessageSearchFilter) = searchManager.onFilterChange(filter)
+
+    fun onSearchFilterChange(filter: MessageSearchFilter) {
+        ensureLocalCopiesIfBrowsingMedia(filter)
+        searchManager.onFilterChange(filter)
+    }
+
+    /**
+     * The "Shared Media" overflow item: opens search already browsing photos.
+     * There is no separate media screen — two per-chat media browsers with
+     * different data sources would drift apart.
+     */
+    fun openSharedMedia() {
+        val photos = MessageSearchFilter(type = MessageFilterType.PHOTOS)
+        ensureLocalCopiesIfBrowsingMedia(photos)
+        searchManager.openSearchWithFilter(photos)
+    }
+
     fun toggleSearch() = searchManager.toggleSearch()
     fun clearSearch() = searchManager.clearSearch()
+
+    // Guarantees a durable local copy of the chat's media the first time a media
+    // browse opens: the grid is about to fetch these files over the network to
+    // render them anyway, so saving them stops the same (often large, old,
+    // remote-only) files being re-downloaded on every re-entry. Carried over
+    // from the deleted SharedMediaViewModel.
+    //
+    // Stays on @ApplicationScope, and stays here rather than moving into
+    // ChatSearchManager: that manager is constructed with viewModelScope, so
+    // homing this there would silently downgrade the guarantee the scope choice
+    // exists for — the saves must finish when the user backs straight out.
+    private var localCopiesEnsured = false
+
+    private fun ensureLocalCopiesIfBrowsingMedia(filter: MessageSearchFilter) {
+        val browsingMedia = filter.type == MessageFilterType.PHOTOS ||
+            filter.type == MessageFilterType.VIDEOS
+        if (!browsingMedia || localCopiesEnsured) return
+        localCopiesEnsured = true
+        appScope.launch { messageRepository.ensureLocalCopiesForChat(chatId) }
+    }
 
     // ── Polls ──
     fun sendPoll(question: String, options: List<String>, isMultipleChoice: Boolean, isAnonymous: Boolean) =
