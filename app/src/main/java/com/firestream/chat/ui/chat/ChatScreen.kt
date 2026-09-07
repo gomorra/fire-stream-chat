@@ -173,8 +173,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 // Max emoji size multiplier shown in the input field — keeps tall emoji from overflowing maxLines.
@@ -187,7 +185,6 @@ private const val INPUT_EMOJI_SIZE_CAP = 2.0f
  */
 private const val MAX_GALLERY_PICK = 10
 
-private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
 // Chronological↔reversed index translation at the LazyColumn boundary.
 // The LazyColumn runs `reverseLayout = true` so `firstVisibleItemIndex` and
@@ -409,6 +406,46 @@ fun ChatScreen(
         viewModel.dismissFullscreenImage()
         fullscreenMediaMessageId = null
         if (landOn != null && landOn != openedOn) jumpToSourceMessage(landOn, animate = false)
+    }
+
+    // Media opened from the search grid gets its own pager state, kept apart
+    // from the chat's fullscreen overlay for two reasons. It must page through
+    // the *filtered* results — a date-filtered Photos browse is not the chat's
+    // whole gallery — and closing it must land back in the grid, i.e. in the
+    // browse session the user is still in, rather than in the conversation.
+    // That second part is why nothing here writes fullscreenMediaMessageId:
+    // that field is what drives the land-in-chat jump for bubble-opened media,
+    // and the search path must not inherit it.
+    var searchGalleryIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+
+    val searchGalleryItems = remember(uiState.overlays.searchResults) {
+        uiState.overlays.searchResults
+            .filter { it.type == MessageType.IMAGE && (it.mediaUrl != null || it.localUri != null) }
+            .map {
+                FullscreenMediaItem(imageUrl = it.mediaUrl, localUri = it.localUri, messageId = it.id)
+            }
+    }
+
+    // One grid, two destinations: the image pager cannot play video, and the
+    // video player cannot swipe through stills.
+    fun openSearchMedia(message: Message) {
+        if (message.type == MessageType.VIDEO) {
+            (message.localUri ?: message.mediaUrl)?.let { viewModel.showFullscreenVideo(it) }
+            return
+        }
+        val index = searchGalleryItems.indexOfFirst { it.messageId == message.id }
+        if (index >= 0) searchGalleryIndex = index
+    }
+
+    // Tapping a non-media result travels to the message in the conversation.
+    fun openSearchResult(message: Message) {
+        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == message.id }
+        if (chronoIdx >= 0) {
+            scope.launch {
+                scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
+            }
+        }
+        viewModel.clearSearch()
     }
 
     // Save scroll position when leaving so it can be restored on re-entry.
@@ -1101,47 +1138,16 @@ fun ChatScreen(
                         showClear = uiState.overlays.searchFilter.isActive,
                         onClearFilters = { viewModel.onSearchFilterChange(MessageSearchFilter.NONE) },
                     )
-                    LazyColumn(
+                    SearchResultList(
+                        results = uiState.overlays.searchResults,
+                        filterType = uiState.overlays.searchFilter.type,
+                        onResultClick = { message -> openSearchResult(message) },
+                        onMediaClick = { message -> openSearchMedia(message) },
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.surface)
-                    ) {
-                        items(uiState.overlays.searchResults, key = { "search_${it.id}" }) { message ->
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable {
-                                        val chronoIdx = uiState.messages.messages.indexOfFirst { it.id == message.id }
-                                        if (chronoIdx >= 0) {
-                                            scope.launch {
-                                                scrollToAndCenter(uiState.messages.messages.toReversedIndex(chronoIdx))
-                                            }
-                                        }
-                                        viewModel.clearSearch()
-                                    }
-                                    .padding(horizontal = 16.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = message.senderId.take(12),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                Text(
-                                    text = message.content,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = searchResultDateFormat.format(Date(message.timestamp)),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            HorizontalDivider()
-                        }
-                    }
+                            .background(MaterialTheme.colorScheme.surface),
+                    )
                 }
             }
 
@@ -2197,6 +2203,29 @@ fun ChatScreen(
                     snackbarHostState = fullscreenSnackbarHostState,
                 )
             }
+        }
+    }
+
+    BackHandler(enabled = searchGalleryIndex != null) { searchGalleryIndex = null }
+
+    LaunchedEffect(searchGalleryIndex != null) {
+        if (searchGalleryIndex != null) keyboardController?.hide()
+    }
+
+    AnimatedVisibility(visible = searchGalleryIndex != null, enter = fadeIn(), exit = fadeOut()) {
+        searchGalleryIndex?.let { idx ->
+            // No onPageChanged: swiping here moves through the search results,
+            // not through the conversation, so there is nothing for the chat
+            // list to follow you out to. Closing returns to the grid.
+            FullscreenImagePager(
+                items = searchGalleryItems,
+                initialIndex = idx,
+                onDismiss = { searchGalleryIndex = null },
+                snackbarHostState = fullscreenSnackbarHostState,
+                onSaveToDownloads = { item ->
+                    viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
+                },
+            )
         }
     }
 
