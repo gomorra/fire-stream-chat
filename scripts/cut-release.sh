@@ -156,6 +156,15 @@ NEW_HEADER="## [$VERSION] $SEP $FINAL_DATE"
 
 info "Preflight OK. New header will be: $NEW_HEADER"
 
+# Reminder, not a gate: most releases close no backlog item, so blocking here
+# would be noise. See the changelog-release skill, "sweep the backlog".
+BACKLOG_FILE="$REPO_ROOT/docs/BACKLOG.md"
+if [[ -f "$BACKLOG_FILE" ]]; then
+    OPEN_ITEMS=$(grep -cE '^### .*\([0-9]+\.[0-9]+\)$' "$BACKLOG_FILE" || true)
+    info "docs/BACKLOG.md has $OPEN_ITEMS open items — if this release shipped any of"
+    info "them, Ctrl-C now, delete them there, commit, and re-run."
+fi
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
     info "--dry-run: no changes will be made"
 fi
