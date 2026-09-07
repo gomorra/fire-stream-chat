@@ -154,6 +154,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageSearchFilter
+import com.firestream.chat.domain.model.MessageSearchLimits
 import com.firestream.chat.ui.chat.command.resolveRemindTarget
 import com.firestream.chat.ui.chat.widget.RemindWidget
 import com.firestream.chat.ui.components.UserAvatar
@@ -1012,41 +1014,56 @@ fun ChatScreen(
                 enter = slideInVertically() + fadeIn(),
                 exit = slideOutVertically() + fadeOut()
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    OutlinedTextField(
-                        value = uiState.overlays.searchQuery,
-                        onValueChange = { viewModel.onSearchQueryChange(it) },
-                        modifier = Modifier.weight(1f),
-                        placeholder = { Text("Search in conversation...") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(20.dp),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
-                    )
-                    IconButton(onClick = { viewModel.clearSearch() }) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Close search",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            imageVector = Icons.Default.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedTextField(
+                            value = uiState.overlays.searchQuery,
+                            onValueChange = { viewModel.onSearchQueryChange(it) },
+                            modifier = Modifier.weight(1f),
+                            placeholder = { Text("Search in conversation...") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(20.dp),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search)
+                        )
+                        IconButton(onClick = { viewModel.clearSearch() }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Close search",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                    // Prefilter chips: a blank query plus a chip is browse mode,
+                    // which is what makes this pane a media browser and not only
+                    // a text matcher.
+                    SearchFilterChipRow(
+                        filter = uiState.overlays.searchFilter,
+                        onFilterChange = { viewModel.onSearchFilterChange(it) },
+                    )
                 }
             }
 
-            // Search results overlay
-            if (uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank()) {
+            // Search results overlay. Shown for a filter alone as well as for a
+            // typed query — a chip with no query is browse mode.
+            val searchIsSelecting =
+                uiState.overlays.searchQuery.isNotBlank() || uiState.overlays.searchFilter.isActive
+            if (uiState.overlays.isSearchActive && searchIsSelecting) {
                 if (uiState.overlays.searchResults.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -1055,17 +1072,34 @@ fun ChatScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "No results found",
+                            // Browse mode has no query to have "found" nothing
+                            // for, so it says what it actually looked at.
+                            text = if (uiState.overlays.searchQuery.isBlank()) {
+                                "Nothing matches these filters"
+                            } else {
+                                "No results found"
+                            },
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 } else {
-                    Text(
-                        text = "${uiState.overlays.searchResults.size} ${if (uiState.overlays.searchResults.size == 1) "result" else "results"}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    // The active filters live here as well as in the chip row:
+                    // chips scroll off-screen, and an active-but-invisible
+                    // filter is exactly the dishonesty an overflow chip would
+                    // have introduced.
+                    SearchResultsSummary(
+                        summary = searchResultsSummary(
+                            filter = uiState.overlays.searchFilter,
+                            resultCount = uiState.overlays.searchResults.size,
+                            // The query is LIMIT-capped, so a full page means
+                            // "at least this many" and must not be shown as an
+                            // exact count.
+                            atLimit = uiState.overlays.searchResults.size >=
+                                MessageSearchLimits.forQuery(uiState.overlays.searchQuery),
+                        ),
+                        showClear = uiState.overlays.searchFilter.isActive,
+                        onClearFilters = { viewModel.onSearchFilterChange(MessageSearchFilter.NONE) },
                     )
                     LazyColumn(
                         modifier = Modifier
@@ -1111,7 +1145,8 @@ fun ChatScreen(
                 }
             }
 
-            val showingSearchResults = uiState.overlays.isSearchActive && uiState.overlays.searchQuery.isNotBlank() && uiState.overlays.searchResults.isNotEmpty()
+            val showingSearchResults =
+                uiState.overlays.isSearchActive && searchIsSelecting && uiState.overlays.searchResults.isNotEmpty()
             if (!showingSearchResults) {
                 when {
                     !contentReady -> {

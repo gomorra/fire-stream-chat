@@ -48,6 +48,7 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
+import com.firestream.chat.domain.model.MessageSearchLimits
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -107,13 +108,6 @@ private const val RECEIPT_WRITE_CONCURRENCY = 8
 // between the previous list update and the next one exceeds this window, the
 // next update starts a fresh bubble instead of silently extending the old one.
 private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
-
-// Result caps for in-chat search. Text search keeps the historical 50; browse
-// mode (a filter chip with no query) gets 200, because there the filter — not
-// the query — is doing the selecting and 50 truncates visibly. 200 is also the
-// largest value that keeps the deferred (chatId, timestamp) index defensible.
-private const val TEXT_SEARCH_RESULT_LIMIT = 50
-private const val BROWSE_RESULT_LIMIT = 200
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -1191,10 +1185,7 @@ class MessageRepositoryImpl @Inject constructor(
     ): List<Message> {
         return try {
             // Browse mode (blank query + an active filter) selects by chip, not
-            // by text, so it takes the larger cap: 50 truncates visibly when the
-            // filter rather than the query is doing the selecting. 200 is the
-            // ceiling that keeps the deferred (chatId, timestamp) index
-            // defensible — going higher means doing the index too.
+            // by text, so it takes the larger cap — see MessageSearchLimits.
             val browsing = query.isEmpty()
             val results = messageDao.searchMessagesInChat(
                 chatId = chatId,
@@ -1206,7 +1197,7 @@ class MessageRepositoryImpl @Inject constructor(
                 starredOnly = filter.isStarred,
                 from = filter.fromMs,
                 to = filter.toMs,
-                limit = if (browsing) BROWSE_RESULT_LIMIT else TEXT_SEARCH_RESULT_LIMIT,
+                limit = MessageSearchLimits.forQuery(query),
             )
             // The word-boundary pass narrows LIKE's substring match to whole
             // words. It must not run in browse mode: there is no query to bound,

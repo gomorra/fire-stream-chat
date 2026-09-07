@@ -38,3 +38,21 @@ data class MessageSearchFilter(
         val NONE = MessageSearchFilter()
     }
 }
+
+/**
+ * Result caps for in-chat search. Text search keeps the historical 50; browse
+ * mode (a filter chip with no query typed) gets 200, because there the filter —
+ * not the query — is doing the selecting and 50 truncates visibly. 200 is also
+ * the largest value that keeps the deferred `(chatId, timestamp)` index
+ * defensible; going higher means doing the index too.
+ *
+ * They live here rather than privately in the repository because the result
+ * count the UI shows is cap-truncated, and a UI that cannot tell it is at the
+ * cap has to either lie ("200 photos" when there are 2,000) or say nothing.
+ */
+object MessageSearchLimits {
+    const val TEXT = 50
+    const val BROWSE = 200
+
+    fun forQuery(query: String): Int = if (query.isBlank()) BROWSE else TEXT
+}
