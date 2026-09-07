@@ -21,6 +21,20 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Chat search prefilter chips (`56cb67a`…`b8b5ddd`, 2026-09-07)
+- Device pass never run for the whole feature: the chip row's horizontal scroll under a
+  thumb, the date range picker, the photo/video grid, and tapping a video tile through to
+  the player.
+- Specifically unconfirmed: that a **local** video's frame decodes into a grid tile
+  (`ChatSearchResults.kt` uses `rememberVideoFrameRequest`; only the remote-thumbnail
+  fallback is obviously safe), and that closing the search image pager lands back in the
+  grid rather than in the conversation.
+- Also unconfirmed: the deferred `(chatId, timestamp)` index. Trigger to revisit is the
+  Photos chip feeling sluggish on a real long chat — the browse `LIMIT` is 200
+  (`MessageSearchLimits`), and raising it further means doing the index too.
+- The "Shared Media" three-dot item now opens search pre-filtered to Photos; the standalone
+  screen is deleted, so a regression here has no fallback path.
+
 ### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
 - Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute
   auto-silence cancel stops it.

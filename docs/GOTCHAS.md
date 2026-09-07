@@ -30,6 +30,14 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `remember(localUri) { File(it).takeIf { exists() && isFile && canRead() } }`.
   `produceState(initialValue = false)` renders one frame with the wrong source and made
   the cold-start spinner run to completion (1.6.4 fix, `ebd7b14`).
+- **`DateRangePicker` reports UTC midnights, not local days.** `selectedStartDateMillis` /
+  `selectedEndDateMillis` are UTC-anchored, while everything you filter with them
+  (`Message.timestamp`) is local wall-clock. Feed them straight into a range comparison
+  and, in any zone east of UTC, a message sent late on the last selected day falls
+  outside it. Re-anchor explicitly: read the UTC calendar's y/m/d, rebuild in the default
+  zone, and take end-of-day as *start of the next day minus 1 ms* — `+24h` overshoots on
+  a DST-shortened day. See `ChatSearchFilterBar.kt` (`utcDayToLocalStart` / `…End`).
+
 - **Freeze list order in the presentation layer.** For UI lists that would reorder
   mid-interaction (e.g. emoji Recents), snapshot the order with `remember { list }` per
   open session and keep the underlying flow live. Don't add a `delay` debounce in the
@@ -66,6 +74,19 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **Initial `null` from a Room flow means "not loaded yet", not "gone".** Detail
   ViewModels must gate `isDeleted` / `isAccessDenied` flags on a prior non-null
   emission, or every screen-open flashes the deleted state.
+- **A soft-deleted row is invisible to a text search and visible to a filter-only one.**
+  `softDeleteMessage` blanks `content` but leaves `mediaUrl` intact, so `content LIKE
+  '%q%'` can never match a tombstone — which quietly hides the fact that a query with *no*
+  content predicate (a browse by type, say) will return it and render its thumbnail. Any
+  new query over `messages` that can run without a content predicate needs
+  `AND deletedAt IS NULL` explicitly. Regression test:
+  `MessageDaoSearchFilterTest.photos browse excludes a soft-deleted image`.
+- **Optional filters: nullable/zero-valued params, not `@RawQuery`.** Room keeps verifying
+  a query written as `(:type IS NULL OR type = :type)` / `(:flag = 0 OR …)`; dropping to
+  `@RawQuery` to build predicates dynamically gives that up. Put a `(:query = '' OR
+  content LIKE …)` short-circuit first so the no-query path doesn't scan every row's
+  content against `'%%'`. See `MessageDao.searchMessagesInChat`.
+
 - **Shared-storage files: `exists()` is not enough.** MediaStore files from a prior
   install can pass `File.exists()` yet throw `EACCES` on open. Gate with
   `exists() && isFile && canRead()`.
