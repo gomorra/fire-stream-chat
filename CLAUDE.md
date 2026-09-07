@@ -72,6 +72,15 @@ Plans must include an **Order** line that defines the build sequence:
 
 **Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
 
+### Review tools
+
+Two tools, non-overlapping scopes — pick by what you are looking for:
+
+- **`/simplify`** — quality only: reuse, simplification, efficiency, altitude. It applies its own fixes. Trigger-gated inside the post-step workflow below, and offered by the pre-commit `ask-simplify.sh` hook.
+- **`/code-review`** — correctness bugs, which `/simplify` explicitly does not hunt. **Not** part of the automatic workflow: run it manually before cutting a release, or on any diff touching Signal/crypto, coroutine scoping, or the sync path. `/code-review ultra` is user-triggered and billed — Claude cannot launch it, so never write it into an auto-run step.
+
+Do not reimplement either with a custom review prompt.
+
 ### Post-step code review
 
 **After each significant phase or larger step, ALWAYS run these steps in order without waiting to be asked:**
@@ -79,8 +88,6 @@ Plans must include an **Order** line that defines the build sequence:
 2. `./gradlew assembleDebug` — build must be clean
 3. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin (stronger models for the trigger categories below).
    - **Triggers** (any one is sufficient): (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines).
-   - **Never reimplement the review** with a custom prompt — always `Skill(skill: "simplify")`.
-   - **Never substitute `/simplify-review`** — that skill is manual-invocation only.
 4. `git commit` — **commit immediately after a clean build; do not wait for user instruction**
 5. **Write unit tests** when the step/phase introduces **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes.
 6. `./gradlew test` — unit tests must pass
