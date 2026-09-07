@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageSearchFilter
 
 // The currently-shown fullscreen image. Both message images and link-preview
 // thumbnails feed into the same fullscreen overlay, but they carry different
@@ -37,6 +38,10 @@ internal data class FullscreenVideo(
 
 internal data class OverlaysState(
     val searchQuery: String = "",
+    // The prefilter chips under the search box. An active filter with a blank
+    // query is browse mode ("show me the photos"), so this is a second,
+    // independent input to the same search — not a post-filter over results.
+    val searchFilter: MessageSearchFilter = MessageSearchFilter.NONE,
     val searchResults: List<Message> = emptyList(),
     val isSearchActive: Boolean = false,
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),

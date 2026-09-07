@@ -19,6 +19,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.reminder.DateTimeDetector
@@ -267,6 +268,7 @@ class ChatViewModel @Inject constructor(
 
     // ── Search ──
     fun onSearchQueryChange(query: String) = searchManager.onSearchQueryChange(query)
+    fun onSearchFilterChange(filter: MessageSearchFilter) = searchManager.onFilterChange(filter)
     fun toggleSearch() = searchManager.toggleSearch()
     fun clearSearch() = searchManager.clearSearch()
 
