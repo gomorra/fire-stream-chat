@@ -2,7 +2,10 @@ package com.firestream.chat.test.fakes
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageFilterType
+import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageStatus
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.MessageRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,6 +32,9 @@ internal class FakeMessageRepository : MessageRepository {
     var lastSentMessage: Message? = null
     var lastSentRecipientId: String? = null
     var lastSentMimeType: String? = null
+
+    /** The filter the last in-chat search was issued with — lets a test assert it reached the repo unchanged. */
+    var lastSearchFilter: MessageSearchFilter? = null
 
     /** Every media send, in call order — lets a test assert batch order and completeness. */
     data class SentMedia(
@@ -58,6 +64,7 @@ internal class FakeMessageRepository : MessageRepository {
         lastSentMessage = null
         lastSentRecipientId = null
         lastSentMimeType = null
+        lastSearchFilter = null
     }
 
     private fun consumeFailure(): Result<Nothing>? =
@@ -76,9 +83,6 @@ internal class FakeMessageRepository : MessageRepository {
         messagesByChat.map { byChat ->
             byChat.values.flatten().filter { it.isStarred || it.id in starred.value }
         }
-
-    override fun getSharedMedia(chatId: String): Flow<List<Message>> =
-        messagesByChat.map { it[chatId].orEmpty().filter { m -> m.mediaUrl != null } }
 
     override fun getSharedMediaForUser(userId: String): Flow<List<Message>> =
         messagesByChat.map { byChat ->
@@ -229,9 +233,34 @@ internal class FakeMessageRepository : MessageRepository {
         return messagesByChat.value.values.flatten().filter { it.content.contains(query, ignoreCase = true) }
     }
 
-    override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> {
+    /**
+     * Mirrors the real query's shape closely enough for manager/use-case tests:
+     * tombstones drop out, a blank query is browse mode (no content predicate),
+     * and the filter axes are ANDed. Ordering is newest-first like the DAO's.
+     */
+    override suspend fun searchMessagesInChat(
+        chatId: String,
+        query: String,
+        filter: MessageSearchFilter,
+    ): List<Message> {
         throwIfNextFailure()
-        return messagesByChat.value[chatId].orEmpty().filter { it.content.contains(query, ignoreCase = true) }
+        lastSearchFilter = filter
+        return messagesByChat.value[chatId].orEmpty()
+            .filter { it.deletedAt == null }
+            .filter { query.isEmpty() || it.content.contains(query, ignoreCase = true) }
+            .filter { m -> filter.type?.let { m.matchesFilterType(it) } ?: true }
+            .filter { !filter.isStarred || it.isStarred || it.id in starred.value }
+            .filter { m -> filter.fromMs?.let { m.timestamp >= it } ?: true }
+            .filter { m -> filter.toMs?.let { m.timestamp <= it } ?: true }
+            .sortedByDescending { it.timestamp }
+    }
+
+    private fun Message.matchesFilterType(type: MessageFilterType): Boolean = when (type) {
+        MessageFilterType.PHOTOS -> this.type == MessageType.IMAGE
+        MessageFilterType.VIDEOS -> this.type == MessageType.VIDEO
+        MessageFilterType.DOCS -> this.type == MessageType.DOCUMENT
+        MessageFilterType.VOICE -> this.type == MessageType.VOICE
+        MessageFilterType.LINKS -> content.contains("http")
     }
 
     override suspend fun markChatAsDelivered(chatId: String): Result<Unit> {

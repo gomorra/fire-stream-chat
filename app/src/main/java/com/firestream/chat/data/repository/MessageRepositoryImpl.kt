@@ -46,6 +46,8 @@ import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageFilterType
+import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -105,6 +107,13 @@ private const val RECEIPT_WRITE_CONCURRENCY = 8
 // between the previous list update and the next one exceeds this window, the
 // next update starts a fresh bubble instead of silently extending the old one.
 private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
+
+// Result caps for in-chat search. Text search keeps the historical 50; browse
+// mode (a filter chip with no query) gets 200, because there the filter — not
+// the query — is doing the selecting and 50 truncates visibly. 200 is also the
+// largest value that keeps the deferred (chatId, timestamp) index defensible.
+private const val TEXT_SEARCH_RESULT_LIMIT = 50
+private const val BROWSE_RESULT_LIMIT = 200
 
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
@@ -1175,17 +1184,53 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun searchMessagesInChat(chatId: String, query: String): List<Message> {
+    override suspend fun searchMessagesInChat(
+        chatId: String,
+        query: String,
+        filter: MessageSearchFilter,
+    ): List<Message> {
         return try {
-            val regex = wordBoundaryRegex(query)
-            messageDao.searchMessagesInChat(chatId, query)
-                .filter { regex.containsMatchIn(it.content) }
-                .map { it.toDomain() }
+            // Browse mode (blank query + an active filter) selects by chip, not
+            // by text, so it takes the larger cap: 50 truncates visibly when the
+            // filter rather than the query is doing the selecting. 200 is the
+            // ceiling that keeps the deferred (chatId, timestamp) index
+            // defensible — going higher means doing the index too.
+            val browsing = query.isEmpty()
+            val results = messageDao.searchMessagesInChat(
+                chatId = chatId,
+                query = query,
+                // LINKS is a content property, not a MessageType, so it maps to
+                // `requireLink` and leaves `type` unconstrained.
+                type = filter.type?.toMessageTypeName(),
+                requireLink = filter.type == MessageFilterType.LINKS,
+                starredOnly = filter.isStarred,
+                from = filter.fromMs,
+                to = filter.toMs,
+                limit = if (browsing) BROWSE_RESULT_LIMIT else TEXT_SEARCH_RESULT_LIMIT,
+            )
+            // The word-boundary pass narrows LIKE's substring match to whole
+            // words. It must not run in browse mode: there is no query to bound,
+            // and media rows carry an empty content that no regex would match.
+            val filtered = if (browsing) {
+                results
+            } else {
+                val regex = wordBoundaryRegex(query)
+                results.filter { regex.containsMatchIn(it.content) }
+            }
+            filtered.map { it.toDomain() }
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             Log.w(TAG, "searchMessagesInChat failed for chat=$chatId (query length=${query.length})", e)
             emptyList()
         }
+    }
+
+    private fun MessageFilterType.toMessageTypeName(): String? = when (this) {
+        MessageFilterType.PHOTOS -> MessageType.IMAGE.name
+        MessageFilterType.VIDEOS -> MessageType.VIDEO.name
+        MessageFilterType.DOCS -> MessageType.DOCUMENT.name
+        MessageFilterType.VOICE -> MessageType.VOICE.name
+        MessageFilterType.LINKS -> null
     }
 
     private fun wordBoundaryRegex(query: String) =
@@ -1244,10 +1289,6 @@ class MessageRepositoryImpl @Inject constructor(
         }
         // Batch-update Room in one shot so the DAO flow emits only once
         messageDao.updateMessageStatusBatch(messageIds, MessageStatus.READ.name)
-    }
-
-    override fun getSharedMedia(chatId: String): Flow<List<Message>> {
-        return messageDao.getSharedMedia(chatId).map { entities -> entities.map { it.toDomain() } }
     }
 
     override fun getSharedMediaForUser(userId: String): Flow<List<Message>> {

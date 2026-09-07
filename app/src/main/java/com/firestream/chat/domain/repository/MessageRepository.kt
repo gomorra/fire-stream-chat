@@ -2,6 +2,7 @@ package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.TimerAlarmSound
 import com.firestream.chat.domain.model.TimerAlarmStyle
 import kotlinx.coroutines.flow.Flow
@@ -37,13 +38,21 @@ interface MessageRepository {
     fun getStarredMessages(): Flow<List<Message>>
     // Phase 2: search
     suspend fun searchMessages(query: String): List<Message>
-    suspend fun searchMessagesInChat(chatId: String, query: String): List<Message>
+    /**
+     * In-chat search, optionally prefiltered. A blank [query] with an active
+     * [filter] is browse mode; a blank query with no filter matches everything
+     * in the chat, so callers gate that case (see `SearchMessagesUseCase`).
+     */
+    suspend fun searchMessagesInChat(
+        chatId: String,
+        query: String,
+        filter: MessageSearchFilter = MessageSearchFilter.NONE,
+    ): List<Message>
     // Delivery / read receipts
     suspend fun markChatAsDelivered(chatId: String): Result<Unit>
     suspend fun markMessagesAsDelivered(chatId: String, messageIds: List<String>): Result<Unit>
     suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit>
     // Shared media
-    fun getSharedMedia(chatId: String): Flow<List<Message>>
     fun getSharedMediaForUser(userId: String): Flow<List<Message>>
     /**
      * Persist a durable on-disk copy (populating `localUri`) of every

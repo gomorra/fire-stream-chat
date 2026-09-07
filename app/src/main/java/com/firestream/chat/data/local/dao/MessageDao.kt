@@ -84,13 +84,50 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT 100")
     suspend fun searchMessages(query: String): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT 50")
-    suspend fun searchMessagesInChat(chatId: String, query: String): List<MessageEntity>
+    // In-chat search with prefilters. Every clause is a nullable/zero-valued
+    // short-circuit so one compile-time-verified query serves both text search
+    // and filter-only "browse" mode (blank query + an active chip) — Room keeps
+    // verifying it, which @RawQuery would have given up.
+    //
+    // `:query = ''` is a short-circuit, not a nicety: without it browse mode
+    // would LIKE every row's content against '%%'.
+    //
+    // `deletedAt IS NULL` is mandatory, not polish. softDeleteMessage blanks
+    // `content` but leaves `mediaUrl` intact, so a tombstoned image is
+    // invisible to any non-blank content LIKE — but a filter-only query has no
+    // content predicate at all and would happily return it and render its
+    // thumbnail. It also re-aligns "what search can return" with "what the
+    // message list renders".
+    //
+    // `:requireLink` is the LINKS chip: a link lives in the content of a TEXT
+    // row, so it is a second parameter rather than a `type` value.
+    @Query(
+        """
+        SELECT * FROM messages
+        WHERE chatId = :chatId
+          AND deletedAt IS NULL
+          AND (:query = '' OR content LIKE '%' || :query || '%')
+          AND (:type IS NULL OR type = :type)
+          AND (:requireLink = 0 OR content LIKE '%http%')
+          AND (:starredOnly = 0 OR isStarred = 1)
+          AND (:from IS NULL OR timestamp >= :from)
+          AND (:to IS NULL OR timestamp <= :to)
+        ORDER BY timestamp DESC
+        LIMIT :limit
+        """
+    )
+    suspend fun searchMessagesInChat(
+        chatId: String,
+        query: String,
+        type: String?,
+        requireLink: Boolean,
+        starredOnly: Boolean,
+        from: Long?,
+        to: Long?,
+        limit: Int,
+    ): List<MessageEntity>
 
     // Shared media queries
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND mediaUrl IS NOT NULL ORDER BY timestamp DESC")
-    fun getSharedMedia(chatId: String): Flow<List<MessageEntity>>
-
     @Query("SELECT * FROM messages WHERE senderId = :userId AND mediaUrl IS NOT NULL ORDER BY timestamp DESC LIMIT 100")
     fun getSharedMediaForUser(userId: String): Flow<List<MessageEntity>>
 
