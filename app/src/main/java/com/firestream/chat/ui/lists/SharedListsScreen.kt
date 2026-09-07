@@ -127,9 +127,18 @@ private fun SharedListRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val itemCount = listData.items.size
+            // Items live in a subcollection and are not hydrated on the shared-lists
+            // stream — read the denormalized counts, not `items.size`.
+            val itemCount = listData.itemCount
+            val checkedCount = listData.checkedCount
+            val subtitle = when (listData.type) {
+                ListType.CHECKLIST, ListType.SHOPPING ->
+                    "$checkedCount/$itemCount checked"
+                ListType.GENERIC ->
+                    "$itemCount item${if (itemCount != 1) "s" else ""}"
+            }
             Text(
-                text = "$itemCount item${if (itemCount != 1) "s" else ""}",
+                text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
