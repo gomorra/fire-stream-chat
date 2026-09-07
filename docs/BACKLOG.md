@@ -21,7 +21,7 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
-### Chat search prefilter chips (`56cb67a`…`b8b5ddd`, 2026-09-07)
+### Chat search prefilter chips (`56cb67a`…`261704d`, 2026-09-07)
 - Device pass never run for the whole feature: the chip row's horizontal scroll under a
   thumb, the date range picker, the photo/video grid, and tapping a video tile through to
   the player.
@@ -34,6 +34,9 @@ Delete an item once it has been verified (or once a fix for what the check found
   (`MessageSearchLimits`), and raising it further means doing the index too.
 - The "Shared Media" three-dot item now opens search pre-filtered to Photos; the standalone
   screen is deleted, so a regression here has no fallback path.
+- Confirm on device that **system back closes the search overlay** rather than the chat
+  (`261704d` added the `BackHandler`; the deleted screen used to get this from the NavHost),
+  and that it still yields to the two fullscreen viewers while either is open.
 
 ### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
 - Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute

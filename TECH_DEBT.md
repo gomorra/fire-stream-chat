@@ -183,6 +183,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### A media filter chip triggers the unconditional local-copy backfill
+
+**The smell.** `ChatViewModel.ensureLocalCopiesIfBrowsingMedia` fires `messageRepository.ensureLocalCopiesForChat(chatId)` on `@ApplicationScope` the first time a Photos or Videos chip activates in a chat. That call deliberately **bypasses the auto-download preference** and downloads every not-yet-local image, video and document in the chat. Before the search merge it took navigating to a dedicated Shared Media screen; now an idle chip tap while text-searching starts it, on a metered connection, with no way to cancel — it is on the application scope precisely so it survives the user leaving.
+
+**Why we haven't changed it.** It is what makes the browse worth opening: the grid fetches these files over the network to render them anyway, so without the backfill every re-entry re-downloads the same remote-only media. That was the original rationale in `SharedMediaViewModel`, and the chat-search-filters plan carried it over deliberately (`.claude/plans/done/chat-search-filters.md`, step 6). Narrowing it to the explicit "Shared Media" entry point would leave the chip-opened browse — now the *primary* way in — re-downloading forever, which is the bug the backfill exists to prevent. It is also once-per-ViewModel, so it cannot loop.
+
+**When to revisit.** If a real device on a metered connection shows this costing meaningful data, or if the auto-download preference gains a "never, and mean it" setting. The honest fix is probably to gate the backfill on the browse actually rendering results, or to scope it to the filtered result set rather than the whole chat, rather than to move where it fires. Raised by the code-review pass on `56cb67a`…`261704d` (2026-09-07).
+
+---
+
 ### `ChatScreen` does not use `rememberImagePicker`
 
 **The smell.** `ui/components/ImagePicker.kt` exists to own activity-result launcher scaffolding, and `ProfileScreen` / `GroupSettingsScreen` use it. `ChatScreen` never adopted it and has now diverged further: it needs `PickMultipleVisualMedia` (multi-select, capped by `MAX_GALLERY_PICK`), a video-capture launcher, and per-URI mime sniffing, none of which the single-image helper offers.
