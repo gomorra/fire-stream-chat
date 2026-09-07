@@ -311,45 +311,49 @@ fun ListDetailScreen(
                 var draggedItemId by remember { mutableStateOf<String?>(null) }
                 val displayItems = localItems.filter { it.id != pendingRemoval?.id }
 
-                var awaitingReorderSync by remember { mutableStateOf(false) }
+                // Set while our own reorder write is in flight; holds the order the user
+                // dragged the rows into so the observed echo can't bounce them back.
+                var pendingReorderIds by remember { mutableStateOf<List<String>?>(null) }
 
                 val reorderableLazyListState = rememberReorderableLazyListState(listState) { from, to ->
-                    if (draggedItemId == null) draggedItemId = localItems.getOrNull(from.index)?.id
-                    localItems = localItems.toMutableList().apply {
+                    // from/to index the *rendered* list, which hides a pending swipe removal.
+                    // Move within that projection, then re-append the hidden row so it comes
+                    // back in place if the user undoes the swipe.
+                    val rendered = localItems.filter { it.id != pendingRemoval?.id }
+                    if (draggedItemId == null) draggedItemId = rendered.getOrNull(from.index)?.id
+                    val moved = rendered.toMutableList().apply {
                         add(to.index, removeAt(from.index))
                     }
+                    localItems = moved + localItems.filter { it.id == pendingRemoval?.id }
                 }
 
                 // Drag ended: commit reordered list
                 LaunchedEffect(reorderableLazyListState.isAnyItemDragging) {
-                    if (!reorderableLazyListState.isAnyItemDragging && draggedItemId != null) {
-                        val display = uiState.displayItems
-                        val changed = localItems.size != display.size ||
-                            localItems.indices.any { localItems[it].id != display[it].id }
-                        draggedItemId = null
-                        if (changed) {
-                            awaitingReorderSync = true
-                            viewModel.reorderItems(localItems)
-                        }
+                    if (reorderableLazyListState.isAnyItemDragging) return@LaunchedEffect
+                    // Always release the guard once the drag is over — leaving it set would
+                    // freeze the mirror and the screen would only refresh on re-entry.
+                    val wasDragging = draggedItemId != null
+                    draggedItemId = null
+                    if (!wasDragging) return@LaunchedEffect
+                    val display = uiState.displayItems
+                    val changed = localItems.size != display.size ||
+                        localItems.indices.any { localItems[it].id != display[it].id }
+                    if (changed) {
+                        pendingReorderIds = localItems.map { it.id }
+                        viewModel.reorderItems(localItems)
                     }
                 }
 
-                // Server update: sync local state (skip while dragging or reorder in flight)
-                LaunchedEffect(uiState.displayItems) {
-                    if (draggedItemId != null) return@LaunchedEffect
-                    // A size change means items were added/removed (e.g. clear checked),
-                    // not just reordered. Always sync those through and clear the reorder
-                    // guard so we don't swallow a later update.
-                    if (uiState.displayItems.size != localItems.size) {
-                        awaitingReorderSync = false
-                        localItems = uiState.displayItems
+                // Observed update → local mirror. Keyed on the drag guards too, so an update
+                // that lands mid-drag is reconciled when the drag ends instead of being
+                // dropped for the lifetime of the screen.
+                LaunchedEffect(uiState.displayItems, reorderableLazyListState.isAnyItemDragging, draggedItemId) {
+                    if (draggedItemId != null || reorderableLazyListState.isAnyItemDragging) {
                         return@LaunchedEffect
                     }
-                    if (awaitingReorderSync) {
-                        awaitingReorderSync = false
-                        return@LaunchedEffect
-                    }
-                    localItems = uiState.displayItems
+                    val mirror = reconcileListItems(uiState.displayItems, pendingReorderIds)
+                    pendingReorderIds = mirror.pendingOrderIds
+                    localItems = mirror.items
                 }
 
                 LaunchedEffect(listData.items.size) {
