@@ -6,7 +6,7 @@ One-line pointers to every doc in this folder. Start here when you're not sure w
 |---|---|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Clean-architecture overview, tech stack, feature flows, navigation, package layout. |
 | [SPEC.md](SPEC.md) | Product-level feature list — what the app does, from a user's perspective. |
-| [ROADMAP.md](ROADMAP.md) | Phased plan from current state toward Signal/WhatsApp-parity messaging. |
+| [BACKLOG.md](BACKLOG.md) | Open, unshipped work — features, enhancements, and ideas. Shipped history lives in `CHANGELOG.md`. |
 | [PATTERNS.md](PATTERNS.md) | Grep-able catalogue of named codebase conventions (slice ownership, AppError, fakes vs. mocks, etc.). Cited by `AGENT-NOTE` headers. |
 | [FEATURE-MAP.md](FEATURE-MAP.md) | Cross-cutting feature → file lookup table for features spanning 4+ packages. Check before grepping. |
 | [DOMAIN-MODELS.md](DOMAIN-MODELS.md) | Shapes of the framework-free Kotlin data classes in `domain/model/`. |
@@ -14,6 +14,7 @@ One-line pointers to every doc in this folder. Start here when you're not sure w
 | [SCHEMA-FIRESTORE.md](SCHEMA-FIRESTORE.md) | Firestore collections and Realtime Database paths — the authoritative remote store. |
 | [CLOUD-FUNCTIONS.md](CLOUD-FUNCTIONS.md) | The four Firebase Cloud Functions in `functions/index.js` and their triggers. |
 | [RELEASING.md](RELEASING.md) | One-time keystore setup, GitHub Secrets, and the tag-and-publish flow that drives the in-app updater. |
+| [TESTING.md](TESTING.md) | Per-feature testing requirements, coverage intent, and security-specific testing. The mandatory pre-commit gate is in `CLAUDE.md`. |
 | [GOTCHAS.md](GOTCHAS.md) | Hard-won, host-independent traps promoted from session memory — Compose, coroutines, Room, platform pins. Check before debugging something that smells platform-shaped. |
 | [test-plans/](test-plans/) | Manual / sprint test plans, dated by sprint. |
 | [reviews/](reviews/) | Dated code-quality review reports. |

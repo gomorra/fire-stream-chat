@@ -121,6 +121,8 @@ Reference docs in `docs/`:
 - `SCHEMA-FIRESTORE.md` — Firestore collections and RTDB paths
 - `DOMAIN-MODELS.md` — domain model shapes
 - `CLOUD-FUNCTIONS.md` — Firebase Cloud Functions
+- `TESTING.md` — per-feature testing requirements, coverage intent, security-specific testing
+- `BACKLOG.md` — open, unshipped features and ideas (shipped history is `CHANGELOG.md`)
 
 The full annotated package tree (every subpackage, one-line contents) lives in [`docs/ARCHITECTURE.md` §12 "Package Layout"](docs/ARCHITECTURE.md#12-package-layout).
 
@@ -181,6 +183,7 @@ Four functions in `functions/index.js` (Node.js 20) — push notifications for m
 - **Unit tests are debug-only** — the release unit-test component is disabled outright, because the Robolectric Compose tests need `ui-test-manifest`'s ComponentActivity (wired as `debugImplementation`) and the send-path tests assume the `BuildConfig.DEBUG` plaintext branch. Rationale in `app/build.gradle.kts:248`.
 - Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions. Prefer the fakes in `test/fakes/` for the Message/Chat/User repos.
 - **Don't keep a coverage list here** — it rots. `find app/src/test -name '*Test.kt'` is the source of truth (~96 classes; heaviest in `ui/chat` and `data/repository`).
+- **Per-feature requirements** — what a given feature owes in tests (unit / Compose / integration), coverage intent, and security-specific testing live in [`docs/TESTING.md`](docs/TESTING.md). The non-negotiable gate is Change Safety below.
 - **Architecture rules are executable** — `app/src/test/java/com/firestream/chat/architecture/ArchitectureTest.kt` (Konsist) enforces domain purity, the data⇏ui/navigation direction, the UI→data system-boundary allowlist, and Chat\*Manager isolation across all production source sets. If a rule fails on code you intend to keep, the decision belongs in `TECH_DEBT.md` (new baseline or allowlist entry) — never weaken a rule silently.
 
 ### Change Safety
