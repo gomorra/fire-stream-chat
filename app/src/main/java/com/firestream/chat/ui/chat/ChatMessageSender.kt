@@ -46,40 +46,38 @@ internal class ChatMessageSender(
         val state = _uiState.value
         scope.launch {
             chatRepository.setTyping(chatId, false)
+            // Deliberately no `isSending = true` here: it gates the send button
+            // (ChatScreen), and a text send is local-first — the optimistic
+            // bubble is already on screen. Holding the button disabled until the
+            // backend acked meant the user could not fire off a second message
+            // while the first was still in flight, which is what made sending
+            // feel laggy on a slow connection. Media, poll and timer sends still
+            // set it: there the flag prevents a genuine double-submit.
             _uiState.update {
                 it.copy(
                     composer = it.composer.copy(
-                        isSending = true,
                         replyToMessage = null,
                         mentionCandidates = emptyList()
                     ),
                     messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1)
                 )
             }
+            // Failures surface as the error banner; the bubble itself is already
+            // flipped to FAILED in Room by the repository. Neither branch touches
+            // isSending — it was never set above, and clearing it here would
+            // release the composer out from under a media send running alongside.
             if (state.session.isBroadcast) {
                 messageRepository.sendBroadcastMessage(chatId, content, state.session.broadcastRecipientIds)
                     .onFailure { e ->
-                        _uiState.update {
-                            it.copy(
-                                composer = it.composer.copy(isSending = false),
-                                session = it.session.copy(error = AppError.from(e))
-                            )
-                        }
+                        _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
                     }
-                    .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
             } else {
                 val replyToId = state.composer.replyToMessage?.id
                 val mentions = if (state.session.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
                 messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
                     .onFailure { e ->
-                        _uiState.update {
-                            it.copy(
-                                composer = it.composer.copy(isSending = false),
-                                session = it.session.copy(error = AppError.from(e))
-                            )
-                        }
+                        _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
                     }
-                    .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
             }
         }
     }

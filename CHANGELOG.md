@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.21.1] — 2026-09-07
+
+### Fixed
+
+- **Sending and receiving messages is no longer sluggish, and a new message can't get stuck behind delivery receipts.** Opening a chat with unread messages set off a burst of receipt writes, and every one of those came back to the app as a fresh copy of the *entire* conversation. The app then re-walked that whole conversation from the top on each copy — and, worse, threw away the pass it was in the middle of every time the next copy landed. In a busy moment the newest message sat at the end of a list the app never got to finish reading, so it simply didn't appear; sending another message into the chat was often what finally let the backlog settle, which is why replying seemed to "unstick" it. Now a pass always runs to completion, only messages that actually changed are looked at again, and the receipts go out together instead of one after another. Sending is quicker too: the send button no longer locks up until the network confirms — so a second message can be typed and fired straight away — the block-list lookup that used to sit in front of every send and every incoming batch is now remembered for a few seconds, and the chat-list preview is updated alongside the message instead of adding a second wait before the ✓ appears. That last one also fixes a message that had genuinely been delivered being marked as failed when only the preview update failed.
+
 ## [1.21.0] — 2026-07-27
 
 ### Added

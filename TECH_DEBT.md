@@ -6,18 +6,38 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ## Deferred — valuable but risky to touch without the right test coverage
 
-### `MessageRepositoryImpl.observeMessages` — split `IncomingMessageProcessor`
+### `MessageRepositoryImpl.observeMessages` — extract an `IncomingMessageProcessor`
 
-**The smell.** `MessageRepositoryImpl` is still ~1000 lines after the April 2026 refactor pass, and most of the weight is in `observeMessages()` (see `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt:82`). Its inner `collectLatest` body is ~180 lines and mixes: blocked-sender filtering, reaction updates, self-message shortcut, Signal decryption with `NonCancellable` wrapper, Room upsert, auto-download routing, and shared-list cache sync.
+**The smell.** Most of the weight of the observe path is in `getMessages()` (see `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt`). The September 2026 send/receive-latency pass lifted the per-message body out into `reconcileRawMessage()`, which is a real improvement in readability, but that function is still ~170 lines and still mixes: reaction updates, self-message shortcut, Signal decryption with its `NonCancellable` wrapper, Room upsert, auto-download routing, and shared-list cache sync. The collaborator-owning split — a separate `IncomingMessageProcessor` type — has not happened.
 
-**Why we haven't extracted it.**
-- The `NonCancellable` block (around line 180) protects against a subtle Signal ratchet desync: if `collectLatest` cancels mid-decrypt after the ratchet has advanced but before the Room insert, a re-emitted snapshot will re-attempt decryption against an already-advanced ratchet and produce sporadic "unable to decrypt" errors. Any split has to preserve this non-cancellable atomicity, and unit tests can't fully verify it — it's an interaction between `collectLatest` cancellation, Signal's `SessionCipher` state, and Room persistence.
-- The existing repo tests (`MessageRepositoryBlockTest`, `DeliveryTest`, `LocalUriTest`) cover the send path, not the observe-and-decrypt path.
-- A clean extraction would also pull in the two `dagger.Lazy<ChatRepository>` / `dagger.Lazy<ListRepository>` hacks that exist solely to break a Hilt cycle caused by `observeMessages` calling `listRepository.fetchAndCacheList` as a side effect.
+**Why we haven't extracted it further.**
+- The `NonCancellable` block protects against a subtle Signal ratchet desync: if the collector is cancelled mid-decrypt after the ratchet has advanced but before the Room insert, a re-emitted snapshot will re-attempt decryption against an already-advanced ratchet and produce sporadic "unable to decrypt" errors. Any split has to preserve this non-cancellable atomicity, and unit tests can't fully verify it — it's an interaction between cancellation, Signal's `SessionCipher` state, and Room persistence. (The snapshot collector no longer uses `collectLatest`, so a *newer snapshot* is no longer a cancellation source; leaving the chat still is.)
+- The repo tests around this path (`MessageRepositorySnapshotTest`) cover the reconcile *loop* — pass completion, unchanged-skip, block-list caching — not the decrypt-and-upsert body.
+- A clean extraction would also pull in the two `dagger.Lazy<ChatRepository>` / `dagger.Lazy<ListRepository>` hacks that exist solely to break a Hilt cycle caused by the reconcile body calling `listRepository.fetchAndCacheList` as a side effect.
 
 **When to revisit.** The next time someone is actively debugging E2E decryption on a real device with encryption re-enabled (recall `BuildConfig.DEBUG` disables Signal in debug builds), or when we gain integration tests that exercise the full snapshot → decrypt → Room pipeline. Don't take this on as a standalone "cleanup" task.
 
 **Related:** finding #2 from the April 2026 audit at `/root/.claude/plans/graceful-mixing-plum.md`.
+
+---
+
+### Message listener has no upper bound — snapshots always carry the whole chat
+
+**The smell.** `MessageSource.observeMessages(chatId)` subscribes to `chats/{id}/messages` with no `limit`, and emits the entire collection on every change. The September 2026 latency pass made the *reconcile* side cheap (unchanged rows are skipped, so per-snapshot work is now proportional to what actually changed), but the snapshot object itself, the `mapToRaw` pass over it inside `FirestoreMessageSource`, and the Room→domain mapping of the whole chat on each emission all still scale with conversation length. A years-old chat pays that on every receipt write.
+
+**Why we haven't fixed it.** Bounding the listener means paging: a windowed listener over the newest N, a separate "load older" fetch, and a UI that can ask for more. That touches `MessageSource` (both flavors), the repository's reconcile loop, the Room query, and `ChatMessageLoader`/`ChatScreen` scroll handling — a feature, not a tweak, and it changes what "the message list" means for search, reply-jump, and the pinned-message bar, all of which currently assume the whole chat is in Room.
+
+**When to revisit.** When a chat long enough to feel it exists on a real device — the honest trigger is a profiler trace or a user report of scroll jank in a specific long conversation, not a line count. Do it as a planned paging feature with its own step plan.
+
+---
+
+### Sends still await two backend round trips before the tick
+
+**The smell.** `sendMessage` awaits `add()` (server ack) before flipping the optimistic Room row from `SENDING` to `SENT`, and the first send into a chat additionally awaits a block-state read. Firestore latency-compensates the write locally, so the message is effectively queued the moment it is written — but the app deliberately waits for the ack, because `SENT` is a claim about the backend and because the `FAILED` path (and its retry affordance) has nothing else to hang off.
+
+**Why we haven't fixed it.** Trusting the local write would mean the app owns the durability story: a real outbox with retry, a distinct "queued" state in the UI, and reconciliation on restart. That is the already-logged "Durable offline-send outbox" work below, not something to bolt onto the current send path.
+
+**When to revisit.** Together with the durable offline-send outbox — the two are the same piece of work.
 
 ---
 
@@ -87,11 +107,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ### Offline send silently dropped on a block-check cache miss
 
-**The smell.** Every 1:1 send method in `MessageRepositoryImpl` runs a pre-flight `userSource.isUserBlocked(senderId, recipientId)` *before* it inserts the optimistic row — `sendMessage` (text) at `MessageRepositoryImpl.kt:445` → insert at 463, `sendMediaMessage` at 511 → 538, `sendVoiceMessage` at 935 → 953, `sendLocationMessage` at 1222 → 1240, `sendTimerMessage` at 1269 → 1291. `isUserBlocked` is a plain Firestore `.get().await()` (`FirestoreUserSource.kt:71`). Offline, Firestore's `get()` serves from cache only when the document is *already cached*; for a `users/{me}/blockedUsers/{recipient}` doc that doesn't exist (recipient not blocked → never fetched), the offline `get()` **throws** `FirebaseFirestoreException: Failed to get document because the client is offline`. That throw lands *before* `messageDao.insertMessage(...)`, so `resultOf` returns failure, `ChatMessageSender` surfaces an `AppError` snackbar, and **no optimistic row is ever written** — no bubble, no `FAILED` state, no retry button, and nothing for orphan-recovery to find. The composed message (and, for media, the picked image) is silently lost; the user must re-pick and resend.
+**The smell.** Every 1:1 send method in `MessageRepositoryImpl` runs a pre-flight block check *before* it inserts the optimistic row — `sendMessage` (text) at `MessageRepositoryImpl.kt:445` → insert at 463, `sendMediaMessage` at 511 → 538, `sendVoiceMessage` at 935 → 953, `sendLocationMessage` at 1222 → 1240, `sendTimerMessage` at 1269 → 1291. `isUserBlocked` is a plain Firestore `.get().await()` (`FirestoreUserSource.kt:71`). Offline, Firestore's `get()` serves from cache only when the document is *already cached*; for a `users/{me}/blockedUsers/{recipient}` doc that doesn't exist (recipient not blocked → never fetched), the offline `get()` **throws** `FirebaseFirestoreException: Failed to get document because the client is offline`. That throw lands *before* `messageDao.insertMessage(...)`, so `resultOf` returns failure, `ChatMessageSender` surfaces an `AppError` snackbar, and **no optimistic row is ever written** — no bubble, no `FAILED` state, no retry button, and nothing for orphan-recovery to find. The composed message (and, for media, the picked image) is silently lost; the user must re-pick and resend.
 
 **Verified 2026-06-10** on the emulator: sent an image to a 1:1 chat fully offline → snackbar *"Failed to get the document because the client is offline"*, and a direct Room query (`SELECT … FROM messages WHERE status IN ('SENDING','FAILED')`) returned **zero new rows** — the insert never ran. Reproduced via an image because that's the most visible loss, but the throwing check is identical across all five 1:1 send types; whether it fires depends only on whether the block-status doc is in Firestore's cache. (An offline *text* send earlier in the same session queued fine — its block-doc happened to be cached then. So this is a cache-state-dependent drop, not image-specific.)
 
 **The asymmetry that makes it a clear bug.** The *receive*-side block filter already fails open offline: `observeMessages` / `syncAllChatMessages` wrap `getBlockedUserIds(...)` in a catch that logs and returns `emptySet()` (the 2026-06-09 silent-catch refactor, `a0bdb5c`). The *send*-side `isUserBlocked` does not — an offline cache-miss is fatal to the whole send. Making the send side fail open the same way restores symmetry.
+
+**Still open after the September 2026 latency pass.** The send sites now call a private `MessageRepositoryImpl.isBlocked(senderId, recipientId)` that memoises the answer for 30s instead of hitting `userSource.isUserBlocked` on every send — that is where the fix below belongs, and it narrows the window (a cached "not blocked" from while online survives going offline) without closing it: the *first* check for a pair still throws offline and still drops the send.
 
 **Why we haven't fixed it.** Catalogued during the 2026-06-10 verification of `a0bdb5c` rather than fixed inline — the user opted to record it. It's a small, contained change, but it wants a regression test and overlaps with the larger offline-send design above, so it's grouped here rather than chased standalone.
 
