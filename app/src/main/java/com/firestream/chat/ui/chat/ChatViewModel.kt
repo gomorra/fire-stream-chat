@@ -243,6 +243,8 @@ class ChatViewModel @Inject constructor(
     fun onTyping(text: String) = messageSender.onTyping(text)
     fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) = messageSender.sendMessage(content, emojiSizes)
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") = messageSender.sendMediaMessage(uri, mimeType, caption)
+
+    internal fun sendMediaMessages(items: List<PendingMedia>) = messageSender.sendMediaMessages(items)
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
     fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") = messageSender.sendLocationMessage(latitude, longitude, comment)
     fun retrySend(message: Message) = messageSender.retrySend(message)

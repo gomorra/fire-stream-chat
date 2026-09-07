@@ -71,7 +71,8 @@ data class VideoResult(
  */
 @Singleton
 class VideoTranscoder @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val processingLimiter: MediaProcessingLimiter,
 ) {
     companion object {
         /** Reject source videos longer than 3 minutes. */
@@ -141,7 +142,10 @@ class VideoTranscoder @Inject constructor(
      * through. [metadata] comes from [ensureWithinLimits] so the container is parsed exactly once
      * per send. See the class KDoc for the looper/cancellation contract.
      */
-    suspend fun transcode(uri: Uri, targetHeight: Int, metadata: VideoMetadata): VideoResult {
+    suspend fun transcode(uri: Uri, targetHeight: Int, metadata: VideoMetadata): VideoResult =
+        processingLimiter.withPermit { runTranscode(uri, targetHeight, metadata) }
+
+    private suspend fun runTranscode(uri: Uri, targetHeight: Int, metadata: VideoMetadata): VideoResult {
         val (displayWidth, displayHeight) =
             displayDimensions(metadata.width, metadata.height, metadata.rotationDegrees)
         val durationSec = ((metadata.durationMs + 500) / 1000).toInt()

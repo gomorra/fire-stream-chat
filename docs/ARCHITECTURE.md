@@ -446,6 +446,7 @@ com.firestream.chat/
 │   │                            # ChatDictationManager, DictationControlBar, TypingRow,
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
 │   │                            # FullscreenImageViewer, ImagePreviewScreen,
+│   │                            # ZoomableBox, PendingMedia,
 │   │                            # ForwardChatPicker, LocationPickerSheet,
 │   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,

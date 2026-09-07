@@ -38,8 +38,11 @@ class ImagePickerState internal constructor(
  * flow in the app needs: a gallery picker, a camera capture, and a CAMERA
  * permission request that chains into the capture on grant.
  *
- * Replaces the ~25-line launcher scaffolding that was previously duplicated
- * across `ChatScreen`, `ProfileScreen`, and `GroupSettingsScreen`.
+ * Replaces the ~25-line launcher scaffolding that `ProfileScreen` and
+ * `GroupSettingsScreen` used to duplicate. `ChatScreen` deliberately does not
+ * use it: its gallery button multi-selects (`PickMultipleVisualMedia`) and it
+ * also needs a video-capture launcher, neither of which this single-image
+ * helper covers. See the note in `TECH_DEBT.md` before "fixing" that.
  *
  * @param createCameraUri Called each time a camera capture starts to produce
  *   a fresh `content://` URI (typically via [FileProvider]) for the camera

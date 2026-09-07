@@ -159,6 +159,66 @@ class SharePickerViewModelTest {
         assertTrue("onDone should fire for a successful single-chat share", onDoneCalled)
     }
 
+    private fun mediaContent(vararg names: String) = SharedContent.Media(
+        items = names.map { name ->
+            SharedContent.Media.MediaItem(
+                cachedUri = "file:///cache/$name",
+                mimeType = "image/jpeg",
+                fileName = name
+            )
+        }
+    )
+
+    @Test
+    fun `multi-image share sends every item in the order it was picked`() = runTest {
+        every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
+        coEvery { shareContentResolver.resolve(any()) } returns
+            mediaContent("a.jpg", "b.jpg", "c.jpg", "d.jpg")
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.toggleChatSelection(individualChat.id)
+
+        var onDoneCalled = false
+        viewModel.send { _, _ -> onDoneCalled = true }
+        advanceUntilIdle()
+
+        // Order is the contract: the images must land in the chat the way the
+        // user picked them, which the old concurrent send left to chance.
+        assertEquals(
+            listOf("file:///cache/a.jpg", "file:///cache/b.jpg", "file:///cache/c.jpg", "file:///cache/d.jpg"),
+            messageRepository.sentMedia.map { it.uri }
+        )
+        assertTrue("onDone should fire once the whole batch succeeded", onDoneCalled)
+        assertNull(viewModel.uiState.value.error)
+    }
+
+    @Test
+    fun `one failed item does not stop the rest of the batch`() = runTest {
+        every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
+        coEvery { shareContentResolver.resolve(any()) } returns mediaContent("a.jpg", "b.jpg", "c.jpg")
+        // FakeMessageRepository consumes this on the first send only.
+        messageRepository.nextFailure = IOException("first image is unreadable")
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.toggleChatSelection(individualChat.id)
+
+        var onDoneCalled = false
+        viewModel.send { _, _ -> onDoneCalled = true }
+        advanceUntilIdle()
+
+        assertEquals(
+            "the two items behind the failure must still be sent",
+            listOf("file:///cache/b.jpg", "file:///cache/c.jpg"),
+            messageRepository.sentMedia.map { it.uri }
+        )
+        val state = viewModel.uiState.value
+        assertNotNull("the failure must still be surfaced", state.error)
+        assertFalse("isSending should reset after a partial failure", state.isSending)
+        assertFalse("onDone must not fire when part of the batch failed", onDoneCalled)
+    }
+
     @Test
     fun `resolve failure sets Error preview state`() = runTest {
         every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()

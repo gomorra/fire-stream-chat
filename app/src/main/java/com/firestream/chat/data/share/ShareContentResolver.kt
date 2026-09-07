@@ -23,6 +23,9 @@ class ShareContentResolver @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
+    @Volatile
+    private var cacheDir: File? = null
+
     /**
      * Resolve a SEND / SEND_MULTIPLE intent into a [SharedContent].
      *
@@ -59,13 +62,33 @@ class ShareContentResolver @Inject constructor(
     }
 
     private fun resolveMultiple(intent: Intent): SharedContent? {
-        @Suppress("DEPRECATION")
-        val uris = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        val uris = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        }
         if (uris.isNullOrEmpty()) return null
 
         val type = intent.type ?: "*/*"
-        val items = uris.map { uri -> copyToCache(uri, type) }
-        if (items.isEmpty()) return null
+        // Copy each URI independently: one revoked/unreadable item in a
+        // multi-select must not sink the whole share. Sharing 10 photos where
+        // the 4th has gone stale should still offer the other 9 rather than an
+        // error screen. Only a total failure is propagated, so the caller can
+        // still tell "nothing was readable" from "nothing was attached".
+        var firstFailure: Throwable? = null
+        val items = uris.mapNotNull { uri ->
+            runCatching { copyToCache(uri, type) }
+                .onFailure { e ->
+                    Log.w(TAG, "Skipping unreadable shared URI: $uri", e)
+                    if (firstFailure == null) firstFailure = e
+                }
+                .getOrNull()
+        }
+        if (items.isEmpty()) {
+            firstFailure?.let { throw it }
+            return null
+        }
         return SharedContent.Media(items)
     }
 
@@ -77,20 +100,30 @@ class ShareContentResolver @Inject constructor(
     @Throws(IOException::class, SecurityException::class)
     private fun copyToCache(sourceUri: Uri, fallbackMimeType: String): SharedContent.Media.MediaItem {
         val resolver = context.contentResolver
-        val mimeType = resolver.getType(sourceUri) ?: fallbackMimeType
-        val extension = MimeTypeMap.getSingleton()
-            .getExtensionFromMimeType(mimeType) ?: "bin"
-        val fileName = queryFileName(sourceUri) ?: "shared_${UUID.randomUUID()}.$extension"
+        val displayName = queryFileName(sourceUri)
+        val nameExtension = displayName?.substringAfterLast('.', "")
+            ?.takeIf { it.isNotEmpty() }
+            ?.lowercase()
+        // A SEND_MULTIPLE intent's own type is routinely a wildcard ("image/*",
+        // "*/*") because it has to cover every item. That is useless as an
+        // upload mime type and yields no extension, so only fall back to it once
+        // the provider's own type and the file name have both come up empty.
+        val mimeType = resolver.getType(sourceUri)?.takeUnless { it.contains('*') }
+            ?: nameExtension?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+            ?: concreteMimeType(fallbackMimeType)
+        val extension = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            ?: nameExtension
+            ?: "bin"
+        val fileName = displayName ?: "shared_${UUID.randomUUID()}.$extension"
 
-        val cacheDir = File(context.cacheDir, "shared_media").apply { mkdirs() }
-        val destFile = File(cacheDir, "${UUID.randomUUID()}.$extension")
+        val destFile = File(sharedMediaCacheDir(), "${UUID.randomUUID()}.$extension")
 
         val input = resolver.openInputStream(sourceUri)
             ?: throw IOException("Couldn't open shared URI: $sourceUri")
+        // copyTo already reads through its own buffer; wrapping the sink in
+        // another one would memcpy every byte a second time.
         input.use { stream ->
-            destFile.outputStream().buffered().use { output ->
-                stream.copyTo(output)
-            }
+            destFile.outputStream().use { output -> stream.copyTo(output) }
         }
 
         return SharedContent.Media.MediaItem(
@@ -99,6 +132,26 @@ class ShareContentResolver @Inject constructor(
             fileName = fileName
         )
     }
+
+    /**
+     * Last resort when neither the provider nor the file name yielded a type.
+     * A wildcard must never reach a [SharedContent.Media.MediaItem]: it is used
+     * verbatim as the upload's Content-Type and to classify the message, and a
+     * wildcard is not a valid value for either. Collapse it to the most likely
+     * concrete type for its family instead.
+     */
+    private fun concreteMimeType(mimeType: String): String = when {
+        !mimeType.contains('*') -> mimeType
+        mimeType.startsWith("image/") -> "image/jpeg"
+        mimeType.startsWith("video/") -> "video/mp4"
+        mimeType.startsWith("audio/") -> "audio/mpeg"
+        mimeType.startsWith("text/") -> "text/plain"
+        else -> "application/octet-stream"
+    }
+
+    /** Created once per process rather than per shared item. */
+    private fun sharedMediaCacheDir(): File =
+        cacheDir ?: File(context.cacheDir, "shared_media").apply { mkdirs() }.also { cacheDir = it }
 
     private fun queryFileName(uri: Uri): String? {
         return try {

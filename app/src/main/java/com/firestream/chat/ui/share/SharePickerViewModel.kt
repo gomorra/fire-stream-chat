@@ -9,7 +9,6 @@ import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
-import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
@@ -231,19 +230,24 @@ class SharePickerViewModel @Inject constructor(
             is SharedContent.Text -> {
                 messageRepository.sendMessage(chatId, content.text, recipientId).getOrThrow()
             }
-            is SharedContent.Media -> coroutineScope {
-                val results: List<Result<Message>> = content.items.map { item ->
-                    async {
-                        messageRepository.sendMediaMessage(
-                            chatId,
-                            item.cachedUri,
-                            item.mimeType,
-                            recipientId
-                        )
-                    }
-                }.awaitAll()
-                val firstFailure = results.firstOrNull { it.isFailure }
-                if (firstFailure != null) throw firstFailure.exceptionOrNull()!!
+            is SharedContent.Media -> {
+                // Sequential so the images land in the chat in the order the user
+                // picked them. Memory is not this loop's problem: MediaProcessingLimiter
+                // caps concurrent decode/compress process-wide.
+                //
+                // A failed item does not abort the ones behind it — the first error is
+                // held back and thrown once the batch is done, so one unsendable photo
+                // still lets the rest through.
+                var firstFailure: Throwable? = null
+                content.items.forEach { item ->
+                    messageRepository.sendMediaMessage(
+                        chatId,
+                        item.cachedUri,
+                        item.mimeType,
+                        recipientId
+                    ).onFailure { e -> if (firstFailure == null) firstFailure = e }
+                }
+                firstFailure?.let { throw it }
             }
         }
     }

@@ -22,14 +22,23 @@ data class ImageResult(
 
 @Singleton
 class ImageCompressor @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val processingLimiter: MediaProcessingLimiter,
 ) {
     companion object {
         private const val MAX_DIMENSION = 1600
         private const val JPEG_QUALITY = 80
     }
 
-    suspend fun processImage(uri: Uri, fullQuality: Boolean): ImageResult = withContext(Dispatchers.IO) {
+    /**
+     * Decodes, rotates and re-encodes [uri]. Holds a full bitmap while it runs, so
+     * it takes a [MediaProcessingLimiter] permit for the duration — that is the
+     * only thing standing between a large multi-image batch and an OOM.
+     */
+    suspend fun processImage(uri: Uri, fullQuality: Boolean): ImageResult =
+        processingLimiter.withPermit { compressImage(uri, fullQuality) }
+
+    private suspend fun compressImage(uri: Uri, fullQuality: Boolean): ImageResult = withContext(Dispatchers.IO) {
         val inputStream = context.contentResolver.openInputStream(uri)
             ?: throw IllegalArgumentException("Cannot open URI: $uri")
 

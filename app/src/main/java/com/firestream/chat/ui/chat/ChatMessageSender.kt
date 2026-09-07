@@ -82,19 +82,37 @@ internal class ChatMessageSender(
         }
     }
 
-    fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") {
+    fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") =
+        sendMediaMessages(listOf(PendingMedia(uri, mimeType, caption)))
+
+    /**
+     * Send a picked batch, in the order the user arranged it.
+     *
+     * Sequential so the images land in the order they were picked; memory is
+     * bounded process-wide by MediaProcessingLimiter, not here. One failure does
+     * not stop the rest — the first error is reported once the batch is done.
+     */
+    fun sendMediaMessages(items: List<PendingMedia>) {
+        if (items.isEmpty()) return
         scope.launch {
             _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
-            messageRepository.sendMediaMessage(chatId, uri.toString(), mimeType, recipientId, caption)
-                .onFailure { e ->
-                    _uiState.update {
-                        it.copy(
-                            composer = it.composer.copy(isSending = false),
-                            session = it.session.copy(error = AppError.from(e))
-                        )
-                    }
-                }
-                .onSuccess { _uiState.update { it.copy(composer = it.composer.copy(isSending = false)) } }
+            var firstError: AppError? = null
+            items.forEach { item ->
+                messageRepository.sendMediaMessage(
+                    chatId,
+                    item.uri.toString(),
+                    item.mimeType,
+                    recipientId,
+                    item.caption
+                ).onFailure { e -> if (firstError == null) firstError = AppError.from(e) }
+            }
+            val error = firstError
+            _uiState.update {
+                it.copy(
+                    composer = it.composer.copy(isSending = false),
+                    session = if (error != null) it.session.copy(error = error) else it.session
+                )
+            }
         }
     }
 

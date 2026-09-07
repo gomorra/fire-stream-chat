@@ -114,13 +114,13 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import coil.compose.AsyncImage
-import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import androidx.compose.ui.graphics.Color
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
@@ -1314,12 +1314,7 @@ private fun rememberMessageVideoThumbModel(message: Message): Any? {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
     return when {
-        localFile != null -> remember(localFile) {
-            ImageRequest.Builder(context)
-                .data(localFile)
-                .decoderFactory(VideoFrameDecoder.Factory())
-                .build()
-        }
+        localFile != null -> rememberVideoFrameRequest(localFile)
         message.mediaThumbnailUrl != null -> message.mediaThumbnailUrl
         else -> null
     }

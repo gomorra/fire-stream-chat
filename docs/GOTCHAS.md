@@ -14,6 +14,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Compose / UI
 
+- **Kotlin block comments nest — never write a literal `/` + `*` inside a KDoc.**
+  A wildcard mime type spelled out in a KDoc (`image` + slash + star) opens a
+  *nested* comment that is never closed, and the file fails to compile with a
+  confusing "Missing '}'" pointing dozens of lines away plus "Unclosed comment"
+  at EOF. Line comments (`//`) are unaffected. Bit us writing the share-sheet
+  mime-normalisation KDoc; say "a wildcard" in prose instead.
+
 - **Composable param-count ceiling (~15).** ART rejects composables with too many
   explicit params with a `VerifyError` **on first render**, not at compile time.
   Collapse callbacks into an `@Immutable *Callbacks` data class (see

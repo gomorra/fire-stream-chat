@@ -30,11 +30,23 @@ internal class FakeMessageRepository : MessageRepository {
     var lastSentRecipientId: String? = null
     var lastSentMimeType: String? = null
 
+    /** Every media send, in call order — lets a test assert batch order and completeness. */
+    data class SentMedia(
+        val chatId: String,
+        val uri: String,
+        val mimeType: String,
+        val recipientId: String,
+        val caption: String,
+    )
+
+    val sentMedia: MutableList<SentMedia> = mutableListOf()
+
     fun emit(chatId: String, messages: List<Message>) {
         messagesByChat.value = messagesByChat.value + (chatId to messages)
     }
 
     fun reset() {
+        sentMedia.clear()
         messagesByChat.value = emptyMap()
         starred.value = emptySet()
         _uploadProgress.value = emptyMap()
@@ -159,6 +171,8 @@ internal class FakeMessageRepository : MessageRepository {
         val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, content = caption)
         lastSentMessage = msg
         lastSentMimeType = mimeType
+        lastSentRecipientId = recipientId
+        sentMedia += SentMedia(chatId, uri, mimeType, recipientId, caption)
         return Result.success(msg)
     }
 

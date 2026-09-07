@@ -471,7 +471,7 @@ private fun MultiMediaPreview(items: List<SharedContent.Media.MediaItem>) {
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             contentPadding = PaddingValues(horizontal = 16.dp)
         ) {
-            items(items.take(8), key = { it.cachedUri }) { item ->
+            items(items, key = { it.cachedUri }) { item ->
                 AsyncImage(
                     model = item.cachedUri,
                     contentDescription = item.fileName,

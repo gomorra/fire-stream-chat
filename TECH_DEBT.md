@@ -163,6 +163,36 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Mime-type normalisation lives at one producer, not at the consumer
+
+**The smell.** `ShareContentResolver.concreteMimeType` collapses a wildcard mime (`image` + slash + star) to a concrete one, because a wildcard is invalid both as an upload Content-Type and as the input to `MessageRepositoryImpl.sendMediaMessage`'s `isImage`/`isVideo` classification. But that invariant belongs to the *consumer*, and the share resolver is only one of three producers: `ChatScreen`'s gallery launcher (`getType(uri) ?: "image/jpeg"`) and its document launcher (`?: "application/octet-stream"`) each roll their own fallback with no wildcard check. `MediaFileManager` additionally holds a third, private extension→mime table (`mimeFromExtension` / `normalizeExtension`).
+
+**Why we haven't fixed it.** The deep fix is to hoist one mime helper into `data/util` and normalise once at the top of `sendMediaMessage`. That changes the classification input for *every* send path — including which branch runs `VideoTranscoder.ensureWithinLimits` — so it is a data-layer behaviour change riding along in what was a UI-shaped multi-image change, with no test covering the document/wildcard combinations today.
+
+**When to revisit.** Next time `sendMediaMessage`'s type handling is touched for its own sake, or the first time a wildcard mime is observed reaching an upload. Do it with tests for all three producers at once.
+
+---
+
+### `ImagePreviewScreen` re-implements `FullscreenImagePager`'s pager↔zoom contract
+
+**The smell.** The `ZoomableBox` extraction (2026-09) factored out the gesture math shared by the fullscreen viewer and the pre-send preview, but stopped one level short: `rememberPagerState` + `currentPageZoomed` + `userScrollEnabled = !zoomed` + the `isActive = page == currentPage` guard + the empty-list→dismiss effect are still written out in both `FullscreenImageViewer.FullscreenImagePager` and `ImagePreviewScreen`. A `ZoomablePager(pageCount, onEmpty, content)` would own the whole contract.
+
+**Why we haven't fixed it.** The fullscreen viewer's zoom/paging interaction has been fixed three separate times and has no UI-test coverage of the gesture split; folding it into a new shared composable in the same change that introduced the second caller doubles the blast radius. The duplicated part is ~8 lines and is now at least documented in one place.
+
+**When to revisit.** When a third zoomable pager appears, or when the fullscreen viewer gains Compose UI tests for the zoom/page gesture split.
+
+---
+
+### `ChatScreen` does not use `rememberImagePicker`
+
+**The smell.** `ui/components/ImagePicker.kt` exists to own activity-result launcher scaffolding, and `ProfileScreen` / `GroupSettingsScreen` use it. `ChatScreen` never adopted it and has now diverged further: it needs `PickMultipleVisualMedia` (multi-select, capped by `MAX_GALLERY_PICK`), a video-capture launcher, and per-URI mime sniffing, none of which the single-image helper offers.
+
+**Why we haven't fixed it.** Generalising `rememberImagePicker` to cover multi-select plus video capture would widen its API for two callers that only want the simple form, and `ChatScreen`'s launcher block is entangled with `pendingMedia`, camera URI creation, and permission chaining. The helper's KDoc has been corrected so it no longer claims `ChatScreen` as a user.
+
+**When to revisit.** If a second screen needs multi-select media picking — then extract a `rememberMultiImagePicker` rather than overloading the existing one.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

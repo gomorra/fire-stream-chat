@@ -14,6 +14,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateIntAsState
@@ -176,6 +177,13 @@ import java.util.Locale
 
 // Max emoji size multiplier shown in the input field — keeps tall emoji from overflowing maxLines.
 private const val INPUT_EMOJI_SIZE_CAP = 2.0f
+
+/**
+ * Cap on a single gallery pick. Every picked item is decoded, compressed and
+ * uploaded, so this bounds the work one tap can queue up; the system photo
+ * picker enforces it in its own UI.
+ */
+private const val MAX_GALLERY_PICK = 10
 
 private val searchResultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
@@ -713,27 +721,32 @@ fun ChatScreen(
 
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var cameraVideoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    var pendingMediaUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    var pendingMediaMimeType by rememberSaveable { mutableStateOf("image/jpeg") }
+    // The batch queued in ImagePreviewScreen. A gallery multi-pick, a camera
+    // capture and a video capture all funnel into this one list, so the preview
+    // screen never has to care which one produced it.
+    var pendingMedia by rememberSaveable(stateSaver = PendingMedia.ListSaver) {
+        mutableStateOf(emptyList<PendingMedia>())
+    }
 
-    val galleryLauncher = rememberLauncherForActivityResult(PickVisualMedia()) { uri ->
-        if (uri != null) {
-            pendingMediaMimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-            pendingMediaUri = uri
+    val galleryLauncher = rememberLauncherForActivityResult(
+        PickMultipleVisualMedia(MAX_GALLERY_PICK)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            pendingMedia = uris.map { uri ->
+                PendingMedia(uri, context.contentResolver.getType(uri) ?: "image/jpeg")
+            }
         }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { success ->
         if (success) cameraUri?.let {
-            pendingMediaMimeType = "image/jpeg"
-            pendingMediaUri = it
+            pendingMedia = listOf(PendingMedia(it, "image/jpeg"))
         }
     }
 
     val cameraVideoLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CaptureVideo()) { success ->
         if (success) cameraVideoUri?.let {
-            pendingMediaMimeType = "video/mp4"
-            pendingMediaUri = it
+            pendingMedia = listOf(PendingMedia(it, "video/mp4"))
         }
     }
 
@@ -2171,22 +2184,21 @@ fun ChatScreen(
         }
     }
 
-    BackHandler(enabled = pendingMediaUri != null) {
-        pendingMediaUri = null
+    BackHandler(enabled = pendingMedia.isNotEmpty()) {
+        pendingMedia = emptyList()
     }
 
-    AnimatedVisibility(visible = pendingMediaUri != null, enter = fadeIn(), exit = fadeOut()) {
-        pendingMediaUri?.let { uri ->
+    AnimatedVisibility(visible = pendingMedia.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
+        if (pendingMedia.isNotEmpty()) {
             ImagePreviewScreen(
-                imageUri = uri,
-                mimeType = pendingMediaMimeType,
+                items = pendingMedia,
                 recentEmojis = uiState.overlays.recentEmojis,
                 onEmojiUsed = viewModel::addRecentEmoji,
-                onSend = { caption ->
-                    viewModel.sendMediaMessage(uri, pendingMediaMimeType, caption)
-                    pendingMediaUri = null
+                onSend = { edited ->
+                    viewModel.sendMediaMessages(edited)
+                    pendingMedia = emptyList()
                 },
-                onDismiss = { pendingMediaUri = null }
+                onDismiss = { pendingMedia = emptyList() }
             )
         }
     }
