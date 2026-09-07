@@ -39,8 +39,13 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 > or attempt proxy workarounds — it burns tokens for nothing. Instead: skip the
 > test+build gate, review the diff statically with extra care, and state clearly in
 > the final report that the change is build-unverified and needs a local
-> `./gradlew test assembleDebug`. (Status 2026-07-18 — remove this note once the
-> egress policy allows `dl.google.com`.)
+> `./gradlew test assembleDebug`.
+>
+> **Cloud sessions: re-check this once, cheaply.** Run a single `./gradlew tasks`. If it
+> resolves AGP, the policy has changed — delete this whole note and say so in your final
+> report. If it dies at plugin resolution, the note still holds; do not probe further.
+> (Local sessions cannot verify this — `dl.google.com` always resolves here. Last
+> confirmed broken 2026-07-18.)
 
 - JVM target: 17
 - `minSdk = 29`, `targetSdk = 35`, `compileSdk = 35`
@@ -141,6 +146,7 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 - **DataStore writes need `@ApplicationScope`** — preference writes that must outlive `onCleared()` use `appScope`, not `viewModelScope`. → [PATTERNS.md#datastore-writes-need-applicationscope](docs/PATTERNS.md#datastore-writes-need-applicationscope)
 - **Room version bump rule** — any column/table change bumps `@Database(version = …)` in `AppDatabase.kt` / `SignalDatabase.kt`. → [PATTERNS.md#room-version-bump-rule](docs/PATTERNS.md#room-version-bump-rule)
 - **`reverseLayout` for chat lists** — chat-style `LazyColumn`s use `reverseLayout = true` + `messages.asReversed()`; never reintroduce IME-coupling via `snapshotFlow{ime}`. → [PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling](docs/PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling)
+- **Compose UI tests run under Robolectric** — Compose UI tests live in the *unit* source set (`app/src/test/`), not `androidTest/`. → [PATTERNS.md#compose-ui-tests-run-under-robolectric](docs/PATTERNS.md#compose-ui-tests-run-under-robolectric)
 
 ### Discovery & maintenance
 
@@ -169,10 +175,12 @@ Four functions in `functions/index.js` (Node.js 20) — push notifications for m
 
 ## Testing
 
-- **Unit tests**: `app/src/test/` — JUnit 4 + MockK + `kotlinx-coroutines-test`
-- **UI tests**: Espresso + Compose UI Test (no instrumentation tests written yet)
-- Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions.
-- Existing test coverage: use case tests (Archive, Mute, Pin, Search, Star, Group, Broadcast, Call log), ViewModel tests (ChatList, Settings, GroupSettings, CreateBroadcast, Calls), repository tests (Presence, Delivery/receipts).
+- **Everything lives in `app/src/test/`** — JUnit 4 + MockK + `kotlinx-coroutines-test`, all running on the JVM under `./gradlew test`. There is no `app/src/androidTest/` source set.
+- **Compose UI tests run under Robolectric**, in that same unit source set — not as instrumentation tests. `@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`; see `ui/chatlist/ChatListItemUiTest.kt` for the canonical shape. → [PATTERNS.md#compose-ui-tests-run-under-robolectric](docs/PATTERNS.md#compose-ui-tests-run-under-robolectric)
+- **Instrumentation tests: none written.** The `androidTestImplementation` espresso / `compose-ui-test-junit4` deps and a `testInstrumentationRunner` are declared (`app/build.gradle.kts:495`) but unused. Prefer a Robolectric test in `app/src/test/`; a real `androidTest` needs a device and is **not** in the CI gate.
+- **Unit tests are debug-only** — the release unit-test component is disabled outright, because the Robolectric Compose tests need `ui-test-manifest`'s ComponentActivity (wired as `debugImplementation`) and the send-path tests assume the `BuildConfig.DEBUG` plaintext branch. Rationale in `app/build.gradle.kts:248`.
+- Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions. Prefer the fakes in `test/fakes/` for the Message/Chat/User repos.
+- **Don't keep a coverage list here** — it rots. `find app/src/test -name '*Test.kt'` is the source of truth (~96 classes; heaviest in `ui/chat` and `data/repository`).
 - **Architecture rules are executable** — `app/src/test/java/com/firestream/chat/architecture/ArchitectureTest.kt` (Konsist) enforces domain purity, the data⇏ui/navigation direction, the UI→data system-boundary allowlist, and Chat\*Manager isolation across all production source sets. If a rule fails on code you intend to keep, the decision belongs in `TECH_DEBT.md` (new baseline or allowlist entry) — never weaken a rule silently.
 
 ### Change Safety

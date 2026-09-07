@@ -299,11 +299,15 @@ Each feature implementation must include:
    - Crypto tests: encryption round-trip (encrypt → decrypt = original plaintext)
    - Test files live alongside source in `app/src/test/`
 
-2. **UI / Instrumentation tests (Compose UI Test + Espresso)**
+2. **Compose UI tests (Robolectric + `createComposeRule`)**
    - Every new screen: renders correctly, handles empty/loading/error states
    - User interaction flows: tap, swipe, long-press trigger expected behavior
    - Navigation: correct route transitions with expected arguments
-   - Test files in `app/src/androidTest/`
+   - Test files live in `app/src/test/` alongside the unit tests and run under
+     `./gradlew test` — **not** in `app/src/androidTest/`, which does not exist.
+     See [PATTERNS.md#compose-ui-tests-run-under-robolectric](PATTERNS.md#compose-ui-tests-run-under-robolectric).
+     Reserve a future `androidTest` source set for genuinely device-dependent
+     behaviour (real IME insets, `MediaStore` permissions, cross-app intents).
 
 3. **Integration tests**
    - Firestore security rules tested for each new collection/document pattern
@@ -313,7 +317,7 @@ Each feature implementation must include:
 ### Continuous Feedback Loop
 
 - Run `./gradlew test` after every implementation step — never batch test runs
-- Run `./gradlew connectedAndroidTest` for UI tests on emulator/device
+- UI tests need no device — they are Robolectric tests inside `./gradlew test`. `connectedAndroidTest` is only relevant if a device-dependent `androidTest` source set is ever added.
 - Full build verification: `./gradlew assembleDebug` must pass with zero warnings treated as errors
 - If a test fails, fix it before moving to the next feature — never skip ahead
 

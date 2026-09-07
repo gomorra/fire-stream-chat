@@ -112,6 +112,22 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ---
 
+## Compose UI tests run under Robolectric
+
+**Definition.** Compose UI tests live in the *unit* source set (`app/src/test/`) and run on the JVM via `@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`. They execute as part of `./gradlew test`. This project has **no** `app/src/androidTest/` source set.
+
+**Use when.** Asserting on rendered Compose output — a composable renders without throwing for every variant of its input, a click emits the right callback, conditional UI appears or hides. This is the default for UI coverage here.
+**Don't use when.** The behaviour genuinely requires a device: real IME insets, `MediaStore` permission prompts, cross-app intents. Those need a new `androidTest` source set, which is not in the CI gate — prefer restructuring the test over starting one.
+
+**Example.** `app/src/test/java/com/firestream/chat/ui/chatlist/ChatListItemUiTest.kt:31` — the canonical shape; its own KDoc names it "the Robolectric + createComposeRule pattern for future UI tests". `ui/chat/MessageBubbleSmokeTest.kt:32` is the render-every-variant smoke form that guards the composable param-count `VerifyError` ceiling.
+
+**Trap.** Three, all non-obvious:
+1. The annotations are load-bearing: `@Config(sdk = [29], application = android.app.Application::class)`. Drop the `application` override and Robolectric boots the Hilt application class — the test then fails in DI, nowhere near the composable you were testing.
+2. The `androidTestImplementation` espresso and `compose-ui-test-junit4` deps *are* declared (`app/build.gradle.kts:495`). They are unused scaffolding; their presence is not evidence that instrumentation testing is the convention here.
+3. Unit tests are debug-only on purpose (`app/build.gradle.kts:248`) — these tests depend on `ui-test-manifest`'s ComponentActivity, which is wired as `debugImplementation`, so a release unit-test variant cannot compile. Don't "fix" that by re-enabling it.
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:
