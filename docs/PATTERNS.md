@@ -128,6 +128,32 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ---
 
+## Flavor-specific eager init via FlavorBootstrap
+
+**Definition.** Per-flavor work that must run in `Application.onCreate` is bound into a Hilt `Set<FlavorBootstrap>` rather than branched on in shared code. `FireStreamApp` iterates `flavorBootstraps.forEach { it.start() }` with no flavor-specific imports; each flavor's DI module adds (or omits) a `@Binds @IntoSet` entry, and `@Multibinds` guarantees the set exists even when a flavor contributes nothing.
+
+**Use when.** Adding eager init that should run for exactly one flavor — a flavor-specific lifecycle observer, WorkManager seeder, or trace listener.
+**Don't use when.** The init is shared by all flavors. That goes directly in `FireStreamApp.onCreate` — routing it through the multibinding buys nothing and hides it.
+
+**Example.** `app/src/main/java/com/firestream/chat/di/FlavorBootstrap.kt:11` is the whole interface (`fun start()`). `di/FlavorBootstrapModule.kt:16` declares `@Multibinds`; `app/src/pocketbase/java/com/firestream/chat/di/PocketBaseModule.kt:86` is the only current contributor, binding `PocketBaseLifecycleHook` — it connects/disconnects the SSE realtime stream on foreground/background, because PocketBase SSE does not auto-pause on backgrounding the way Firestore listeners do. The firebase flavor deliberately contributes nothing, which is why the empty-set case must work.
+
+**Trap.** The temptation is to skip the indirection and write `if (BuildConfig.FLAVOR == "pocketbase")` in `FireStreamApp`. That compiles, but it drags flavor-specific types into `app/src/main/`, where the other flavor cannot resolve them — the shared source set must stay flavor-agnostic.
+
+---
+
+## MediaProcessingLimiter owns the concurrency bound, callers own ordering
+
+**Definition.** Concurrent image decode/compress and video transcode are capped process-wide at 2 by the `@Singleton` `MediaProcessingLimiter`, which `ImageCompressor` and `VideoTranscoder` each wrap their work in. Batch callers are responsible only for *ordering* — sending sequentially so items land in the order the user picked them.
+
+**Use when.** Adding any new path that decodes, compresses, or transcodes media. Inject the existing compressor/transcoder and the bound comes with it.
+**Don't use when.** — there is no exemption. A new entry point does not get its own bound.
+
+**Example.** `app/src/main/java/com/firestream/chat/data/util/MediaProcessingLimiter.kt:25` (the semaphore, with the reasoning for 2 permits in its companion KDoc); `data/util/ImageCompressor.kt:39` and `data/util/VideoTranscoder.kt:146` are the two call sites, both `processingLimiter.withPermit { … }`. Callers: `ui/chat/ChatMessageSender.kt`, `ui/share/SharePickerViewModel.kt`.
+
+**Trap.** Adding a per-batch or per-ViewModel `Semaphore` "to be safe". Multi-select send and the share sheet can both be running, so two locally-bounded batches are jointly unbounded — each operation holds a full decoded bitmap, and it is the number running concurrently, not the number queued, that decides whether a large batch OOMs. The bound only works if it is the one shared singleton.
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:

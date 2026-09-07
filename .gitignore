@@ -49,6 +49,7 @@ firebase.log
 .claude/hooks/*
 !.claude/hooks/session-start.sh
 !.claude/hooks/block-heredoc-commit.sh
+!.claude/hooks/promote-memory.sh
 !.claude/settings.json
 !.claude/plans/
 !.claude/skills/

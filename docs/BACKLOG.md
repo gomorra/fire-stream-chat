@@ -5,10 +5,55 @@ Open, unshipped work only: features, enhancements, and ideas that have **not** l
 - **Shipped history** lives in [`CHANGELOG.md`](../CHANGELOG.md) (what changed, when, why) and the current product surface in [`SPEC.md`](SPEC.md). This file deliberately keeps no "already implemented" list — that parallel list is what rotted its predecessor.
 - **Deferred/declined refactors** with a recorded reason live in [`TECH_DEBT.md`](../TECH_DEBT.md), not here. This file is for work nobody has ruled on yet.
 - **Testing requirements** for anything built from this list are in [`TESTING.md`](TESTING.md).
+- **Shipped but unverified** work — code that landed but whose on-device check never ran —
+  is the one exception to "unshipped only"; it sits in *Pending on-device verification* below.
 
 Items carry their old roadmap number in parentheses (e.g. `3.4`) so external references still resolve. Ordering within a section implies no priority.
 
 **When an item ships, delete it from this file** — ideally as part of cutting the release that shipped it (see the `changelog-release` skill).
+
+---
+
+## Pending on-device verification
+
+Code that has **shipped** but whose behaviour nobody has confirmed on real hardware.
+It is not a feature gap and not tech debt — it is an unfinished check, and it is listed
+here because a cloud agent has no other way to learn that the work is not fully done.
+Delete an item once it has been verified (or once a fix for what the check found ships).
+
+### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
+- Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute
+  auto-silence cancel stops it.
+- Unconfirmed: whether `USE_FULL_SCREEN_INTENT` is still granted on Android 14+ for this
+  sideloaded app.
+- **Test by upgrading over an existing install, never a clean one** — notification-channel
+  sound/vibration is frozen at creation, so channel-freeze bugs are invisible on a fresh
+  install.
+- Not load-bearing by design: both audible styles escalate through the same re-post chain,
+  so `FLAG_INSISTENT` is additive. Don't "simplify" that chain out for INSISTENT.
+
+### Reaction cue follow-ups (`3309b41`, 2026-07-25)
+- The cue itself (`dc1dd24`) is confirmed working on device. `3309b41` is not: list/poll
+  bubble highlighting, the flash starting on scroll arrival rather than at tap, and the
+  animated `scrollToAndCenter`.
+- Note for any new bubble type added outside `MessageBubble`: wire up `isHighlighted` or it
+  silently loses every jump highlight.
+
+### Message reminders / snooze (`dd519e5`…`a3669f5`, 2026-07-19)
+- Device pass never run: cold / warm / background notification taps, reboot restore, and
+  `.remind` both with and without a reply target.
+
+### Baseline profile generation (2026-04-24)
+- The `:baselineprofile` module, generator, and testTags are in place; the actual on-device
+  generation run has never happened. Blocked on a connected device plus a Firebase console
+  test phone number.
+
+### Signal database split — remove the debug-encryption guards (2026-04-26)
+- The split moved Signal tables into `signal.db`, which was the reason the debug guards
+  existed. Both are still in place **by design**, pending verification across a few schema
+  iterations: `!BuildConfig.DEBUG` in `MessageRepositoryImpl.kt` and the
+  `libsignal_jni.so` debug-variant exclusion in `app/build.gradle.kts`.
+- Removing them is the follow-up; until then, debug builds still send plaintext.
 
 ---
 

@@ -148,12 +148,21 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 - **Room version bump rule** — any column/table change bumps `@Database(version = …)` in `AppDatabase.kt` / `SignalDatabase.kt`. → [PATTERNS.md#room-version-bump-rule](docs/PATTERNS.md#room-version-bump-rule)
 - **`reverseLayout` for chat lists** — chat-style `LazyColumn`s use `reverseLayout = true` + `messages.asReversed()`; never reintroduce IME-coupling via `snapshotFlow{ime}`. → [PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling](docs/PATTERNS.md#reverselayout-for-chat-lists-not-ime-coupling)
 - **Compose UI tests run under Robolectric** — Compose UI tests live in the *unit* source set (`app/src/test/`), not `androidTest/`. → [PATTERNS.md#compose-ui-tests-run-under-robolectric](docs/PATTERNS.md#compose-ui-tests-run-under-robolectric)
+- **`FlavorBootstrap` for flavor-specific eager init** — per-flavor `Application.onCreate` work binds into a Hilt `Set<FlavorBootstrap>`; never branch on `BuildConfig.FLAVOR` in `app/src/main/`. → [PATTERNS.md#flavor-specific-eager-init-via-flavorbootstrap](docs/PATTERNS.md#flavor-specific-eager-init-via-flavorbootstrap)
+- **`MediaProcessingLimiter` owns the concurrency bound** — decode/compress/transcode is capped process-wide at 2; batch callers own *ordering* only, never their own semaphore. → [PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering](docs/PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering)
 
 ### Discovery & maintenance
 
 - **Cross-cutting work** — for any feature spanning 4+ packages, [`docs/FEATURE-MAP.md`](docs/FEATURE-MAP.md) lists every file involved. Check there before grepping.
 - **Maintaining FEATURE-MAP** — when you add, move, rename, or delete a file in `app/src/main/java/`, check whether it appears in `docs/FEATURE-MAP.md` and update if so. Refresh the `last-verified` HTML comment quarterly.
 - **Gotchas** — hard-won, host-independent traps (Compose VerifyError ceiling, MockK relaxed-nullable, Media3 pins/looper contract, …) are catalogued in [`docs/GOTCHAS.md`](docs/GOTCHAS.md). Check it before debugging something that smells platform-shaped; add entries there (not to local session memory) when the lesson is machine-independent — cloud sessions only see what's in git.
+- **Local memory vs. tracked docs** — the Claude Code auto-memory store (`~/.claude/projects/<slug>/memory/`) is invisible to cloud sessions and to every other machine, and this repo is public, so it is never synced into git. Route each fact instead, at the moment you write it:
+  - host-independent trap → [`docs/GOTCHAS.md`](docs/GOTCHAS.md)
+  - named, reusable convention → [`docs/PATTERNS.md`](docs/PATTERNS.md) + a one-line pointer in Key Conventions above
+  - shipped but not yet checked on hardware → [`docs/BACKLOG.md`](docs/BACKLOG.md) § *Pending on-device verification*
+  - host-specific (JDK path, emulator flag, device serial, keystore location) → local memory **only** — committing it would mislead a cloud sandbox.
+
+  The `.claude/hooks/promote-memory.sh` PostToolUse hook raises this question automatically on any write into the store; it is a reminder, not a gate.
 - **Plans** — in-flight plans live in `.claude/plans/`; shipped plans archive to `.claude/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
 - **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
 
