@@ -3,6 +3,7 @@ package com.firestream.chat.domain.usecase.message
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
+import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import io.mockk.coEvery
@@ -47,23 +48,23 @@ class SearchMessagesUseCaseTest {
     @Test
     fun `returns empty list for blank query`() = runTest {
         val result = useCase("")
-        assertTrue(result.isEmpty())
+        assertTrue(result.messages.isEmpty())
     }
 
     @Test
     fun `returns empty list for whitespace-only query`() = runTest {
         val result = useCase("   ")
-        assertTrue(result.isEmpty())
+        assertTrue(result.messages.isEmpty())
     }
 
     @Test
     fun `performs global search when no chatId provided`() = runTest {
-        coEvery { messageRepository.searchMessages("hello") } returns listOf(sampleMessage)
+        coEvery { messageRepository.searchMessages("hello") } returns MessageSearchResults(listOf(sampleMessage))
 
         val result = useCase("hello")
 
-        assertEquals(1, result.size)
-        assertEquals(sampleMessage, result.first())
+        assertEquals(1, result.messages.size)
+        assertEquals(sampleMessage, result.messages.first())
         coVerify(exactly = 1) { messageRepository.searchMessages("hello") }
     }
 
@@ -71,11 +72,11 @@ class SearchMessagesUseCaseTest {
     fun `performs in-chat search when chatId provided`() = runTest {
         coEvery {
             messageRepository.searchMessagesInChat("c1", "world", MessageSearchFilter.NONE)
-        } returns listOf(sampleMessage)
+        } returns MessageSearchResults(listOf(sampleMessage))
 
         val result = useCase("world", chatId = "c1")
 
-        assertEquals(1, result.size)
+        assertEquals(1, result.messages.size)
         coVerify(exactly = 1) {
             messageRepository.searchMessagesInChat("c1", "world", MessageSearchFilter.NONE)
         }
@@ -83,11 +84,11 @@ class SearchMessagesUseCaseTest {
 
     @Test
     fun `returns empty list when no results found`() = runTest {
-        coEvery { messageRepository.searchMessages("notfound") } returns emptyList()
+        coEvery { messageRepository.searchMessages("notfound") } returns MessageSearchResults.EMPTY
 
         val result = useCase("notfound")
 
-        assertTrue(result.isEmpty())
+        assertTrue(result.messages.isEmpty())
     }
 
     // ── Browse mode: blank query + active filter ─────────────────────────────
@@ -95,22 +96,22 @@ class SearchMessagesUseCaseTest {
     @Test
     fun `blank query with an active filter browses instead of returning empty`() = runTest {
         val filter = MessageSearchFilter(type = MessageFilterType.PHOTOS)
-        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns listOf(samplePhoto)
+        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns MessageSearchResults(listOf(samplePhoto))
 
         val result = useCase("", chatId = "c1", filter = filter)
 
-        assertEquals(listOf(samplePhoto), result)
+        assertEquals(listOf(samplePhoto), result.messages)
         coVerify(exactly = 1) { messageRepository.searchMessagesInChat("c1", "", filter) }
     }
 
     @Test
     fun `whitespace-only query with an active filter reaches the repository as empty string`() = runTest {
         val filter = MessageSearchFilter(isStarred = true)
-        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns listOf(sampleMessage)
+        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns MessageSearchResults(listOf(sampleMessage))
 
         val result = useCase("   ", chatId = "c1", filter = filter)
 
-        assertEquals(1, result.size)
+        assertEquals(1, result.messages.size)
         coVerify(exactly = 1) { messageRepository.searchMessagesInChat("c1", "", filter) }
     }
 
@@ -118,18 +119,18 @@ class SearchMessagesUseCaseTest {
     fun `blank query with no active filter still returns empty in-chat`() = runTest {
         val result = useCase("", chatId = "c1", filter = MessageSearchFilter.NONE)
 
-        assertTrue(result.isEmpty())
+        assertTrue(result.messages.isEmpty())
         coVerify(exactly = 0) { messageRepository.searchMessagesInChat(any(), any(), any()) }
     }
 
     @Test
     fun `a date range alone counts as an active filter`() = runTest {
         val filter = MessageSearchFilter(fromMs = 1_000L, toMs = 2_000L)
-        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns listOf(sampleMessage)
+        coEvery { messageRepository.searchMessagesInChat("c1", "", filter) } returns MessageSearchResults(listOf(sampleMessage))
 
         val result = useCase("", chatId = "c1", filter = filter)
 
-        assertEquals(1, result.size)
+        assertEquals(1, result.messages.size)
     }
 
     @Test
@@ -140,7 +141,7 @@ class SearchMessagesUseCaseTest {
             fromMs = 10L,
             toMs = 99L,
         )
-        coEvery { messageRepository.searchMessagesInChat("c1", "report", filter) } returns emptyList()
+        coEvery { messageRepository.searchMessagesInChat("c1", "report", filter) } returns MessageSearchResults.EMPTY
 
         useCase("report", chatId = "c1", filter = filter)
 
@@ -149,11 +150,11 @@ class SearchMessagesUseCaseTest {
 
     @Test
     fun `global search ignores the filter axis`() = runTest {
-        coEvery { messageRepository.searchMessages("hello") } returns listOf(sampleMessage)
+        coEvery { messageRepository.searchMessages("hello") } returns MessageSearchResults(listOf(sampleMessage))
 
         val result = useCase("hello", chatId = null, filter = MessageSearchFilter(isStarred = true))
 
-        assertEquals(1, result.size)
+        assertEquals(1, result.messages.size)
         coVerify(exactly = 1) { messageRepository.searchMessages("hello") }
     }
 
@@ -161,7 +162,7 @@ class SearchMessagesUseCaseTest {
     fun `global browse mode is not supported - blank query returns empty even with a filter`() = runTest {
         val result = useCase("", chatId = null, filter = MessageSearchFilter(type = MessageFilterType.PHOTOS))
 
-        assertTrue(result.isEmpty())
+        assertTrue(result.messages.isEmpty())
         coVerify(exactly = 0) { messageRepository.searchMessages(any()) }
     }
 }

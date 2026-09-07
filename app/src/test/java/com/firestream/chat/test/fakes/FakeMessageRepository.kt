@@ -4,6 +4,7 @@ import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
+import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.MessageRepository
@@ -36,6 +37,9 @@ internal class FakeMessageRepository : MessageRepository {
     /** The filter the last in-chat search was issued with — lets a test assert it reached the repo unchanged. */
     var lastSearchFilter: MessageSearchFilter? = null
 
+    /** Forces the truncation flag on every search result, to exercise the "200+" rendering. */
+    var searchTruncated: Boolean = false
+
     /** Every media send, in call order — lets a test assert batch order and completeness. */
     data class SentMedia(
         val chatId: String,
@@ -65,6 +69,7 @@ internal class FakeMessageRepository : MessageRepository {
         lastSentRecipientId = null
         lastSentMimeType = null
         lastSearchFilter = null
+        searchTruncated = false
     }
 
     private fun consumeFailure(): Result<Nothing>? =
@@ -228,9 +233,13 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(Unit)
     }
 
-    override suspend fun searchMessages(query: String): List<Message> {
+    override suspend fun searchMessages(query: String): MessageSearchResults {
         throwIfNextFailure()
-        return messagesByChat.value.values.flatten().filter { it.content.contains(query, ignoreCase = true) }
+        return MessageSearchResults(
+            messages = messagesByChat.value.values.flatten()
+                .filter { it.content.contains(query, ignoreCase = true) },
+            truncated = searchTruncated,
+        )
     }
 
     /**
@@ -242,10 +251,10 @@ internal class FakeMessageRepository : MessageRepository {
         chatId: String,
         query: String,
         filter: MessageSearchFilter,
-    ): List<Message> {
+    ): MessageSearchResults {
         throwIfNextFailure()
         lastSearchFilter = filter
-        return messagesByChat.value[chatId].orEmpty()
+        val matches = messagesByChat.value[chatId].orEmpty()
             .filter { it.deletedAt == null }
             .filter { query.isEmpty() || it.content.contains(query, ignoreCase = true) }
             .filter { m -> filter.type?.let { m.matchesFilterType(it) } ?: true }
@@ -253,6 +262,7 @@ internal class FakeMessageRepository : MessageRepository {
             .filter { m -> filter.fromMs?.let { m.timestamp >= it } ?: true }
             .filter { m -> filter.toMs?.let { m.timestamp <= it } ?: true }
             .sortedByDescending { it.timestamp }
+        return MessageSearchResults(messages = matches, truncated = searchTruncated)
     }
 
     private fun Message.matchesFilterType(type: MessageFilterType): Boolean = when (type) {

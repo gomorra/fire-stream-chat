@@ -73,7 +73,8 @@ internal class ChatSearchManager(
                     isSearchActive = newActive,
                     searchQuery = if (newActive) it.overlays.searchQuery else "",
                     searchFilter = if (newActive) it.overlays.searchFilter else MessageSearchFilter.NONE,
-                    searchResults = if (newActive) it.overlays.searchResults else emptyList()
+                    searchResults = if (newActive) it.overlays.searchResults else emptyList(),
+                    searchResultsTruncated = if (newActive) it.overlays.searchResultsTruncated else false
                 )
             )
         }
@@ -88,7 +89,8 @@ internal class ChatSearchManager(
                     isSearchActive = false,
                     searchQuery = "",
                     searchFilter = MessageSearchFilter.NONE,
-                    searchResults = emptyList()
+                    searchResults = emptyList(),
+                    searchResultsTruncated = false,
                 )
             )
         }
@@ -108,20 +110,41 @@ internal class ChatSearchManager(
         // anyway, but short-circuiting keeps the results list from flickering
         // through a round trip on the way back to empty.
         if (query.isBlank() && !filter.isActive) {
-            _uiState.update { it.copy(overlays = it.overlays.copy(searchResults = emptyList())) }
+            _uiState.update {
+                it.copy(
+                    overlays = it.overlays.copy(
+                        searchResults = emptyList(),
+                        searchResultsTruncated = false,
+                    )
+                )
+            }
             return
         }
         searchJob = scope.launch {
             if (debounce) delay(TYPING_DEBOUNCE_MS)
             try {
                 val results = searchMessagesUseCase(query, chatId, filter)
-                _uiState.update { it.copy(overlays = it.overlays.copy(searchResults = results)) }
+                _uiState.update {
+                    it.copy(
+                        overlays = it.overlays.copy(
+                            searchResults = results.messages,
+                            searchResultsTruncated = results.truncated,
+                        )
+                    )
+                }
             } catch (e: CancellationException) {
                 // A superseded job must not clear the results the job that
                 // replaced it is about to write.
                 throw e
             } catch (_: Exception) {
-                _uiState.update { it.copy(overlays = it.overlays.copy(searchResults = emptyList())) }
+                _uiState.update {
+                    it.copy(
+                        overlays = it.overlays.copy(
+                            searchResults = emptyList(),
+                            searchResultsTruncated = false,
+                        )
+                    )
+                }
             }
         }
     }

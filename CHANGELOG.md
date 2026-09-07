@@ -14,7 +14,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
+- **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached — including a photo whose file is gone — also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
+- **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so.
+- **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing.
 
 ## [1.22.0] — 2026-09-07
 

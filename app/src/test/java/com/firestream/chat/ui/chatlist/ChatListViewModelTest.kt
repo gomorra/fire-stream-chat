@@ -6,6 +6,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
@@ -65,7 +66,7 @@ class ChatListViewModelTest {
         userRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
-        coEvery { searchMessagesUseCase(any(), any()) } returns emptyList()
+        coEvery { searchMessagesUseCase(any(), any()) } returns MessageSearchResults.EMPTY
         coEvery { contactRepository.syncContacts() } returns Result.success(emptyList())
         every { contactRepository.getContacts() } returns flowOf(emptyList())
         every { userRepository.observeUser(any()) } returns emptyFlow()

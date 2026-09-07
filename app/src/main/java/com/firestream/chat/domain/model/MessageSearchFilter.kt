@@ -54,5 +54,8 @@ object MessageSearchLimits {
     const val TEXT = 50
     const val BROWSE = 200
 
+    /** Global (cross-chat) search, which has no filter axis and so no browse mode. */
+    const val GLOBAL = 100
+
     fun forQuery(query: String): Int = if (query.isBlank()) BROWSE else TEXT
 }

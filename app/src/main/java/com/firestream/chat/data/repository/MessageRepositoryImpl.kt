@@ -49,6 +49,7 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchLimits
+import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -1165,16 +1166,20 @@ class MessageRepositoryImpl @Inject constructor(
         return messageDao.getStarredMessages().map { entities -> entities.map { it.toDomain() } }
     }
 
-    override suspend fun searchMessages(query: String): List<Message> {
+    override suspend fun searchMessages(query: String): MessageSearchResults {
         return try {
             val regex = wordBoundaryRegex(query)
-            messageDao.searchMessages(query)
-                .filter { regex.containsMatchIn(it.content) }
-                .map { it.toDomain() }
+            val rows = messageDao.searchMessages(query, MessageSearchLimits.GLOBAL)
+            MessageSearchResults(
+                messages = rows.filter { regex.containsMatchIn(it.content) }.map { it.toDomain() },
+                // Read off the raw row count, before the word-boundary filter
+                // thins it — see MessageSearchResults.
+                truncated = rows.size >= MessageSearchLimits.GLOBAL,
+            )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             Log.w(TAG, "searchMessages failed (query length=${query.length})", e)
-            emptyList()
+            MessageSearchResults.EMPTY
         }
     }
 
@@ -1182,12 +1187,13 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         query: String,
         filter: MessageSearchFilter,
-    ): List<Message> {
+    ): MessageSearchResults {
         return try {
             // Browse mode (blank query + an active filter) selects by chip, not
             // by text, so it takes the larger cap — see MessageSearchLimits.
             val browsing = query.isEmpty()
-            val results = messageDao.searchMessagesInChat(
+            val limit = MessageSearchLimits.forQuery(query)
+            val rows = messageDao.searchMessagesInChat(
                 chatId = chatId,
                 query = query,
                 // LINKS is a content property, not a MessageType, so it maps to
@@ -1197,22 +1203,28 @@ class MessageRepositoryImpl @Inject constructor(
                 starredOnly = filter.isStarred,
                 from = filter.fromMs,
                 to = filter.toMs,
-                limit = MessageSearchLimits.forQuery(query),
+                limit = limit,
             )
             // The word-boundary pass narrows LIKE's substring match to whole
             // words. It must not run in browse mode: there is no query to bound,
             // and media rows carry an empty content that no regex would match.
             val filtered = if (browsing) {
-                results
+                rows
             } else {
                 val regex = wordBoundaryRegex(query)
-                results.filter { regex.containsMatchIn(it.content) }
+                rows.filter { regex.containsMatchIn(it.content) }
             }
-            filtered.map { it.toDomain() }
+            MessageSearchResults(
+                messages = filtered.map { it.toDomain() },
+                // Off the raw row count, not `filtered`: the word-boundary pass
+                // runs after SQLite's LIMIT, so a page truncated by the cap can
+                // still come back far shorter than it. See MessageSearchResults.
+                truncated = rows.size >= limit,
+            )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             Log.w(TAG, "searchMessagesInChat failed for chat=$chatId (query length=${query.length})", e)
-            emptyList()
+            MessageSearchResults.EMPTY
         }
     }
 

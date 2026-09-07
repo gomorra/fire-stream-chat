@@ -250,7 +250,7 @@ class ChatListViewModel @Inject constructor(
         }
         searchJob = viewModelScope.launch {
             delay(300)
-            val results = searchMessagesUseCase(query)
+            val results = searchMessagesUseCase(query).messages
             _uiState.value = _uiState.value.copy(searchResults = results)
         }
     }

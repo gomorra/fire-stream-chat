@@ -43,6 +43,10 @@ internal data class OverlaysState(
     // independent input to the same search — not a post-filter over results.
     val searchFilter: MessageSearchFilter = MessageSearchFilter.NONE,
     val searchResults: List<Message> = emptyList(),
+    // Whether the query hit its cap, so the results header can say "200+"
+    // rather than presenting a truncated page as an exact total. Not derivable
+    // from searchResults.size — see MessageSearchResults.
+    val searchResultsTruncated: Boolean = false,
     val isSearchActive: Boolean = false,
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),
     val listDataCache: Map<String, ListData?> = emptyMap(),

@@ -437,13 +437,20 @@ fun ChatScreen(
 
     // One grid, two destinations: the image pager cannot play video, and the
     // video player cannot swipe through stills.
+    //
+    // A row with neither a local file nor a remote URL still renders a tile (a
+    // broken-image placeholder), so a silent no-op here would be a tile that
+    // does nothing — the same dead tap the text-row path already reports.
     fun openSearchMedia(message: Message) {
         if (message.type == MessageType.VIDEO) {
-            (message.localUri ?: message.mediaUrl)?.let { viewModel.showFullscreenVideo(it) }
+            val source = message.localUri ?: message.mediaUrl
+            if (source == null) viewModel.onSearchResultOpened(reached = false)
+            else viewModel.showFullscreenVideo(source)
             return
         }
         val index = searchGalleryItems.indexOfFirst { it.messageId == message.id }
-        if (index >= 0) searchGalleryIndex = index
+        if (index < 0) viewModel.onSearchResultOpened(reached = false)
+        else searchGalleryIndex = index
     }
 
     // Tapping a non-media result travels to the message in the conversation,
@@ -1116,7 +1123,12 @@ fun ChatScreen(
             if (uiState.overlays.isSearchActive && searchIsSelecting) {
                 if (uiState.overlays.searchResults.isEmpty()) {
                     Box(
+                        // Takes the whole pane rather than sitting as a one-line
+                        // label above the conversation: opening "Shared Media"
+                        // in a chat with no photos would otherwise look like the
+                        // menu item did nothing.
                         modifier = Modifier
+                            .weight(1f)
                             .fillMaxWidth()
                             .padding(16.dp),
                         contentAlignment = Alignment.Center
@@ -1142,11 +1154,11 @@ fun ChatScreen(
                         summary = searchResultsSummary(
                             filter = uiState.overlays.searchFilter,
                             resultCount = uiState.overlays.searchResults.size,
-                            // The query is LIMIT-capped, so a full page means
-                            // "at least this many" and must not be shown as an
-                            // exact count.
-                            atLimit = uiState.overlays.searchResults.size >=
-                                MessageSearchLimits.forQuery(uiState.overlays.searchQuery),
+                            // Reported by the layer that saw the raw row count,
+                            // not inferred from the survivors here: the
+                            // whole-word pass runs after SQLite's LIMIT, so a
+                            // truncated page can come back well short of the cap.
+                            atLimit = uiState.overlays.searchResultsTruncated,
                         ),
                         showClear = uiState.overlays.searchFilter.isActive,
                         onClearFilters = { viewModel.onSearchFilterChange(MessageSearchFilter.NONE) },
@@ -1164,8 +1176,10 @@ fun ChatScreen(
                 }
             }
 
-            val showingSearchResults =
-                uiState.overlays.isSearchActive && searchIsSelecting && uiState.overlays.searchResults.isNotEmpty()
+            // Note this does not also require results: an empty result set still
+            // owns the pane (see the empty-state Box above), so the conversation
+            // must stay hidden behind it.
+            val showingSearchResults = uiState.overlays.isSearchActive && searchIsSelecting
             if (!showingSearchResults) {
                 when {
                     !contentReady -> {
@@ -2165,6 +2179,13 @@ fun ChatScreen(
             detectSnoozeTime = { text -> viewModel.detectSnoozeTime(text) },
         )
     }
+
+    // Registered before the two viewer handlers below, which must win while they
+    // are open. Search is an in-place overlay, not a NavHost destination — since
+    // "Shared Media" stopped being its own entry, nothing else catches back, and
+    // pressing it would pop ChatScreen off the stack, losing both the browse and
+    // the conversation behind it.
+    BackHandler(enabled = uiState.overlays.isSearchActive) { viewModel.clearSearch() }
 
     BackHandler(enabled = fullscreenImage != null) {
         closeFullscreenImage()

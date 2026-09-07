@@ -81,8 +81,10 @@ interface MessageDao {
     fun getStarredMessages(): Flow<List<MessageEntity>>
 
     // Phase 2: in-app search (LIKE-based; FTS4 virtual table added separately)
-    @Query("SELECT * FROM messages WHERE content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT 100")
-    suspend fun searchMessages(query: String): List<MessageEntity>
+    // The limit is a parameter, not a literal, so the caller that reports
+    // "there may be more" and the query that truncates cannot drift apart.
+    @Query("SELECT * FROM messages WHERE content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun searchMessages(query: String, limit: Int): List<MessageEntity>
 
     // In-chat search with prefilters. Every clause is a nullable/zero-valued
     // short-circuit so one compile-time-verified query serves both text search

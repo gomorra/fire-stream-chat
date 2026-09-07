@@ -152,6 +152,47 @@ class ChatSearchManagerTest {
         assertEquals(listOf("p1"), uiState.value.overlays.searchResults.map { it.id })
     }
 
+    // ── Truncation ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `truncation reported by the repository reaches the slice`() = runTest {
+        repository.searchTruncated = true
+        val manager = newManager()
+
+        manager.onFilterChange(MessageSearchFilter(type = MessageFilterType.PHOTOS))
+        advanceUntilIdle()
+
+        assertTrue(uiState.value.overlays.searchResultsTruncated)
+    }
+
+    @Test
+    fun `a stale truncation flag never outlives the page it described`() = runTest {
+        repository.searchTruncated = true
+        val manager = newManager()
+        manager.onFilterChange(MessageSearchFilter(type = MessageFilterType.PHOTOS))
+        advanceUntilIdle()
+        assertTrue(uiState.value.overlays.searchResultsTruncated)
+
+        // Back to nothing selected: the short-circuit empties the results, and
+        // must drop the flag with them or the header keeps claiming "200+".
+        manager.onFilterChange(MessageSearchFilter.NONE)
+        advanceUntilIdle()
+
+        assertFalse(uiState.value.overlays.searchResultsTruncated)
+    }
+
+    @Test
+    fun `clearSearch drops the truncation flag`() = runTest {
+        repository.searchTruncated = true
+        val manager = newManager()
+        manager.onFilterChange(MessageSearchFilter(type = MessageFilterType.PHOTOS))
+        advanceUntilIdle()
+
+        manager.clearSearch()
+
+        assertFalse(uiState.value.overlays.searchResultsTruncated)
+    }
+
     // ── Reset semantics ──────────────────────────────────────────────────────
 
     @Test
