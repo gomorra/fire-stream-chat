@@ -21,6 +21,23 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Link previews — consent-banner suppression + fetch de-duplication (`6ef4abc`, 2026-09-08)
+- Nothing here has been seen on hardware. The offscreen `WebView`, `postVisualStateCallback`,
+  and `PixelCopy` with a scaling `srcRect` are all outside what a JVM unit test can reach, so
+  the whole capture path is build-verified only.
+- Check on a device: (a) a news site with a cookie wall — the preview should be the page, not
+  the banner; (b) a `maps.app.goo.gl` link — should end up with no preview image rather than a
+  screenshot of `consent.google.com`; (c) a chat with several image-less links open at once —
+  previews should fill in one at a time without the list stuttering.
+- Specifically unconfirmed: that the geometric stripper
+  (`WebPagePreviewCapture.OVERLAY_STRIPPER_JS`, `document.elementsFromPoint` at a sampled grid)
+  hides banners without also hiding a site's real content — a full-viewport `fixed` wrapper that
+  *contains* the page would trip the same size test. If a preview comes back blank white, that
+  is the first thing to suspect.
+- Also unconfirmed: that `PixelCopy`'s `srcRect` overload scales rather than crops here. A
+  preview showing only the top-left corner of the page means it cropped, and the fix is to go
+  back to a full-size destination bitmap plus an explicit downscale.
+
 ### Message search — prefilter chips + global scope (`56cb67a`…`261704d`, 2026-09-07; global 2026-09-08)
 - Device pass still outstanding for the in-chat surface: the date range picker, the
   photo/video grid, and tapping a video tile through to the player. (The chip row's
