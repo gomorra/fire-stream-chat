@@ -36,7 +36,7 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   and, in any zone east of UTC, a message sent late on the last selected day falls
   outside it. Re-anchor explicitly: read the UTC calendar's y/m/d, rebuild in the default
   zone, and take end-of-day as *start of the next day minus 1 ms* — `+24h` overshoots on
-  a DST-shortened day. See `ChatSearchFilterBar.kt` (`utcDayToLocalStart` / `…End`).
+  a DST-shortened day. See `ui/search/SearchFilterBar.kt` (`utcDayToLocalStart` / `…End`).
 
 - **Freeze list order in the presentation layer.** For UI lists that would reorder
   mid-interaction (e.g. emoji Recents), snapshot the order with `remember { list }` per
@@ -85,7 +85,7 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   a query written as `(:type IS NULL OR type = :type)` / `(:flag = 0 OR …)`; dropping to
   `@RawQuery` to build predicates dynamically gives that up. Put a `(:query = '' OR
   content LIKE …)` short-circuit first so the no-query path doesn't scan every row's
-  content against `'%%'`. See `MessageDao.searchMessagesInChat`.
+  content against `'%%'`. See `MessageDao.searchMessages`, whose one query serves both the in-chat and the global scope via `(:chatId IS NULL OR chatId = :chatId)`.
 
 - **Shared-storage files: `exists()` is not enough.** MediaStore files from a prior
   install can pass `File.exists()` yet throw `EACCES` on open. Gate with
@@ -142,3 +142,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   platform timeout.** Nothing stops it on its own — unattended, it rings until the battery
   dies. Always pair it with `setTimeoutAfter(...)` as a backstop plus an explicit dismiss
   affordance; a Dismiss action alone only helps when somebody is present.
+
+## Build tooling
+
+- **`./gradlew lint` crashes on this AGP/AndroidX combination — it is not your diff.**
+  Two AndroidX detectors (`NonNullableMutableLiveDataDetector` on
+  `AppLifecycleObserver.kt`, `RememberInCompositionDetector` on `ArchitectureTest.kt`)
+  die with `IncompatibleClassChangeError`, which fails the whole `lint` task. It
+  reproduces on a clean checkout of `main` with no local changes, so a crash naming a
+  file you never touched is version skew between the lint jars and the detector APIs, not
+  a regression. Confirmed 2026-09-08. **`lint` is deliberately not in the gate** — the
+  project gate is `./gradlew test assembleDebug` (CLAUDE.md, `.github/workflows/ci.yml`),
+  so don't add `lint` to CI or block a commit on it until the toolchain is bumped.

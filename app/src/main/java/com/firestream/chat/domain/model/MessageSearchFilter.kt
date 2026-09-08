@@ -1,7 +1,7 @@
 package com.firestream.chat.domain.model
 
 /**
- * The type axis of in-chat search. Single-select: two types would read as AND
+ * The type axis of message search. Single-select: two types would read as AND
  * where the user means OR.
  *
  * Deliberately *not* an alias for [MessageType]: [LINKS] is a property of a
@@ -18,8 +18,9 @@ enum class MessageFilterType {
 }
 
 /**
- * A prefilter over in-chat search. The three axes are independent: [type] is
- * single-select, [isStarred] and the [fromMs]–[toMs] date range are toggles.
+ * A prefilter over message search, in a single chat or across all of them. The
+ * three axes are independent: [type] is single-select, [isStarred] and the
+ * [fromMs]–[toMs] date range are toggles.
  *
  * An active filter with a blank query is *browse mode* ("show me the photos"):
  * `SearchMessagesUseCase`'s blank-query guard only returns empty when there is
@@ -40,11 +41,12 @@ data class MessageSearchFilter(
 }
 
 /**
- * Result caps for in-chat search. Text search keeps the historical 50; browse
- * mode (a filter chip with no query typed) gets 200, because there the filter —
- * not the query — is doing the selecting and 50 truncates visibly. 200 is also
- * the largest value that keeps the deferred `(chatId, timestamp)` index
- * defensible; going higher means doing the index too.
+ * Result caps for message search. Text search keeps the historical 50 in a
+ * single chat and 100 across all of them; browse mode (a filter chip with no
+ * query typed) gets 200 either way, because there the filter — not the query —
+ * is doing the selecting and 50 truncates visibly. 200 is also the largest
+ * value that keeps the deferred `(chatId, timestamp)` index defensible; going
+ * higher means doing the index too.
  *
  * They live here rather than privately in the repository because the result
  * count the UI shows is cap-truncated, and a UI that cannot tell it is at the
@@ -54,8 +56,17 @@ object MessageSearchLimits {
     const val TEXT = 50
     const val BROWSE = 200
 
-    /** Global (cross-chat) search, which has no filter axis and so no browse mode. */
+    /** Text search across every chat: a wider net than one chat's 50. */
     const val GLOBAL = 100
 
-    fun forQuery(query: String): Int = if (query.isBlank()) BROWSE else TEXT
+    /**
+     * Takes the same [chatId] the query itself is given — null meaning every
+     * chat — rather than a separate "is global" flag, which would be a second
+     * expression of one fact and could disagree with it.
+     */
+    fun forScope(query: String, chatId: String?): Int = when {
+        query.isBlank() -> BROWSE
+        chatId == null -> GLOBAL
+        else -> TEXT
+    }
 }

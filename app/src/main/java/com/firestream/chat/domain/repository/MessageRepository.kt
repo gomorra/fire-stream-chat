@@ -38,14 +38,16 @@ interface MessageRepository {
     suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit>
     fun getStarredMessages(): Flow<List<Message>>
     // Phase 2: search
-    suspend fun searchMessages(query: String): MessageSearchResults
     /**
-     * In-chat search, optionally prefiltered. A blank [query] with an active
-     * [filter] is browse mode; a blank query with no filter matches everything
-     * in the chat, so callers gate that case (see `SearchMessagesUseCase`).
+     * Message search, scoped to [chatId] or — when it is null — across every
+     * chat, optionally prefiltered.
+     *
+     * A blank [query] with an active [filter] is browse mode; a blank query
+     * with no filter matches everything in scope, so callers gate that case
+     * (see `SearchMessagesUseCase`).
      */
-    suspend fun searchMessagesInChat(
-        chatId: String,
+    suspend fun searchMessages(
+        chatId: String?,
         query: String,
         filter: MessageSearchFilter = MessageSearchFilter.NONE,
     ): MessageSearchResults

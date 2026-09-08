@@ -3,35 +3,40 @@
 //   prefilter chips (type / starred / date range) that also drive it.
 // Owns: ChatUiState.overlays.{searchQuery, searchFilter, searchResults, isSearchActive}.
 // Collaborators: ChatViewModel (composition root), SearchMessagesUseCase.
-// Don't put here: global search across chats (lives in ChatListViewModel),
-//   any state outside the overlays slice. Pattern:
-//   docs/PATTERNS.md#chat-manager-slice-ownership.
+// Don't put here: global search across chats (lives in ui/search/
+//   GlobalSearchViewModel), the debounce/cancellation machinery itself (shared
+//   with global search as ui/search/SearchRunner), or any state outside the
+//   overlays slice. Pattern: docs/PATTERNS.md#chat-manager-slice-ownership.
 // endregion
 
 package com.firestream.chat.ui.chat
 
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
-
-// Only typing is debounced. A chip tap is a discrete action with a settled
-// intent behind it, so it re-queries at once (see [onFilterChange]).
-private const val TYPING_DEBOUNCE_MS = 300L
+import com.firestream.chat.ui.search.SearchRunner
 
 internal class ChatSearchManager(
-    private val chatId: String,
-    private val searchMessagesUseCase: SearchMessagesUseCase,
+    chatId: String,
+    searchMessagesUseCase: SearchMessagesUseCase,
     private val _uiState: MutableStateFlow<ChatUiState>,
-    private val scope: CoroutineScope
+    scope: CoroutineScope
 ) {
 
-    private var searchJob: Job? = null
+    // Debounce timing and the cancel-supersede contract are shared with global
+    // search; only where the results land is this manager's business.
+    private val runner = SearchRunner(scope, searchMessagesUseCase, chatId) { messages, truncated ->
+        _uiState.update {
+            it.copy(
+                overlays = it.overlays.copy(
+                    searchResults = messages,
+                    searchResultsTruncated = truncated,
+                )
+            )
+        }
+    }
 
     fun onSearchQueryChange(query: String) {
         _uiState.update { it.copy(overlays = it.overlays.copy(searchQuery = query)) }
@@ -78,11 +83,11 @@ internal class ChatSearchManager(
                 )
             )
         }
-        if (!_uiState.value.overlays.isSearchActive) searchJob?.cancel()
+        if (!_uiState.value.overlays.isSearchActive) runner.cancel()
     }
 
     fun clearSearch() {
-        searchJob?.cancel()
+        runner.cancel()
         _uiState.update {
             it.copy(
                 overlays = it.overlays.copy(
@@ -96,56 +101,9 @@ internal class ChatSearchManager(
         }
     }
 
-    /**
-     * Re-issues the search from whatever query and filter are currently in
-     * state — the single path both inputs funnel through, so neither can go
-     * stale against the other.
-     */
+    /** Re-issues the search from whatever query and filter are currently in state. */
     private fun runSearch(debounce: Boolean) {
-        searchJob?.cancel()
         val overlays = _uiState.value.overlays
-        val query = overlays.searchQuery
-        val filter = overlays.searchFilter
-        // Nothing selected on either axis: the use case would return empty
-        // anyway, but short-circuiting keeps the results list from flickering
-        // through a round trip on the way back to empty.
-        if (query.isBlank() && !filter.isActive) {
-            _uiState.update {
-                it.copy(
-                    overlays = it.overlays.copy(
-                        searchResults = emptyList(),
-                        searchResultsTruncated = false,
-                    )
-                )
-            }
-            return
-        }
-        searchJob = scope.launch {
-            if (debounce) delay(TYPING_DEBOUNCE_MS)
-            try {
-                val results = searchMessagesUseCase(query, chatId, filter)
-                _uiState.update {
-                    it.copy(
-                        overlays = it.overlays.copy(
-                            searchResults = results.messages,
-                            searchResultsTruncated = results.truncated,
-                        )
-                    )
-                }
-            } catch (e: CancellationException) {
-                // A superseded job must not clear the results the job that
-                // replaced it is about to write.
-                throw e
-            } catch (_: Exception) {
-                _uiState.update {
-                    it.copy(
-                        overlays = it.overlays.copy(
-                            searchResults = emptyList(),
-                            searchResultsTruncated = false,
-                        )
-                    )
-                }
-            }
-        }
+        runner.run(overlays.searchQuery, overlays.searchFilter, debounce)
     }
 }

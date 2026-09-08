@@ -21,12 +21,12 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
-### Chat search prefilter chips (`56cb67a`…`261704d`, 2026-09-07)
+### Message search — prefilter chips + global scope (`56cb67a`…`261704d`, 2026-09-07; global 2026-09-08)
 - Device pass never run for the whole feature: the chip row's horizontal scroll under a
   thumb, the date range picker, the photo/video grid, and tapping a video tile through to
   the player.
 - Specifically unconfirmed: that a **local** video's frame decodes into a grid tile
-  (`ChatSearchResults.kt` uses `rememberVideoFrameRequest`; only the remote-thumbnail
+  (`ui/search/SearchResults.kt` uses `rememberVideoFrameRequest`; only the remote-thumbnail
   fallback is obviously safe), and that closing the search image pager lands back in the
   grid rather than in the conversation.
 - Also unconfirmed: the deferred `(chatId, timestamp)` index. Trigger to revisit is the
@@ -37,6 +37,17 @@ Delete an item once it has been verified (or once a fix for what the check found
 - Confirm on device that **system back closes the search overlay** rather than the chat
   (`261704d` added the `BackHandler`; the deleted screen used to get this from the NavHost),
   and that it still yields to the two fullscreen viewers while either is open.
+- **Global search (`Routes.SEARCH`, from the chat list magnifier) is entirely unverified
+  on hardware.** Specifically: that the chip row scrolls freely now that it is under a
+  pager-free destination and not a page of `MainScreen`'s `HorizontalPager` — this is the
+  reason it is its own destination, so it is the check that matters most; that the field
+  is focused **with the keyboard already up** on entry (`LaunchedEffect` + `FocusRequester`
+  only requests focus, and some OEM IMEs need more); and that tapping any global result —
+  media tiles included — lands *at the message* in the right conversation rather than at
+  the bottom of it.
+- Global search has no `MessageSearchFilter` persistence across the destination's
+  lifecycle, so process death mid-search drops the chips. Accepted (search is transient),
+  recorded so it reads as a decision rather than an oversight.
 
 ### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
 - Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute

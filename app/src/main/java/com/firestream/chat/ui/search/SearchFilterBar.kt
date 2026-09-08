@@ -1,4 +1,4 @@
-package com.firestream.chat.ui.chat
+package com.firestream.chat.ui.search
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -46,14 +46,16 @@ import java.util.Locale
 import java.util.TimeZone
 
 /**
- * The prefilter chips under the in-chat search box, which turn the search pane
- * into a browser ("show me the photos") rather than only a text matcher.
+ * The prefilter chips under the search box, which turn the search pane into a
+ * browser ("show me the photos") rather than only a text matcher. Shared by
+ * in-chat and global search.
  *
  * One horizontally scrollable row with no overflow "…" chip: an overflow chip
  * cannot honestly show selection state — it either hides the active filter or
- * reorders chips under the thumb. `ChatScreen` is its own NavHost destination
- * rather than a page in `MainScreen`'s pager, so the [LazyRow] has no gesture
- * conflict to worry about.
+ * reorders chips under the thumb. Both hosts (`ChatScreen`, `GlobalSearchScreen`)
+ * are their own NavHost destinations rather than pages in `MainScreen`'s pager,
+ * so the [LazyRow] has no gesture conflict to worry about — do not host this row
+ * inside a pager page.
  *
  * The type chips are single-select (multi-select would read as AND where the
  * user means OR); Starred and Date are independent toggles on their own axes.
@@ -233,7 +235,7 @@ private val MessageFilterType.chipIcon: ImageVector
         MessageFilterType.VOICE -> Icons.Default.Mic
     }
 
-// ── Formatting (pure; unit-tested in ChatSearchFilterFormatTest) ─────────────
+// ── Formatting (pure; unit-tested in SearchFilterFormatTest) ────────────────
 
 /**
  * The line above the results: `42 photos · Mar 2026`.
@@ -272,9 +274,10 @@ private fun MessageFilterType?.resultNoun(singular: Boolean): String = when (thi
  * the chip is the only place an off-screen filter is visible.
  */
 internal fun dateRangeLabel(fromMs: Long?, toMs: Long?): String? {
-    val dayMonth = SimpleDateFormat("d MMM", Locale.getDefault())
-    val dayMonthYear = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-    val monthYear = SimpleDateFormat("MMM yyyy", Locale.getDefault())
+    // The common case by far — searchResultsSummary calls this on every
+    // keystroke, and building three pattern-compiling formatters only to
+    // discard them is the kind of waste a text field notices.
+    if (fromMs == null && toMs == null) return null
     return when {
         fromMs != null && toMs != null -> when {
             spansWholeMonth(fromMs, toMs) -> monthYear.format(fromMs)
@@ -286,6 +289,13 @@ internal fun dateRangeLabel(fromMs: Long?, toMs: Long?): String? {
         else -> null
     }
 }
+
+// File-level, like SearchResults.kt's resultDateFormat: SimpleDateFormat is not
+// thread-safe, but every caller here is composition or a unit test, both
+// single-threaded.
+private val dayMonth = SimpleDateFormat("d MMM", Locale.getDefault())
+private val dayMonthYear = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+private val monthYear = SimpleDateFormat("MMM yyyy", Locale.getDefault())
 
 private fun calendarAt(millis: Long) = Calendar.getInstance().apply { timeInMillis = millis }
 

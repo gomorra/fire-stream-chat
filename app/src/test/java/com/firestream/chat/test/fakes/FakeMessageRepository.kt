@@ -233,28 +233,25 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(Unit)
     }
 
-    override suspend fun searchMessages(query: String): MessageSearchResults {
-        throwIfNextFailure()
-        return MessageSearchResults(
-            messages = messagesByChat.value.values.flatten()
-                .filter { it.content.contains(query, ignoreCase = true) },
-            truncated = searchTruncated,
-        )
-    }
-
     /**
      * Mirrors the real query's shape closely enough for manager/use-case tests:
-     * tombstones drop out, a blank query is browse mode (no content predicate),
-     * and the filter axes are ANDed. Ordering is newest-first like the DAO's.
+     * a null [chatId] spans every chat, tombstones drop out, a blank query is
+     * browse mode (no content predicate), and the filter axes are ANDed.
+     * Ordering is newest-first like the DAO's.
      */
-    override suspend fun searchMessagesInChat(
-        chatId: String,
+    override suspend fun searchMessages(
+        chatId: String?,
         query: String,
         filter: MessageSearchFilter,
     ): MessageSearchResults {
         throwIfNextFailure()
         lastSearchFilter = filter
-        val matches = messagesByChat.value[chatId].orEmpty()
+        val scope = if (chatId == null) {
+            messagesByChat.value.values.flatten()
+        } else {
+            messagesByChat.value[chatId].orEmpty()
+        }
+        val matches = scope
             .filter { it.deletedAt == null }
             .filter { query.isEmpty() || it.content.contains(query, ignoreCase = true) }
             .filter { m -> filter.type?.let { m.matchesFilterType(it) } ?: true }

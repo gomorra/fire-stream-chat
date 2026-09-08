@@ -37,7 +37,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Truncation reporting for in-chat search.
+ * Truncation reporting for message search, in one chat and across all of them.
  *
  * The load-bearing case is `a page thinned by the word-boundary filter is still
  * reported as truncated`: SQLite's `LIMIT` runs *before* the whole-word pass, so
@@ -102,9 +102,16 @@ class MessageRepositorySearchTruncationTest {
         )
     }
 
-    private fun stubInChat(returned: List<MessageEntity>) {
+    private fun stubSearch(returned: List<MessageEntity>) {
         coEvery {
-            messageDao.searchMessagesInChat(any(), any(), any(), any(), any(), any(), any(), any())
+            messageDao.searchMessages(any(), any(), any(), any(), any(), any(), any(), any())
+        } returns returned
+    }
+
+    /** Stubs only the calls made with [limit], so a cap mismatch fails loudly. */
+    private fun stubSearchAtLimit(limit: Int, returned: List<MessageEntity>) {
+        coEvery {
+            messageDao.searchMessages(any(), any(), any(), any(), any(), any(), any(), limit)
         } returns returned
     }
 
@@ -116,9 +123,9 @@ class MessageRepositorySearchTruncationTest {
         val returned = rows(MessageSearchLimits.TEXT) { i ->
             if (i < 2) "the cat sat" else "category $i"
         }
-        stubInChat(returned)
+        stubSearch(returned)
 
-        val result = repository.searchMessagesInChat("chat1", "cat")
+        val result = repository.searchMessages("chat1", "cat")
 
         assertEquals(2, result.messages.size)
         assertTrue("truncation must come off the raw row count", result.truncated)
@@ -126,9 +133,9 @@ class MessageRepositorySearchTruncationTest {
 
     @Test
     fun `a short page is not reported as truncated`() = runTest {
-        stubInChat(rows(3) { "the cat sat" })
+        stubSearch(rows(3) { "the cat sat" })
 
-        val result = repository.searchMessagesInChat("chat1", "cat")
+        val result = repository.searchMessages("chat1", "cat")
 
         assertEquals(3, result.messages.size)
         assertFalse(result.truncated)
@@ -136,9 +143,9 @@ class MessageRepositorySearchTruncationTest {
 
     @Test
     fun `a full browse page is reported as truncated`() = runTest {
-        stubInChat(rows(MessageSearchLimits.BROWSE) { "" })
+        stubSearch(rows(MessageSearchLimits.BROWSE) { "" })
 
-        val result = repository.searchMessagesInChat(
+        val result = repository.searchMessages(
             "chat1",
             "",
             MessageSearchFilter(type = MessageFilterType.PHOTOS),
@@ -152,9 +159,9 @@ class MessageRepositorySearchTruncationTest {
     fun `browse mode keeps rows the word-boundary filter would have dropped`() = runTest {
         // Media rows carry an empty content that no word regex matches; browse
         // mode must not run the filter at all.
-        stubInChat(rows(4) { "" })
+        stubSearch(rows(4) { "" })
 
-        val result = repository.searchMessagesInChat(
+        val result = repository.searchMessages(
             "chat1",
             "",
             MessageSearchFilter(type = MessageFilterType.PHOTOS),
@@ -165,24 +172,39 @@ class MessageRepositorySearchTruncationTest {
     }
 
     @Test
-    fun `global search reports truncation off its own cap`() = runTest {
-        coEvery {
-            messageDao.searchMessages(any(), MessageSearchLimits.GLOBAL)
-        } returns rows(MessageSearchLimits.GLOBAL) { i -> if (i < 1) "the cat sat" else "category $i" }
+    fun `global text search caps at GLOBAL, not the in-chat TEXT cap`() = runTest {
+        stubSearchAtLimit(
+            MessageSearchLimits.GLOBAL,
+            rows(MessageSearchLimits.GLOBAL) { i -> if (i < 1) "the cat sat" else "category $i" },
+        )
 
-        val result = repository.searchMessages("cat")
+        val result = repository.searchMessages(null, "cat")
 
         assertEquals(1, result.messages.size)
+        assertTrue("truncation must come off the raw row count", result.truncated)
+    }
+
+    @Test
+    fun `global browse mode caps at BROWSE, the same as an in-chat browse`() = runTest {
+        stubSearchAtLimit(MessageSearchLimits.BROWSE, rows(MessageSearchLimits.BROWSE) { "" })
+
+        val result = repository.searchMessages(
+            null,
+            "",
+            MessageSearchFilter(type = MessageFilterType.PHOTOS),
+        )
+
+        assertEquals(MessageSearchLimits.BROWSE, result.messages.size)
         assertTrue(result.truncated)
     }
 
     @Test
     fun `a failed query reports neither results nor truncation`() = runTest {
         coEvery {
-            messageDao.searchMessagesInChat(any(), any(), any(), any(), any(), any(), any(), any())
+            messageDao.searchMessages(any(), any(), any(), any(), any(), any(), any(), any())
         } throws IllegalStateException("db gone")
 
-        val result = repository.searchMessagesInChat("chat1", "cat")
+        val result = repository.searchMessages("chat1", "cat")
 
         assertTrue(result.messages.isEmpty())
         assertFalse(result.truncated)

@@ -139,6 +139,12 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextRange
+import com.firestream.chat.ui.search.SearchEmptyState
+import com.firestream.chat.ui.search.SearchFilterChipRow
+import com.firestream.chat.ui.search.isSearchSelecting
+import com.firestream.chat.ui.search.SearchResultList
+import com.firestream.chat.ui.search.SearchResultsSummary
+import com.firestream.chat.ui.search.searchResultsSummary
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -1119,32 +1125,16 @@ fun ChatScreen(
             // Search results overlay. Shown for a filter alone as well as for a
             // typed query — a chip with no query is browse mode.
             val searchIsSelecting =
-                uiState.overlays.searchQuery.isNotBlank() || uiState.overlays.searchFilter.isActive
+                isSearchSelecting(uiState.overlays.searchQuery, uiState.overlays.searchFilter)
             if (uiState.overlays.isSearchActive && searchIsSelecting) {
                 if (uiState.overlays.searchResults.isEmpty()) {
-                    Box(
-                        // Takes the whole pane rather than sitting as a one-line
-                        // label above the conversation: opening "Shared Media"
-                        // in a chat with no photos would otherwise look like the
-                        // menu item did nothing.
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            // Browse mode has no query to have "found" nothing
-                            // for, so it says what it actually looked at.
-                            text = if (uiState.overlays.searchQuery.isBlank()) {
-                                "Nothing matches these filters"
-                            } else {
-                                "No results found"
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    SearchEmptyState(
+                        query = uiState.overlays.searchQuery,
+                        // Only reached with something selected — the pane is not
+                        // shown otherwise — so the hint never renders here.
+                        isSelecting = true,
+                        modifier = Modifier.weight(1f),
+                    )
                 } else {
                     // The active filters live here as well as in the chip row:
                     // chips scroll off-screen, and an active-but-invisible
@@ -1166,7 +1156,7 @@ fun ChatScreen(
                     SearchResultList(
                         results = uiState.overlays.searchResults,
                         filterType = uiState.overlays.searchFilter.type,
-                        senderName = { message ->
+                        resultLabel = { message ->
                             uiState.session.senderDisplayName(message.senderId)
                         },
                         onResultClick = { message -> openSearchResult(message) },

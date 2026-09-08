@@ -1166,25 +1166,8 @@ class MessageRepositoryImpl @Inject constructor(
         return messageDao.getStarredMessages().map { entities -> entities.map { it.toDomain() } }
     }
 
-    override suspend fun searchMessages(query: String): MessageSearchResults {
-        return try {
-            val regex = wordBoundaryRegex(query)
-            val rows = messageDao.searchMessages(query, MessageSearchLimits.GLOBAL)
-            MessageSearchResults(
-                messages = rows.filter { regex.containsMatchIn(it.content) }.map { it.toDomain() },
-                // Read off the raw row count, before the word-boundary filter
-                // thins it — see MessageSearchResults.
-                truncated = rows.size >= MessageSearchLimits.GLOBAL,
-            )
-        } catch (e: Exception) {
-            e.rethrowIfCancellation()
-            Log.w(TAG, "searchMessages failed (query length=${query.length})", e)
-            MessageSearchResults.EMPTY
-        }
-    }
-
-    override suspend fun searchMessagesInChat(
-        chatId: String,
+    override suspend fun searchMessages(
+        chatId: String?,
         query: String,
         filter: MessageSearchFilter,
     ): MessageSearchResults {
@@ -1192,8 +1175,8 @@ class MessageRepositoryImpl @Inject constructor(
             // Browse mode (blank query + an active filter) selects by chip, not
             // by text, so it takes the larger cap — see MessageSearchLimits.
             val browsing = query.isEmpty()
-            val limit = MessageSearchLimits.forQuery(query)
-            val rows = messageDao.searchMessagesInChat(
+            val limit = MessageSearchLimits.forScope(query, chatId)
+            val rows = messageDao.searchMessages(
                 chatId = chatId,
                 query = query,
                 // LINKS is a content property, not a MessageType, so it maps to
@@ -1223,7 +1206,7 @@ class MessageRepositoryImpl @Inject constructor(
             )
         } catch (e: Exception) {
             e.rethrowIfCancellation()
-            Log.w(TAG, "searchMessagesInChat failed for chat=$chatId (query length=${query.length})", e)
+            Log.w(TAG, "searchMessages failed for chat=${chatId ?: "*"} (query length=${query.length})", e)
             MessageSearchResults.EMPTY
         }
     }

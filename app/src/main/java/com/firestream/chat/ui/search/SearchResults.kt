@@ -1,4 +1,4 @@
-package com.firestream.chat.ui.chat
+package com.firestream.chat.ui.search
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -59,21 +59,23 @@ private val resultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefaul
 private val URL_REGEX = Regex("""https?://[^\s]+""")
 
 /**
- * The in-chat search results, rendered by what the active chip selected.
+ * Search results, rendered by what the active chip selected. Shared by the
+ * in-chat search pane and the global search screen.
  *
  * Photos and Videos get a thumbnail grid — the whole point of browse mode is
  * that a wall of "sent an image" text rows is useless for finding a picture.
  * Docs and Links get icon rows keyed on the filename / URL they carry. Anything
  * else keeps the text rows search has always had.
  *
- * Text rows are labelled with [senderName] — the caller resolves it, because
- * the id→name maps live on the session slice and this file only renders.
+ * Text rows are labelled with [resultLabel] — the caller resolves it, because
+ * the id→name maps live in the caller's state and this file only renders. In
+ * a chat that is the sender's name; globally it also has to say which chat.
  */
 @Composable
 internal fun SearchResultList(
     results: List<Message>,
     filterType: MessageFilterType?,
-    senderName: (Message) -> String,
+    resultLabel: (Message) -> String,
     onResultClick: (Message) -> Unit,
     onMediaClick: (Message) -> Unit,
     modifier: Modifier = Modifier,
@@ -124,7 +126,7 @@ internal fun SearchResultList(
             items(results, key = { "search_${it.id}" }) { message ->
                 SearchTextRow(
                     message = message,
-                    senderName = senderName(message),
+                    label = resultLabel(message),
                     onClick = { onResultClick(message) },
                 )
                 HorizontalDivider()
@@ -133,8 +135,46 @@ internal fun SearchResultList(
     }
 }
 
+/**
+ * What the results pane says when it has nothing to list, shared by both search
+ * surfaces so the two cannot drift into different words for one condition.
+ *
+ * Three states, not two: nothing selected yet is a *hint*, because an empty
+ * screen reporting a failed search before anything was asked for reads as a
+ * broken search. Browse mode has no query to have found nothing *for*, so it
+ * says what it actually looked at.
+ *
+ * Takes the whole pane rather than sitting as a one-line label above the
+ * conversation: opening "Shared Media" in a chat with no photos would otherwise
+ * look like the menu item did nothing.
+ */
 @Composable
-private fun SearchTextRow(message: Message, senderName: String, onClick: () -> Unit) {
+internal fun SearchEmptyState(
+    query: String,
+    isSelecting: Boolean,
+    modifier: Modifier = Modifier,
+    hint: String = "Search your messages",
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = when {
+                !isSelecting -> hint
+                query.isBlank() -> "Nothing matches these filters"
+                else -> "No messages found"
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SearchTextRow(message: Message, label: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -142,7 +182,7 @@ private fun SearchTextRow(message: Message, senderName: String, onClick: () -> U
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
-            text = senderName,
+            text = label,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary
         )

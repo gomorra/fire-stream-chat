@@ -107,7 +107,7 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 24 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatSearchFilterBar`, `ChatSearchResults`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference.
+- **ChatScreen** is split into 22 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference. The search-results and filter-chip rendering lives in `ui/search/` instead, because global search renders the same way.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -310,6 +310,8 @@ graph TD
     ChatList -->|New Group| CreateGroup[CreateGroupScreen]
     ChatList -->|New Broadcast| CreateBroadcast[CreateBroadcastScreen]
     ChatList -->|Open Chat| Chat[ChatScreen]
+    ChatList -->|Search| Search[GlobalSearchScreen]
+    Search -->|Open result at message| Chat
 
     %% From Settings
     Settings -->|Starred Messages| StarredMessages[StarredMessagesScreen]
@@ -448,7 +450,6 @@ com.firestream.chat/
 │   │                            # ForwardChatPicker, LocationPickerSheet,
 │   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
-│   │                            # ChatSearchFilterBar, ChatSearchResults,
 │   │                            # MessageInfoScreen, ChatUtils, BubbleTailShape,
 │   │                            # MentionFormatter, MessageGrouping
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,
@@ -465,6 +466,10 @@ com.firestream.chat/
 │   ├── main/                    # MainScreen (HorizontalPager — Chats/Calls/Lists tabs),
 │   │                            # BottomNavBar
 │   ├── profile/                 # ProfileScreen, ProfileViewModel
+│   ├── search/                  # Global search: GlobalSearchScreen,
+│   │                            # GlobalSearchViewModel, GlobalSearchLabels;
+│   │                            # plus the rendering both scopes share —
+│   │                            # SearchResults, SearchFilterBar
 │   ├── settings/                # SettingsScreen, SettingsViewModel
 │   ├── share/                   # SharePickerScreen, SharePickerViewModel
 │   ├── starred/                 # StarredMessagesScreen, StarredMessagesViewModel

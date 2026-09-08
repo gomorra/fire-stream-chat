@@ -47,6 +47,7 @@ import com.firestream.chat.ui.auth.ProfileSetupScreen
 import com.firestream.chat.ui.broadcast.CreateBroadcastScreen
 import com.firestream.chat.ui.chat.ChatScreen
 import com.firestream.chat.ui.chat.MessageInfoScreen
+import com.firestream.chat.ui.search.GlobalSearchScreen
 import com.firestream.chat.ui.chatlist.ArchivedChatsScreen
 import com.firestream.chat.ui.contacts.ContactsScreen
 import com.firestream.chat.ui.group.CreateGroupScreen
@@ -130,6 +131,7 @@ object Routes {
     const val SETTINGS = "settings"
     const val USER_PROFILE = "user_profile/{userId}"
     const val STARRED_MESSAGES = "starred_messages"
+    const val SEARCH = "search"
     const val SCHEDULED_REMINDERS = "scheduled_reminders"
     const val ARCHIVED_CHATS = "archived_chats"
     // Bottom nav tabs (no longer a separate nav route — handled by MainScreen tab state)
@@ -439,6 +441,7 @@ fun FireStreamNavGraph(
                 onNewGroupClick = { navController.navigate(Routes.CREATE_GROUP) },
                 onNewBroadcastClick = { navController.navigate(Routes.CREATE_BROADCAST) },
                 onSettingsClick = { navController.navigate(Routes.SETTINGS) },
+                onSearchClick = { navController.navigate(Routes.SEARCH) },
                 onMessageClick = { chatId, recipientId ->
                     navController.navigate(Routes.chat(chatId, recipientId)) {
                         launchSingleTop = true
@@ -564,6 +567,21 @@ fun FireStreamNavGraph(
         // Phase 2: Starred Messages
         composable(Routes.STARRED_MESSAGES) {
             StarredMessagesScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // Global search across every chat. Its own destination rather than a
+        // panel over the chat list: the list is a page inside MainScreen's
+        // HorizontalPager, which the filter chips' LazyRow would fight for
+        // horizontal drags.
+        composable(Routes.SEARCH) {
+            GlobalSearchScreen(
+                onBackClick = { navController.popBackStack() },
+                onResultClick = { chatId, recipientId, messageId ->
+                    navController.navigate(
+                        Routes.chat(chatId, recipientId, targetMessageId = messageId)
+                    )
+                }
+            )
         }
 
         // Scheduled Reminders

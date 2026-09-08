@@ -2,6 +2,16 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.24.0] — 2026-09-08
+
+### Added
+
+- **Search across every chat, with the same chips the conversation search has.** The magnifier on the chat list used to open a thin strip that matched text and nothing else: no filters, no way to tell which conversation a hit came from, and tapping one dropped you at the *bottom* of that chat rather than at the message you had just read. It is now a screen of its own, opening with the keyboard already up, carrying the full chip row — Photos, Videos, Links, Docs, Voice, Starred, Date — so "every photo anyone sent me in March" is a search you can actually run. A chip on its own still browses, counts still say `200+` rather than claiming a total they don't have, and deleted messages stay out of the results — a guard the old global search never had, and the one that mattered most once it gained a Photos chip, because a deleted photo keeps its file reference. Search is its own destination rather than a panel over the list for a concrete reason: the list is a swipeable tab, and a scrollable row of chips inside it would have fought the swipe.
+
+### Fixed
+
+- **A global search result now says where it came from, and takes you to the message.** Every hit is headed by the conversation it was said in — `Bob · Weekend Trip`, or just the person's name in a one-to-one, where repeating it on both sides would be noise — and your own messages read "You". Tapping any result, photos and videos included, lands in that conversation *at that message* instead of at the bottom of it.
+
 ## [UNRELEASED] [1.23.0] — 2026-09-07
 
 ### Added

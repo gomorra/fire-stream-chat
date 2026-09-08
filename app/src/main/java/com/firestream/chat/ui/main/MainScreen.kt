@@ -31,6 +31,7 @@ internal fun MainScreen(
     onNewGroupClick: () -> Unit,
     onNewBroadcastClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onSearchClick: () -> Unit,
     onMessageClick: (chatId: String, recipientId: String) -> Unit,
     onListClick: (listId: String) -> Unit = {},
     onListCreated: (listId: String) -> Unit = {},
@@ -81,6 +82,7 @@ internal fun MainScreen(
                     onNewGroupClick = onNewGroupClick,
                     onNewBroadcastClick = onNewBroadcastClick,
                     onSettingsClick = onSettingsClick,
+                    onSearchClick = onSearchClick,
                 )
                 MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
                 MainTab.LISTS -> ListsScreen(

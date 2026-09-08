@@ -75,8 +75,8 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
-| `app/src/main/java/com/firestream/chat/ui/chat/ChatSearchResults.kt` | Per-type search-result rendering — the media grid the three-dot "Shared Media" item now lands in |
-| `app/src/main/java/com/firestream/chat/ui/chat/ChatSearchFilterBar.kt` | Search prefilter chips, date-range picker, active-filter summary |
+| `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type search-result rendering, shared by in-chat and global search — the media grid the three-dot "Shared Media" item lands in |
+| `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Search prefilter chips, date-range picker, active-filter summary — shared by both scopes |
 | `app/src/main/java/com/firestream/chat/ui/components/SharedMediaTile.kt` | Shared grid-tile composable used by both the search media grid and `ProfileScreen` |
 | `app/src/main/java/com/firestream/chat/ui/components/ScaledImageDecoder.kt` | Coil decoder via Android `ImageDecoder` — avoids the `BitmapFactory` subsample-to-black bug on large old images |
 | `app/src/main/java/com/firestream/chat/ui/profile/ProfileScreen.kt` | Profile / chat-detail screen — its Shared Media section reuses `SharedMediaTile` |
@@ -322,6 +322,31 @@ Chats can send video — record with the camera or pick one from the gallery. Vi
 | `app/src/main/res/values/strings.xml` | `reply_preview_video`, `attachment_record_video` |
 
 **Entry point:** record or pick a video in `ChatScreen.kt`'s composer → `ImagePreviewScreen` (video mode) → `MessageRepositoryImpl.sendMediaMessage()` guards via `VideoTranscoder.ensureWithinLimits`, transcodes, uploads a thumbnail → `MessageBubble` `VIDEO` branch renders it → tap opens `ChatViewModel.showFullscreenVideo()` → `FullscreenVideoPlayer`.
+
+---
+
+## Message Search (in-chat + global)
+
+One search, two scopes. In a chat it is an overlay owned by `ChatSearchManager` on the overlays slice; from the chat list's magnifier it is `Routes.SEARCH`, its own NavHost destination — *not* a panel over the list, because the list is a page inside `MainScreen`'s `HorizontalPager` and the filter chips' `LazyRow` would fight the pager for horizontal drags. Both scopes share one repository method, one DAO query, and the whole of the rendering; the only thing global adds is a `sender · chat` label and a jump-to-message on tap. A blank query plus an active chip is *browse mode* — the filter, not the text, does the selecting.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/model/MessageSearchFilter.kt` | The filter (type / starred / date range), and `MessageSearchLimits` — TEXT 50, GLOBAL 100, BROWSE 200 |
+| `app/src/main/java/com/firestream/chat/domain/model/MessageSearchResults.kt` | Results + the `truncated` flag the "200+" rendering depends on |
+| `app/src/main/java/com/firestream/chat/domain/usecase/message/SearchMessagesUseCase.kt` | The blank-query guard for both scopes (blank **and** no filter → empty) |
+| `app/src/main/java/com/firestream/chat/domain/repository/MessageRepository.kt` | `searchMessages(chatId: String?, query, filter)` — null `chatId` is global |
+| `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | The one compile-time-verified query; every clause a nullable/zero short-circuit, incl. `deletedAt IS NULL` |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Browse-mode short-circuit, whole-word pass, truncation read off the **raw** row count |
+| `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type rendering — media grid / icon rows / text rows; `resultLabel` is the caller's to resolve |
+| `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Chips, date-range picker, active-filter summary, `searchResultsSummary` |
+| `app/src/main/java/com/firestream/chat/ui/search/GlobalSearchScreen.kt` | The global destination: auto-focused field, chips, hint / empty / results |
+| `app/src/main/java/com/firestream/chat/ui/search/GlobalSearchViewModel.kt` | Debounce (300 ms typing, immediate on a chip), chat + contact maps, `recipientIdFor` |
+| `app/src/main/java/com/firestream/chat/ui/search/GlobalSearchLabels.kt` | Pure `sender · chat` labelling; collapses to the title alone in a 1:1 |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatSearchManager.kt` | The in-chat scope: same debounce asymmetry, on the overlays slice |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt` | In-chat search pane; result tap jumps within the conversation, media tiles open the fullscreen viewer |
+| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.SEARCH`; a global result navigates `Routes.chat(…, targetMessageId = …)` |
+
+**Entry points:** chat list magnifier → `Routes.SEARCH` → `GlobalSearchScreen` → tap a result → `Routes.chat(targetMessageId)` (media tiles included — a cross-chat fullscreen pager would need gallery args spanning chats). In a chat: the ⋮ menu's Search / Shared Media → `ChatSearchManager.openSearchWithFilter()`.
 
 ---
 

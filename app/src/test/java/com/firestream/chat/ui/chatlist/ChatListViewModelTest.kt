@@ -6,8 +6,6 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.model.MessageSearchResults
-import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
 import io.mockk.coEvery
@@ -35,7 +33,6 @@ class ChatListViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
 
-    private lateinit var searchMessagesUseCase: SearchMessagesUseCase
     private lateinit var authRepository: AuthRepository
     private lateinit var contactRepository: ContactRepository
     private lateinit var userRepository: UserRepository
@@ -60,13 +57,11 @@ class ChatListViewModelTest {
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
-        searchMessagesUseCase = mockk()
         authRepository = mockk()
         contactRepository = mockk()
         userRepository = mockk()
 
         every { authRepository.currentUserId } returns "user1"
-        coEvery { searchMessagesUseCase(any(), any()) } returns MessageSearchResults.EMPTY
         coEvery { contactRepository.syncContacts() } returns Result.success(emptyList())
         every { contactRepository.getContacts() } returns flowOf(emptyList())
         every { userRepository.observeUser(any()) } returns emptyFlow()
@@ -74,7 +69,6 @@ class ChatListViewModelTest {
         chatRepository.emit(listOf(chat1, chat2))
 
         viewModel = ChatListViewModel(
-            searchMessagesUseCase = searchMessagesUseCase,
             authRepository = authRepository,
             chatRepository = chatRepository,
             messageRepository = messageRepository,
@@ -126,7 +120,6 @@ class ChatListViewModelTest {
         chatRepository.emit(pinnedChats)
 
         val vm = ChatListViewModel(
-            searchMessagesUseCase = searchMessagesUseCase,
             authRepository = authRepository,
             chatRepository = chatRepository,
             messageRepository = messageRepository,
@@ -164,20 +157,6 @@ class ChatListViewModelTest {
     }
 
     @Test
-    fun `clearSearch resets search state`() = runTest {
-        advanceUntilIdle()
-        viewModel.onSearchQueryChange("hello")
-        advanceUntilIdle()
-
-        viewModel.clearSearch()
-
-        val state = viewModel.uiState.value
-        assertEquals("", state.searchQuery)
-        assertTrue(state.searchResults.isEmpty())
-        assertFalse(state.isSearchActive)
-    }
-
-    @Test
     fun `clearError clears error message`() = runTest {
         advanceUntilIdle()
         viewModel.togglePin("newChat", false)
@@ -209,7 +188,6 @@ class ChatListViewModelTest {
         chatRepository.emit(listOf(older, newer))
 
         val vm = ChatListViewModel(
-            searchMessagesUseCase = searchMessagesUseCase,
             authRepository = authRepository,
             chatRepository = chatRepository,
             messageRepository = messageRepository,
@@ -241,7 +219,6 @@ class ChatListViewModelTest {
         chatRepository.emit(listOf(chatA, chatB))
 
         val vm = ChatListViewModel(
-            searchMessagesUseCase = searchMessagesUseCase,
             authRepository = authRepository,
             chatRepository = chatRepository,
             messageRepository = messageRepository,
@@ -281,7 +258,6 @@ class ChatListViewModelTest {
         chatRepository.emit(listOf(olderWithMessage, emptyRecent))
 
         val vm = ChatListViewModel(
-            searchMessagesUseCase = searchMessagesUseCase,
             authRepository = authRepository,
             chatRepository = chatRepository,
             messageRepository = messageRepository,

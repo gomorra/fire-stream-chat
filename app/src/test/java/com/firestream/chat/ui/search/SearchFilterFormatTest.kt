@@ -1,4 +1,4 @@
-package com.firestream.chat.ui.chat
+package com.firestream.chat.ui.search
 
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
@@ -19,7 +19,7 @@ import java.util.TimeZone
  * Timezone and locale are pinned, because both formatters read the defaults and
  * the UTC↔local day conversion only has a bug to catch east of UTC.
  */
-class ChatSearchFilterFormatTest {
+class SearchFilterFormatTest {
 
     private lateinit var originalZone: TimeZone
     private lateinit var originalLocale: Locale

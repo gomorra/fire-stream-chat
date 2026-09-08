@@ -9,30 +9,23 @@ class SearchMessagesUseCase @Inject constructor(
     private val messageRepository: MessageRepository
 ) {
     /**
-     * In-chat search ([chatId] non-null) accepts a [filter]. A blank query with
-     * an active filter is browse mode ("show me the photos"), so the blank-query
-     * guard only bites when there is no filter either.
+     * Searches one chat ([chatId] non-null) or every chat (null), with an
+     * optional [filter] either way.
      *
-     * Global search (null [chatId]) has no filter axis yet — it renders results
-     * across chats and would need its own result rendering. Its blank-query
-     * guard is unconditional.
+     * A blank query with an active filter is browse mode ("show me the
+     * photos"), so the blank-query guard only bites when there is no filter
+     * either — a blank query with no filter would otherwise match everything
+     * in scope.
      */
     suspend operator fun invoke(
         query: String,
         chatId: String? = null,
         filter: MessageSearchFilter = MessageSearchFilter.NONE,
     ): MessageSearchResults {
-        if (chatId == null) {
-            return if (query.isBlank()) {
-                MessageSearchResults.EMPTY
-            } else {
-                messageRepository.searchMessages(query)
-            }
-        }
         // Trimmed so a query of pure whitespace reaches the data layer as the
         // empty string its browse-mode short-circuit tests for.
         val trimmed = query.trim()
         if (trimmed.isEmpty() && !filter.isActive) return MessageSearchResults.EMPTY
-        return messageRepository.searchMessagesInChat(chatId, trimmed, filter)
+        return messageRepository.searchMessages(chatId, trimmed, filter)
     }
 }

@@ -6,16 +6,13 @@ import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
-import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,20 +28,15 @@ data class ChatListUiState(
     val error: AppError? = null,
     val currentUserId: String = "",
     val pendingDeleteChatId: String? = null,
-    val searchQuery: String = "",
-    val searchResults: List<Message> = emptyList(),
-    val isSearchActive: Boolean = false,
     val showArchived: Boolean = false,
     val pendingMuteChatId: String? = null,
     val contacts: Map<String, Contact> = emptyMap(),
     // Presence: set of recipient user IDs currently online
     val onlineUserIds: Set<String> = emptySet(),
-    val isSearchBarVisible: Boolean = false
 )
 
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
-    private val searchMessagesUseCase: SearchMessagesUseCase,
     private val authRepository: AuthRepository,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
@@ -55,7 +47,6 @@ class ChatListViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatListUiState())
     val uiState: StateFlow<ChatListUiState> = _uiState.asStateFlow()
 
-    private var searchJob: Job? = null
     private val recipientObservers = mutableMapOf<String, Job>()
     private var cachedRecipientIds: Set<String> = emptySet()
     private var hasSyncedMessages = false
@@ -239,35 +230,6 @@ class ChatListViewModel @Inject constructor(
 
     fun toggleShowArchived() {
         _uiState.value = _uiState.value.copy(showArchived = !_uiState.value.showArchived)
-    }
-
-    fun onSearchQueryChange(query: String) {
-        _uiState.value = _uiState.value.copy(searchQuery = query, isSearchActive = query.isNotEmpty())
-        searchJob?.cancel()
-        if (query.isBlank()) {
-            _uiState.value = _uiState.value.copy(searchResults = emptyList())
-            return
-        }
-        searchJob = viewModelScope.launch {
-            delay(300)
-            val results = searchMessagesUseCase(query).messages
-            _uiState.value = _uiState.value.copy(searchResults = results)
-        }
-    }
-
-    fun toggleSearchBar() {
-        val newVisible = !_uiState.value.isSearchBarVisible
-        _uiState.value = _uiState.value.copy(isSearchBarVisible = newVisible)
-        if (!newVisible) clearSearch()
-    }
-
-    fun clearSearch() {
-        searchJob?.cancel()
-        _uiState.value = _uiState.value.copy(
-            searchQuery = "",
-            searchResults = emptyList(),
-            isSearchActive = false
-        )
     }
 
     fun refresh() {

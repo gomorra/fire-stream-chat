@@ -81,15 +81,23 @@ interface MessageDao {
     fun getStarredMessages(): Flow<List<MessageEntity>>
 
     // Phase 2: in-app search (LIKE-based; FTS4 virtual table added separately)
+    //
+    // One query serves both scopes and every prefilter. Each clause is a
+    // nullable/zero-valued short-circuit, so it stays compile-time verified —
+    // which @RawQuery would have given up — while covering in-chat search,
+    // global search, and filter-only "browse" mode (blank query + an active
+    // chip).
+    //
     // The limit is a parameter, not a literal, so the caller that reports
     // "there may be more" and the query that truncates cannot drift apart.
-    @Query("SELECT * FROM messages WHERE content LIKE '%' || :query || '%' ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun searchMessages(query: String, limit: Int): List<MessageEntity>
-
-    // In-chat search with prefilters. Every clause is a nullable/zero-valued
-    // short-circuit so one compile-time-verified query serves both text search
-    // and filter-only "browse" mode (blank query + an active chip) — Room keeps
-    // verifying it, which @RawQuery would have given up.
+    //
+    // `:chatId IS NULL` is the global scope. There is no index on
+    // `messages.chatId` (the `(chatId, timestamp)` index is deliberately
+    // deferred), so today the added clause costs no query plan — this is
+    // already a full scan behind a `LIKE '%…%'`. Note for whoever adds that
+    // index: an OR-term over a nullable bound parameter is not an indexable
+    // constraint, so the in-chat scope will not use it in this form. Splitting
+    // the query back in two is part of the index work.
     //
     // `:query = ''` is a short-circuit, not a nicety: without it browse mode
     // would LIKE every row's content against '%%'.
@@ -106,7 +114,7 @@ interface MessageDao {
     @Query(
         """
         SELECT * FROM messages
-        WHERE chatId = :chatId
+        WHERE (:chatId IS NULL OR chatId = :chatId)
           AND deletedAt IS NULL
           AND (:query = '' OR content LIKE '%' || :query || '%')
           AND (:type IS NULL OR type = :type)
@@ -118,8 +126,8 @@ interface MessageDao {
         LIMIT :limit
         """
     )
-    suspend fun searchMessagesInChat(
-        chatId: String,
+    suspend fun searchMessages(
+        chatId: String?,
         query: String,
         type: String?,
         requireLink: Boolean,

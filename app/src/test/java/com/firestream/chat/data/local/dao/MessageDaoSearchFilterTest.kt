@@ -17,7 +17,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Covers the prefiltered in-chat search query behind the search chips.
+ * Covers the prefiltered search query behind the search chips, in one chat
+ * (`chatId` set) and across all of them (`chatId` null).
  *
  * The load-bearing case is `photos browse excludes a soft-deleted image`:
  * [MessageDao.softDeleteMessage] blanks `content` but leaves `mediaUrl`
@@ -48,7 +49,7 @@ class MessageDaoSearchFilterTest {
 
     /** Calls the query the way the repository does, with everything off by default. */
     private suspend fun search(
-        chatId: String = "c1",
+        chatId: String? = "c1",
         query: String = "",
         type: String? = null,
         requireLink: Boolean = false,
@@ -56,7 +57,7 @@ class MessageDaoSearchFilterTest {
         from: Long? = null,
         to: Long? = null,
         limit: Int = 200,
-    ) = dao.searchMessagesInChat(chatId, query, type, requireLink, starredOnly, from, to, limit)
+    ) = dao.searchMessages(chatId, query, type, requireLink, starredOnly, from, to, limit)
 
     @Test
     fun `text search matches content substrings within the chat`() = runTest {
@@ -189,6 +190,47 @@ class MessageDaoSearchFilterTest {
         val results = search(limit = 3)
 
         assertEquals(listOf("m5", "m4", "m3"), results.map { it.id })
+    }
+
+    // ── Global scope (chatId = null) ────────────────────────────────────────
+
+    @Test
+    fun `a null chatId searches across every chat`() = runTest {
+        dao.insertMessages(listOf(
+            msg(id = "here", chatId = "c1", content = "meet at the harbour", timestamp = 100L),
+            msg(id = "there", chatId = "c2", content = "harbour again", timestamp = 200L),
+            msg(id = "miss", chatId = "c2", content = "nothing relevant", timestamp = 300L),
+        ))
+
+        val results = search(chatId = null, query = "harbour", limit = 50)
+
+        assertEquals(listOf("there", "here"), results.map { it.id })
+    }
+
+    @Test
+    fun `a global photos browse excludes a soft-deleted image in another chat`() = runTest {
+        // The guard the old unfiltered global query never had: a tombstone
+        // keeps its mediaUrl, and a filter-only query has no content predicate
+        // to hide it behind.
+        dao.insertMessages(listOf(
+            msg(id = "live", chatId = "c1", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg"),
+            msg(id = "gone", chatId = "c2", type = "IMAGE", content = "caption", mediaUrl = "https://x/2.jpg"),
+        ))
+        dao.softDeleteMessage("gone", deletedAt = 4242L)
+
+        val results = search(chatId = null, type = "IMAGE")
+
+        assertEquals(listOf("live"), results.map { it.id })
+    }
+
+    @Test
+    fun `a chat-scoped search still excludes the other chat's hits`() = runTest {
+        dao.insertMessages(listOf(
+            msg(id = "here", chatId = "c1", content = "harbour"),
+            msg(id = "there", chatId = "c2", content = "harbour"),
+        ))
+
+        assertEquals(listOf("here"), search(chatId = "c1", query = "harbour", limit = 50).map { it.id })
     }
 
     private fun msg(

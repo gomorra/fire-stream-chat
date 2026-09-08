@@ -203,6 +203,26 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### "What is this chat called" has three divergent copies
+
+**The smell.** Resolving a chat's display name — 1:1 → the other participant's contact name, else `chat.name`, else a fallback — is written three times, and the three already disagree. `ui/chatlist/ChatListItem.kt` does `?: chat.name ?: "Chat"` with no blank check, so a chat whose `name` is `""` renders an empty row. `ui/search/GlobalSearchLabels.kt`'s `Chat?.displayTitle` adds `takeIf { it.isNotBlank() }` and is the only one with unit tests. `ui/share/SharePickerViewModel.kt`'s `chatDisplayName` prefers `chat.name` *first* and falls back to a raw uid. The underlying "other participant of a 1:1" expression (`participants.firstOrNull { it != currentUserId }`) is hand-rolled ~15 more times across `ui/` — `ForwardChatPicker`, `ListShareSheet`, `ArchivedChatsScreen`, `ChatListScreen`, `SharePickerViewModel`.
+
+**Why we haven't fixed it.** The global-search change (2026-09-08) consolidated the two copies it introduced into one `otherParticipant` helper inside `ui/search/`, but going further means one shared helper — `ui/components/`, or a `Chat` extension — that `ui/chatlist`, `ui/share` and `ui/search` all call. That is a refactor across three feature packages with no test coverage on two of them, landed on top of an already cross-cutting diff; doing it as a drive-by inside the search commit would have made a reviewable change unreviewable. The three call sites are also not quite the same function: `SharePickerViewModel` keys on `User`, the other two on `Contact`.
+
+**When to revisit.** The next time a fourth caller needs it, or the first time the blank-`name` divergence produces a real empty row in the chat list — that one is a live (pre-existing) bug in `ChatListItem`, not merely a smell. Raised by three of four `/simplify` reviewers on the global-search diff (2026-09-08).
+
+---
+
+### A read-only screen pays for `getChats()`'s full sync pipeline
+
+**The smell.** `ChatRepositoryImpl.getChats()` is not a Room read: it is a `channelFlow` that also launches `chatSource.observeChatsForUser(uid)` and, per remote emission, does a `chatDao.upsertRemote(...)` plus a per-group-chat `profileImageManager.fileExists()` / `downloadAvatar()` pass. `ui/search/GlobalSearchViewModel` collects it purely to build an `id → Chat` map for result labels, so for as long as the search screen is open it pays for a second live Firestore snapshot listener, a duplicate Room upsert, and a duplicate avatar pass — genuinely duplicate, since `ChatListViewModel` is collecting the same flow on the back stack directly underneath. `getContacts()` has the same shape, including one `File.exists()` stat per contact per emission on the collecting dispatcher.
+
+**Why we haven't fixed it.** It is the house pattern, not something global search invented: `ListsViewModel`, `ListDetailViewModel` and `CallsViewModel` all collect `getChats()` for read-only purposes too. Fixing it properly means adding a local-only accessor (`observeLocalChats()`, Room-backed, no sync `launch {}`) and moving every read-only consumer onto it — a repository-interface change touching four view models, which is not the search feature's to make.
+
+**When to revisit.** When the local-only accessor is added for any reason, move all four consumers at once. Sooner if profiling shows the duplicate avatar pass or the per-contact `File.exists()` stats costing frames on a large account. Raised by the `/simplify` efficiency pass on the global-search diff (2026-09-08).
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
