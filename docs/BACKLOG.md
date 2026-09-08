@@ -44,10 +44,13 @@ Delete an item once it has been verified (or once a fix for what the check found
   newest-first icon rows; and **the chip row scrolls freely** under the pager-free
   destination — the check that motivated making it a destination at all, confirmed by the
   author on device.
-  Still unverified: that the field is focused **with the keyboard already up** on entry
-  (`LaunchedEffect` + `FocusRequester` only requests focus, and some OEM IMEs need more),
-  and that tapping a global result — media tiles included — lands *at the message* in the
-  right conversation rather than at the bottom of it.
+  Also confirmed: tapping a global result lands *at the message* in the right conversation
+  rather than at the bottom of it. Media tiles are covered by the same check rather than
+  by analogy — `GlobalSearchScreen` passes one `openResult` lambda to both `onResultClick`
+  and `onMediaClick`, so there is no second path to exercise.
+  Still unverified, and the last item here: that the field is focused **with the keyboard
+  already up** on entry — `LaunchedEffect` + `FocusRequester` only requests focus, and some
+  OEM IMEs need more. An emulator would not prove this either way; it needs a real phone.
 - Global search has no `MessageSearchFilter` persistence across the destination's
   lifecycle, so process death mid-search drops the chips. Accepted (search is transient),
   recorded so it reads as a decision rather than an oversight.
