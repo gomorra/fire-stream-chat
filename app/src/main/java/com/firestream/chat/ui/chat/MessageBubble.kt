@@ -90,6 +90,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.firestream.chat.domain.util.MapUrls
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1159,7 +1160,7 @@ private fun LocationBubbleContent(
 ) {
     if (latitude == null || longitude == null) return
     val context = LocalContext.current
-    val mapUrl = remember(latitude, longitude) { staticMapUrl(latitude, longitude) }
+    val mapUrl = remember(latitude, longitude) { MapUrls.staticMapUrl(latitude, longitude) }
     Column(
         modifier = Modifier
             .clickable {

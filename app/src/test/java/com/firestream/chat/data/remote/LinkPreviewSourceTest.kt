@@ -18,6 +18,7 @@ import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LinkPreviewSourceTest {
@@ -26,6 +27,9 @@ class LinkPreviewSourceTest {
     private val webPagePreviewCapture = mockk<WebPagePreviewCapture>()
 
     private val source = LinkPreviewSource(okHttpClient, webPagePreviewCapture)
+
+    /** Every request the source issued, so a test can assert how it identified itself. */
+    private val sentRequests = mutableListOf<Request>()
 
     private fun stubHtml(html: String, url: String = "https://example.com/page") {
         val response = Response.Builder()
@@ -37,7 +41,7 @@ class LinkPreviewSourceTest {
             .build()
         val call = mockk<Call>()
         every { call.execute() } returns response
-        every { okHttpClient.newCall(any()) } returns call
+        every { okHttpClient.newCall(capture(sentRequests)) } returns call
     }
 
     // ── extractUrl ────────────────────────────────────────────────────────
@@ -288,5 +292,163 @@ class LinkPreviewSourceTest {
         assertEquals("/tmp/p.png", preview!!.imageUrl)
         assertNull(preview.title)
         coVerify(exactly = 1) { webPagePreviewCapture.capture("https://example.com/screenshot-only") }
+    }
+
+    @Test
+    fun `fetchPreview parses meta tags with reversed attribute order`() = runTest {
+        stubHtml(
+            """
+            <html><head>
+                <meta content="Restaurant Bagdad · Stuttgart" property="og:title">
+                <meta content="https://cdn.example.com/photo.png" property="og:image">
+                <meta content="Fine dining" property="og:description">
+            </head></html>
+            """.trimIndent(),
+            url = "https://example.com/reversed"
+        )
+
+        val preview = source.fetchPreview("https://example.com/reversed")
+
+        assertNotNull(preview)
+        assertEquals("Restaurant Bagdad · Stuttgart", preview!!.title)
+        assertEquals("https://cdn.example.com/photo.png", preview.imageUrl)
+        assertEquals("Fine dining", preview.description)
+        coVerify(exactly = 0) { webPagePreviewCapture.capture(any()) }
+    }
+
+    @Test
+    fun `fetchPreview parses itemprop microdata`() = runTest {
+        stubHtml(
+            """
+            <html><head>
+                <meta content="Item Name" itemprop="name">
+                <meta content="Item Description" itemprop="description">
+                <meta content="https://cdn.example.com/item.png" itemprop="image">
+            </head></html>
+            """.trimIndent(),
+            url = "https://example.com/microdata"
+        )
+
+        val preview = source.fetchPreview("https://example.com/microdata")
+
+        assertNotNull(preview)
+        assertEquals("Item Name", preview!!.title)
+        assertEquals("Item Description", preview.description)
+        assertEquals("https://cdn.example.com/item.png", preview.imageUrl)
+    }
+
+    @Test
+    fun `fetchPreview unescapes HTML entities in title and description`() = runTest {
+        stubHtml(
+            """
+            <html><head>
+                <meta property="og:title" content="Rock &amp; Roll &#39;Special&#39; &quot;Live&quot;" />
+                <meta property="og:description" content="A &lt; B &amp; C &gt; D" />
+                <meta property="og:image" content="https://cdn.example.com/art.png" />
+            </head></html>
+            """.trimIndent(),
+            url = "https://example.com/entities"
+        )
+
+        val preview = source.fetchPreview("https://example.com/entities")
+
+        assertNotNull(preview)
+        assertEquals("Rock & Roll 'Special' \"Live\"", preview!!.title)
+        assertEquals("A < B & C > D", preview.description)
+    }
+
+    @Test
+    fun `fetchPreview extracts place name from canonical maps URL when title is generic`() = runTest {
+        val mapsUrl = "https://www.google.com/maps/place/Brandenburg+Gate/@52.5162746,13.3777041,17z"
+        stubHtml(
+            """
+            <html><head>
+                <title>Google Maps</title>
+                <meta content="Google Maps" property="og:title">
+            </head></html>
+            """.trimIndent(),
+            url = mapsUrl
+        )
+
+        val preview = source.fetchPreview(mapsUrl)
+
+        assertNotNull(preview)
+        assertEquals("Brandenburg Gate", preview!!.title)
+        assertNotNull(preview.imageUrl)
+        coVerify(exactly = 0) { webPagePreviewCapture.capture(any()) }
+    }
+
+    // ── how the fetch identifies itself ───────────────────────────────────
+
+    @Test
+    fun `fetchPreview identifies itself as a social crawler`() = runTest {
+        stubHtml(
+            """<html><head><meta property="og:title" content="Titled"></head></html>""",
+            url = "https://example.com/ua"
+        )
+        coEvery { webPagePreviewCapture.capture(any()) } returns null
+
+        source.fetchPreview("https://example.com/ua")
+
+        // A browser UA is what made Google properties answer with a consent
+        // interstitial carrying no og: tags; a crawler UA is served the real metadata.
+        val userAgent = sentRequests.single().header("User-Agent")
+        assertNotNull(userAgent)
+        assertTrue("expected a crawler UA, got $userAgent", userAgent!!.startsWith("WhatsApp/"))
+    }
+
+    @Test
+    fun `fetchPreview retries as a browser when the crawler UA is refused`() = runTest {
+        val url = "https://example.com/bot-fight"
+        val refused = Response.Builder()
+            .request(Request.Builder().url(url).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(403)
+            .message("Forbidden")
+            .body("".toResponseBody("text/html".toMediaType()))
+            .build()
+        val served = Response.Builder()
+            .request(Request.Builder().url(url).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(200)
+            .message("OK")
+            .body(
+                """<html><head><meta property="og:title" content="Behind the wall"></head></html>"""
+                    .toResponseBody("text/html".toMediaType())
+            )
+            .build()
+        var attempt = 0
+        every { okHttpClient.newCall(capture(sentRequests)) } answers {
+            val response = if (attempt++ == 0) refused else served
+            mockk<Call>().also { every { it.execute() } returns response }
+        }
+        coEvery { webPagePreviewCapture.capture(any()) } returns null
+
+        val preview = source.fetchPreview(url)
+
+        assertNotNull(preview)
+        assertEquals("Behind the wall", preview!!.title)
+        assertEquals(2, sentRequests.size)
+        assertTrue(sentRequests[0].header("User-Agent")!!.startsWith("WhatsApp/"))
+        assertTrue(sentRequests[1].header("User-Agent")!!.startsWith("Mozilla/"))
+    }
+
+    @Test
+    fun `fetchPreview does not retry an ordinary not-found`() = runTest {
+        val url = "https://example.com/gone"
+        val missing = Response.Builder()
+            .request(Request.Builder().url(url).build())
+            .protocol(Protocol.HTTP_1_1)
+            .code(404)
+            .message("Not Found")
+            .body("".toResponseBody("text/html".toMediaType()))
+            .build()
+        val call = mockk<Call>()
+        every { call.execute() } returns missing
+        every { okHttpClient.newCall(capture(sentRequests)) } returns call
+        coEvery { webPagePreviewCapture.capture(any()) } returns null
+
+        assertNull(source.fetchPreview(url))
+        assertEquals(1, sentRequests.size)
     }
 }

@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.firestream.chat.domain.util.MapUrls
 import com.google.android.gms.location.CurrentLocationRequest
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
@@ -129,7 +130,7 @@ internal fun LocationPickerSheet(
                 else -> {
                     val lat = latitude!!
                     val lng = longitude!!
-                    val mapUrl = staticMapUrl(lat, lng)
+                    val mapUrl = MapUrls.staticMapUrl(lat, lng)
 
                     Box(
                         modifier = Modifier

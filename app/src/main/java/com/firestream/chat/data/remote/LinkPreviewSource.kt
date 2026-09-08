@@ -2,6 +2,7 @@ package com.firestream.chat.data.remote
 
 import androidx.annotation.VisibleForTesting
 import com.firestream.chat.data.util.SingleFlight
+import com.firestream.chat.domain.util.MapUrls
 import com.firestream.chat.domain.util.MessageUrls
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -59,33 +60,28 @@ class LinkPreviewSource @Inject constructor(
     }
 
     private suspend fun loadPreview(url: String): LinkPreview? {
-        val parsed = withContext(Dispatchers.IO) {
-            try {
-                val request = Request.Builder()
-                    .url(url)
-                    // A real browser UA, not a bot string: many sites (Google properties
-                    // included) serve a stripped consent/interstitial page to unknown
-                    // agents, which carries no og: tags at all.
-                    .header("User-Agent", BROWSER_UA)
-                    .header("Accept", "text/html,application/xhtml+xml")
-                    .header("Accept-Language", "en-US,en;q=0.9")
-                    .build()
-                okHttpClient.newCall(request).execute().use { response ->
-                    readHtmlHead(response)?.let { parseHtmlMeta(url, it) }
-                }
-            } catch (_: Exception) {
-                null
-            }
-        }
+        val page = fetchPage(url)
+        val parsed = page.meta
+        val finalUrl = page.finalUrl
+
+        // Dedicated Map adapter: extract place name and coordinates from the canonical URL
+        val mapsInfo = MapUrls.extractMapsPlaceInfo(finalUrl) ?: MapUrls.extractMapsPlaceInfo(url)
+        val effectiveTitle = parsed?.title?.takeUnless { it.equals("Google Maps", ignoreCase = true) }
+            ?: mapsInfo?.placeName
+            ?: parsed?.title
+
+        val fallbackMapImage = if (parsed?.imageUrl == null && mapsInfo?.latitude != null && mapsInfo.longitude != null) {
+            MapUrls.staticMapUrl(mapsInfo.latitude, mapsInfo.longitude)
+        } else null
 
         // Fallback: if the page exposed no image via any meta/link tag, render the
         // page in an offscreen WebView and use the top-of-page screenshot as the
         // preview image.
-        val imageUrl = parsed?.imageUrl ?: webPagePreviewCapture.capture(url)
+        val imageUrl = parsed?.imageUrl ?: fallbackMapImage ?: webPagePreviewCapture.capture(url)
 
         val preview = LinkPreview(
             url = url,
-            title = parsed?.title,
+            title = effectiveTitle,
             description = parsed?.description,
             imageUrl = imageUrl
         )
@@ -94,6 +90,49 @@ class LinkPreviewSource @Inject constructor(
         return preview.takeIf {
             it.title != null || it.description != null || it.imageUrl != null
         }
+    }
+
+    private data class FetchedPage(
+        val finalUrl: String,
+        val meta: ParsedMeta? = null,
+        /** The server answered the way bot-detection does — worth one honest retry. */
+        val blocked: Boolean = false
+    )
+
+    /**
+     * Fetches [url]'s metadata, as a crawler first and as a browser second.
+     *
+     * The crawler UA is what makes a site serve its pre-rendered OpenGraph tags instead
+     * of a consent wall or an empty JS shell, so it goes first. But bot-fight
+     * configurations answer that same UA with 403/429 when it arrives from a phone's
+     * residential IP, and a failure here is sticky for [FAILURE_COOLDOWN_MS]. One retry
+     * as an ordinary browser costs a single request and keeps a whole domain from
+     * silently losing previews.
+     */
+    private suspend fun fetchPage(url: String): FetchedPage = withContext(Dispatchers.IO) {
+        val asCrawler = readPage(url, CRAWLER_UA)
+        if (asCrawler.blocked) readPage(url, BROWSER_UA) else asCrawler
+    }
+
+    private fun readPage(url: String, userAgent: String): FetchedPage = try {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", userAgent)
+            .header("Accept", "text/html,application/xhtml+xml")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .build()
+        okHttpClient.newCall(request).execute().use { response ->
+            // The *final* URL after redirects: a maps.app.goo.gl share link only names
+            // its place once it has resolved, and relative images resolve against it.
+            val finalUrl = response.request.url.toString()
+            FetchedPage(
+                finalUrl = finalUrl,
+                meta = readHtmlHead(response)?.let { parseHtmlMeta(finalUrl, it) },
+                blocked = response.code in BOT_REJECTION_CODES
+            )
+        }
+    } catch (_: Exception) {
+        FetchedPage(finalUrl = url)
     }
 
     /**
@@ -141,25 +180,40 @@ class LinkPreviewSource @Inject constructor(
     )
 
     private fun parseHtmlMeta(pageUrl: String, html: String): ParsedMeta {
-        val title = OG_TITLE.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: TWITTER_TITLE.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: TITLE_TAG.find(html)?.groupValues?.getOrNull(1)?.trim()
+        val title = (OG_TITLE.find(html)?.extractContent()
+            ?: TWITTER_TITLE.find(html)?.extractContent()
+            ?: ITEMPROP_NAME.find(html)?.extractContent()
+            ?: TITLE_TAG.find(html)?.groupValues?.getOrNull(1))
+            ?.trim()?.takeIf { it.isNotEmpty() }?.let { unescapeHtml(it) }
 
-        val description = OG_DESC.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: TWITTER_DESC.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: META_DESC.find(html)?.groupValues?.getOrNull(1)?.trim()
+        val description = (OG_DESC.find(html)?.extractContent()
+            ?: TWITTER_DESC.find(html)?.extractContent()
+            ?: META_DESC.find(html)?.extractContent()
+            ?: ITEMPROP_DESC.find(html)?.extractContent())
+            ?.trim()?.takeIf { it.isNotEmpty() }?.let { unescapeHtml(it) }
 
         // We deliberately skip <link rel="icon"> — it's typically a 16–32 px
         // favicon, which Coil upscales into a blurry square that users
         // perceive as an empty preview. Better to fall through to the
         // WebView screenshot fallback, which produces a real page thumbnail.
-        val rawImage = OG_IMAGE.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: TWITTER_IMAGE.find(html)?.groupValues?.getOrNull(1)?.trim()
-            ?: APPLE_TOUCH_ICON.find(html)?.groupValues?.getOrNull(1)?.trim()
+        val rawImage = (OG_IMAGE.find(html)?.extractContent()
+            ?: TWITTER_IMAGE.find(html)?.extractContent()
+            ?: ITEMPROP_IMAGE.find(html)?.extractContent()
+            ?: APPLE_TOUCH_ICON.find(html)?.groupValues?.getOrNull(1))
+            ?.trim()?.takeIf { it.isNotEmpty() }?.let { unescapeHtml(it) }
 
         val imageUrl = rawImage?.let { resolveUrl(pageUrl, it) }
         return ParsedMeta(title = title, description = description, imageUrl = imageUrl)
     }
+
+    private fun unescapeHtml(text: String): String = text
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&#x27;", "'")
 
     // Resolves a possibly-relative image reference against the page's URL:
     //   "//cdn.example.com/a.png"  → "https://cdn.example.com/a.png"
@@ -184,9 +238,15 @@ class LinkPreviewSource @Inject constructor(
         private const val INITIAL_PROBE_BYTES = 8L * 1024
         private val HEAD_CLOSE = "</head".encodeUtf8()
         private val HTML_SUBTYPES = setOf("html", "xhtml+xml", "plain")
+        private const val CRAWLER_UA = "WhatsApp/2.21.12.21 A"
+
+        /** Falls back to a plain browser identity when the crawler UA is refused. */
         private const val BROWSER_UA =
             "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36"
+
+        /** Statuses a bot-detection layer answers with; ordinary 404s are not retried. */
+        private val BOT_REJECTION_CODES = setOf(401, 403, 406, 429)
 
         @VisibleForTesting
         internal const val FAILURE_COOLDOWN_MS = 10L * 60 * 1000
@@ -201,6 +261,10 @@ class LinkPreviewSource @Inject constructor(
 
         private val META_DESC = metaRegex("name", "description")
 
+        private val ITEMPROP_NAME = metaRegex("itemprop", "name")
+        private val ITEMPROP_DESC = metaRegex("itemprop", "description")
+        private val ITEMPROP_IMAGE = metaRegex("itemprop", "image")
+
         private val TITLE_TAG = Regex(
             """<title[^>]*>([^<]+)</title>""",
             RegexOption.IGNORE_CASE
@@ -211,12 +275,14 @@ class LinkPreviewSource @Inject constructor(
             RegexOption.IGNORE_CASE
         )
 
-        // Matches <meta {attr}="{value}" ... content="...">. Most sites emit
-        // meta tags in this order; sites that reverse it will miss here but
-        // will still fall through to the WebView screenshot.
+        // Matches <meta {attr}="{value}" ... content="..."> AND <meta content="..." ... {attr}="{value}">.
+        // Google properties, among others, reverse the order: <meta content="..." property="og:title">.
         private fun metaRegex(attr: String, value: String): Regex = Regex(
-            """<meta[^>]+$attr=["']$value["'][^>]+content=["']([^"']+)["']""",
+            """<meta[^>]+(?:$attr=["']$value["'][^>]+content=["']([^"']*)["']|content=["']([^"']*)["'][^>]+$attr=["']$value["'])""",
             RegexOption.IGNORE_CASE
         )
+
+        private fun MatchResult.extractContent(): String? =
+            groupValues.drop(1).firstOrNull { it.isNotEmpty() }
     }
 }
