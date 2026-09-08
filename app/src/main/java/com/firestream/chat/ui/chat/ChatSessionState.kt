@@ -34,3 +34,18 @@ internal data class SessionState(
     // before they try to send.
     val isRecipientBlocked: Boolean = false,
 )
+
+/**
+ * The name to show for [senderId] in this chat.
+ *
+ * [participantAvatars] is the map to read: it is populated for 1:1 chats
+ * (from `observeRecipient`) as well as for groups, whereas
+ * [participantNameMap] is group-only. The raw id is the last resort so a row
+ * never renders blank — it is not something to show on purpose.
+ */
+internal fun SessionState.senderDisplayName(senderId: String): String =
+    if (senderId == currentUserId) {
+        "You"
+    } else {
+        participantAvatars[senderId]?.displayName ?: chatName ?: senderId
+    }

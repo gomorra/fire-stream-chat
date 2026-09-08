@@ -105,7 +105,9 @@ internal class ChatMessageActions(
             recipientId = recipientId,
             fireAtMs = fireAtMs,
             messageSnapshot = snapshotContentFor(message),
-            senderNameSnapshot = senderNameFor(message, session),
+            // Snapshotted, not resolved at fire time: the notification must
+            // still name a sender after the live message has been deleted.
+            senderNameSnapshot = session.senderDisplayName(message.senderId),
             createdAtMs = System.currentTimeMillis(),
         )
         scope.launch {
@@ -131,21 +133,6 @@ internal class ChatMessageActions(
      * preset", not an error.
      */
     suspend fun detectSnoozeTime(text: String): Long? = dateTimeDetector.detect(text, System.currentTimeMillis())
-
-    // Best-effort sender name for the notification that fires later, after the
-    // live message may have been deleted. "You" for the current user's own
-    // messages (mirrors the star/starred-overview convention); otherwise the
-    // richest name source already populated on session — participantAvatars is
-    // filled for both the 1:1 recipient (ChatInfoManager.observeRecipient) and
-    // group participants (loadGroupParticipants), so it covers both chat kinds.
-    private fun senderNameFor(message: Message, session: SessionState): String =
-        if (message.senderId == session.currentUserId) {
-            "You"
-        } else {
-            session.participantAvatars[message.senderId]?.displayName
-                ?: session.chatName
-                ?: message.senderId
-        }
 
     // Mirrors FCMService's notification-text formatting for non-text types (the
     // fired reminder notification is the direct analogue of a push notification

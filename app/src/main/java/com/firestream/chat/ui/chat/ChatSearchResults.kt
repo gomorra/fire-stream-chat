@@ -65,11 +65,15 @@ private val URL_REGEX = Regex("""https?://[^\s]+""")
  * that a wall of "sent an image" text rows is useless for finding a picture.
  * Docs and Links get icon rows keyed on the filename / URL they carry. Anything
  * else keeps the text rows search has always had.
+ *
+ * Text rows are labelled with [senderName] — the caller resolves it, because
+ * the id→name maps live on the session slice and this file only renders.
  */
 @Composable
 internal fun SearchResultList(
     results: List<Message>,
     filterType: MessageFilterType?,
+    senderName: (Message) -> String,
     onResultClick: (Message) -> Unit,
     onMediaClick: (Message) -> Unit,
     modifier: Modifier = Modifier,
@@ -118,7 +122,11 @@ internal fun SearchResultList(
 
         else -> LazyColumn(modifier = modifier.fillMaxSize()) {
             items(results, key = { "search_${it.id}" }) { message ->
-                SearchTextRow(message = message, onClick = { onResultClick(message) })
+                SearchTextRow(
+                    message = message,
+                    senderName = senderName(message),
+                    onClick = { onResultClick(message) },
+                )
                 HorizontalDivider()
             }
         }
@@ -126,7 +134,7 @@ internal fun SearchResultList(
 }
 
 @Composable
-private fun SearchTextRow(message: Message, onClick: () -> Unit) {
+private fun SearchTextRow(message: Message, senderName: String, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -134,7 +142,7 @@ private fun SearchTextRow(message: Message, onClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
         Text(
-            text = message.senderId.take(12),
+            text = senderName,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.primary
         )

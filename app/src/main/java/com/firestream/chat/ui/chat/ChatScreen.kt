@@ -1166,6 +1166,9 @@ fun ChatScreen(
                     SearchResultList(
                         results = uiState.overlays.searchResults,
                         filterType = uiState.overlays.searchFilter.type,
+                        senderName = { message ->
+                            uiState.session.senderDisplayName(message.senderId)
+                        },
                         onResultClick = { message -> openSearchResult(message) },
                         onMediaClick = { message -> openSearchMedia(message) },
                         modifier = Modifier
@@ -1734,13 +1737,8 @@ fun ChatScreen(
                             uiState.composer.replyToMessage,
                             uiState.messages.messages,
                         )
-                        // Same name source as ChatMessageActions.senderNameFor:
-                        // participantAvatars covers both 1:1 and group chats;
-                        // participantNameMap is group-only.
                         val senderName = target?.senderId?.let { id ->
-                            if (id == uiState.session.currentUserId) "You"
-                            else uiState.session.participantAvatars[id]?.displayName
-                                ?: uiState.session.chatName
+                            uiState.session.senderDisplayName(id)
                         }
                         widget.RenderContent(
                             targetMessage = target,
