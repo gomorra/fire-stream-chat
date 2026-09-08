@@ -4,6 +4,9 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import okhttp3.Call
 import okhttp3.MediaType.Companion.toMediaType
@@ -38,26 +41,16 @@ class LinkPreviewSourceTest {
     }
 
     // ── extractUrl ────────────────────────────────────────────────────────
+    // Detection itself is MessageUrls' job and is covered by MessageUrlsTest;
+    // this only pins that fetchPreview's companion delegate still reaches it.
 
     @Test
-    fun `extractUrl finds URL in text`() {
+    fun `extractUrl delegates to the shared detector`() {
         assertEquals(
             "https://example.com/foo",
-            source.extractUrl("check this out https://example.com/foo right here"),
+            source.extractUrl("check this out https://example.com/foo."),
         )
-    }
-
-    @Test
-    fun `extractUrl returns null for text without URL`() {
         assertNull(source.extractUrl("just some words, no link"))
-    }
-
-    @Test
-    fun `extractUrl finds first URL when multiple present`() {
-        assertEquals(
-            "https://first.example.com",
-            source.extractUrl("https://first.example.com and https://second.example.com"),
-        )
     }
 
     // ── fetchPreview meta tag fallback chain ──────────────────────────────
@@ -161,16 +154,54 @@ class LinkPreviewSourceTest {
     }
 
     @Test
-    fun `fetchPreview does not cache empty results so transient failures retry`() = runTest {
+    fun `fetchPreview suppresses a retry inside the failure cooldown`() = runTest {
         stubHtml("<html></html>")
         coEvery { webPagePreviewCapture.capture(any()) } returns null
 
-        source.fetchPreview("https://example.com/transient")
-        source.fetchPreview("https://example.com/transient")
+        assertNull(source.fetchPreview("https://example.com/transient"))
+        assertNull(source.fetchPreview("https://example.com/transient"))
 
-        // Both attempts hit the network because the first returned null
-        // — caching it would have permanently masked a recoverable error.
+        // The second attempt short-circuits. The message flow re-emits on every
+        // status write, and re-running a dead link's full fetch — HTTP plus the
+        // ~20 s WebView capture — on each emission is what made chat lag.
+        coVerify(exactly = 1) { okHttpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `fetchPreview retries once the failure cooldown expires`() = runTest {
+        stubHtml("<html></html>")
+        coEvery { webPagePreviewCapture.capture(any()) } returns null
+        var now = 0L
+        source.nowMs = { now }
+
+        assertNull(source.fetchPreview("https://example.com/transient"))
+        now += LinkPreviewSource.FAILURE_COOLDOWN_MS + 1
+        assertNull(source.fetchPreview("https://example.com/transient"))
+
+        // Cooldown, not a permanent block — a network blip still recovers.
         coVerify(exactly = 2) { okHttpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `concurrent fetches for one url issue a single request`() = runBlocking {
+        stubHtml("""<html><head><meta property="og:title" content="Shared" /></head></html>""")
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        coEvery { webPagePreviewCapture.capture(any()) } coAnswers {
+            entered.complete(Unit)
+            release.await()
+            null
+        }
+
+        val first = async { source.fetchPreview("https://example.com/race") }
+        entered.await()
+        val second = async { source.fetchPreview("https://example.com/race") }
+        release.complete(Unit)
+
+        assertEquals(first.await(), second.await())
+        // Second caller joins the in-flight fetch instead of starting its own —
+        // without this, every re-emission stacked another capture on the first.
+        coVerify(exactly = 1) { okHttpClient.newCall(any()) }
     }
 
     // ── relative URL resolution ───────────────────────────────────────────
@@ -232,9 +263,13 @@ class LinkPreviewSourceTest {
         every { okHttpClient.newCall(any()) } answers { newCallSequence.removeAt(0) }
         coEvery { webPagePreviewCapture.capture(any()) } returns null
 
+        var now = 0L
+        source.nowMs = { now }
+
         val first = source.fetchPreview("https://example.com/retry")
         assertNull(first)
 
+        now += LinkPreviewSource.FAILURE_COOLDOWN_MS + 1
         val second = source.fetchPreview("https://example.com/retry")
         assertNotNull(second)
         assertEquals("https://cdn/x.png", second!!.imageUrl)

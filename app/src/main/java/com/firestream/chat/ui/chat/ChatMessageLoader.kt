@@ -21,6 +21,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.util.MessageUrls
 
 internal class ChatMessageLoader(
     private val chatId: String,
@@ -47,6 +48,13 @@ internal class ChatMessageLoader(
     private var previousMessages: List<Message>? = null
     private val observedListIds = mutableSetOf<String>()
     private val processedUnshareIds = mutableSetOf<String>()
+
+    // Message id → the text last scanned for a link. The message flow re-emits on
+    // every status/receipt write, and re-running the URL regex over every message in
+    // the chat on each of those was pure main-thread waste. Keyed on content, not id,
+    // so an edit is still rescanned. Retry *timing* is not decided here — that stays
+    // with LinkPreviewSource's cache and cooldown.
+    private val scannedContent = mutableMapOf<String, String>()
 
     fun start() {
         loadMessages()
@@ -195,14 +203,32 @@ internal class ChatMessageLoader(
 
     private fun fetchLinkPreviewsFor(messages: List<Message>) {
         messages.forEach { msg ->
-            if (msg.type == MessageType.TEXT) {
-                val url = linkPreviewSource.extractUrl(msg.content) ?: return@forEach
-                if (_uiState.value.overlays.linkPreviews.containsKey(url)) return@forEach
-                scope.launch {
-                    val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
+            if (msg.type != MessageType.TEXT) return@forEach
+            if (scannedContent.put(msg.id, msg.content) == msg.content) return@forEach
+            // Cheap prefilter — most messages have no link, and the regex is the
+            // expensive half of this sweep.
+            val url = msg.content.takeIf { it.contains("http") }
+                ?.let { MessageUrls.extractUrl(it) }
+            if (url == null) {
+                // An edit that removed the link must drop the preview with it.
+                if (_uiState.value.overlays.linkPreviews.containsKey(msg.id)) {
                     _uiState.update {
-                        it.copy(overlays = it.overlays.copy(linkPreviews = it.overlays.linkPreviews + (url to preview)))
+                        it.copy(overlays = it.overlays.copy(
+                            linkPreviews = it.overlays.linkPreviews - msg.id
+                        ))
                     }
+                }
+                return@forEach
+            }
+            scope.launch {
+                val preview = linkPreviewSource.fetchPreview(url) ?: return@launch
+                // Keyed by message id, not URL: the loader is the only place that
+                // knows both, and pairing them here spares every recomposition from
+                // re-deriving the URL to look a preview up.
+                _uiState.update {
+                    it.copy(overlays = it.overlays.copy(
+                        linkPreviews = it.overlays.linkPreviews + (msg.id to preview)
+                    ))
                 }
             }
         }

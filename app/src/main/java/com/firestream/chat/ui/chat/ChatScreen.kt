@@ -1202,6 +1202,15 @@ fun ChatScreen(
                         val reversed = remember(uiState.messages.messages) {
                             uiState.messages.messages.asReversed()
                         }
+                        // Hoisted out of the item scope: this lookup used to run a
+                        // linear scan per visible bubble per recomposition — O(items ×
+                        // messages) every frame in a long chat. Built once per data
+                        // change, and skipped entirely when nothing is a reply.
+                        val messagesById = remember(uiState.messages.messages) {
+                            val messages = uiState.messages.messages
+                            if (messages.none { it.replyToId != null }) emptyMap()
+                            else messages.associateBy { it.id }
+                        }
                         LazyColumn(
                             state = listState,
                             reverseLayout = true,
@@ -1228,14 +1237,8 @@ fun ChatScreen(
                                     else -> 4.dp
                                 }
                                 val isOwn = message.senderId == uiState.session.currentUserId
-                                val replyToMessage = message.replyToId?.let { id ->
-                                    uiState.messages.messages.find { it.id == id }
-                                }
-                                val linkPreview = if (message.type == MessageType.TEXT) {
-                                    uiState.overlays.linkPreviews.entries.firstOrNull { (url, _) ->
-                                        message.content.contains(url)
-                                    }?.value
-                                } else null
+                                val replyToMessage = message.replyToId?.let { messagesById[it] }
+                                val linkPreview = uiState.overlays.linkPreviews[message.id]
 
                                 // Keep the date separator and the bubble inside ONE lazy-item node.
                                 // With reverseLayout=true, multiple sibling composables emitted

@@ -371,6 +371,26 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### Link previews cache in RAM only, while their screenshots cache on disk
+
+**The smell.** `LinkPreviewSource` holds resolved previews and negative results in two `ConcurrentHashMap`s on a `@Singleton`, but `WebPagePreviewCapture` writes its rendered JPEGs into `cacheDir`. So the two halves of one result have different lifetimes: after every cold start the title/description and — more expensively — the *negative* result are gone, so a dead link's 10-minute `FAILURE_COOLDOWN_MS` resets and the ~20 s offscreen WebView capture runs again. Raised by the altitude reviewer during the 2026-09-08 preview work.
+
+**Why we're not fixing it now.** The right shape is a small Room table (`url` PK, title, description, imageUrl, `fetchedAt`, `failed`) that `ChatScreen` observes like any other local data, which would also retire the transient `overlays.linkPreviews` slice and make one owner of all three caches. That is a schema change (with the version-bump rule), a new DAO, a repository seam, and a rework of how the chat screen receives previews — a feature-sized change, not part of a bug fix. The in-RAM cooldown already removes the within-session repeat, which was the reported lag.
+
+**When to revisit.** If cold-start preview cost shows up in profiling or a dogfood complaint, or the next time the chat overlay state is reworked. Bump `AppDatabase` version when it lands, and delete the `cache`/`failures` maps rather than layering a third cache on top.
+
+---
+
+### `SingleFlight` exists but `MediaFileManager` / `ProfileImageManager` still hand-roll it
+
+**The smell.** `data/util/SingleFlight.kt` was extracted (2026-09-08) when the `ConcurrentHashMap<K, CompletableDeferred<V>>` + `putIfAbsent`/`await`/`complete` idiom reached a third copy. Only `LinkPreviewSource` uses it; `MediaFileManager.downloadAndSave` and `ProfileImageManager.downloadAvatar` still carry their own `inFlightDownloads` copies.
+
+**Why we're not doing it now.** Both are on the media-download path and were outside the diff that prompted the extraction; migrating them is mechanical but wants its own change with the download tests actually exercised, not a drive-by in a link-preview fix.
+
+**When to revisit.** Next time either manager is touched. The migration is a straight swap — replace the field with `SingleFlight<String, T>` and wrap the body in `run(key) { … }`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

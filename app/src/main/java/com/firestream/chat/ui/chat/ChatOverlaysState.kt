@@ -48,6 +48,8 @@ internal data class OverlaysState(
     // from searchResults.size — see MessageSearchResults.
     val searchResultsTruncated: Boolean = false,
     val isSearchActive: Boolean = false,
+    /** Message id → its resolved link preview. Keyed by message so the UI never
+     *  re-derives the URL; ChatMessageLoader owns the pairing. */
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val recentEmojis: List<String> = emptyList(),

@@ -47,16 +47,12 @@ import com.firestream.chat.ui.components.ScaledImageDecoder
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import java.io.File
+import com.firestream.chat.domain.util.MessageUrls
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 private val resultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
-
-// Same shape as LinkPreviewSource.URL_REGEX. Duplicated rather than injected:
-// pulling a data-layer singleton into a composable to format one row is a worse
-// trade than eight characters of regex.
-private val URL_REGEX = Regex("""https?://[^\s]+""")
 
 /**
  * Search results, rendered by what the active chip selected. Shared by the
@@ -116,7 +112,7 @@ internal fun SearchResultList(
                     primary = if (filterType == MessageFilterType.DOCS) {
                         message.content.ifBlank { "Document" }
                     } else {
-                        URL_REGEX.find(message.content)?.value ?: message.content
+                        MessageUrls.extractUrl(message.content) ?: message.content
                     },
                     label = resultLabel(message),
                     timestamp = message.timestamp,
