@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.24.1] — 2026-09-08
+
+### Fixed
+
+- **Link and document results in search now say who sent them, and where.** A hit under the Links or Docs chip was a bare URL or filename with a date under it — fine inside one conversation, useless across all of them, since the whole point of a global search is finding the link someone sent you without remembering which chat it was in. Those rows now carry the same `Alice · Weekend Trip` heading the text results have had, in the same place, so the two kinds of result read as one list. In a conversation the heading is just the sender, as it is for text hits. (`329c35c`)
+
 ## [1.24.0] — 2026-09-08
 
 ### Added
