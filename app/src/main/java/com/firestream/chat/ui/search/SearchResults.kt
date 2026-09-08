@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Description
@@ -28,18 +29,22 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageType
@@ -54,14 +59,25 @@ import java.util.Locale
 
 private val resultDateFormat = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
+/** Sized so a link row is about twice a plain result row — see [SearchLinkRow]. */
+private val LINK_THUMBNAIL_SIZE = 64.dp
+
 /**
  * Search results, rendered by what the active chip selected. Shared by the
  * in-chat search pane and the global search screen.
  *
  * Photos and Videos get a thumbnail grid — the whole point of browse mode is
  * that a wall of "sent an image" text rows is useless for finding a picture.
- * Docs and Links get icon rows keyed on the filename / URL they carry. Anything
+ * Links get the same treatment at row scale: a double-height row carrying the
+ * page's preview image and title, because a column of bare URLs is the same
+ * unreadable wall — the domain is rarely what the user remembers about a link.
+ * Docs get a single-height icon row keyed on the filename they carry. Anything
  * else keeps the text rows search has always had.
+ *
+ * [linkPreviews] (message id → preview, the pairing `OverlaysState.linkPreviews`
+ * also uses) is what a link row renders; [onLinkVisible] is how it asks for one
+ * it doesn't have yet. Both default to nothing, so a surface with no preview
+ * source still renders correct — just plainer — link rows.
  *
  * Text *and* icon rows are labelled with [resultLabel] — the caller resolves
  * it, because the id→name maps live in the caller's state and this file only
@@ -78,6 +94,8 @@ internal fun SearchResultList(
     onResultClick: (Message) -> Unit,
     onMediaClick: (Message) -> Unit,
     modifier: Modifier = Modifier,
+    linkPreviews: Map<String, LinkPreview> = emptyMap(),
+    onLinkVisible: (Message) -> Unit = {},
 ) {
     when (filterType) {
         MessageFilterType.PHOTOS, MessageFilterType.VIDEOS -> LazyVerticalGrid(
@@ -98,22 +116,30 @@ internal fun SearchResultList(
             }
         }
 
-        MessageFilterType.DOCS, MessageFilterType.LINKS -> LazyColumn(modifier = modifier.fillMaxSize()) {
+        MessageFilterType.LINKS -> LazyColumn(modifier = modifier.fillMaxSize()) {
+            items(results, key = { "search_${it.id}" }) { message ->
+                // Asked for as the row composes, not when the results land, so
+                // the fetching follows the viewport — see SearchLinkPreviewLoader.
+                LaunchedEffect(message.id, message.content) { onLinkVisible(message) }
+                SearchLinkRow(
+                    // The URL itself, not the sentence around it: the URL is
+                    // what the user is scanning for when no title resolved.
+                    url = MessageUrls.extractUrl(message.content) ?: message.content,
+                    preview = linkPreviews[message.id],
+                    label = resultLabel(message),
+                    timestamp = message.timestamp,
+                    onClick = { onResultClick(message) },
+                )
+                HorizontalDivider()
+            }
+        }
+
+        MessageFilterType.DOCS -> LazyColumn(modifier = modifier.fillMaxSize()) {
             items(results, key = { "search_${it.id}" }) { message ->
                 SearchIconRow(
-                    icon = if (filterType == MessageFilterType.DOCS) {
-                        Icons.Default.Description
-                    } else {
-                        Icons.Default.Link
-                    },
-                    // A DOCUMENT carries its filename in `content`; a link row
-                    // shows the URL itself rather than the sentence around it,
-                    // because the URL is what the user is scanning for.
-                    primary = if (filterType == MessageFilterType.DOCS) {
-                        message.content.ifBlank { "Document" }
-                    } else {
-                        MessageUrls.extractUrl(message.content) ?: message.content
-                    },
+                    icon = Icons.Default.Description,
+                    // A DOCUMENT carries its filename in `content`.
+                    primary = message.content.ifBlank { "Document" },
                     label = resultLabel(message),
                     timestamp = message.timestamp,
                     onClick = { onResultClick(message) },
@@ -243,6 +269,95 @@ private fun SearchIconRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Text(
+                text = resultDateFormat.format(Date(timestamp)),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * A link result, two rows tall so it can carry the page's preview image.
+ *
+ * The image is the point: a Links browse is a column of near-identical URLs,
+ * and users recognise a page they were sent by its thumbnail and headline long
+ * before they recognise its host. Until the preview resolves — or when it never
+ * does — the thumbnail slot holds the link icon at the same size, so the list
+ * doesn't reflow row by row as previews arrive.
+ *
+ * The URL stays on screen even when a title resolved, demoted to the second
+ * line: a title alone can't answer "is this the shop or the review of it?".
+ */
+@Composable
+private fun SearchLinkRow(
+    url: String,
+    preview: LinkPreview?,
+    label: String,
+    timestamp: Long,
+    onClick: () -> Unit,
+) {
+    val title = preview?.title?.takeIf { it.isNotBlank() }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(LINK_THUMBNAIL_SIZE)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (preview?.imageUrl != null) {
+                AsyncImage(
+                    model = preview.imageUrl,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Link,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Column(modifier = Modifier.padding(start = 12.dp)) {
+            if (label.isNotBlank()) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Text(
+                text = title ?: url,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontWeight = if (title != null) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // Only once a title has taken the line above — otherwise this would
+            // print the URL twice.
+            if (title != null) {
+                Text(
+                    text = url,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 text = resultDateFormat.format(Date(timestamp)),
                 style = MaterialTheme.typography.labelSmall,

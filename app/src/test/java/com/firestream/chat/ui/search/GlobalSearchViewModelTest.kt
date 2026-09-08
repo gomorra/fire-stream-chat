@@ -70,6 +70,7 @@ class GlobalSearchViewModelTest {
 
     private fun newViewModel() = GlobalSearchViewModel(
         searchMessagesUseCase = SearchMessagesUseCase(messageRepository),
+        linkPreviewSource = mockk(relaxed = true),
         authRepository = authRepository,
         chatRepository = chatRepository,
         contactRepository = contactRepository,

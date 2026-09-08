@@ -4,7 +4,8 @@
 //   contact maps a cross-chat result row needs to say where it came from.
 // Owns: GlobalSearchUiState in its entirety.
 // Collaborators: SearchMessagesUseCase (chatId = null), ChatRepository,
-//   ContactRepository, AuthRepository.
+//   ContactRepository, AuthRepository, SearchLinkPreviewLoader (shared with
+//   in-chat search).
 // Don't put here: in-chat search (ChatSearchManager owns the overlays slice),
 //   chat-list concerns, or the debounce/cancellation machinery (SearchRunner,
 //   shared with in-chat search). Derived reads belong on GlobalSearchUiState,
@@ -15,6 +16,8 @@ package com.firestream.chat.ui.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.firestream.chat.data.remote.LinkPreview
+import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
@@ -40,6 +43,8 @@ data class GlobalSearchUiState(
     val chats: Map<String, Chat> = emptyMap(),
     val contacts: Map<String, Contact> = emptyMap(),
     val currentUserId: String = "",
+    /** Message id → the preview behind its link, filled in as link rows appear. */
+    val linkPreviews: Map<String, LinkPreview> = emptyMap(),
 ) {
     /** Whether the user has selected anything on either axis — see [isSearchSelecting]. */
     val isSelecting: Boolean
@@ -67,6 +72,7 @@ internal fun GlobalSearchUiState.recipientIdFor(chatId: String): String =
 @HiltViewModel
 class GlobalSearchViewModel @Inject constructor(
     searchMessagesUseCase: SearchMessagesUseCase,
+    linkPreviewSource: LinkPreviewSource,
     authRepository: AuthRepository,
     chatRepository: ChatRepository,
     contactRepository: ContactRepository,
@@ -79,6 +85,12 @@ class GlobalSearchViewModel @Inject constructor(
     // search; only where the results land is this view model's business.
     private val runner = SearchRunner(viewModelScope, searchMessagesUseCase, chatId = null) { messages, truncated ->
         _uiState.update { it.copy(results = messages, truncated = truncated) }
+    }
+
+    // Demand-driven: the row asks as it composes, so a Links browse doesn't
+    // queue a fetch for every result the user never scrolls to.
+    private val linkPreviewLoader = SearchLinkPreviewLoader(viewModelScope, linkPreviewSource) { id, preview ->
+        _uiState.update { it.copy(linkPreviews = it.linkPreviews + (id to preview)) }
     }
 
     init {
@@ -105,6 +117,9 @@ class GlobalSearchViewModel @Inject constructor(
         _uiState.update { it.copy(filter = filter) }
         runSearch(debounce = false)
     }
+
+    /** A link result has come on screen and wants its preview resolved. */
+    fun onLinkResultVisible(message: Message) = linkPreviewLoader.request(message)
 
     fun clearQuery() {
         _uiState.update { it.copy(query = "") }

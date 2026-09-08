@@ -23,6 +23,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.firestream.chat.data.remote.LinkPreviewSource
+import io.mockk.mockk
 
 /**
  * The two search inputs — the text box and the chip row — feed the same query
@@ -38,6 +40,7 @@ class ChatSearchManagerTest {
 
     private val repository = FakeMessageRepository()
     private val useCase = SearchMessagesUseCase(repository)
+    private val linkPreviewSource = mockk<LinkPreviewSource>(relaxed = true)
     private val uiState = MutableStateFlow(ChatUiState())
 
     private val hello = message(id = "t1", content = "hello harbour", type = MessageType.TEXT)
@@ -51,6 +54,7 @@ class ChatSearchManagerTest {
     private fun TestScope.newManager() = ChatSearchManager(
         chatId = CHAT_ID,
         searchMessagesUseCase = useCase,
+        linkPreviewSource = linkPreviewSource,
         _uiState = uiState,
         scope = this,
     )

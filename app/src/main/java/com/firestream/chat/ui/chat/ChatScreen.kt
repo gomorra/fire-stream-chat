@@ -1166,6 +1166,10 @@ fun ChatScreen(
                             .weight(1f)
                             .fillMaxWidth()
                             .background(MaterialTheme.colorScheme.surface),
+                        // Shared with the conversation's own previews: a link
+                        // already resolved in a bubble needs no second fetch.
+                        linkPreviews = uiState.overlays.linkPreviews,
+                        onLinkVisible = viewModel::onSearchLinkVisible,
                     )
                 }
             }

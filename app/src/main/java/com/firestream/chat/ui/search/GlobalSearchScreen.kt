@@ -149,6 +149,8 @@ fun GlobalSearchScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surface),
+                    linkPreviews = uiState.linkPreviews,
+                    onLinkVisible = viewModel::onLinkResultVisible,
                 )
             }
         }

@@ -78,6 +78,11 @@ Delete an item once it has been verified (or once a fix for what the check found
   Still unverified, and the last item here: that the field is focused **with the keyboard
   already up** on entry — `LaunchedEffect` + `FocusRequester` only requests focus, and some
   OEM IMEs need more. An emulator would not prove this either way; it needs a real phone.
+- Unverified on device: the **two-line link rows** (`SearchLinkRow`). Specifically that
+  previews arrive as rows scroll into view without the list stalling or reflowing — the
+  fetch behind one can end in `WebPagePreviewCapture`'s serialised offscreen WebView, so a
+  fast scroll through a Links browse queues captures behind each other. Emulator-visible;
+  the honest check is a real chat with a dozen image-less links in it.
 - Global search has no `MessageSearchFilter` persistence across the destination's
   lifecycle, so process death mid-search drops the chips. Accepted (search is transient),
   recorded so it reads as a decision rather than an oversight.

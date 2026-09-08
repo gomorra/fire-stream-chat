@@ -2,7 +2,13 @@
 // Responsibility: Debounced full-text search across the current chat, plus the
 //   prefilter chips (type / starred / date range) that also drive it.
 // Owns: ChatUiState.overlays.{searchQuery, searchFilter, searchResults, isSearchActive}.
-// Collaborators: ChatViewModel (composition root), SearchMessagesUseCase.
+//   Second writer into overlays.linkPreviews, which ChatMessageLoader fills for
+//   the loaded window: a Links search reaches messages far older than that, and
+//   the two share one map so a link already previewed in the conversation shows
+//   its image in the results without a second fetch. Keyed by message id, so
+//   the writes merge rather than race.
+// Collaborators: ChatViewModel (composition root), SearchMessagesUseCase,
+//   SearchLinkPreviewLoader (shared with global search).
 // Don't put here: global search across chats (lives in ui/search/
 //   GlobalSearchViewModel), the debounce/cancellation machinery itself (shared
 //   with global search as ui/search/SearchRunner), or any state outside the
@@ -14,13 +20,17 @@ package com.firestream.chat.ui.chat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
+import com.firestream.chat.data.remote.LinkPreviewSource
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
+import com.firestream.chat.ui.search.SearchLinkPreviewLoader
 import com.firestream.chat.ui.search.SearchRunner
 
 internal class ChatSearchManager(
     chatId: String,
     searchMessagesUseCase: SearchMessagesUseCase,
+    linkPreviewSource: LinkPreviewSource,
     private val _uiState: MutableStateFlow<ChatUiState>,
     scope: CoroutineScope
 ) {
@@ -37,6 +47,17 @@ internal class ChatSearchManager(
             )
         }
     }
+
+    // Demand-driven: the row asks as it composes, so a Links browse doesn't
+    // queue a fetch for every result the user never scrolls to.
+    private val linkPreviewLoader = SearchLinkPreviewLoader(scope, linkPreviewSource) { id, preview ->
+        _uiState.update {
+            it.copy(overlays = it.overlays.copy(linkPreviews = it.overlays.linkPreviews + (id to preview)))
+        }
+    }
+
+    /** A link result has come on screen and wants its preview resolved. */
+    fun onLinkResultVisible(message: Message) = linkPreviewLoader.request(message)
 
     fun onSearchQueryChange(query: String) {
         _uiState.update { it.copy(overlays = it.overlays.copy(searchQuery = query)) }

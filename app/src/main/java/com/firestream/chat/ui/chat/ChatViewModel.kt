@@ -157,7 +157,9 @@ class ChatViewModel @Inject constructor(
 
     // Managers
     private val pollManager = ChatPollManager(chatId, pollRepository, _uiState, viewModelScope)
-    private val searchManager = ChatSearchManager(chatId, searchMessagesUseCase, _uiState, viewModelScope)
+    private val searchManager = ChatSearchManager(
+        chatId, searchMessagesUseCase, linkPreviewSource, _uiState, viewModelScope
+    )
     private val messageActions = ChatMessageActions(
         chatId, recipientId, messageRepository, reminderRepository, dateTimeDetector, _uiState, viewModelScope,
         onReminderScheduled = { outcome ->
@@ -286,6 +288,7 @@ class ChatViewModel @Inject constructor(
         searchManager.openSearchWithFilter(photos)
     }
 
+    fun onSearchLinkVisible(message: Message) = searchManager.onLinkResultVisible(message)
     fun toggleSearch() = searchManager.toggleSearch()
     fun clearSearch() = searchManager.clearSearch()
 
