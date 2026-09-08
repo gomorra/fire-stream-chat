@@ -6,17 +6,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **Search across every chat, with the same chips the conversation search has.** The magnifier on the chat list used to open a thin strip that matched text and nothing else: no filters, no way to tell which conversation a hit came from, and tapping one dropped you at the *bottom* of that chat rather than at the message you had just read. It is now a screen of its own, opening with the keyboard already up, carrying the full chip row — Photos, Videos, Links, Docs, Voice, Starred, Date — so "every photo anyone sent me in March" is a search you can actually run. A chip on its own still browses, counts still say `200+` rather than claiming a total they don't have, and deleted messages stay out of the results — a guard the old global search never had, and the one that mattered most once it gained a Photos chip, because a deleted photo keeps its file reference. Search is its own destination rather than a panel over the list for a concrete reason: the list is a swipeable tab, and a scrollable row of chips inside it would have fought the swipe. (`17cb1c3`)
-
-### Fixed
-
-- **A global search result now says where it came from, and takes you to the message.** Every hit is headed by the conversation it was said in — `Bob · Weekend Trip`, or just the person's name in a one-to-one, where repeating it on both sides would be noise — and your own messages read "You". Tapping any result, photos and videos included, lands in that conversation *at that message* instead of at the bottom of it. (`17cb1c3`)
-
-## [UNRELEASED] [1.23.0] — 2026-09-07
-
-### Added
-
 - **Search in a conversation now has filter chips, so it doubles as a browser.** Searching a chat used to mean typing a word and reading a list of text rows — no help at all when what you actually want is "the photos", or "that PDF someone sent in March". A row of chips now sits under the search box — Photos, Videos, Links, Docs, Voice, Starred, Date — and a chip on its own, with nothing typed, browses: photos and videos come back as a thumbnail grid you can tap straight into, documents and links as rows showing the filename or the URL rather than the sentence around it. Chips combine with what you type, so "report" with Docs selected searches filenames only. The Date chip opens a range picker and then wears the range you chose, and the line above the results spells out every active filter with an × to clear them, because chips scroll off-screen and a filter you can't see is a filter you'll blame the app for. Counts are capped, so a full page reads "200+" rather than claiming an exact total it doesn't have. (`56cb67a`, `0fad83b`, `344da67`, `905aa24`)
+
+- **Search across every chat, with the same chips the conversation search has.** The magnifier on the chat list used to open a thin strip that matched text and nothing else: no filters, no way to tell which conversation a hit came from, and tapping one dropped you at the *bottom* of that chat rather than at the message you had just read. It is now a screen of its own, opening with the keyboard already up, carrying the full chip row — Photos, Videos, Links, Docs, Voice, Starred, Date — so "every photo anyone sent me in March" is a search you can actually run. A chip on its own still browses, counts still say `200+` rather than claiming a total they don't have, and deleted messages stay out of the results — a guard the old global search never had, and the one that mattered most once it gained a Photos chip, because a deleted photo keeps its file reference. Search is its own destination rather than a panel over the list for a concrete reason: the list is a swipeable tab, and a scrollable row of chips inside it would have fought the swipe. (`17cb1c3`)
 
 ### Changed
 
@@ -25,9 +17,14 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached — including a photo whose file is gone — also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
+
 - **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so.
+
 - **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing.
+
 - **Search results named the sender by a raw account id.** Every text result in a conversation search was headed by a twelve-character fragment of the sender's internal id — `fIBTup2Ablac` — where a name belongs, which told you nothing about who wrote the message you were looking at. Results now say **You** for your own messages and the person's name for everyone else's, falling back to the group name; the same resolver now serves the reminder notifications and the `.remind` widget, which had each grown their own copy of it. (`57f7cfa`)
+
+- **A global search result now says where it came from, and takes you to the message.** Every hit is headed by the conversation it was said in — `Bob · Weekend Trip`, or just the person's name in a one-to-one, where repeating it on both sides would be noise — and your own messages read "You". Tapping any result, photos and videos included, lands in that conversation *at that message* instead of at the bottom of it. (`17cb1c3`)
 
 ## [1.22.0] — 2026-09-07
 
