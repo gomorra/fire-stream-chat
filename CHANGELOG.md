@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.25.0] — 2026-09-08
+
+### Changed
+
+- **Link search results now carry the page's preview image.** A hit under the Links chip was a single-height row with the bare URL on it, and a column of those is close to unreadable — the host is rarely what anyone remembers about a link they were sent. Each link result is now twice as tall and leads with the page's preview image and headline, with the URL kept underneath so a title alone never has to answer "is this the shop or the review of it?". Previews are fetched as rows scroll into view rather than all at once, and a link already previewed in the conversation reuses that image instead of being fetched a second time. Document results are unchanged. (`238d051`)
+
 ## [1.24.4] — 2026-09-08
 
 ### Fixed
