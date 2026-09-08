@@ -67,9 +67,12 @@ private val URL_REGEX = Regex("""https?://[^\s]+""")
  * Docs and Links get icon rows keyed on the filename / URL they carry. Anything
  * else keeps the text rows search has always had.
  *
- * Text rows are labelled with [resultLabel] — the caller resolves it, because
- * the id→name maps live in the caller's state and this file only renders. In
- * a chat that is the sender's name; globally it also has to say which chat.
+ * Text *and* icon rows are labelled with [resultLabel] — the caller resolves
+ * it, because the id→name maps live in the caller's state and this file only
+ * renders. In a chat that is the sender's name; globally it also has to say
+ * which chat. A link or document row without it is a URL with no answer to
+ * "who sent me this, and where?", which is the first thing asked of a
+ * cross-chat hit.
  */
 @Composable
 internal fun SearchResultList(
@@ -115,6 +118,7 @@ internal fun SearchResultList(
                     } else {
                         URL_REGEX.find(message.content)?.value ?: message.content
                     },
+                    label = resultLabel(message),
                     timestamp = message.timestamp,
                     onClick = { onResultClick(message) },
                 )
@@ -200,10 +204,17 @@ private fun SearchTextRow(message: Message, label: String, onClick: () -> Unit) 
     }
 }
 
+/**
+ * A link or document result: the [label] on top, then what the row is keyed on,
+ * then the date — the same order [SearchTextRow] uses, so the two result shapes
+ * read as one list. A blank label (nothing resolvable to say) drops its line
+ * rather than leaving an empty one.
+ */
 @Composable
 private fun SearchIconRow(
     icon: ImageVector,
     primary: String,
+    label: String,
     timestamp: Long,
     onClick: () -> Unit,
 ) {
@@ -221,6 +232,15 @@ private fun SearchIconRow(
             modifier = Modifier.size(24.dp),
         )
         Column(modifier = Modifier.padding(start = 12.dp)) {
+            if (label.isNotBlank()) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 text = primary,
                 style = MaterialTheme.typography.bodyMedium,
