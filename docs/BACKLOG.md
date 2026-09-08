@@ -22,9 +22,10 @@ here because a cloud agent has no other way to learn that the work is not fully 
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
 ### Message search — prefilter chips + global scope (`56cb67a`…`261704d`, 2026-09-07; global 2026-09-08)
-- Device pass never run for the whole feature: the chip row's horizontal scroll under a
-  thumb, the date range picker, the photo/video grid, and tapping a video tile through to
-  the player.
+- Device pass still outstanding for the in-chat surface: the date range picker, the
+  photo/video grid, and tapping a video tile through to the player. (The chip row's
+  horizontal scroll is no longer in doubt — `SearchFilterChipRow` is one composable and it
+  was confirmed scrolling in global search on 2026-09-08.)
 - Specifically unconfirmed: that a **local** video's frame decodes into a grid tile
   (`ui/search/SearchResults.kt` uses `rememberVideoFrameRequest`; only the remote-thumbnail
   fallback is obviously safe), and that closing the search image pager lands back in the
@@ -37,14 +38,16 @@ Delete an item once it has been verified (or once a fix for what the check found
 - Confirm on device that **system back closes the search overlay** rather than the chat
   (`261704d` added the `BackHandler`; the deleted screen used to get this from the NavHost),
   and that it still yields to the two fullscreen viewers while either is open.
-- **Global search (`Routes.SEARCH`, from the chat list magnifier) is entirely unverified
-  on hardware.** Specifically: that the chip row scrolls freely now that it is under a
-  pager-free destination and not a page of `MainScreen`'s `HorizontalPager` — this is the
-  reason it is its own destination, so it is the check that matters most; that the field
-  is focused **with the keyboard already up** on entry (`LaunchedEffect` + `FocusRequester`
-  only requests focus, and some OEM IMEs need more); and that tapping any global result —
-  media tiles included — lands *at the message* in the right conversation rather than at
-  the bottom of it.
+- Global search (`Routes.SEARCH`, from the chat list magnifier) is **partly verified**
+  (release build, emulator API 36, 2026-09-08). Confirmed: the screen renders and survives
+  R8 minification; a Links browse returns hits across chats with an honest count and
+  newest-first icon rows; and **the chip row scrolls freely** under the pager-free
+  destination — the check that motivated making it a destination at all, confirmed by the
+  author on device.
+  Still unverified: that the field is focused **with the keyboard already up** on entry
+  (`LaunchedEffect` + `FocusRequester` only requests focus, and some OEM IMEs need more),
+  and that tapping a global result — media tiles included — lands *at the message* in the
+  right conversation rather than at the bottom of it.
 - Global search has no `MessageSearchFilter` persistence across the destination's
   lifecycle, so process death mid-search drops the chips. Accepted (search is transient),
   recorded so it reads as a decision rather than an oversight.
