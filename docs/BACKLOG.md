@@ -21,14 +21,15 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
-### Link previews — consent-banner suppression + fetch de-duplication (`6ef4abc`, 2026-09-08)
+### Link previews — consent walls, fetch de-duplication, Maps metadata (`6ef4abc`, `ae89ec1`, 2026-09-08)
 - Nothing here has been seen on hardware. The offscreen `WebView`, `postVisualStateCallback`,
   and `PixelCopy` with a scaling `srcRect` are all outside what a JVM unit test can reach, so
   the whole capture path is build-verified only.
 - Check on a device: (a) a news site with a cookie wall — the preview should be the page, not
-  the banner; (b) a `maps.app.goo.gl` link — should end up with no preview image rather than a
-  screenshot of `consent.google.com`; (c) a chat with several image-less links open at once —
-  previews should fill in one at a time without the list stuttering.
+  the banner; (b) a `maps.app.goo.gl` link shared from the Google Maps app — should now show the
+  place name and Google's own map image, *not* a bare link and not a screenshot of
+  `consent.google.com`; (c) a chat with several image-less links open at once — previews should
+  fill in one at a time without the list stuttering.
 - Specifically unconfirmed: that the geometric stripper
   (`WebPagePreviewCapture.OVERLAY_STRIPPER_JS`, `document.elementsFromPoint` at a sampled grid)
   hides banners without also hiding a site's real content — a full-viewport `fixed` wrapper that
@@ -37,6 +38,15 @@ Delete an item once it has been verified (or once a fix for what the check found
 - Also unconfirmed: that `PixelCopy`'s `srcRect` overload scales rather than crops here. A
   preview showing only the top-left corner of the page means it cropped, and the fix is to go
   back to a full-size destination bitmap plus an explicit downscale.
+- New with `ae89ec1`, and unconfirmed on hardware: that the crawler User-Agent behaves on a
+  phone the way it does from a desktop shell. It was verified against `google.com/maps` with
+  `curl` (no consent redirect, `og:image` is a signed static map), but never from the device,
+  and never against a real `maps.app.goo.gl` short link — short-link resolution now depends on
+  `response.request.url` after redirects, which no unit test exercises.
+- Also new and unconfirmed: the one-shot browser retry on 401/403/406/429. No site in testing
+  actually refused the crawler UA, so the retry path has only ever run against a stubbed
+  response. If previews start failing on a specific domain, check `LinkPreviewSource` there
+  first — a refusal that is not one of those four codes still falls into the ten-minute cooldown.
 
 ### Message search — prefilter chips + global scope (`56cb67a`…`261704d`, 2026-09-07; global 2026-09-08)
 - Device pass still outstanding for the in-chat surface: the date range picker, the

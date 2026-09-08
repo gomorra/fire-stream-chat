@@ -2,6 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.24.4] — 2026-09-08
+
+### Fixed
+
+- **Google Maps links show a preview again.** Sharing a place from Google Maps produced a bare link with no card at all, in the chat bubble and in the share sheet alike — Google redirects an ordinary browser to its consent wall, and the metadata it does serve writes `content=` before `property=`, which the tag parser could not match. The preview fetch now identifies itself as a social crawler, which Google answers with no consent wall and a ready-made map image of the place, and the place name is read out of the Maps link itself when the page only calls itself "Google Maps". (`ae89ec1`)
+- **A refused link preview no longer costs ten minutes of silence.** Sites that screen for crawlers answer with a refusal, and one refusal used to leave that link previewless until the cooldown expired; the fetch now quietly tries once more as an ordinary browser. (`ae89ec1`)
+
 ## [1.24.3] — 2026-09-08
 
 ### Changed
