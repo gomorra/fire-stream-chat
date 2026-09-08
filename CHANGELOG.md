@@ -2,6 +2,14 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.24.2] — 2026-09-08
+
+### Fixed
+
+- **Link previews no longer show a cookie banner instead of the page.** When a shared link had no preview image of its own, the app rendered the page offscreen and photographed it — and what it photographed was the consent wall sitting on top, so the preview for a news article was a picture of "We value your privacy". Consent scripts are now blocked before they can build a banner, anything that still appears is stripped by checking what is genuinely covering the page rather than by matching a list of vendor names, and a link that lands on a consent page outright — which is where a Google Maps link goes — gets no image rather than a photograph of the wall. Previews also stopped identifying themselves as a bot when reading a page, which is why several large sites were serving them an interstitial with no preview information in it at all. (`6ef4abc`)
+
+- **Opening a chat with links in it is no longer sluggish.** Every time a message changed status — sent, delivered, read, and each of those is its own update — the app re-fetched the preview for every link on screen, including re-rendering the offscreen page, which takes up to twenty seconds. A busy conversation could have several of those running at once, which is what the stutter was. Each link is now fetched once, shared between everything that asks for it, retried on a cooldown rather than on repeat if it fails, and rendered one page at a time. Scrolling a long conversation is cheaper too: matching a message to its preview, and a reply to what it replies to, no longer means searching the whole conversation for each bubble on screen. (`6ef4abc`)
+
 ## [1.24.1] — 2026-09-08
 
 ### Fixed
