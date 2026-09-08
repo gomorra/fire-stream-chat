@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.24.3] — 2026-09-08
+
+### Changed
+
+- **The scroll-to-bottom button appears much sooner.** Returning to the newest messages previously required scrolling past more than two full screens of conversation before the down arrow button would appear. It now appears as soon as the screen is scrolled up by 20% of the chat screen's height. (`0e275c7`)
+
 ## [1.24.2] — 2026-09-08
 
 ### Fixed

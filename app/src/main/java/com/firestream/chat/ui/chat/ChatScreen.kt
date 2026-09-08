@@ -52,6 +52,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -1181,18 +1182,20 @@ fun ChatScreen(
                         }
                     }
                     else -> {
-                        // Scroll-to-bottom: show FAB when more than 2 screens from the newest
-                        // message. With reverseLayout, "at the bottom" means firstVisibleIdx == 0,
-                        // so distance to the newest is just `firstVisibleIdx`.
+                        // Scroll-to-bottom: show FAB when the list is scrolled up by at least
+                        // 20% of the chat screen's height from the newest message.
                         // derivedStateOf prevents recomposition on every scroll frame — the
                         // boolean only changes when the FAB needs to appear or disappear.
                         val totalItems = uiState.messages.messages.size
+                        val itemHeights = remember(viewModel.chatId) { mutableMapOf<Int, Int>() }
                         val showScrollToBottom by remember(totalItems) {
                             derivedStateOf {
-                                val visInfo = listState.layoutInfo.visibleItemsInfo
-                                val firstIdx = visInfo.firstOrNull()?.index ?: 0
-                                val visible = visInfo.size
-                                totalItems > 0 && firstIdx > visible * 2
+                                isScrolledUpPastThreshold(
+                                    listState = listState,
+                                    totalItems = totalItems,
+                                    itemHeights = itemHeights,
+                                    thresholdFraction = 0.2f
+                                )
                             }
                         }
 
@@ -2414,3 +2417,54 @@ private fun Modifier.imeOrPanelHeight(
     val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
 }
+
+/**
+ * Calculates whether the chat list is scrolled up from the newest message (bottom)
+ * by at least [thresholdFraction] of the chat viewport's height (default 20%).
+ *
+ * In reverseLayout:
+ * - When at the bottom: `firstVisibleItemIndex == 0`, `firstVisibleItemScrollOffset == 0`.
+ * - When scrolling up: `firstVisibleItemScrollOffset` increases as item 0 moves off the
+ *   bottom edge, and `firstVisibleItemIndex` increments once each item leaves view.
+ *
+ * Scrolled distance is tracked using cached item heights for measured items, falling back
+ * to the average visible item height for unmeasured items.
+ */
+internal fun isScrolledUpPastThreshold(
+    listState: LazyListState,
+    totalItems: Int,
+    itemHeights: MutableMap<Int, Int> = mutableMapOf(),
+    thresholdFraction: Float = 0.2f
+): Boolean {
+    val layoutInfo = listState.layoutInfo
+    val total = if (totalItems > 0) totalItems else layoutInfo.totalItemsCount
+    val viewportHeight = layoutInfo.viewportSize.height
+    if (total == 0 || viewportHeight <= 0) return false
+
+    val visInfo = layoutInfo.visibleItemsInfo
+    if (visInfo.isEmpty()) return false
+
+    // Cache heights of visible items near the bottom
+    for (item in visInfo) {
+        if (item.index <= 10) {
+            itemHeights[item.index] = item.size
+        }
+    }
+
+    val thresholdPx = viewportHeight * thresholdFraction
+    val firstIndex = listState.firstVisibleItemIndex
+    val firstOffset = listState.firstVisibleItemScrollOffset
+
+    if (firstIndex == 0) {
+        return firstOffset >= thresholdPx
+    }
+
+    val avgHeight = maxOf(1, visInfo.sumOf { it.size } / visInfo.size)
+    var scrolledPx = firstOffset
+    for (i in 0 until firstIndex) {
+        scrolledPx += itemHeights[i] ?: avgHeight
+        if (scrolledPx >= thresholdPx) return true
+    }
+    return scrolledPx >= thresholdPx
+}
+
