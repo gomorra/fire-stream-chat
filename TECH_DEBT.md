@@ -391,6 +391,29 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### `google-services` plugin is applied to every variant, including `pocketbase`
+
+**The smell.** `app/build.gradle.kts` applies `alias(libs.plugins.google.services)` at
+module level, so the plugin registers a `process<Variant>GoogleServices` task for *all*
+variants. `assemblePocketbaseDebug` therefore fails with "File google-services.json is
+missing" — the self-host flavor, whose whole point is not needing Firebase, cannot be
+built without Firebase configuration. It also blocks any environment that does not carry
+the gitignored `google-services.json`: a cloud container, a fresh clone, CI on a fork.
+
+**Why we haven't fixed it.** The plugin has no per-flavor `apply` switch; the fix is to
+disable its tasks for the non-firebase variants
+(`tasks.matching { it.name.contains("Pocketbase") && it.name.contains("GoogleServices") }`)
+or move Firebase into a flavor-scoped `apply(plugin = ...)`. Both are small but touch the
+build script for a flavor that is not maintained yet (2026-09-09), and the workaround —
+`.claude/hooks/session-start.sh` writing a build-only placeholder — unblocks remote
+sessions today without changing what a release build does.
+
+**When to revisit.** When the pocketbase flavor gets real users or enters the CI matrix;
+at that point "the self-host build needs a Firebase file" stops being a curiosity and
+becomes a packaging bug.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

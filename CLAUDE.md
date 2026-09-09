@@ -32,20 +32,30 @@ cd functions && npm install && firebase deploy --only functions
 cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 ```
 
-> **⚠️ Cloud sessions (Claude Code on the web): Gradle does NOT work.** The managed
-> environment's egress policy blocks `dl.google.com` (Google Maven; `maven.google.com`
-> just redirects there), so AGP and the Android SDK cannot be downloaded and every
-> `./gradlew` invocation fails at plugin resolution. Do **not** retry, probe mirrors,
-> or attempt proxy workarounds — it burns tokens for nothing. Instead: skip the
-> test+build gate, review the diff statically with extra care, and state clearly in
-> the final report that the change is build-unverified and needs a local
-> `./gradlew test assembleDebug`.
+> **Cloud sessions (Claude Code on the web): Gradle works — run the gate.** Verified
+> 2026-09-09: `./gradlew :app:testFirebaseDebugUnitTest` runs the full suite (910 tests)
+> in a cloud container. A previous version of this note claimed the egress policy blocked
+> `dl.google.com`; that was wrong, or has since changed. Google Maven, Maven Central, the
+> Gradle plugin portal and `dl.google.com/android/repository` all resolve.
 >
-> **Cloud sessions: re-check this once, cheaply.** Run a single `./gradlew tasks`. If it
-> resolves AGP, the policy has changed — delete this whole note and say so in your final
-> report. If it dies at plugin resolution, the note still holds; do not probe further.
-> (Local sessions cannot verify this — `dl.google.com` always resolves here. Last
-> confirmed broken 2026-07-18.)
+> Three things a fresh container lacks, all handled by `.claude/hooks/session-start.sh`
+> — if you hit one of them, the hook did not run (check `CLAUDE_CODE_REMOTE`), so run it
+> by hand rather than working around it:
+> 1. **No Android SDK.** Every Android task dies with `SDK location not found`.
+>    `scripts/install-android-sdk.sh` installs it and writes `sdk.dir` to `local.properties`.
+> 2. **No `google-services.json`.** The plugin is applied module-wide, so *every* variant
+>    fails at `processGoogleServices`. The hook writes a build-only placeholder.
+> 3. **No UTF-8 locale.** `LANG` is unset, so `sun.jnu.encoding` is ASCII and the Kotlin
+>    compiler cannot write class files for the test names containing an em dash —
+>    it reports only `Internal compiler error`. `LANG`/`LC_ALL` are set in
+>    `.claude/settings.json`; the daemon inherits them from the shell, so exporting them
+>    inside a hook or a single command is not enough (`./gradlew --stop` first if you do).
+>
+> Use the **firebase** flavor (`:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`);
+> bare `test` also builds pocketbase, which is not maintained yet. One test fails in a
+> cloud container and only there: `ApkDownloaderTest.unresolvable host maps to friendly
+> No internet connection message` expects a DNS failure, and the sandbox's HTTP proxy
+> answers `403` on CONNECT instead. It passes locally and in CI. Any *other* failure is real.
 
 - JVM target: 17
 - `minSdk = 29`, `targetSdk = 35`, `compileSdk = 35`

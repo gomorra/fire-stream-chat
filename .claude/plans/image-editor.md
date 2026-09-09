@@ -240,7 +240,7 @@ keeps it honest:
 | Composer | ✓ | later | later | Sending either needs a new `MessageType` + a Room version bump |
 | Reaction sheet | ✓ | — | — | A reaction is one grapheme stored on the message; a sticker reaction is a different data model |
 | Caption bar (preview) | ✓ | — | — | It types into a text field |
-| **Editor overlay** (Phase 5) | ✓ | ✓ | — | Placed and flattened into the JPEG — an animation cannot be |
+| **Editor overlay** (Phase 5) | ✓ | ✓ | — | Placed and flattened into the JPEG — an animation cannot be. Also carries Text and Shape tabs, which no other host wants |
 
 A host that declares one tab renders **no island at all**, just the search button,
 so the reaction sheet and the caption bar look exactly as they do today. Nothing
@@ -382,22 +382,33 @@ becomes a one-tab alias so the composer, reaction sheet and caption bar are byte
 byte unchanged in behaviour. No new feature in this commit — it is a refactor with a
 test to prove the three existing hosts still behave.
 
-**5b — the sticker tab and the overlay screen.**
+**5b — the sticker and shape tabs, and the overlay screen.**
 
-- The picker mounts here with `tabs = setOf(EMOJI, STICKER)`; the search button and
-  island appear because there are two tabs. Emoji content is the existing grid —
-  do not build a second picker.
+- The picker mounts here with `tabs = setOf(EMOJI, STICKER, TEXT, SHAPE)`. Four
+  segments plus the search and delete buttons do not fit a 390 dp row with labels, so
+  the island goes **icon-only except the active segment, which keeps its label** —
+  meaning stays visible without the row scrolling. Emoji content is the existing
+  grid; do not build a second picker.
+- `ShapeTab`: rectangle, rounded rectangle, ellipse, line and arrow, with an
+  outline/filled toggle and the draw screen's colour strip. Shapes are what make
+  annotation work — "put a box round this" is the other half of the blur tool, and
+  both serve the same redact-before-sending job.
 - `StickerTab`: a bundled local pack plus recents. Placed stickers are flattened
   into the JPEG, so **no `MessageType` and no Room bump** — sticker-as-message stays
   in `docs/BACKLOG.md` §4.6.
 - Text objects: colour strip, a filled/outline style toggle, centre alignment.
 - Manipulation: tap to select, one-finger drag to move, two-finger pinch to scale
   and rotate.
-- **One-handed scale/rotate is a corner handle, not a slider.** The selection box
-  carries a single bottom-right handle: drag distance scales, drag angle rotates, in
-  one gesture (the iOS/Canva convention). Drawn at 26 dp with the hit rect expanded
-  to 48 dp, and a live `1.8×` readout pinned above the box so the finger never covers
-  the number it is setting. No arming tap — the handle is directly draggable.
+- **Scale and rotate are two separate handles**, not one combined corner. Bottom-right
+  scales, top-right rotates, each drawn at 26 dp with the hit rect expanded to 48 dp
+  and its own live readout (`1.4×`, `−8°`) pinned clear of the finger. No arming tap —
+  both are directly draggable.
+  This supersedes the single combined handle drafted earlier. A combined handle is
+  fine while everything on the canvas is an emoji, where neither exact size nor exact
+  angle matters. It stops being fine once shapes are in: a rectangle drawn round
+  something is usually wanted axis-aligned or at a deliberate angle, and a combined
+  handle cannot rotate without also resizing. Rotation **snaps every 15°** and to
+  0/90/180/270, which is only meaningful with a dedicated rotate gesture.
   Rejected: a left-edge slider like the draw screen's. It reads identically but means
   something else — on the draw screen that slider is a *tool* property (brush width,
   no selection required), here it would be a *selected object's* property, appearing
@@ -487,10 +498,12 @@ test to prove the three existing hosts still behave.
 - **Collapsing the search must be reachable.** The island slides away when search
   opens, so the field needs its own × (and back must close search before it closes
   the panel) — otherwise the tab switcher is gone with no way back to it.
-- **Three controls on one 390 dp row is tight.** Search button (38) + island (three
-  labelled segments) + delete button (38) fits only with the island's segment padding
-  at 11 dp and its icons at 15 dp. A fourth segment does not fit with labels; if one
-  is ever added, the segments go icon-only rather than the row scrolling.
+- **The 390 dp row is the constraint that shaped the island.** Search button (38) +
+  island + delete button (38) fits three *labelled* segments only at 11 dp segment
+  padding and 15 dp icons. The fourth tab (Shapes) pushed it over, which is why the
+  island is icon-only with a label on the active segment. A fifth tab does not fit at
+  all — it would need the row to scroll, and a scrolling mode switcher is worse than
+  no mode switcher.
 - **The draw screen's slider and the overlay screen's scale must not look alike.**
   See Phase 5 — one is a tool property, the other a selection property. If the corner
   handle turns out to occlude small stickers in practice, the fallback is a readout
