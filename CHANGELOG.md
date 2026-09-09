@@ -18,6 +18,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **The send preview has an editing toolbar.** Adjust, sticker and draw buttons now sit alongside HD and download at the top of the preview screen; Adjust is live, while sticker and draw stay dimmed until a later update wires them up. The batch counter has moved below the toolbar to make room. (`2b69002`, `8fa8f0f`, `debe9b1`)
 - **An edited photo is capped at 4096 px on its long edge.** Rotating or cropping means decoding the whole photo, which a 108 MP original cannot survive, so an edit pass works at 4096 px. Sending an *untouched* photo in HD is unaffected and still goes at full resolution; only a photo that has been through the editor is capped. Editing also strips the photo's location and camera metadata, since the result is re-encoded from scratch. (`30b7b83`, `debe9b1`)
 
+### Fixed
+
+- **A photo's crop handles now sit on the photo.** The crop frame was drawn against the photo's fitted rectangle while the photo itself was positioned half a letterbox away from it, so on any image that did not exactly fill the screen the corner handles sat a finger-width from the edges they were supposed to be grabbing. The editor also survives turning the phone now — a half-finished crop used to be thrown away on rotation. (`8e93a95`)
+
 ## [1.25.0] — 2026-09-08
 
 ### Changed
