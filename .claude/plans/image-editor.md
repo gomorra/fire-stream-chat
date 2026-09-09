@@ -391,8 +391,24 @@ test to prove the three existing hosts still behave.
   into the JPEG, so **no `MessageType` and no Room bump** — sticker-as-message stays
   in `docs/BACKLOG.md` §4.6.
 - Text objects: colour strip, a filled/outline style toggle, centre alignment.
-- Manipulation: one-finger drag, two-finger pinch-scale and rotate, tap to select,
-  drag onto a trash zone that appears at the bottom while dragging.
+- Manipulation: tap to select, one-finger drag to move, two-finger pinch to scale
+  and rotate.
+- **One-handed scale/rotate is a corner handle, not a slider.** The selection box
+  carries a single bottom-right handle: drag distance scales, drag angle rotates, in
+  one gesture (the iOS/Canva convention). Drawn at 26 dp with the hit rect expanded
+  to 48 dp, and a live `1.8×` readout pinned above the box so the finger never covers
+  the number it is setting. No arming tap — the handle is directly draggable.
+  Rejected: a left-edge slider like the draw screen's. It reads identically but means
+  something else — on the draw screen that slider is a *tool* property (brush width,
+  no selection required), here it would be a *selected object's* property, appearing
+  and disappearing with the selection. Same affordance, different noun, in adjacent
+  screens of one editor.
+- **Delete is a button on the picker row, not a drop zone.** A trash button sits at
+  the right end of the search/island row, acting on the current selection: reachable
+  one-handed, discoverable without first dragging something, and it keeps the photo
+  free of chrome that only appears mid-gesture. It stays put when search expands and
+  slides the island away — deletion belongs to the selection, not to the picker — and
+  it is hidden, not greyed, while nothing is selected.
 - **Undo / Redo** move over *placements* — the unit people expect back is "that
   emoji I just added", not "the last two millimetres I dragged it". Moves, scales and
   rotations of an already-placed object therefore collapse into its placement rather
@@ -471,6 +487,14 @@ test to prove the three existing hosts still behave.
 - **Collapsing the search must be reachable.** The island slides away when search
   opens, so the field needs its own × (and back must close search before it closes
   the panel) — otherwise the tab switcher is gone with no way back to it.
+- **Three controls on one 390 dp row is tight.** Search button (38) + island (three
+  labelled segments) + delete button (38) fits only with the island's segment padding
+  at 11 dp and its icons at 15 dp. A fourth segment does not fit with labels; if one
+  is ever added, the segments go icon-only rather than the row scrolling.
+- **The draw screen's slider and the overlay screen's scale must not look alike.**
+  See Phase 5 — one is a tool property, the other a selection property. If the corner
+  handle turns out to occlude small stickers in practice, the fallback is a readout
+  pill that becomes a drag target, not a second left-edge slider.
 - **Cloud sessions cannot run `./gradlew`** (blocked `dl.google.com`). Every phase
   lands build-unverified from the web and needs a local
   `./gradlew test assembleDebug` before it is trusted.
