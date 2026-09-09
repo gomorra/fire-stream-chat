@@ -31,7 +31,7 @@ later session, extract them back out of the published page (the `design` skill's
 else. `./gradlew :app:assembleFirebaseDebug` for the build half. Use the flavor-qualified
 tasks: bare `test` also builds pocketbase, which is not maintained yet.
 
-`Order: 1 → 2 → 3 → 4 → 5 → 6`
+`Order: 1 → 2 → 3 → 4 → 5a → 5b → 6`
 
 ---
 
@@ -242,8 +242,10 @@ composer, `ChatScreen:2138` reaction sheet, `ImagePreviewScreen:330` caption bar
 Adding a fourth copy for the editor would be the third mistake in a row. It becomes
 a shared module instead, and the editor is the reason to build the shell now.
 
-**The chrome.** A circular **search button** on the left, and to its right a
-segmented **island** — Emoji · Sticker · GIF — with a sliding selector. Tapping
+**The chrome.** A circular **search button** on the left, a segmented **island** of
+whatever tabs the host declares, and — where the host has a selection to act on — a
+**delete button** at the right end of the same row. The composer's island is
+Emoji · Sticker · GIF; the editor's is Emoji · Sticker · Text · Shapes. Tapping
 search expands the field out of the button and the island slides right and fades;
 the field's × collapses it and brings the island back. One row, two states, and the
 tab you are in stays visible whenever you are not typing.
@@ -251,12 +253,12 @@ tab you are in stays visible whenever you are not typing.
 **The island's tabs are declared by the host, not fixed** — this is the part that
 keeps it honest:
 
-| Host | Emoji | Sticker | GIF | Why |
-|---|:--:|:--:|:--:|---|
-| Composer | ✓ | later | later | Sending either needs a new `MessageType` + a Room version bump |
-| Reaction sheet | ✓ | — | — | A reaction is one grapheme stored on the message; a sticker reaction is a different data model |
-| Caption bar (preview) | ✓ | — | — | It types into a text field |
-| **Editor overlay** (Phase 5) | ✓ | ✓ | — | Placed and flattened into the JPEG — an animation cannot be. Also carries Text and Shape tabs, which no other host wants |
+| Host | Emoji | Sticker | GIF | Text | Shapes | Why |
+|---|:--:|:--:|:--:|:--:|:--:|---|
+| Composer | ✓ | later | later | — | — | Sending a sticker or GIF needs a new `MessageType` + a Room version bump; text is what the composer already is |
+| Reaction sheet | ✓ | — | — | — | — | A reaction is one grapheme stored on the message; a sticker reaction is a different data model |
+| Caption bar (preview) | ✓ | — | — | — | — | It types into a text field |
+| **Editor overlay** (Phase 5) | ✓ | ✓ | — | ✓ | ✓ | Everything here is placed and flattened into the JPEG — which an animation cannot be. Text and Shapes are placed objects, so they belong to this host alone |
 
 A host that declares one tab renders **no island at all**, just the search button,
 so the reaction sheet and the caption bar look exactly as they do today. Nothing
@@ -276,11 +278,13 @@ per-tab placeholder, never one shared string — switching tabs must not carry a
 query that means nothing where it lands.
 
 **The split.** `ui/chat/picker/` gains `PickerPanel.kt` (the shell: search button,
-island, animated swap, per-tab state — owns no content), `EmojiTab.kt` (today's
-grid, category headers, recents, quick-reactions row, backspace and the long-press
-size drag, moved out essentially unchanged) and `StickerTab.kt` (new). `PickerTab`
-enumerates the tabs and a `PickerSelection` sealed result (`Emoji(emoji, size)` /
-`Sticker(id)` / `Gif(...)`) gives a host one callback instead of three.
+island, delete button, animated swap, per-tab state — owns no content), `EmojiTab.kt`
+(today's grid, category headers, recents, quick-reactions row, backspace and the
+long-press size drag, moved out essentially unchanged), plus `StickerTab.kt`,
+`TextTab.kt` and `ShapeTab.kt` (all new, all editor-only for now). `PickerTab`
+enumerates the tabs and a `PickerSelection` sealed result — `Emoji(emoji, size)` /
+`Sticker(id)` / `Gif(...)` / `Text(style)` / `Shape(kind, filled)` — gives a host one
+callback instead of five.
 
 `EmojiHandlerPanel` survives as a thin alias over `PickerPanel(tabs = setOf(EMOJI))`
 so the three existing call sites are untouched by the extraction commit. The risky
@@ -304,7 +308,9 @@ consistent. Written down here so it is decided, not defaulted.
 ## 3. Phases
 
 Each phase is one commit, green on its own, carrying its own tests, its CHANGELOG
-entry and its version bump (`feat:` → minor).
+entry and its version bump (`feat:` → minor). Phase 5 is the exception and is two:
+**5a** is a pure refactor (no CHANGELOG entry, no bump) and **5b** the feature on top,
+so a regression in the picker extraction is bisectable away from the new tabs.
 
 ### Phase 1 — toolbar, download, per-image HD
 
@@ -386,11 +392,11 @@ entry and its version bump (`feat:` → minor).
   on Done.
 - File: `ui/chat/imageedit/DrawImageScreen.kt`.
 
-### Phase 5 — Overlay screen (emoji, stickers + text) and the shared picker
+### Phase 5 — Overlay screen (emoji, stickers, text + shapes) and the shared picker
 
-One screen for emoji, stickers and text, because drag / pinch-scale / rotate /
-z-order / delete are the same machinery for all three; splitting them would mean
-writing it three times.
+One screen for emoji, stickers, text and shapes, because drag / scale / rotate /
+z-order / delete are the same machinery for all four; splitting them would mean
+writing it four times.
 
 **5a — extract the picker shell first, as its own commit** (§2.8). `ui/chat/picker/`
 gains `PickerPanel` + `EmojiTab` + `PickerTab`/`PickerSelection`; `EmojiHandlerPanel`
@@ -445,10 +451,12 @@ test to prove the three existing hosts still behave.
   `drawBitmap` for stickers, at output resolution so glyphs and edges stay crisp.
 - Files: `ui/chat/imageedit/OverlayImageScreen.kt`, `ui/chat/picker/PickerPanel.kt`,
   `ui/chat/picker/EmojiTab.kt`, `ui/chat/picker/StickerTab.kt`,
+  `ui/chat/picker/TextTab.kt`, `ui/chat/picker/ShapeTab.kt`,
   `ui/chat/picker/PickerTab.kt`.
-- Tests: the three pre-existing hosts still render one tab and no island; the
-  editor host renders two and switches between them; a query typed on one tab does
-  not survive a tab switch; `sessionRecents` still freezes for the panel's lifetime.
+- Tests: the three pre-existing hosts still render one tab, no island and no delete
+  button; the editor host renders four segments and switches between them; a query
+  typed on one tab does not survive a tab switch; `sessionRecents` still freezes for
+  the panel's lifetime; rotation snaps to the nearest 15° and to the cardinals.
 
 ### Phase 6 — Edit from the fullscreen viewer
 
@@ -524,9 +532,12 @@ test to prove the three existing hosts still behave.
   See Phase 5 — one is a tool property, the other a selection property. If the corner
   handle turns out to occlude small stickers in practice, the fallback is a readout
   pill that becomes a drag target, not a second left-edge slider.
-- **Cloud sessions cannot run `./gradlew`** (blocked `dl.google.com`). Every phase
-  lands build-unverified from the web and needs a local
-  `./gradlew test assembleDebug` before it is trusted.
+- **Cloud sessions CAN run the gate — run it.** An earlier version of this plan said
+  they could not, blaming a `dl.google.com` block; that was a misdiagnosis of a missing
+  Android SDK. As of 2026-09-09 `./gradlew :app:testFirebaseDebugUnitTest` runs all 910
+  tests in a cloud container. See the header for the exact tasks and the one expected
+  proxy-only failure, and `CLAUDE.md` for what the session-start hook provisions. No
+  phase should land build-unverified.
 
 ---
 
@@ -555,7 +566,8 @@ test to prove the three existing hosts still behave.
   screens ago). Flattening forbids it by construction; it is the main thing the
   accumulated-`ImageEdit` model above would have bought.
 - **Drawing on videos.** Needs the transformer pipeline, not this one.
-- **GIF and sticker packs.** Already tracked in `docs/BACKLOG.md` §4.6.
+- **Downloadable sticker packs.** `docs/BACKLOG.md` §4.6 — Phase 5b ships one bundled
+  pack; pack management is its own feature.
 
 ---
 
