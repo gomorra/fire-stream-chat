@@ -21,6 +21,19 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — the rasterizer and the edit cache (Phase 2, 2026-09-09)
+- `ImageEditRasterizer` decodes through `ImageDecoder` with a 4096 px target size. Robolectric
+  covers the round trip on synthetic bitmaps; what it cannot cover is the pathology the decoder
+  was chosen for — large *real* camera originals, which come back black through a subsampled
+  `BitmapFactory` (see `ScaledImageDecoder`'s KDoc). Nothing in production calls `rasterize` yet,
+  so this becomes checkable with the adjust screen in Phase 3: rasterize a 12 MP+ original and
+  confirm the result is the photo, not a black rectangle.
+- Also unconfirmed: the HD sheet's size estimates against what actually leaves the device. Send
+  the same photo Standard and HD and compare the two labels to the received file sizes — the
+  labels say "about", but they should be in the right order and the right order of magnitude.
+- Also unconfirmed: that `cacheDir/edits/` is empty after a cold start following a preview
+  session older than 24 hours (`ImageEditRasterizer.sweepStale`, called from `FireStreamApp`).
+
 ### Link previews — consent walls, fetch de-duplication, Maps metadata (`6ef4abc`, `ae89ec1`, 2026-09-08)
 - Nothing here has been seen on hardware. The offscreen `WebView`, `postVisualStateCallback`,
   and `PixelCopy` with a scaling `srcRect` are all outside what a JVM unit test can reach, so

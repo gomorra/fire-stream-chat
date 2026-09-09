@@ -102,6 +102,7 @@ class ChatViewModelBlockedStateTest {
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
+        imageEditRasterizer = mockk(relaxed = true),
         activeChatTracker = activeChatTracker,
         speechRecognizerManager = speechRecognizerManager,
         callStateHolder = callStateHolder,

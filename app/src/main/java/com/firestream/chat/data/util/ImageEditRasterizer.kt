@@ -1,0 +1,396 @@
+package com.firestream.chat.data.util
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.Matrix
+import android.net.Uri
+import android.provider.OpenableColumns
+import androidx.annotation.VisibleForTesting
+import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.PixelRect
+import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.domain.util.SizeEstimate
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.math.roundToInt
+
+/**
+ * Every full-resolution bitmap operation the image editor performs, and the
+ * lifecycle of the files it writes.
+ *
+ * ### Why one class owns all of it
+ *
+ * Edits **rasterize per editor screen** (`.claude/plans/image-editor.md` §2.1):
+ * pressing Done flattens that screen's layer into a new JPEG in
+ * `cacheDir/edits/` and hands the URI back, so the chain of files *is* the undo
+ * history and the send pipeline never learns that editing exists. That makes
+ * this the single place holding a full-size bitmap, which is why it is also the
+ * single place taking a [MediaProcessingLimiter] permit — the process-wide cap
+ * of two decoded bitmaps is what stands between a twenty-image batch and an OOM
+ * (docs/PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering).
+ *
+ * ### What crosses the layer boundary
+ *
+ * The *arithmetic* — [RasterOp] and everything in [ImageEditGeometry] — lives in
+ * `domain/util/`, because it is pure functions over floats with no Android type
+ * in it. That is what lets an editor screen build its ops and label its resize
+ * presets without importing anything from `data/`. What stays here is only what
+ * genuinely needs the platform: decode, encode, the cache lifecycle, the
+ * limiter permit and the header probe. So this class is the single
+ * `UI_ALLOWED_DATA_IMPORTS` entry the editor spends, and only the hosting
+ * ViewModel needs even that (`.claude/plans/image-editor.md` §2.2).
+ *
+ * ### What it deliberately does not do
+ *
+ * - **It never decodes at true source resolution.** A 108 MP camera original
+ *   would OOM, so an edit pass works at [ImageEditGeometry.WORKING_MAX_DIMENSION] on the long
+ *   edge. An HD send of an *edited* photo is therefore capped at 4096 px while
+ *   an HD send of an untouched photo stays at full resolution — a deliberate
+ *   trade, recorded in `TECH_DEBT.md` with its revisit trigger.
+ * - **It never uses a subsampled `BitmapFactory` to decode.** Large camera
+ *   originals come back **black** through a heavily subsampled decode; see
+ *   `ScaledImageDecoder`'s KDoc for the pathology. [ImageDecoder.setTargetSize]
+ *   does a proper scaled decode and honours EXIF orientation on the way.
+ * - **It preserves no EXIF.** Re-encoding through [Bitmap.compress] drops GPS
+ *   and camera metadata, so an edited image carries none. That is a privacy
+ *   property worth keeping, not a regression to fix.
+ *
+ * Intermediates are written at [INTERMEDIATE_QUALITY]; only the final send goes
+ * through [ImageCompressor]. Three edit passes at q95 followed by one q80 is not
+ * visually distinguishable from a single q80 — a real but bounded cost of the
+ * rasterize-per-screen model.
+ */
+@Singleton
+class ImageEditRasterizer @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val processingLimiter: MediaProcessingLimiter,
+) {
+
+    private val sequence = AtomicLong(0)
+
+    /**
+     * Guards [inFlight] and serialises eviction.
+     *
+     * [MediaProcessingLimiter] allows two operations at once, so two
+     * [rasterize] calls can overlap. Without this, each would list the
+     * directory, compute its own total and delete independently — over-evicting
+     * at best, and at worst deleting the other's freshly written output, which
+     * is in nobody's `liveSteps` yet because it has not been returned to a
+     * caller to record.
+     */
+    private val evictionLock = Mutex()
+
+    /**
+     * Outputs written but not yet handed back to a caller. Registered before the
+     * bytes are written and exempt from eviction until [rasterize] returns, at
+     * which point the caller records the step and it becomes a live step
+     * instead.
+     *
+     * Verified by construction rather than by a test: reproducing the race needs
+     * two rasterize calls genuinely overlapping inside the write window, which
+     * has no deterministic seam to hook. A test that merely runs two calls and
+     * hopes they interleave asserts nothing on the runs where they do not. What
+     * *is* tested is the property this feeds: [enforceBudget] never deletes a
+     * file in `keep`, even when that leaves it over budget.
+     */
+    private val inFlight = mutableSetOf<File>()
+
+    /**
+     * The byte ceiling for `cacheDir/edits/`. A `var` only so a test can shrink
+     * it: the real budget is [CACHE_BUDGET_BYTES] and nothing in production
+     * writes to this.
+     */
+    @VisibleForTesting
+    internal var cacheBudgetBytes: Long = CACHE_BUDGET_BYTES
+
+    /** `cacheDir/edits/`, created on demand. */
+    private val editsDir: File
+        get() = File(context.cacheDir, EDITS_DIR).apply { mkdirs() }
+
+    /**
+     * Applies [ops] to [source] and returns the URI of the new JPEG.
+     *
+     * Holds a [MediaProcessingLimiter] permit for the whole decode-transform-
+     * encode, because that is exactly the window in which a full-size bitmap is
+     * resident. Runs on IO; callers stay responsible for ordering.
+     *
+     * Writing the result may push `cacheDir/edits/` over [CACHE_BUDGET_BYTES],
+     * in which case the oldest files there are evicted — see [enforceBudget].
+     * [liveSteps] is **the step every item in the batch is currently sitting
+     * on**, and those are exempt from that eviction. It has no default, because
+     * a caller that forgets it does not get a compile error but a user who
+     * loses the crop they just made on page 3 while editing page 1: eviction is
+     * globally oldest-first, and an item nobody has touched for a minute owns
+     * some of the oldest files in the directory even though its newest one is
+     * the image the pager is showing. Losing undo *depth* is the acceptable
+     * cost of the budget; losing the current step is not.
+     */
+    suspend fun rasterize(source: Uri, ops: List<RasterOp>, liveSteps: Set<Uri>): Uri =
+        processingLimiter.withPermit {
+            withContext(Dispatchers.IO) {
+                var bitmap = decodeCapped(source)
+                try {
+                    for (op in ops) {
+                        val next = applyOp(bitmap, op)
+                        if (next !== bitmap) {
+                            bitmap.recycle()
+                            bitmap = next
+                        }
+                    }
+                    val output = File(editsDir, "edit_${System.currentTimeMillis()}_${sequence.incrementAndGet()}.jpg")
+                    // Registered before the bytes exist, so a concurrent
+                    // rasterize's eviction can never pick it up mid-write.
+                    evictionLock.withLock { inFlight += output }
+                    try {
+                        output.outputStream().use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, INTERMEDIATE_QUALITY, out)
+                        }
+                        evictionLock.withLock {
+                            enforceBudget(cacheBudgetBytes, keep = editFiles(liveSteps) + inFlight)
+                        }
+                    } finally {
+                        evictionLock.withLock { inFlight -= output }
+                    }
+                    Uri.fromFile(output)
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+        }
+
+    /**
+     * Output dimensions and approximate encoded size for sending [source] with
+     * [hd] on or off, or null when the URI cannot be read at all — the sheet
+     * then renders its rows without a size line rather than with a confident
+     * number nobody should trust.
+     *
+     * Reads the source's header only (`inJustDecodeBounds`), so it allocates no
+     * bitmap and takes no permit. `BitmapFactory` is safe *here* precisely
+     * because nothing is decoded: the black-bitmap pathology is a property of a
+     * subsampled decode, not of reading a header.
+     */
+    suspend fun estimateSize(source: Uri, hd: Boolean): SizeEstimate? =
+        withContext(Dispatchers.IO) {
+            val header = probe(source) ?: return@withContext null
+            ImageEditGeometry.estimatedSize(
+                width = header.width,
+                height = header.height,
+                sourceBytes = header.sourceBytes,
+                hd = hd,
+                standardMaxDimension = ImageCompressor.MAX_DIMENSION,
+            )
+        }
+
+    /**
+     * Deletes rasterized steps the history no longer reaches — the tail
+     * abandoned when a new edit lands on top of an undo, or a whole item's
+     * chain when its batch is dismissed.
+     *
+     * Ignores anything that is not a file inside `cacheDir/edits/`. The caller
+     * passes URIs straight out of an item's history, and that list also contains
+     * the pick's own `content://` URI in every other code path; deleting the
+     * user's gallery original because a list got mixed up is not a mistake worth
+     * leaving available.
+     */
+    fun discard(uris: Collection<Uri>) {
+        // Deliberately not the `editsDir` accessor: that one creates the
+        // directory, and deleting nothing is no reason to make a folder.
+        val dir = runCatching { File(context.cacheDir, EDITS_DIR).canonicalFile }.getOrNull() ?: return
+        for (uri in uris) {
+            val file = editFile(uri, dir) ?: continue
+            runCatching { file.delete() }
+        }
+    }
+
+    /** True when a history entry's file is still on disk (§4: the OS may reclaim it). */
+    fun exists(uri: Uri): Boolean {
+        if (uri.scheme != "file") return true
+        val path = uri.path ?: return false
+        return runCatching { File(path).exists() }.getOrDefault(false)
+    }
+
+    /**
+     * Drops edit files older than [MAX_AGE_MILLIS]. Called once at app start.
+     *
+     * By age rather than wholesale: a send that was interrupted mid-upload is
+     * flipped to FAILED at startup and keeps its manual retry, and that retry
+     * re-reads the URI it was given. Emptying the directory on every launch
+     * would turn every such retry into a broken image, so recent steps survive
+     * a restart and only genuinely abandoned ones are collected — the same shape
+     * as `FireStreamApp.cleanOldSharedMedia`.
+     */
+    fun sweepStale() {
+        val cutoff = System.currentTimeMillis() - MAX_AGE_MILLIS
+        editFiles().forEach { file ->
+            if (file.lastModified() < cutoff) runCatching { file.delete() }
+        }
+    }
+
+    /** Everything currently in `cacheDir/edits/`, without creating it. */
+    private fun editFiles(): List<File> =
+        File(context.cacheDir, EDITS_DIR).listFiles()?.filter { it.isFile }.orEmpty()
+
+    /** [liveSteps] as files, dropping any URI that is not a local path. */
+    private fun editFiles(liveSteps: Set<Uri>): Set<File> =
+        liveSteps.mapNotNullTo(mutableSetOf()) { uri -> uri.path?.let(::File) }
+
+    /**
+     * Trims `cacheDir/edits/` back under [budget], oldest first, never touching
+     * anything in [keep].
+     *
+     * Keeping redo alive is what makes this load-bearing rather than tidy: undo
+     * can no longer free the file it steps off, so the cache grows per edit
+     * *step*, not per image, and stays grown for the whole preview session.
+     * Twenty picks × eight steps of 4096 px JPEG is comfortably past a gigabyte.
+     *
+     * Oldest-first is the plan's "trim the oldest steps of the least recently
+     * touched item" (§3) without per-item bookkeeping in the data layer: each
+     * item's steps are written in order and an item the user is working on keeps
+     * writing new files, so modification time already ranks the steps the way
+     * that rule wants them ranked. What it costs is undo *depth* on an item
+     * nobody has touched for a while, which the missing-file fallback in
+     * `PendingMedia.onSurvivingStep` absorbs by design.
+     *
+     * [keep] is what that ranking cannot see: every item's current step, plus
+     * any output still in flight. Without them, "oldest globally" and "oldest
+     * for this item" diverge the moment a batch has more than one edited image,
+     * and the eviction silently throws away an edit the user can still see.
+     *
+     * When [keep] is large enough that the budget cannot be met, this returns
+     * over budget rather than deleting a protected file. That is the right way
+     * round — a cache slightly over its ceiling costs disk, a deleted live step
+     * costs the user their work — and it cannot run away, because live steps are
+     * one per batch item.
+     *
+     * Callers must hold [evictionLock]; concurrent evictions would each compute
+     * a total from their own listing and over-delete.
+     */
+    @VisibleForTesting
+    internal fun enforceBudget(budget: Long, keep: Set<File>) {
+        val files = editFiles().sortedBy { it.lastModified() }
+        var total = files.sumOf { it.length() }
+        for (file in files) {
+            if (total <= budget) return
+            if (file in keep) continue
+            val size = file.length()
+            if (runCatching { file.delete() }.getOrDefault(false)) total -= size
+        }
+    }
+
+    /** Decodes [source] with its long edge capped at [ImageEditGeometry.WORKING_MAX_DIMENSION]. */
+    private fun decodeCapped(source: Uri): Bitmap {
+        val decoderSource = ImageDecoder.createSource(context.contentResolver, source)
+        return ImageDecoder.decodeBitmap(decoderSource) { decoder, info, _ ->
+            // Software allocation because the ops below read and re-encode these
+            // pixels; a hardware bitmap cannot be read back.
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = false
+            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height)
+            if (width > 0 && height > 0) decoder.setTargetSize(width, height)
+        }
+    }
+
+    private fun applyOp(bitmap: Bitmap, op: RasterOp): Bitmap = when (op) {
+        is RasterOp.Rotate -> {
+            val degrees = ImageEditGeometry.normalizeQuarterTurn(op.degrees)
+            if (degrees == 0) {
+                bitmap
+            } else {
+                val matrix = Matrix().apply { postRotate(degrees.toFloat()) }
+                Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            }
+        }
+
+        is RasterOp.Flip -> {
+            val matrix = Matrix().apply {
+                if (op.horizontal) postScale(-1f, 1f) else postScale(1f, -1f)
+            }
+            Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        }
+
+        is RasterOp.Crop -> {
+            val rect: PixelRect = ImageEditGeometry.cropRect(bitmap.width, bitmap.height, op)
+            if (rect.width == bitmap.width && rect.height == bitmap.height) {
+                bitmap
+            } else {
+                Bitmap.createBitmap(bitmap, rect.x, rect.y, rect.width, rect.height)
+            }
+        }
+
+        is RasterOp.Resize -> {
+            val (width, height) = ImageEditGeometry.resizedSize(bitmap.width, bitmap.height, op.longEdge)
+            if (width == bitmap.width && height == bitmap.height) {
+                bitmap
+            } else {
+                Bitmap.createScaledBitmap(bitmap, width, height, true)
+            }
+        }
+    }
+
+    private fun probe(source: Uri): Probe? = try {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(source)?.use {
+            BitmapFactory.decodeStream(it, null, options)
+        }
+        if (options.outWidth <= 0 || options.outHeight <= 0) {
+            null
+        } else {
+            Probe(options.outWidth, options.outHeight, sourceBytes(source))
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    /** File size for a `content://` or `file://` URI; 0 when the provider withholds it. */
+    private fun sourceBytes(uri: Uri): Long = try {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst() && !cursor.isNull(0)) cursor.getLong(0) else 0L
+            }
+            ?: context.contentResolver.openAssetFileDescriptor(uri, "r")
+                ?.use { it.length.coerceAtLeast(0L) }
+            ?: 0L
+    } catch (_: Exception) {
+        0L
+    }
+
+    /** A file inside `cacheDir/edits/`, or null for anything [discard] must not touch. */
+    private fun editFile(uri: Uri, dir: File): File? {
+        if (uri.scheme != "file") return null
+        val path = uri.path ?: return null
+        val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        return if (file.parentFile == dir) file else null
+    }
+
+    /** Header facts about a source image: enough to estimate, not enough to decode. */
+    private data class Probe(val width: Int, val height: Int, val sourceBytes: Long)
+
+    companion object {
+        /** Subdirectory of `cacheDir` holding every rasterized step. */
+        internal const val EDITS_DIR = "edits"
+
+        /** Quality for intermediate steps; only the send re-encodes at q80/q100. */
+        private const val INTERMEDIATE_QUALITY = 95
+
+        /**
+         * Ceiling on `cacheDir/edits/`. Eight steps of a 4096 px q95 JPEG is
+         * roughly 30 MB per image, so this is about eight fully-edited images
+         * held at once — comfortably more than a preview session needs, and two
+         * orders of magnitude under the gigabyte an unbounded cache reaches.
+         */
+        private const val CACHE_BUDGET_BYTES = 256L * 1024 * 1024
+
+        /** How long an edit file survives a process restart; see [sweepStale]. */
+        private val MAX_AGE_MILLIS = TimeUnit.HOURS.toMillis(24)
+    }
+}

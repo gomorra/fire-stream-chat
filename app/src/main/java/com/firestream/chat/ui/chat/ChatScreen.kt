@@ -2292,10 +2292,6 @@ fun ChatScreen(
         }
     }
 
-    BackHandler(enabled = pendingMedia.isNotEmpty()) {
-        pendingMedia = emptyList()
-    }
-
     AnimatedVisibility(visible = pendingMedia.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
         if (pendingMedia.isNotEmpty()) {
             ImagePreviewScreen(
@@ -2305,10 +2301,20 @@ fun ChatScreen(
                 onEmojiUsed = viewModel::addRecentEmoji,
                 onSend = { edited ->
                     viewModel.sendMediaMessages(edited)
+                    // Every step except the one actually being sent — that file
+                    // is about to be read by the compressor.
+                    viewModel.discardEditSteps(
+                        edited.flatMap { item ->
+                            item.editHistory.filterNot { it == item.uri.toString() }
+                        }
+                    )
                     pendingMedia = emptyList()
                 },
                 onDownload = viewModel::savePendingMediaToDownloads,
                 onDismiss = { pendingMedia = emptyList() },
+                estimateSendSize = viewModel::estimateSendSize,
+                editStepExists = viewModel::editStepExists,
+                onDiscardEditSteps = viewModel::discardEditSteps,
                 snackbarHostState = previewSnackbarHostState,
             )
         }

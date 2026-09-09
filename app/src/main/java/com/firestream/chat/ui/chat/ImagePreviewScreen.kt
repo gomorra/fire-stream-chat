@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -70,11 +71,14 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
 import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Full-screen review of everything the user just picked, before any of it is
@@ -99,6 +103,16 @@ import com.firestream.chat.ui.components.rememberVideoFrameRequest
  * [defaultIsHd] is the global "send images in HD" preference, used to render the
  * pill for an item whose own `isHd` is still null — that is, one the user has
  * not overridden. Nothing here writes the preference back.
+ *
+ * ### The history is a list of files the OS may delete
+ *
+ * `cacheDir` can be reclaimed under storage pressure at any moment, and the
+ * rasterizer evicts under its own byte budget deliberately, so a cursor can end
+ * up pointing at a file that is no longer there. [editStepExists] is how this
+ * screen checks: the page on screen is re-resolved whenever it changes, and the
+ * whole batch is re-resolved on send, each falling back to the nearest surviving
+ * step and ultimately to the untouched pick. Losing undo *depth* is acceptable;
+ * sending a URI that resolves to nothing is not (§4).
  */
 @Composable
 internal fun ImagePreviewScreen(
@@ -109,6 +123,12 @@ internal fun ImagePreviewScreen(
     onSend: (List<PendingMedia>) -> Unit,
     onDownload: (PendingMedia) -> Unit,
     onDismiss: () -> Unit,
+    /** Approximate output size for the HD sheet's two rows; see §2.5. */
+    estimateSendSize: suspend (Uri, Boolean) -> SizeEstimate? = { _, _ -> null },
+    /** Whether a rasterized edit step is still on disk. */
+    editStepExists: (Uri) -> Boolean = { true },
+    /** Rasterized steps nothing can reach any more, for the rasterizer to delete. */
+    onDiscardEditSteps: (List<String>) -> Unit = {},
     snackbarHostState: SnackbarHostState? = null,
 ) {
     var drafts by rememberSaveable(items, stateSaver = PendingMedia.ListSaver) {
@@ -139,6 +159,12 @@ internal fun ImagePreviewScreen(
     val current = drafts[currentIndex]
     val isBatch = drafts.size > 1
 
+    // Remembered against the URI it estimates, so the sheet's LaunchedEffect
+    // does not restart on every recomposition and re-probe the same header.
+    val currentUri = current.uri
+    val hdEstimate: suspend (Boolean) -> SizeEstimate? =
+        remember(currentUri, estimateSendSize) { { hd -> estimateSendSize(currentUri, hd) } }
+
     var currentPageZoomed by remember { mutableStateOf(false) }
     var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
     var showHdSheet by rememberSaveable { mutableStateOf(false) }
@@ -148,6 +174,10 @@ internal fun ImagePreviewScreen(
         { index ->
             drafts = drafts.toMutableList().also { list ->
                 captions.remove(list[index].originalUri.toString())
+                // Nothing can reach this item's steps once it leaves the batch,
+                // and undo no longer frees them, so this is their last chance to
+                // be collected before the next app start.
+                onDiscardEditSteps(list[index].editHistory)
                 list.removeAt(index)
             }
         }
@@ -159,7 +189,32 @@ internal fun ImagePreviewScreen(
         drafts = drafts.toMutableList().also { it[currentIndex] = transform(it[currentIndex]) }
     }
 
-    BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
+    // The step under the cursor may have been evicted — by the OS reclaiming
+    // cacheDir, or by the rasterizer's own byte budget. Re-resolve the page the
+    // user is looking at rather than rendering a blank pager page; off the main
+    // thread because it stats files, and only when the item actually changes.
+    LaunchedEffect(currentIndex, current) {
+        if (!current.hasEdits) return@LaunchedEffect
+        val resolved = withContext(Dispatchers.IO) { current.onSurvivingStep(editStepExists) }
+        if (resolved != current) updateCurrent { if (it == current) resolved else it }
+    }
+
+    // Throwing the batch away has to take its rasterized steps with it, and
+    // `drafts` — not the caller's `items` — is where those steps live: edits
+    // land here and are never lifted back out, so nothing outside this screen
+    // can see them to collect them. Undo no longer frees the file it steps off,
+    // so missing this path leaks every step until the next app start.
+    fun dismissBatch() {
+        onDiscardEditSteps(drafts.flatMap { it.editHistory })
+        onDismiss()
+    }
+
+    // One handler rather than two: back closes the emoji sheet if it is open and
+    // otherwise dismisses the batch. Two overlapping BackHandlers would make the
+    // answer depend on declaration order.
+    BackHandler {
+        if (showEmojiSheet) showEmojiSheet = false else dismissBatch()
+    }
 
     Box(
         modifier = Modifier
@@ -197,7 +252,7 @@ internal fun ImagePreviewScreen(
 
         // Back button
         IconButton(
-            onClick = onDismiss,
+            onClick = { dismissBatch() },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
@@ -227,8 +282,8 @@ internal fun ImagePreviewScreen(
         )
 
         // Hidden, not disabled, until this item actually has a step to walk back
-        // to — a fresh pick should look untouched. Inert until Phase 2 starts
-        // producing history files.
+        // to — a fresh pick should look untouched. Unreachable until an editor
+        // screen starts producing history files.
         if (current.hasEdits) {
             ImageEditHistory(
                 canUndo = current.editCursor > 0,
@@ -314,9 +369,17 @@ internal fun ImagePreviewScreen(
                 },
                 onHideEmojiSheet = { showEmojiSheet = false },
                 onSend = {
+                    // Resolve every item, not just the visible one: the pages the
+                    // user is not looking at have not been through the effect
+                    // above, and a vanished step must never reach the send path.
+                    // Synchronous, unlike the effect above: the send needs the
+                    // answer now. Bounded by the batch size times
+                    // PendingMedia.MAX_EDIT_STEPS stat calls on cacheDir, which
+                    // is cheaper than the frame it would cost to defer it.
                     onSend(
                         drafts.map {
-                            it.copy(caption = captions[it.originalUri.toString()].orEmpty())
+                            it.onSurvivingStep(editStepExists)
+                                .copy(caption = captions[it.originalUri.toString()].orEmpty())
                         }
                     )
                 }
@@ -338,8 +401,8 @@ internal fun ImagePreviewScreen(
 
     if (showHdSheet && !current.isVideo) {
         HdQualitySheet(
-            uri = current.uri,
             isHd = current.isHd ?: defaultIsHd,
+            estimate = hdEstimate,
             onSelect = { hd ->
                 updateCurrent { it.copy(isHd = hd) }
                 showHdSheet = false

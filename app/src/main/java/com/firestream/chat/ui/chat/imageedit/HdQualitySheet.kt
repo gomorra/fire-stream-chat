@@ -1,6 +1,5 @@
 package com.firestream.chat.ui.chat.imageedit
 
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,9 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.firestream.chat.domain.util.SizeEstimate
 
 /**
  * Standard-vs-HD for the image currently on screen.
@@ -37,25 +36,33 @@ import androidx.compose.ui.unit.dp
  * the user never touches (`.claude/plans/image-editor.md` §2.5).
  *
  * The sizes are **estimates and say so**. Measuring them exactly would mean a
- * second full decode-and-encode of every image in the batch; instead
- * [probeImage] reads this one image's header when the sheet opens and
- * [ImageSizeEstimator] does the arithmetic. Until that lands — and if the URI
- * cannot be read at all — the rows render without their size line rather than
- * with a placeholder number the user might trust.
+ * second full decode-and-encode of every image in the batch, which is precisely
+ * what `MediaProcessingLimiter` exists to prevent, so [estimate] reads this one
+ * image's header when the sheet opens and does arithmetic against the numbers
+ * `ImageCompressor` will actually apply. When the URI cannot be read at all the
+ * rows render without their size line rather than with a placeholder number the
+ * user might trust.
+ *
+ * [estimate] arrives as a lambda rather than as an injected rasterizer: the
+ * hosting ViewModel owns the dependency, which keeps this sheet — like every
+ * editor composable — constructible in a Robolectric test with a fake.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun HdQualitySheet(
-    uri: Uri,
     isHd: Boolean,
+    estimate: suspend (hd: Boolean) -> SizeEstimate?,
     onSelect: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
-    val context = LocalContext.current
-    var probe by remember(uri) { mutableStateOf<ImageProbe?>(null) }
+    var standardEstimate by remember(estimate) { mutableStateOf<SizeEstimate?>(null) }
+    var hdEstimate by remember(estimate) { mutableStateOf<SizeEstimate?>(null) }
 
-    LaunchedEffect(uri) { probe = probeImage(context, uri) }
+    LaunchedEffect(estimate) {
+        standardEstimate = estimate(false)
+        hdEstimate = estimate(true)
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
@@ -80,14 +87,14 @@ internal fun HdQualitySheet(
             QualityRow(
                 title = "Standard",
                 subtitle = "Faster to send, smaller upload",
-                detail = probe?.let { detailLine(it, hd = false) },
+                detail = standardEstimate?.let(::detailLine),
                 selected = !isHd,
                 onClick = { onSelect(false) },
             )
             QualityRow(
                 title = "HD",
                 subtitle = "Full resolution, best detail",
-                detail = probe?.let { detailLine(it, hd = true) },
+                detail = hdEstimate?.let(::detailLine),
                 selected = isHd,
                 onClick = { onSelect(true) },
             )
@@ -96,11 +103,21 @@ internal fun HdQualitySheet(
 }
 
 /** `1600 × 1200 · about 340 KB`, or just the dimensions when the size is unknown. */
-private fun detailLine(probe: ImageProbe, hd: Boolean): String {
-    val (width, height) = ImageSizeEstimator.estimateDimensions(probe, hd)
-    val size = ImageSizeEstimator.formatBytes(ImageSizeEstimator.estimateBytes(probe, hd))
-    val dimensions = "$width × $height"
+private fun detailLine(estimate: SizeEstimate): String {
+    val dimensions = "${estimate.width} × ${estimate.height}"
+    val size = formatBytes(estimate.bytes)
     return if (size.isEmpty()) dimensions else "$dimensions · about $size"
+}
+
+/**
+ * Decimal KB/MB, one decimal place above a megabyte — the shape a gallery app
+ * shows, not a binary-prefixed one. Blank for a size we could not estimate, so
+ * the caller drops the label rather than printing a confident "0 KB".
+ */
+internal fun formatBytes(bytes: Long): String = when {
+    bytes <= 0 -> ""
+    bytes < 1_000_000 -> "${(bytes / 1_000f).toInt().coerceAtLeast(1)} KB"
+    else -> "%.1f MB".format(bytes / 1_000_000f)
 }
 
 @Composable

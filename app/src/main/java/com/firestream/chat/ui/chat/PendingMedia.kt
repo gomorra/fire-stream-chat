@@ -61,9 +61,79 @@ internal data class PendingMedia(
             return if (step == 0) originalUri else Uri.parse(editHistory[step - 1])
         }
 
+    /**
+     * This item after a rasterized step lands on top of it, plus every history
+     * file the step made unreachable.
+     *
+     * Two things make a file unreachable, and both are this function's job
+     * because both are consequences of where the cursor was
+     * (`.claude/plans/image-editor.md` §2.7):
+     *
+     * - **The abandoned tail.** Finishing an edit while the cursor is not at the
+     *   top discards what redo was holding — linear history, the same rule as
+     *   inside the editors. Keeping those branches alive would mean a tree UI
+     *   and unbounded disk in a send preview.
+     * - **The overflow head.** The history is capped at [MAX_EDIT_STEPS], so the
+     *   oldest step falls off once a ninth lands. That shortens how far back
+     *   undo reaches; it never invalidates the step the user is on.
+     *
+     * The caller hands [LandedEdit.abandoned] to
+     * `ImageEditRasterizer.discard` — undo can no longer free the file it steps
+     * off, so this is the only moment an edit file becomes deletable, and
+     * skipping it is what turns the edit cache into a leak.
+     */
+    fun landEdit(rasterized: Uri): LandedEdit {
+        val step = editCursor.coerceIn(0, editHistory.size)
+        val kept = editHistory.take(step)
+        val appended = kept + rasterized.toString()
+        val overflow = (appended.size - MAX_EDIT_STEPS).coerceAtLeast(0)
+        val history = appended.drop(overflow)
+        return LandedEdit(
+            item = copy(editHistory = history, editCursor = history.size),
+            abandoned = editHistory.drop(step) + appended.take(overflow),
+        )
+    }
+
+    /**
+     * This item with its cursor moved down to the nearest step whose file is
+     * still there, ending at [originalUri] if none of them are.
+     *
+     * `cacheDir` can be reclaimed under storage pressure at any moment,
+     * including between a rotation and its state restore, and the rasterizer's
+     * own byte-budget eviction does the same deliberately. Losing undo *depth*
+     * is an acceptable cost of that; a send failure, a blank pager page or a
+     * cursor pointing at nothing is not (§4).
+     *
+     * **Walking down truncates what it walked past**, so the history stays a
+     * contiguous run of steps that are all actually reachable. Leaving the
+     * vanished entries in place would keep redo *enabled* over a hole it can
+     * never cross — pressing it would land on the missing file and be resolved
+     * straight back, which is exactly the control that silently does nothing
+     * that §2.7 sets out to avoid. Nothing is truncated when every step under
+     * the cursor is present: an ordinary undo must keep its redo tail.
+     */
+    fun onSurvivingStep(exists: (Uri) -> Boolean): PendingMedia {
+        val cursor = editCursor.coerceIn(0, editHistory.size)
+        var step = cursor
+        while (step > 0 && !exists(Uri.parse(editHistory[step - 1]))) step--
+        if (step == cursor) return if (cursor == editCursor) this else copy(editCursor = cursor)
+        return copy(editHistory = editHistory.take(step), editCursor = step)
+    }
+
     companion object {
         /** Field count per item in [ListSaver]; see its KDoc for the layout. */
         private const val SAVED_FIELDS = 6
+
+        /**
+         * How many rasterized steps one item keeps.
+         *
+         * The cap is what bounds the edit cache per image now that redo means
+         * undo cannot free the file it steps off: eight steps of a 4096 px JPEG
+         * is roughly 30 MB for a single photo, and twenty picks without a cap is
+         * comfortably past a gigabyte (§4). Eight is also well past the number
+         * of editor visits anyone makes before sending.
+         */
+        const val MAX_EDIT_STEPS = 8
 
         /**
          * Flattens to fixed-size `[originalUri, mime, caption, isHd, history,
@@ -110,3 +180,19 @@ internal data class PendingMedia(
         )
     }
 }
+
+/**
+ * The outcome of landing one rasterized edit: the item as it now stands, and
+ * the history files that landing it orphaned.
+ *
+ * Returned as a pair rather than mutating in place because the two halves go to
+ * different owners — the item goes back into the preview's draft list, the
+ * orphans go to `ImageEditRasterizer.discard`. A caller that forgets the second
+ * half leaks disk rather than corrupting state, and the type is what makes that
+ * omission visible at the call site.
+ */
+@Immutable
+internal data class LandedEdit(
+    val item: PendingMedia,
+    val abandoned: List<String>,
+)

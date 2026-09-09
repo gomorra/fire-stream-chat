@@ -11,6 +11,8 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
+- **Photo quality estimates now come from the same code that does the compressing.** The Standard and HD sizes in the quality sheet were worked out by a separate copy of the compressor's rules, which would have drifted silently the first time those rules changed. Both rows are now measured against the real thing, and the sheet leaves out a size it genuinely cannot work out rather than printing a number to fill the space. (`30b7b83`)
+- **Photos left in the send preview no longer keep working files around.** The editor writes each change to its own file so it can be undone; those files are now cleaned up when a photo is removed from the batch, when the batch is sent or thrown away, and on app start for anything older than a day. (`30b7b83`, `63a8f99`)
 - **The send preview has an editing toolbar.** Adjust, sticker and draw buttons now sit alongside HD and download at the top of the preview screen; the editors behind them are not built yet, so the three appear dimmed until a later update wires them up. The batch counter has moved below the toolbar to make room. (`2b69002`, `8fa8f0f`)
 
 ## [1.25.0] — 2026-09-08

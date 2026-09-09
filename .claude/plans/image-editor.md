@@ -1,8 +1,9 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phase 1 shipped; Phases 2–6 planned, not implemented.** Phase 1 (the
-toolbar shell, per-image HD and download) landed on 2026-09-09; the rest is still
-the agreed design awaiting its implementation sessions.
+Status: **Phases 1–2 shipped; Phases 3–6 planned, not implemented.** Phase 1 (the
+toolbar shell, per-image HD and download) and Phase 2 (the rasterizer, the fit
+mapper and the live preview-level history) both landed on 2026-09-09; the rest is
+still the agreed design awaiting its implementation sessions.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -364,7 +365,88 @@ Also worth knowing before Phase 2: caption keys and thumbnail-strip keys are now
   `isHd` precedence (per-item `true` over pref `false`, per-item `null` falls
   through to the pref).
 
-### Phase 2 — the rasterizer
+### Phase 2 — the rasterizer  ✅ shipped 2026-09-09
+
+Delivered. Eight departures from the bullets below were taken during
+implementation and are **flagged here for sign-off rather than settled**. Both
+axes of `/code-review` ran on the diff and each found a real bug — the eviction
+scope in #7 and the dismiss-path leak — which are fixed rather than recorded:
+
+1. **`RasterOp`, `SizeEstimate` and the dimension arithmetic live in
+   `domain/util/ImageEditGeometry.kt`** — *amended 2026-09-09, signed off.*
+   This first shipped as types nested inside `ImageEditRasterizer`, to hold the
+   editor to the one `UI_ALLOWED_DATA_IMPORTS` entry §2.2 budgets. Phase 3
+   disproved that within minutes: nesting works for a type reached through the
+   outer name, but the moment a screen wants a *companion helper* it is a fresh
+   import name again, and `AdjustImageScreen` immediately wanted `outputSize`
+   (to label each resize preset with its `W × H`, exactly as §3 Phase 3
+   specifies) and `normalizeQuarterTurn`. The ops and the arithmetic are pure
+   functions over floats with no Android type in them, so they are not a
+   platform adapter at all — they belong in `domain/`, which the UI may import
+   without any allowlist. `ImageEditRasterizer` keeps only decode, encode, the
+   cache lifecycle, the limiter permit and the header probe, and is now imported
+   by exactly one UI file, `ChatViewModel`, which injects it. One allowlist
+   entry, permanently, and clean call sites.
+2. **`estimateSize` returns `SizeEstimate(width, height, bytes)?`, not `Long`.**
+   The HD sheet already renders `1600 x 1200 - about 340 KB`; returning bytes
+   alone would either drop the dimensions line Phase 1 shipped or force a second
+   header read for it.
+3. **Four ops, not seven.** `Rotate`, `Flip`, `Crop` and `Resize` are the four
+   Phase 2's own test list names, and all four are fully specified here.
+   `Straighten`, `Strokes` and `Overlays` are *not* declared: each one's output
+   contract is a decision the phase that designs its UI has to make (does
+   straighten expand the bounds or inscribe-crop them? is a blur stroke a mask
+   over a pixelated copy?), and guessing now would ship a data shape Phase 3/4/5
+   would have to change anyway. The sealed hierarchy is one file, so adding a
+   subtype stays local.
+4. **The per-item cap of 8 lives in `PendingMedia.landEdit`, not the
+   rasterizer.** `rasterize(source, ops)` carries no item identity, and giving
+   it one would put per-item bookkeeping in the data layer to enforce a rule
+   about the length of a list the UI owns. The byte budget and its eviction *are*
+   in the rasterizer, as planned. `landEdit` returns the trimmed head alongside
+   the abandoned tail, so both still reach `discard` through one call site.
+5. **The app-start sweep is age-based (24 h), not wholesale.** A send
+   interrupted mid-upload is flipped to FAILED at startup and keeps its manual
+   retry, and that retry re-reads the URI it was given; emptying the directory on
+   every launch would turn every such retry into a broken image. Same shape as
+   `FireStreamApp.cleanOldSharedMedia`.
+6. **`landEdit` has no production call site yet.** The handoff's instruction was
+   that Phase 2 changes nothing about the three editor entry points, which stay
+   nullable until Phase 3/4/5 pass a lambda. So the append-and-truncate half of
+   this phase ships as tested arithmetic plus a tested `discard`, and Phase 3's
+   Done handler is the one line that joins them. The *fallback* half is live: the
+   visible page re-resolves itself and the whole batch re-resolves on send.
+
+7. **`rasterize` takes a third argument, `liveSteps: Set<Uri>`.** §3 promises
+   eviction "shortens how far back undo reaches without ever invalidating the
+   step the user is currently on", and a directory-wide oldest-first sweep
+   cannot keep that promise: in a batch, page 3's *current* step is old in
+   global terms while the user edits page 1, so evicting it destroys an edit
+   they can still see rather than only its depth. The rasterizer has no way to
+   know which steps are live, so the caller now says. Deliberately **not**
+   defaulted — a forgotten argument would be a silent data loss, so the compiler
+   asks Phase 3 for it.
+   *Re-reviewed on request and found incomplete:* `MediaProcessingLimiter`
+   allows two operations at once, so a second `rasterize` could evict the
+   first's just-written output, which is in nobody's `liveSteps` until it has
+   been returned and recorded. Outputs are now registered as in-flight before
+   the bytes are written and eviction is serialised behind a `Mutex`; when the
+   protected set makes the budget unreachable the cache stays over budget rather
+   than deleting a live step.
+8. **A sent batch's current step is not swept at send time.** §4 says the cache
+   is swept "when a batch is sent"; `ChatScreen.onSend` discards every step
+   *except* the one being sent, because `sendMediaMessage` is about to read
+   those bytes and there is no completion signal to hang a delete on. That one
+   file is collected by `sweepStale` on the next launch, 24 h later. Closing it
+   properly needs a send-completion hook, which is a send-pipeline change §2.1
+   set out to avoid.
+
+Also done here, per the Phase 1 sign-off list: `ImageSizeEstimator.kt` and its
+test are deleted, `HdQualitySheet` runs on `estimateSize`, `ImageCompressor`'s
+`MAX_DIMENSION` is `internal` so the estimate quotes it instead of restating it,
+and that `TECH_DEBT.md` entry is gone — replaced by the 4096 px ceiling entry §6
+asks for.
+
 
 - `data/util/ImageEditRasterizer.kt` + `RasterOp` + the 4096 px ceiling + the
   `cacheDir/edits/` lifecycle (`discard`, and a sweep of the directory on app
@@ -391,6 +473,27 @@ Also worth knowing before Phase 2: caption keys and thumbnail-strip keys are now
 ### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)
 
 - Rotate 90° CW, flip horizontal, straighten slider (−45°..45°) with a faint grid.
+- **Straighten auto-crops live, during the drag** (decided 2026-09-09). As the
+  angle changes the image scales up so it never stops being a full rectangle —
+  what Google Photos, Snapseed and iOS Photos all do. The alternative considered
+  and rejected was to expand the frame, show the black corners and offer an
+  explicit "auto crop" button: it is more honest about what rotation costs, but
+  it has a failure mode this one cannot have — straighten, miss the button,
+  press Done, and send a photo with black triangles in the corners.
+  If the trade is ever to be exposed, the control is **not** an auto-crop
+  button but a **fit ⇄ fill toggle**, and it belongs at the **right end of the
+  straighten slider row**, not floating over the photo: it is a property of the
+  straighten *tool*, so it sits with the tool and appears only while that tool is
+  active. Same reasoning that separates the draw screen's width slider (a tool
+  property) from the overlay screen's scale handle (a selection property). A
+  48 dp target at the row's end leaves ~330 dp for the slider and its angle
+  readout, which fits 390 dp.
+- **`AdjustImageScreen` will hit the ~15-parameter Composable ceiling**, which
+  throws `VerifyError` on first render rather than at compile time — this repo
+  has paid for that once already with a chat-open crash. Rotate, flip,
+  straighten, crop, resize, undo, redo, reset, cancel and done is ten callbacks
+  before anything else. Collapse them into an `@Immutable AdjustCallbacks` data
+  class, the way `MessageBubbleCallbacks` does it.
 - Crop with draggable corner handles and aspect presets: Free / Original / 1:1 /
   4:5 / 16:9.
 - Resize presets on the same screen — Original / 2048 / 1600 / 1080 / 720 long edge
