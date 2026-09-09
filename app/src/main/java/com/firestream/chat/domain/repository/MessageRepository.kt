@@ -16,8 +16,13 @@ interface MessageRepository {
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit>
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, emojiSizes: Map<Int, Float> = emptyMap()): Result<Unit>
-    /** @param uri URI string (e.g. `content://...` or `file://...`). Parsed in the data layer. */
-    suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String = ""): Result<Message>
+    /**
+     * @param uri URI string (e.g. `content://...` or `file://...`). Parsed in the data layer.
+     * @param isHd per-image quality override for images; `null` follows the
+     *   global "send images in HD" preference, which is what every caller that
+     *   does not offer the choice wants.
+     */
+    suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String = "", isHd: Boolean? = null): Result<Message>
     /**
      * Re-drive the send pipeline for a previously-failed message, mutating the
      * existing Room row in place (no new optimistic placeholder, no duplicate

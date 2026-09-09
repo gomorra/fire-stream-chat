@@ -226,6 +226,8 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val uploadProgressMap by viewModel.uploadProgress.collectAsState()
+    // Global "send images in HD"; the send preview's per-image pill falls back to it.
+    val sendImagesFullQuality by viewModel.sendImagesFullQuality.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
     // Tracks char-index → size multiplier for emojis inserted via the picker.
     // Indices are based on messageText.length at insertion time and cleared on send/cancel.
@@ -320,6 +322,17 @@ fun ChatScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     // Separate host for snackbars shown while the fullscreen image viewer is covering the Scaffold.
     val fullscreenSnackbarHostState = remember { SnackbarHostState() }
+    // …and another for the send preview, which covers both.
+    val previewSnackbarHostState = remember { SnackbarHostState() }
+
+    // The batch queued in ImagePreviewScreen. A gallery multi-pick, a camera
+    // capture and a video capture all funnel into this one list, so the preview
+    // screen never has to care which one produced it. Declared up here with the
+    // snackbar hosts because the snackbar router below reads it to decide which
+    // host is on top.
+    var pendingMedia by rememberSaveable(stateSaver = PendingMedia.ListSaver) {
+        mutableStateOf(emptyList<PendingMedia>())
+    }
 
     // Forward picker state
     var forwardTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -632,14 +645,19 @@ fun ChatScreen(
     }
 
     // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the correct host.
-    // When the fullscreen viewer is covering the Scaffold, route to fullscreenSnackbarHostState
-    // so the message appears on top of the viewer rather than being hidden behind it.
+    // When an overlay is covering the Scaffold, route to that overlay's own host so the
+    // message appears on top of it rather than being hidden behind it. Innermost first:
+    // the send preview is drawn over the fullscreen viewer, which is drawn over the Scaffold.
     LaunchedEffect(Unit) {
         viewModel.snackbarEvent.collect { event ->
             // Live read (not the composition-captured local): this collector runs
             // for the screen's lifetime and must route based on the viewer's
             // CURRENT visibility, not its state when the effect launched.
-            val host = if (uiState.overlays.fullscreenImage != null) fullscreenSnackbarHostState else snackbarHostState
+            val host = when {
+                pendingMedia.isNotEmpty() -> previewSnackbarHostState
+                uiState.overlays.fullscreenImage != null -> fullscreenSnackbarHostState
+                else -> snackbarHostState
+            }
             val result = host.showSnackbar(
                 message = event.message,
                 actionLabel = event.actionLabel,
@@ -785,12 +803,6 @@ fun ChatScreen(
 
     var cameraUri by rememberSaveable { mutableStateOf<Uri?>(null) }
     var cameraVideoUri by rememberSaveable { mutableStateOf<Uri?>(null) }
-    // The batch queued in ImagePreviewScreen. A gallery multi-pick, a camera
-    // capture and a video capture all funnel into this one list, so the preview
-    // screen never has to care which one produced it.
-    var pendingMedia by rememberSaveable(stateSaver = PendingMedia.ListSaver) {
-        mutableStateOf(emptyList<PendingMedia>())
-    }
 
     val galleryLauncher = rememberLauncherForActivityResult(
         PickMultipleVisualMedia(MAX_GALLERY_PICK)
@@ -2289,12 +2301,15 @@ fun ChatScreen(
             ImagePreviewScreen(
                 items = pendingMedia,
                 recentEmojis = uiState.overlays.recentEmojis,
+                defaultIsHd = sendImagesFullQuality,
                 onEmojiUsed = viewModel::addRecentEmoji,
                 onSend = { edited ->
                     viewModel.sendMediaMessages(edited)
                     pendingMedia = emptyList()
                 },
-                onDismiss = { pendingMedia = emptyList() }
+                onDownload = viewModel::savePendingMediaToDownloads,
+                onDismiss = { pendingMedia = emptyList() },
+                snackbarHostState = previewSnackbarHostState,
             )
         }
     }

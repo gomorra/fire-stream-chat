@@ -91,6 +91,10 @@ internal class ChatMessageSender(
      * Sequential so the images land in the order they were picked; memory is
      * bounded process-wide by MediaProcessingLimiter, not here. One failure does
      * not stop the rest — the first error is reported once the batch is done.
+     *
+     * Each item carries its own `uri` (the edit cursor's current step) and its
+     * own `isHd` — a null there means the repository falls back to the global
+     * preference, so an untouched pick sends exactly as it always did.
      */
     fun sendMediaMessages(items: List<PendingMedia>) {
         if (items.isEmpty()) return
@@ -103,7 +107,8 @@ internal class ChatMessageSender(
                     item.uri.toString(),
                     item.mimeType,
                     recipientId,
-                    item.caption
+                    item.caption,
+                    item.isHd,
                 ).onFailure { e -> if (firstError == null) firstError = AppError.from(e) }
             }
             val error = firstError

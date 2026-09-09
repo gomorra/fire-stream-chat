@@ -626,8 +626,11 @@ class MessageRepositoryImpl @Inject constructor(
      * @param recipientId See [sendMessage] — must be an empty string for GROUP
      *   and BROADCAST chats so the plaintext branch is used; Signal sessions
      *   are 1:1 and cannot address a group.
+     * @param isHd per-image override from the send preview; `null` falls back to
+     *   the global preference, so a caller that never offers the choice — the
+     *   share sheet, a retry — behaves exactly as it did before per-image HD.
      */
-    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String): Result<Message> = resultOf {
+    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
             throw Exception(ERR_USER_BLOCKED)
@@ -642,7 +645,11 @@ class MessageRepositoryImpl @Inject constructor(
             isVideo -> MessageType.VIDEO
             else -> MessageType.DOCUMENT
         }
-        val isHd = if (isImage) preferencesDataStore.sendImagesFullQualityFlow.first() else false
+        val sendAsHd = if (isImage) {
+            isHd ?: preferencesDataStore.sendImagesFullQualityFlow.first()
+        } else {
+            false
+        }
         val videoQuality = if (isVideo) preferencesDataStore.videoQualityFlow.first() else null
 
         // Guard BEFORE the optimistic insert: reject over-limit videos so no dead
@@ -665,7 +672,7 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             mediaWidth = null,
             mediaHeight = null,
-            isHd = isHd
+            isHd = sendAsHd
         )
         messageDao.insertMessage(MessageEntity.fromDomain(placeholder))
 
@@ -687,7 +694,7 @@ class MessageRepositoryImpl @Inject constructor(
 
                 when {
                     isImage -> {
-                        val result = imageCompressor.processImage(parsedUri, isHd)
+                        val result = imageCompressor.processImage(parsedUri, sendAsHd)
                         tempCompressedFile = result.file
 
                         localFile = mediaFileManager.copyToLocal(
@@ -761,7 +768,7 @@ class MessageRepositoryImpl @Inject constructor(
                     mediaWidth = mediaWidth,
                     mediaHeight = mediaHeight,
                     duration = videoDurationSec,
-                    isHd = isHd,
+                    isHd = sendAsHd,
                 )
 
                 val sentMessage = optimisticMessage.copy(
@@ -773,7 +780,7 @@ class MessageRepositoryImpl @Inject constructor(
                     mediaWidth = mediaWidth,
                     mediaHeight = mediaHeight,
                     duration = videoDurationSec,
-                    isHd = isHd
+                    isHd = sendAsHd
                 )
                 messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
                 chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)

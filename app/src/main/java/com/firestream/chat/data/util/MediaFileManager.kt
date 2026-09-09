@@ -12,6 +12,7 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,35 +71,63 @@ class MediaFileManager @Inject constructor(
 
     suspend fun saveToDownloads(localFile: File, mimeType: String): Uri =
         withContext(Dispatchers.IO) {
-            // Copy to the user-visible Downloads folder via MediaStore (API 29+).
-            val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, localFile.name)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            writeToDownloads(localFile.name, mimeType) { output ->
+                localFile.inputStream().use { it.copyTo(output) }
             }
-
-            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val resolver = context.contentResolver
-            val uri = resolver.insert(collection, values)
-                ?: throw Exception("Failed to create MediaStore entry")
-
-            try {
-                resolver.openOutputStream(uri)?.use { output ->
-                    localFile.inputStream().use { input ->
-                        input.copyTo(output)
-                    }
-                } ?: throw Exception("Failed to open output stream")
-
-                val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
-                resolver.update(uri, done, null, null)
-            } catch (e: Exception) {
-                resolver.delete(uri, null, null)
-                throw e
-            }
-
-            uri
         }
+
+    /**
+     * Save an arbitrary readable [sourceUri] to Downloads under [displayName].
+     *
+     * The [File] overload above only reaches media we already own a local copy
+     * of. A picked-but-unsent image is still a `content://` URI belonging to
+     * the gallery provider, so downloading one from the send preview streams
+     * straight from the resolver rather than staging a temp file first.
+     */
+    suspend fun saveToDownloads(sourceUri: Uri, mimeType: String, displayName: String): Uri =
+        withContext(Dispatchers.IO) {
+            writeToDownloads(displayName, mimeType) { output ->
+                context.contentResolver.openInputStream(sourceUri)?.use { it.copyTo(output) }
+                    ?: throw Exception("Failed to open source URI")
+            }
+        }
+
+    /**
+     * Creates the pending Downloads entry, lets [writeContent] fill it, then
+     * publishes it. A half-written entry is deleted rather than left visible in
+     * the user's Downloads as a zero-byte file.
+     */
+    private fun writeToDownloads(
+        displayName: String,
+        mimeType: String,
+        writeContent: (OutputStream) -> Unit,
+    ): Uri {
+        // Copy to the user-visible Downloads folder via MediaStore (API 29+).
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+
+        val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        val resolver = context.contentResolver
+        val uri = resolver.insert(collection, values)
+            ?: throw Exception("Failed to create MediaStore entry")
+
+        try {
+            resolver.openOutputStream(uri)?.use(writeContent)
+                ?: throw Exception("Failed to open output stream")
+
+            val done = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            resolver.update(uri, done, null, null)
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+
+        return uri
+    }
 
     suspend fun copyToLocal(chatId: String, messageId: String, sourceUri: Uri, extension: String): File =
         withContext(Dispatchers.IO) {

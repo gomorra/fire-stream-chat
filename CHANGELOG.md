@@ -2,6 +2,17 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.26.0] — 2026-09-09
+
+### Added
+
+- **Photo quality is now per photo, not a single global setting.** Sending in HD was one switch in Settings that applied to everything; picking one photo out of a batch to send at full resolution meant changing the setting, sending, and changing it back. The send preview now carries an HD button that acts on the photo you are looking at, opening a sheet with Standard and HD side by side and an approximate size for each — sizes are estimated from the photo's own dimensions rather than measured, because measuring them exactly would mean compressing every photo twice. A photo you never touch still follows the Settings preference exactly as before.
+- **Photos can be saved to Downloads before they are sent.** The download button existed in the fullscreen viewer but not in the send preview, so keeping a copy of something you had just taken or been handed meant sending it first. It is now in the preview too, and saves the photo on the page you are looking at.
+
+### Changed
+
+- **The send preview has an editing toolbar.** Adjust, sticker and draw buttons now sit alongside HD and download at the top of the preview screen; the editors behind them are not built yet, so the three appear dimmed until a later update wires them up. The batch counter has moved below the toolbar to make room.
+
 ## [1.25.0] — 2026-09-08
 
 ### Changed

@@ -1,7 +1,8 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **planned, not implemented.** No code was written in the session that
-produced this file; it is the agreed design for a later implementation session.
+Status: **Phase 1 shipped; Phases 2–6 planned, not implemented.** Phase 1 (the
+toolbar shell, per-image HD and download) landed on 2026-09-09; the rest is still
+the agreed design awaiting its implementation sessions.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -312,7 +313,21 @@ entry and its version bump (`feat:` → minor). Phase 5 is the exception and is 
 **5a** is a pure refactor (no CHANGELOG entry, no bump) and **5b** the feature on top,
 so a regression in the picker extraction is bisectable away from the new tabs.
 
-### Phase 1 — toolbar, download, per-image HD
+### Phase 1 — toolbar, download, per-image HD  ✅ shipped 2026-09-09
+
+Landed as designed, with three notes for the phases that build on it:
+
+- The rail split into two composables, `ImageEditActions` (tools, top-right) and
+  `ImageEditHistory` (undo / redo / original⇄edited, top-left), because they are
+  hidden and shown by different rules. The three editor entry points take
+  **nullable** callbacks and render dimmed while null, so Phase 3/4/5 wire one up
+  by passing a lambda and changing nothing else.
+- The batch page counter moved from beside the rail to below it: five controls at
+  40 dp do not leave a centred counter room on a 390 dp row.
+- Size estimation is `ui/chat/imageedit/ImageSizeEstimator.kt` for now — a header
+  probe plus pure arithmetic — because Phase 1 has no rasterizer to ask. When
+  `ImageEditRasterizer.estimateSize` arrives in Phase 2, the sheet should move to
+  it and this file should go.
 
 - `ImageEditToolbar` in `ImagePreviewScreen`: `[HD] [Adjust] [Overlay] [Draw] [Undo]
   [Redo] [Original⇄Edited] [Download]` top-right, back arrow top-left; everything but
@@ -371,6 +386,13 @@ so a regression in the picker extraction is bisectable away from the new tabs.
   layer to hide, only the photo itself, and an eye button that did nothing here
   would teach people to distrust it on the two screens where it works.
 - Cancel, Done. Done rasterizes once and pushes one history entry.
+- **Verify on device before calling the phase done.** Everything here is a
+  gesture over a coordinate mapping, and that is exactly the class of bug a
+  Robolectric test passes through: crop handles that sit a few dp from where the
+  finger expects them, a straighten that leaves the image imperceptibly
+  off-axis, a rotate that fights the pager's own drag. Check it on hardware in
+  both orientations, and log anything still unchecked under
+  [`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending on-device verification*.
 - File: `ui/chat/imageedit/AdjustImageScreen.kt`.
 
 ### Phase 4 — Draw screen (pen, highlighter, blur)
@@ -390,6 +412,14 @@ so a regression in the picker extraction is bisectable away from the new tabs.
   unambiguously as *redacted*. The tool is still labelled "Blur".
 - Strokes are captured in normalized image space via `ImageFitMapper` and flattened
   on Done.
+- **Verify on device before calling the phase done.** Two things only hardware
+  can answer: whether a drawn stroke keeps up with the finger on a real
+  full-resolution photo, and whether the flattened output actually redacts what
+  the on-screen preview showed as covered — a blur that lands a few pixels off
+  in the JPEG is a privacy failure, not a cosmetic one. Check the layer-eye
+  toggle against the written file, not just the preview, and log anything still
+  unchecked under [`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending
+  on-device verification*.
 - File: `ui/chat/imageedit/DrawImageScreen.kt`.
 
 ### Phase 5 — Overlay screen (emoji, stickers, text + shapes) and the shared picker
@@ -403,6 +433,13 @@ gains `PickerPanel` + `EmojiTab` + `PickerTab`/`PickerSelection`; `EmojiHandlerP
 becomes a one-tab alias so the composer, reaction sheet and caption bar are byte-for-
 byte unchanged in behaviour. No new feature in this commit — it is a refactor with a
 test to prove the three existing hosts still behave.
+
+**Verify on device before calling 5a done.** The behaviour most at risk in the
+move is felt, not asserted: the long-press size drag with its row-sibling fade,
+and the frozen `sessionRecents` order holding still under your finger. Open the
+composer, the reaction sheet and the caption bar on hardware and confirm each is
+indistinguishable from before; log anything still unchecked under
+[`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending on-device verification*.
 
 **5b — the sticker and shape tabs, and the overlay screen.**
 
@@ -449,6 +486,15 @@ test to prove the three existing hosts still behave.
   run at once, same contract as the draw screen.
 - Rendered on Done with `Canvas.drawText` for emoji and text (emoji are text) and
   `drawBitmap` for stickers, at output resolution so glyphs and edges stay crisp.
+- **Verify on device before calling 5b done.** The separate scale and rotate
+  handles were chosen over one combined corner on a claim about the hand — that
+  a 26 dp handle with a 48 dp hit rect is grabbable without occluding what it
+  sits on, and that two-finger pinch and rotate do not fight the selection. Only
+  a real screen settles that, along with whether the four-segment island and its
+  search and delete buttons still fit a 390 dp row. If the handle does occlude
+  small stickers in practice, the fallback is the readout pill, not a second
+  slider. Log anything still unchecked under
+  [`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending on-device verification*.
 - Files: `ui/chat/imageedit/OverlayImageScreen.kt`, `ui/chat/picker/PickerPanel.kt`,
   `ui/chat/picker/EmojiTab.kt`, `ui/chat/picker/StickerTab.kt`,
   `ui/chat/picker/TextTab.kt`, `ui/chat/picker/ShapeTab.kt`,
