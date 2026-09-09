@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,8 +56,9 @@ import com.firestream.chat.ui.theme.FsTextMute
  * different statement from one that is merely not built yet.
  *
  * The controls are black-scrim circles rather than a bar so the photo stays
- * uncovered; sizes (40 dp control, 36 dp inside the history pill, 22 dp glyph)
- * match the back arrow already on this screen.
+ * uncovered; the 40 dp tool circle and its 22 dp glyph match the back arrow
+ * already on this screen. The history pill's buttons are 48 dp instead — see
+ * [ImageEditHistory].
  */
 @Composable
 internal fun ImageEditActions(
@@ -100,11 +102,14 @@ internal fun ImageEditHistory(
     modifier: Modifier = Modifier,
 ) {
     Row(
+        // 48 dp tall, unlike the 40 dp tool circles opposite: these three sit
+        // shoulder to shoulder inside one pill with no gap between their hit
+        // rects, so anything smaller would put three sub-target buttons in a row
+        // and make a mis-tap an undo rather than a miss.
         modifier = modifier
-            .height(40.dp)
-            .background(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(20.dp))
-            .padding(horizontal = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .height(48.dp)
+            .background(color = Color.Black.copy(alpha = 0.5f), shape = RoundedCornerShape(24.dp))
+            .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         PillIconButton(Icons.AutoMirrored.Filled.Undo, "Undo edit", enabled = canUndo, onClick = onUndo)
@@ -149,8 +154,8 @@ private fun HdPill(isHd: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             text = "HD",
+            style = MaterialTheme.typography.labelSmall,
             color = if (isHd) Color.White else FsText,
-            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.5.sp,
         )
@@ -180,7 +185,7 @@ private fun ScrimIconButton(
     }
 }
 
-/** A 36 dp transparent button for use inside the history pill's own scrim. */
+/** A 48 dp transparent button for use inside the history pill's own scrim. */
 @Composable
 private fun PillIconButton(
     icon: ImageVector,
@@ -192,7 +197,7 @@ private fun PillIconButton(
     IconButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.size(36.dp),
+        modifier = Modifier.size(48.dp),
     ) {
         Icon(
             imageVector = icon,

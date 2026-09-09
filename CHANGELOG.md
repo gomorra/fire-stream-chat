@@ -11,7 +11,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **The send preview has an editing toolbar.** Adjust, sticker and draw buttons now sit alongside HD and download at the top of the preview screen; the editors behind them are not built yet, so the three appear dimmed until a later update wires them up. The batch counter has moved below the toolbar to make room. (`2b69002`)
+- **The send preview has an editing toolbar.** Adjust, sticker and draw buttons now sit alongside HD and download at the top of the preview screen; the editors behind them are not built yet, so the three appear dimmed until a later update wires them up. The batch counter has moved below the toolbar to make room. (`2b69002`, `PENDING`)
 
 ## [1.25.0] — 2026-09-08
 

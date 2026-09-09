@@ -31,7 +31,15 @@ internal data class ImageProbe(
  */
 internal object ImageSizeEstimator {
 
-    /** Long-edge cap `ImageCompressor` applies to a non-HD send. */
+    /**
+     * Long-edge cap `ImageCompressor` applies to a non-HD send.
+     *
+     * **Keep in sync with `ImageCompressor.MAX_DIMENSION`** — and with
+     * `JPEG_QUALITY` for the factors below. The duplication is deliberate and
+     * temporary (see `TECH_DEBT.md`): the data-layer constants are private, and
+     * reaching for them would spend the single `UI_ALLOWED_DATA_IMPORTS` entry
+     * §2.2 reserves for `ImageEditRasterizer`. Phase 2 deletes this file.
+     */
     private const val STANDARD_MAX_DIMENSION = 1600
 
     /**

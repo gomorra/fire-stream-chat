@@ -117,6 +117,14 @@ internal fun ImagePreviewScreen(
     val captions = rememberSaveable(items, saver = CaptionsSaver) {
         mutableStateMapOf<String, String>()
     }
+    // Where each item's cursor was before the user jumped to the original, so
+    // Original⇄Edited comes back to the step they were on rather than to the top
+    // (§2.7) — toggling off and back from step 2 of 4 must not silently re-apply
+    // steps 3 and 4. Screen state, not model state: the item still has exactly
+    // one cursor, and this only remembers where a peek started from.
+    val stepBeforePeek = rememberSaveable(items, saver = CursorsSaver) {
+        mutableStateMapOf<String, Int>()
+    }
 
     // Removing the last remaining item is a dismissal — there is nothing left to
     // review or send.
@@ -226,11 +234,27 @@ internal fun ImagePreviewScreen(
                 canUndo = current.editCursor > 0,
                 canRedo = current.editCursor < current.editHistory.size,
                 showingOriginal = current.editCursor == 0,
-                onUndo = { updateCurrent { it.copy(editCursor = it.editCursor - 1) } },
-                onRedo = { updateCurrent { it.copy(editCursor = it.editCursor + 1) } },
+                // Undo and redo are deliberate moves along the axis, so they
+                // retire any half-finished peek rather than letting it snap the
+                // cursor back to where the user no longer is.
+                onUndo = {
+                    stepBeforePeek.remove(current.originalUri.toString())
+                    updateCurrent { it.copy(editCursor = it.editCursor - 1) }
+                },
+                onRedo = {
+                    stepBeforePeek.remove(current.originalUri.toString())
+                    updateCurrent { it.copy(editCursor = it.editCursor + 1) }
+                },
                 onToggleOriginal = {
-                    updateCurrent {
-                        it.copy(editCursor = if (it.editCursor == 0) it.editHistory.size else 0)
+                    val key = current.originalUri.toString()
+                    updateCurrent { item ->
+                        if (item.editCursor == 0) {
+                            val back = stepBeforePeek.remove(key) ?: item.editHistory.size
+                            item.copy(editCursor = back.coerceIn(0, item.editHistory.size))
+                        } else {
+                            stepBeforePeek[key] = item.editCursor
+                            item.copy(editCursor = 0)
+                        }
                     }
                 },
                 modifier = Modifier
@@ -543,6 +567,23 @@ private fun ThumbnailStrip(
         }
     }
 }
+
+/**
+ * Flattens the peeked-from cursor map to `[key, cursor]` pairs. Saved rather
+ * than merely remembered: a rotation mid-peek that forgot the step would send
+ * the user back to the top of the history, which is exactly the re-applied-edits
+ * bug the map exists to prevent.
+ */
+private val CursorsSaver = listSaver<SnapshotStateMap<String, Int>, String>(
+    save = { map -> map.entries.flatMap { listOf(it.key, it.value.toString()) } },
+    restore = { flat ->
+        mutableStateMapOf<String, Int>().apply {
+            flat.chunked(2).forEach { pair ->
+                if (pair.size == 2) pair[1].toIntOrNull()?.let { put(pair[0], it) }
+            }
+        }
+    }
+)
 
 /** Flattens the caption map to `[key, value]` pairs so edits survive rotation. */
 private val CaptionsSaver = listSaver<SnapshotStateMap<String, String>, String>(

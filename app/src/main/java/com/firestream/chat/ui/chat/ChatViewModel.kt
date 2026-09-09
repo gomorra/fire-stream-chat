@@ -379,31 +379,40 @@ class ChatViewModel @Inject constructor(
      * generated name — the provider's own display name is often a bare id.
      */
     internal fun savePendingMediaToDownloads(item: PendingMedia) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val extension = if (item.isVideo) "mp4" else "jpg"
-                val name = "FireStream_${System.currentTimeMillis()}.$extension"
-                val uri = mediaFileManager.saveToDownloads(item.uri, item.mimeType, name)
-                val label = if (item.isVideo) "Video" else "Image"
-                _snackbarEvent.emit(
-                    SnackbarEvent("$label saved to Downloads", actionLabel = "Open", actionUri = uri)
-                )
-            } catch (e: Exception) {
-                _snackbarEvent.emit(SnackbarEvent("Failed to save: ${e.message}"))
-            }
+        val label = if (item.isVideo) "Video" else "Image"
+        val extension = if (item.isVideo) "mp4" else "jpg"
+        saveToDownloads(label) {
+            mediaFileManager.saveToDownloads(
+                sourceUri = item.uri,
+                mimeType = item.mimeType,
+                displayName = "FireStream_${System.currentTimeMillis()}.$extension",
+            )
         }
     }
 
     fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+        saveToDownloads("Image") {
+            val file = when {
+                localUri != null && File(localUri).exists() -> File(localUri)
+                mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
+                else -> throw Exception("No image source available")
+            }
+            mediaFileManager.saveToDownloads(file, mimeType)
+        }
+    }
+
+    /**
+     * Runs a save off the main thread and reports it the one way this app
+     * reports a save: a snackbar with an Open action, or the failure's message.
+     * Only [resolve] — where the bytes come from — differs between callers.
+     */
+    private fun saveToDownloads(label: String, resolve: suspend () -> Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val file = when {
-                    localUri != null && File(localUri).exists() -> File(localUri)
-                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
-                    else -> throw Exception("No image source available")
-                }
-                val uri = mediaFileManager.saveToDownloads(file, mimeType)
-                _snackbarEvent.emit(SnackbarEvent("Image saved to Downloads", actionLabel = "Open", actionUri = uri))
+                val uri = resolve()
+                _snackbarEvent.emit(
+                    SnackbarEvent("$label saved to Downloads", actionLabel = "Open", actionUri = uri)
+                )
             } catch (e: Exception) {
                 _snackbarEvent.emit(SnackbarEvent("Failed to save: ${e.message}"))
             }

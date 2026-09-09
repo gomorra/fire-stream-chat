@@ -223,6 +223,20 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `ImageSizeEstimator` duplicates `ImageCompressor`'s output contract, and probes from the UI layer
+
+**The smell.** Two problems in one file, both introduced knowingly by Phase 1 of the image editor (`.claude/plans/image-editor.md`).
+
+First, `ui/chat/imageedit/ImageSizeEstimator.kt` re-states numbers the data layer already owns: `STANDARD_MAX_DIMENSION = 1600` and its q80/q100 factors mirror `ImageCompressor`'s private `MAX_DIMENSION = 1600` and `JPEG_QUALITY = 80`. Nothing links the two, so changing the compressor would silently make every size the HD sheet quotes wrong — and wrong quietly, since the labels are approximate by design and nobody would notice them drifting.
+
+Second, `probeImage` / `sourceBytes` do `contentResolver` and `BitmapFactory` I/O from the UI layer, called out of a `LaunchedEffect` via `LocalContext`. `ArchitectureTest` passes because it checks *imports* of `com.firestream.chat.data.*`, not where I/O happens; every sibling media probe lives in `data/util/`.
+
+**Why we haven't fixed it.** Both are artefacts of phase ordering, not of taste. The plan's §2.2 gives `ImageEditRasterizer.estimateSize(source, hd)` to Phase 2 and budgets **exactly one** new `UI_ALLOWED_DATA_IMPORTS` entry for the rasterizer itself. Phase 1 has no rasterizer to ask and no allowlist entry to spend, so exposing `ImageCompressor`'s constants — or moving the probe into `data/util/` — would mean spending Phase 2's allowance a phase early on a file that is scheduled to be deleted.
+
+**When to revisit.** In Phase 2, as part of landing `ImageEditRasterizer`: move `HdQualitySheet` onto `estimateSize`, and delete `ImageSizeEstimator.kt` and its test rather than porting them. If Phase 2 slips far enough that the compressor's constants change first, pull the estimate into `data/util/` on its own instead of waiting. Raised by the Standards axis of `/code-review` on the Phase 1 diff (2026-09-09).
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

@@ -315,19 +315,35 @@ so a regression in the picker extraction is bisectable away from the new tabs.
 
 ### Phase 1 — toolbar, download, per-image HD  ✅ shipped 2026-09-09
 
-Landed as designed, with three notes for the phases that build on it:
+Delivered in full. Four departures from the bullets below were taken during
+implementation and are **flagged here for sign-off rather than settled** — say so
+if any should be undone before Phase 2 builds on it:
 
-- The rail split into two composables, `ImageEditActions` (tools, top-right) and
-  `ImageEditHistory` (undo / redo / original⇄edited, top-left), because they are
-  hidden and shown by different rules. The three editor entry points take
-  **nullable** callbacks and render dimmed while null, so Phase 3/4/5 wire one up
-  by passing a lambda and changing nothing else.
-- The batch page counter moved from beside the rail to below it: five controls at
-  40 dp do not leave a centred counter room on a 390 dp row.
-- Size estimation is `ui/chat/imageedit/ImageSizeEstimator.kt` for now — a header
-  probe plus pure arithmetic — because Phase 1 has no rasterizer to ask. When
-  `ImageEditRasterizer.estimateSize` arrives in Phase 2, the sheet should move to
-  it and this file should go.
+1. **The rail is two composables, not one `ImageEditToolbar`.** `ImageEditActions`
+   (tools, top-right) and `ImageEditHistory` (undo / redo / original⇄edited,
+   top-left), because they are hidden and shown by different rules and the plan's
+   own UI direction already puts the history controls in the other corner. The
+   three editor entry points take **nullable** callbacks and render dimmed while
+   null, so Phase 3/4/5 wire one up by passing a lambda and changing nothing else.
+2. **A third file, `ui/chat/imageedit/ImageSizeEstimator.kt`**, not on the file
+   list: a header probe plus pure arithmetic, because Phase 1 has no rasterizer to
+   ask for `estimateSize` (§2.2) and no `UI_ALLOWED_DATA_IMPORTS` entry to spend
+   on one. It duplicates `ImageCompressor`'s 1600/q80 contract, which is recorded
+   in `TECH_DEBT.md`; **Phase 2 should delete this file**, not port it.
+3. **The batch page counter moved from beside the rail to below it.** Five
+   controls at 40 dp do not leave a centred counter room on a 390 dp row — the
+   row-A mockup collides there too.
+4. **The preview-level history controls are wired, not inert**, which §3 assigns
+   to Phase 2. They are unreachable in Phase 1 (nothing can produce a history
+   yet), and wiring them is what let the §2.7 "returns to the step you were on"
+   rule be implemented and regression-tested now rather than being rediscovered
+   later — `ImagePreviewScreenHistoryTest` covers both ends of the axis and the
+   peek-and-return. Phase 2 inherits tested arithmetic; what remains genuinely
+   its own is appending on Done, truncating the tail, and the missing-file
+   fallback.
+
+Also worth knowing before Phase 2: caption keys and thumbnail-strip keys are now
+`originalUri`, not `uri`, because `uri` moves every time a step lands.
 
 - `ImageEditToolbar` in `ImagePreviewScreen`: `[HD] [Adjust] [Overlay] [Draw] [Undo]
   [Redo] [Original⇄Edited] [Download]` top-right, back arrow top-left; everything but
