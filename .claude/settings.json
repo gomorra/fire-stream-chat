@@ -1,5 +1,7 @@
 {
   "env": {
+    "LANG": "C.UTF-8",
+    "LC_ALL": "C.UTF-8",
     "VSCODE_INJECTION": "",
     "GIT_ASKPASS": "",
     "VSCODE_GIT_ASKPASS_NODE": "",

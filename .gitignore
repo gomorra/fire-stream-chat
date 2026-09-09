@@ -53,3 +53,6 @@ firebase.log
 !.claude/settings.json
 !.claude/plans/
 !.claude/skills/
+
+# Kotlin compiler daemon error logs
+.kotlin/
