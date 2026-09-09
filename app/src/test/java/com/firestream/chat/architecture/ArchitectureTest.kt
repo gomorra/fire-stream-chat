@@ -23,7 +23,23 @@ import org.junit.Test
 
 // Parsed once per JVM (top-level val); all production source sets across modules,
 // test source sets excluded. ~330 files, a few seconds.
-private val production = Konsist.scopeFromProduction()
+private val productionScope = Konsist.scopeFromProduction()
+
+/**
+ * The production files these rules reason about.
+ *
+ * Konsist walks the project directory, which means a git worktree checked out
+ * *inside* the repo — `.claude/worktrees/<branch>/`, where this harness puts one
+ * when an agent works on a second branch — is scanned as a second copy of every
+ * production file. That breaks these rules in two ways at once: the roster check
+ * below sees every `Chat*Manager` twice, and an unrelated in-progress branch can
+ * fail the main tree's gate with a violation that is not in the main tree at all.
+ *
+ * Excluding those paths is a scope fix, not a weakened rule: a worktree is a
+ * duplicate checkout, and the rules are about this checkout's source.
+ */
+private val production = productionScope.files
+    .filterNot { it.path.contains("/.claude/worktrees/") }
 
 private fun KoFileDeclaration.inLayer(pathFragment: String): Boolean =
     path.contains("/com/firestream/chat/$pathFragment/")
@@ -101,7 +117,7 @@ class ArchitectureTest {
 
     @Test
     fun `domain layer imports only stdlib, coroutines, javax inject, and domain itself`() {
-        production.files
+        production
             .filter { it.inLayer("domain") }
             // Baselined: @Composable icon slot in the .command palette model —
             // TECH_DEBT.md "ChatCommand.kt — @Composable import in the domain layer".
@@ -115,7 +131,7 @@ class ArchitectureTest {
 
     @Test
     fun `data layer does not import ui or navigation`() {
-        production.files
+        production
             .filter { it.inLayer("data") }
             // Baselined: call-notification PendingIntent targets CallActivity directly —
             // TECH_DEBT.md "CallNotificationManager — data-to-ui import of CallActivity".
@@ -130,7 +146,7 @@ class ArchitectureTest {
 
     @Test
     fun `ui imports from data are limited to the accepted system-boundary allowlist`() {
-        production.files
+        production
             .filter { it.inLayer("ui") }
             .assertTrue { file ->
                 file.imports
@@ -143,7 +159,7 @@ class ArchitectureTest {
     fun `chat managers do not reference other chat managers`() {
         // Text-level (not import-level) on purpose: the managers share a package with
         // each other and ChatViewModel, so a cross-manager reference needs no import.
-        production.files
+        production
             .filter { file -> CHAT_MANAGERS.any { file.isFile("ui/chat/$it.kt") } }
             .assertFalse { file ->
                 val self = file.path.substringAfterLast('/').removeSuffix(".kt")
@@ -153,7 +169,7 @@ class ArchitectureTest {
 
     @Test
     fun `chat manager roster stays in sync with the codebase`() {
-        val discovered = production.files
+        val discovered = production
             .filter { it.inLayer("ui/chat") }
             .map { it.path.substringAfterLast('/') }
             .filter { it.matches(Regex("""Chat\w+Manager\.kt""")) }

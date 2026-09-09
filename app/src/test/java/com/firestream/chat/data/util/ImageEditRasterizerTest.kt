@@ -319,4 +319,19 @@ class ImageEditRasterizerTest {
         // The pick itself is never a cache file and must survive regardless.
         assertTrue(File(requireNotNull(pick.path)).exists())
     }
+
+    // ── two rasterize calls at once ──────────────────────────────────────────
+
+    @Test
+    fun `a live step survives an impossible budget`() = runTest {
+        val live = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = emptySet())
+        rasterizer.cacheBudgetBytes = 1
+
+        // Nothing left to delete but the protected file: the cache stays over
+        // budget rather than the user losing the step they are looking at.
+        val next = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = setOf(live))
+
+        assertTrue(rasterizer.exists(live))
+        assertTrue(rasterizer.exists(next))
+    }
 }

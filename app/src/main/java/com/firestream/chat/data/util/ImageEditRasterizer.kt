@@ -7,8 +7,11 @@ import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.annotation.VisibleForTesting
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -121,6 +124,41 @@ class ImageEditRasterizer @Inject constructor(
 
     private val sequence = AtomicLong(0)
 
+    /**
+     * Guards [inFlight] and serialises eviction.
+     *
+     * [MediaProcessingLimiter] allows two operations at once, so two
+     * [rasterize] calls can overlap. Without this, each would list the
+     * directory, compute its own total and delete independently — over-evicting
+     * at best, and at worst deleting the other's freshly written output, which
+     * is in nobody's `liveSteps` yet because it has not been returned to a
+     * caller to record.
+     */
+    private val evictionLock = Mutex()
+
+    /**
+     * Outputs written but not yet handed back to a caller. Registered before the
+     * bytes are written and exempt from eviction until [rasterize] returns, at
+     * which point the caller records the step and it becomes a live step
+     * instead.
+     *
+     * Verified by construction rather than by a test: reproducing the race needs
+     * two rasterize calls genuinely overlapping inside the write window, which
+     * has no deterministic seam to hook. A test that merely runs two calls and
+     * hopes they interleave asserts nothing on the runs where they do not. What
+     * *is* tested is the property this feeds: [enforceBudget] never deletes a
+     * file in `keep`, even when that leaves it over budget.
+     */
+    private val inFlight = mutableSetOf<File>()
+
+    /**
+     * The byte ceiling for `cacheDir/edits/`. A `var` only so a test can shrink
+     * it: the real budget is [CACHE_BUDGET_BYTES] and nothing in production
+     * writes to this.
+     */
+    @VisibleForTesting
+    internal var cacheBudgetBytes: Long = CACHE_BUDGET_BYTES
+
     /** `cacheDir/edits/`, created on demand. */
     private val editsDir: File
         get() = File(context.cacheDir, EDITS_DIR).apply { mkdirs() }
@@ -156,10 +194,19 @@ class ImageEditRasterizer @Inject constructor(
                         }
                     }
                     val output = File(editsDir, "edit_${System.currentTimeMillis()}_${sequence.incrementAndGet()}.jpg")
-                    output.outputStream().use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, INTERMEDIATE_QUALITY, out)
+                    // Registered before the bytes exist, so a concurrent
+                    // rasterize's eviction can never pick it up mid-write.
+                    evictionLock.withLock { inFlight += output }
+                    try {
+                        output.outputStream().use { out ->
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, INTERMEDIATE_QUALITY, out)
+                        }
+                        evictionLock.withLock {
+                            enforceBudget(cacheBudgetBytes, keep = editFiles(liveSteps) + inFlight)
+                        }
+                    } finally {
+                        evictionLock.withLock { inFlight -= output }
                     }
-                    enforceBudget(CACHE_BUDGET_BYTES, keep = editFiles(liveSteps) + output)
                     Uri.fromFile(output)
                 } finally {
                     bitmap.recycle()
@@ -255,11 +302,21 @@ class ImageEditRasterizer @Inject constructor(
      * nobody has touched for a while, which the missing-file fallback in
      * `PendingMedia.onSurvivingStep` absorbs by design.
      *
-     * [keep] is what that ranking cannot see: the file just written plus every
-     * item's current step. Without them, "oldest globally" and "oldest for this
-     * item" diverge the moment a batch has more than one edited image, and the
-     * eviction silently throws away an edit the user can still see.
+     * [keep] is what that ranking cannot see: every item's current step, plus
+     * any output still in flight. Without them, "oldest globally" and "oldest
+     * for this item" diverge the moment a batch has more than one edited image,
+     * and the eviction silently throws away an edit the user can still see.
+     *
+     * When [keep] is large enough that the budget cannot be met, this returns
+     * over budget rather than deleting a protected file. That is the right way
+     * round — a cache slightly over its ceiling costs disk, a deleted live step
+     * costs the user their work — and it cannot run away, because live steps are
+     * one per batch item.
+     *
+     * Callers must hold [evictionLock]; concurrent evictions would each compute
+     * a total from their own listing and over-delete.
      */
+    @VisibleForTesting
     internal fun enforceBudget(budget: Long, keep: Set<File>) {
         val files = editFiles().sortedBy { it.lastModified() }
         var total = files.sumOf { it.length() }
