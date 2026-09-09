@@ -145,6 +145,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Build tooling
 
+- **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
+  Several test names in this repo contain an em dash (e.g.
+  `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),
+  and Kotlin writes one `.class` file per such name. On a machine where `LANG` is unset
+  the JVM's `sun.jnu.encoding` falls back to `ANSI_X3.4-1968` (ASCII), the compiler
+  cannot encode that path, and the build fails with nothing but
+  `Internal compiler error. See log for more details` — the real
+  `InvalidPathException: Malformed input or input contains unmappable characters` is
+  only visible with `-e:` lines or in the daemon log. Check
+  `java -XshowSettings:properties -version 2>&1 | grep encoding` before suspecting the
+  diff. Fix is `LANG=C.UTF-8` in the *environment*: the Gradle daemon inherits its
+  locale from the shell that starts it, so exporting it for one command needs a
+  `./gradlew --stop` first. This repo sets it in `.claude/settings.json`; a plain
+  terminal on a minimal container needs it in the shell profile. Confirmed 2026-09-09.
+
 - **`./gradlew lint` crashes on this AGP/AndroidX combination — it is not your diff.**
   Two AndroidX detectors (`NonNullableMutableLiveDataDetector` on
   `AppLifecycleObserver.kt`, `RememberInCompositionDetector` on `ArchitectureTest.kt`)
