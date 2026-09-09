@@ -55,8 +55,8 @@ Consequences to accept explicitly:
   final send goes through `ImageCompressor` at q80 (or q100 for HD). Three edit
   passes at q95 followed by one q80 is not visually distinguishable from a single
   q80; this is a real cost, it is bounded, and it is documented rather than denied.
-- **Revert is file-based**, not model-based: `PendingMedia.originalUri` is kept and
-  intermediates are deleted on revert.
+- **Revert is file-based**, not model-based: `PendingMedia.originalUri` is kept
+  untouched, and the rasterized steps in between become the undo history (§2.7).
 - **A working-resolution ceiling is required.** Rasterizing at true source
   resolution OOMs on a 108 MP camera original. Edits rasterize at **min(source,
   4096 px long edge)**. So an HD send of an *edited* photo is capped at 4096 px
@@ -146,6 +146,59 @@ preview screen; the result is a **new** send. If the image has no local file yet
 No HD toggle in the fullscreen viewer: you cannot un-compress a photo that arrived
 compressed, and offering the control would imply otherwise.
 
+### 2.7 Undo, and turning the layer off — two levels, because rasterizing flattens
+
+Rasterize-per-screen (§2.1) means the moment you press **Done**, the strokes and
+stickers stop being objects and become pixels. So "undo" and "hide the layer" have
+to exist at *two* levels, and conflating them would produce a button that silently
+does nothing on one screen and something drastic on the other.
+
+**Inside an editor screen — the layer is still live.**
+
+- **Undo** pops the last object off the working list: the last stroke on the draw
+  screen, the last emoji or text run on the overlay screen, the last transform step
+  (rotate / flip / straighten / crop) on the adjust screen. Multi-step, down to
+  empty; the button disables when there is nothing left. Cheap, because none of it
+  is flattened yet.
+- **Layer visibility** is an eye / eye-off toggle sitting with the *tools*, not with
+  the actions, because it is a view control: it hides everything you have added so
+  you can see the photo underneath and judge whether the redaction covers what you
+  meant it to. **It never changes what gets written.** Pressing Done with the layer
+  hidden still flattens it, and re-entering the screen always comes back visible.
+  A control that could silently discard your work by being left in the wrong
+  position is not worth the ambiguity it saves.
+
+**On the preview screen — the layer is already pixels.**
+
+Here the chosen model pays for itself. Every Done writes a *new* file and the
+previous one is still sitting in `cacheDir/edits/`, so keeping that chain gives
+**cross-screen undo for free**:
+
+```
+PendingMedia(
+  originalUri,          // the pick, never written to
+  editHistory,          // rasterized steps, oldest → newest
+  editsEnabled,         // false → fall back to the original, history kept
+  uri = if (editsEnabled) editHistory.lastOrNull() ?: originalUri
+        else originalUri
+)
+```
+
+- **Undo** pops `editHistory` and deletes the popped file — so it walks back one
+  whole editor visit at a time (undo the crop, then undo the drawing), all the way
+  to the original. This is the answer to "I rotated it three screens ago and now I
+  regret it", which the flattening model otherwise makes impossible.
+- **Edits on/off** is the preview-level version of the layer toggle, and unlike the
+  in-screen one it **is** destructive-by-intent: off means *send the original after
+  all*, keeping the history so it can be switched back on. It reads as "I did all
+  that and actually the plain photo was better" — a decision, not a viewing aid.
+  The thumbnail strip shows whichever version will be sent, so the strip never
+  disagrees with the send button.
+
+There is deliberately **no redo**. Undo already deletes the file it popped, and
+keeping both directions means keeping every branch alive on disk for a gain nobody
+asks for in a send-preview.
+
 ---
 
 ## 3. Phases
@@ -155,10 +208,13 @@ entry and its version bump (`feat:` → minor).
 
 ### Phase 1 — toolbar, download, per-image HD
 
-- `ImageEditToolbar` in `ImagePreviewScreen`: `[HD] [Adjust] [Overlay] [Draw] [Download]`
-  top-right, back arrow top-left, all but HD and Download inert this phase.
-- `PendingMedia`: add `originalUri` and `isHd: Boolean?`; extend `ListSaver` to five
-  fields per item.
+- `ImageEditToolbar` in `ImagePreviewScreen`: `[HD] [Adjust] [Overlay] [Draw] [Undo]
+  [Edits on/off] [Download]` top-right, back arrow top-left; everything but HD and
+  Download is inert this phase, and Undo / Edits-on-off are hidden (not merely
+  disabled) while an item has no edit history, so a fresh pick looks untouched.
+- `PendingMedia`: add `originalUri`, `isHd: Boolean?`, `editHistory: List<String>`
+  and `editsEnabled: Boolean` (§2.7); `uri` becomes derived — the last history entry
+  when edits are enabled, `originalUri` otherwise.
 - `MessageRepository.sendMediaMessage(..., isHd: Boolean? = null)` + impl fallback.
 - HD bottom sheet: two rows with estimated sizes, current selection ticked.
 - Download saves the **current** (post-edit, once later phases land) image via
@@ -166,8 +222,10 @@ entry and its version bump (`feat:` → minor).
 - Files: `ui/chat/imageedit/ImageEditToolbar.kt`, `ui/chat/imageedit/HdQualitySheet.kt`,
   edits to `PendingMedia.kt`, `ImagePreviewScreen.kt`, `ChatMessageSender.kt`,
   `MessageRepository.kt`, `MessageRepositoryImpl.kt`, `ChatViewModel.kt`.
-- Tests: saver round-trip with the new fields; `isHd` precedence (per-item `true`
-  over pref `false`, per-item `null` falls through to the pref).
+- Tests: saver round-trip with the new fields, including a multi-entry history and
+  the newline encoding; `uri` derivation across `editsEnabled` and an empty history;
+  `isHd` precedence (per-item `true` over pref `false`, per-item `null` falls
+  through to the pref).
 
 ### Phase 2 — the rasterizer
 
@@ -178,9 +236,17 @@ entry and its version bump (`feat:` → minor).
   see `ScaledImageDecoder`'s KDoc for the black-bitmap pathology.
 - `ArchitectureTest` allowlist entry + `TECH_DEBT.md` line.
 - `ui/chat/imageedit/ImageFitMapper.kt`.
+- **Preview-level undo and Edits-on/off go live here**, since this is the phase that
+  starts producing history files: push on Done, pop-and-delete on Undo, clamp to the
+  newest surviving file if the cache was evicted under us (§4), and the strip
+  thumbnail follows `editsEnabled`.
+- Per-item history cap (10 steps, oldest evicted) and a total edit-cache budget
+  enforced in `ImageEditRasterizer`.
 - Tests: `ImageFitMapper` mapping round-trips (pure JVM, both directions, letterbox
   and pillarbox); Robolectric bitmap tests for rotate/flip/crop/resize output
-  dimensions and for the resolution ceiling.
+  dimensions and for the resolution ceiling; undo pops and deletes exactly one file;
+  undo past the first step lands on `originalUri`; a history entry whose file has
+  vanished is skipped rather than sent.
 
 ### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)
 
@@ -190,13 +256,23 @@ entry and its version bump (`feat:` → minor).
 - Resize presets on the same screen — Original / 2048 / 1600 / 1080 / 720 long edge
   — each showing the resulting `W × H` and an approximate file size. This is the
   part that has no WhatsApp equivalent.
-- Reset, Cancel, Done. Done rasterizes once.
+- **Undo** steps back through the transform stack — the crop, then the straighten,
+  then the rotate — rather than resetting everything; **Reset** is the separate
+  all-at-once escape. No layer-visibility toggle on this screen: there is no added
+  layer to hide, only the photo itself, and an eye button that did nothing here
+  would teach people to distrust it on the two screens where it works.
+- Cancel, Done. Done rasterizes once and pushes one history entry.
 - File: `ui/chat/imageedit/AdjustImageScreen.kt`.
 
 ### Phase 4 — Draw screen (pen, highlighter, blur)
 
 - Tools: **pen**, **highlighter** (alpha, `BlendMode.Multiply`), **blur** — plus
-  colour strip, width slider, per-stroke undo, and drag-off-canvas to delete.
+  colour strip and width slider.
+- **Undo** pops one stroke at a time and disables itself at zero. **Layer
+  visibility** (eye / eye-off, with the tools) hides every stroke so the photo
+  underneath can be checked — view-only, never affects the output (§2.7). Verifying
+  that a blur actually covers the thing you meant to hide is the reason this button
+  matters most on this screen.
 - **Blur is implemented as pixelate**: a ×1/16 downscale-then-nearest-upscale copy
   of the bitmap is computed once, and blur strokes act as a mask that reveals it.
   Pixelation is cheaper than a real gaussian, is irreversible in the output (which
@@ -217,6 +293,9 @@ that twice.
 - Text objects: colour strip, a filled/outline style toggle, centre alignment.
 - Manipulation: one-finger drag, two-finger pinch-scale and rotate, tap to select,
   drag onto a trash zone that appears at the bottom while dragging.
+- **Undo** removes the most recently *added* object (not the most recently moved —
+  a placement is the unit people expect back). **Layer visibility** hides every
+  emoji and text run at once, same contract as the draw screen.
 - Rendered on Done with `Canvas.drawText` for both (emoji are text), at output
   resolution so glyphs stay crisp.
 - File: `ui/chat/imageedit/OverlayImageScreen.kt`.
@@ -245,7 +324,21 @@ that twice.
   resolution inside `rasterize`.
 - **Cache growth.** `cacheDir/edits/` must be swept when a batch is sent, when it is
   dismissed, and on app start. An unswept editor cache is an unbounded leak on a
-  device that never clears caches.
+  device that never clears caches — and the undo history (§2.7) makes it grow *per
+  edit step*, not per image: twenty picks × ten steps is two hundred full-size
+  JPEGs. Hence the per-item cap of 10 steps and a total cache budget, both enforced
+  in the rasterizer rather than left to the screens.
+- **The undo history is a list of files the OS may delete.** `cacheDir` can be
+  reclaimed under storage pressure at any moment, including between a rotation and
+  its state restore. Every read of a history entry checks the file still exists and
+  falls back to the newest surviving one, ending at `originalUri` — which is the one
+  URI in the model that is never a cache file. A missing intermediate must never
+  produce a send failure or a blank pager page.
+- **Saving the history through process death.** `PendingMedia.ListSaver` currently
+  flattens to fixed-size triples; a variable-length history breaks that shape. Join
+  the history with `\n` into one field — a URI cannot contain a newline — and keep
+  the per-item field count fixed. A saver that silently drops history on rotation
+  would make undo look broken exactly when the user least expects it.
 - **`ArchitectureTest`.** `data ⇏ ui` (hence `RasterOp` living in the data layer),
   and the UI→data allowlist needs its one new entry plus the `TECH_DEBT.md` line.
 - **EXIF.** Re-encoding through `Bitmap.compress` already drops EXIF, so an edited
@@ -271,8 +364,13 @@ that twice.
   `GroupSettingsScreen` take whatever aspect the picker returns; the adjust screen's
   1:1 preset would serve them. Deliberately out of scope — it is an avatar change,
   not an image-editor change, and it would widen the diff across three more screens.
-- **Undo across screens / an edit history stack.** Rasterize-per-screen makes
-  *Revert to original* cheap and a partial undo expensive. Revert only.
+- **Redo.** Undo deletes the file it popped; keeping the other direction means
+  keeping every abandoned branch on disk for a gain nobody looks for in a
+  send-preview. Reconsider only if undo turns out to be used as a browsing gesture
+  rather than a correction.
+- **Per-object selection and re-editing after Done** (move the emoji you placed two
+  screens ago). Flattening forbids it by construction; it is the main thing the
+  accumulated-`ImageEdit` model above would have bought.
 - **Drawing on videos.** Needs the transformer pipeline, not this one.
 - **GIF and sticker packs.** Already tracked in `docs/BACKLOG.md` §4.6.
 
