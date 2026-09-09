@@ -367,8 +367,10 @@ Also worth knowing before Phase 2: caption keys and thumbnail-strip keys are now
 
 ### Phase 2 — the rasterizer  ✅ shipped 2026-09-09
 
-Delivered. Six departures from the bullets below were taken during
-implementation and are **flagged here for sign-off rather than settled**:
+Delivered. Eight departures from the bullets below were taken during
+implementation and are **flagged here for sign-off rather than settled**. Both
+axes of `/code-review` ran on the diff and each found a real bug — the eviction
+scope in #7 and the dismiss-path leak — which are fixed rather than recorded:
 
 1. **`RasterOp` and `SizeEstimate` are nested inside `ImageEditRasterizer`,**
    not top-level in that file. §2.2 budgets *one* `UI_ALLOWED_DATA_IMPORTS`
@@ -377,7 +379,7 @@ implementation and are **flagged here for sign-off rather than settled**:
    `suspend (List<RasterOp>) -> Uri` in a screen signature. Nested, the whole
    surface crosses the boundary under the one allowed name, at the cost of
    `ImageEditRasterizer.RasterOp.Crop(...)` at the call site.
-2. **`estimateSize` returns `SizeEstimate(width, height, bytes)`, not `Long`.**
+2. **`estimateSize` returns `SizeEstimate(width, height, bytes)?`, not `Long`.**
    The HD sheet already renders `1600 x 1200 - about 340 KB`; returning bytes
    alone would either drop the dimensions line Phase 1 shipped or force a second
    header read for it.
@@ -406,6 +408,23 @@ implementation and are **flagged here for sign-off rather than settled**:
    this phase ships as tested arithmetic plus a tested `discard`, and Phase 3's
    Done handler is the one line that joins them. The *fallback* half is live: the
    visible page re-resolves itself and the whole batch re-resolves on send.
+
+7. **`rasterize` takes a third argument, `liveSteps: Set<Uri>`.** §3 promises
+   eviction "shortens how far back undo reaches without ever invalidating the
+   step the user is currently on", and a directory-wide oldest-first sweep
+   cannot keep that promise: in a batch, page 3's *current* step is old in
+   global terms while the user edits page 1, so evicting it destroys an edit
+   they can still see rather than only its depth. The rasterizer has no way to
+   know which steps are live, so the caller now says. Deliberately **not**
+   defaulted — a forgotten argument would be a silent data loss, so the compiler
+   asks Phase 3 for it.
+8. **A sent batch's current step is not swept at send time.** §4 says the cache
+   is swept "when a batch is sent"; `ChatScreen.onSend` discards every step
+   *except* the one being sent, because `sendMediaMessage` is about to read
+   those bytes and there is no completion signal to hang a delete on. That one
+   file is collected by `sweepStale` on the next launch, 24 h later. Closing it
+   properly needs a send-completion hook, which is a send-pipeline change §2.1
+   set out to avoid.
 
 Also done here, per the Phase 1 sign-off list: `ImageSizeEstimator.kt` and its
 test are deleted, `HdQualitySheet` runs on `estimateSize`, `ImageCompressor`'s

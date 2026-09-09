@@ -2292,16 +2292,6 @@ fun ChatScreen(
         }
     }
 
-    // Throwing the batch away must take its rasterized edit steps with it: undo
-    // no longer frees the file it steps off, so nothing else would collect them
-    // until the next app start (see ImageEditRasterizer.sweepStale).
-    val discardPendingMedia = {
-        viewModel.discardEditSteps(pendingMedia.flatMap { it.editHistory })
-        pendingMedia = emptyList()
-    }
-
-    BackHandler(enabled = pendingMedia.isNotEmpty()) { discardPendingMedia() }
-
     AnimatedVisibility(visible = pendingMedia.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
         if (pendingMedia.isNotEmpty()) {
             ImagePreviewScreen(
@@ -2321,7 +2311,7 @@ fun ChatScreen(
                     pendingMedia = emptyList()
                 },
                 onDownload = viewModel::savePendingMediaToDownloads,
-                onDismiss = discardPendingMedia,
+                onDismiss = { pendingMedia = emptyList() },
                 estimateSendSize = viewModel::estimateSendSize,
                 editStepExists = viewModel::editStepExists,
                 onDiscardEditSteps = viewModel::discardEditSteps,

@@ -134,8 +134,16 @@ class ImageEditRasterizer @Inject constructor(
      *
      * Writing the result may push `cacheDir/edits/` over [CACHE_BUDGET_BYTES],
      * in which case the oldest files there are evicted — see [enforceBudget].
+     * [liveSteps] is **the step every item in the batch is currently sitting
+     * on**, and those are exempt from that eviction. It has no default, because
+     * a caller that forgets it does not get a compile error but a user who
+     * loses the crop they just made on page 3 while editing page 1: eviction is
+     * globally oldest-first, and an item nobody has touched for a minute owns
+     * some of the oldest files in the directory even though its newest one is
+     * the image the pager is showing. Losing undo *depth* is the acceptable
+     * cost of the budget; losing the current step is not.
      */
-    suspend fun rasterize(source: Uri, ops: List<RasterOp>): Uri =
+    suspend fun rasterize(source: Uri, ops: List<RasterOp>, liveSteps: Set<Uri>): Uri =
         processingLimiter.withPermit {
             withContext(Dispatchers.IO) {
                 var bitmap = decodeCapped(source)
@@ -151,7 +159,7 @@ class ImageEditRasterizer @Inject constructor(
                     output.outputStream().use { out ->
                         bitmap.compress(Bitmap.CompressFormat.JPEG, INTERMEDIATE_QUALITY, out)
                     }
-                    enforceBudget(keep = output)
+                    enforceBudget(CACHE_BUDGET_BYTES, keep = editFiles(liveSteps) + output)
                     Uri.fromFile(output)
                 } finally {
                     bitmap.recycle()
@@ -189,7 +197,9 @@ class ImageEditRasterizer @Inject constructor(
      * leaving available.
      */
     fun discard(uris: Collection<Uri>) {
-        val dir = runCatching { editsDir.canonicalFile }.getOrNull() ?: return
+        // Deliberately not the `editsDir` accessor: that one creates the
+        // directory, and deleting nothing is no reason to make a folder.
+        val dir = runCatching { File(context.cacheDir, EDITS_DIR).canonicalFile }.getOrNull() ?: return
         for (uri in uris) {
             val file = editFile(uri, dir) ?: continue
             runCatching { file.delete() }
@@ -214,17 +224,23 @@ class ImageEditRasterizer @Inject constructor(
      * as `FireStreamApp.cleanOldSharedMedia`.
      */
     fun sweepStale() {
-        val dir = File(context.cacheDir, EDITS_DIR)
-        if (!dir.exists()) return
         val cutoff = System.currentTimeMillis() - MAX_AGE_MILLIS
-        dir.listFiles()?.forEach { file ->
+        editFiles().forEach { file ->
             if (file.lastModified() < cutoff) runCatching { file.delete() }
         }
     }
 
+    /** Everything currently in `cacheDir/edits/`, without creating it. */
+    private fun editFiles(): List<File> =
+        File(context.cacheDir, EDITS_DIR).listFiles()?.filter { it.isFile }.orEmpty()
+
+    /** [liveSteps] as files, dropping any URI that is not a local path. */
+    private fun editFiles(liveSteps: Set<Uri>): Set<File> =
+        liveSteps.mapNotNullTo(mutableSetOf()) { uri -> uri.path?.let(::File) }
+
     /**
-     * Trims `cacheDir/edits/` back under [CACHE_BUDGET_BYTES], oldest first,
-     * never touching [keep].
+     * Trims `cacheDir/edits/` back under [budget], oldest first, never touching
+     * anything in [keep].
      *
      * Keeping redo alive is what makes this load-bearing rather than tidy: undo
      * can no longer free the file it steps off, so the cache grows per edit
@@ -238,13 +254,18 @@ class ImageEditRasterizer @Inject constructor(
      * that rule wants them ranked. What it costs is undo *depth* on an item
      * nobody has touched for a while, which the missing-file fallback in
      * `PendingMedia.onSurvivingStep` absorbs by design.
+     *
+     * [keep] is what that ranking cannot see: the file just written plus every
+     * item's current step. Without them, "oldest globally" and "oldest for this
+     * item" diverge the moment a batch has more than one edited image, and the
+     * eviction silently throws away an edit the user can still see.
      */
-    private fun enforceBudget(keep: File) {
-        val files = editsDir.listFiles()?.sortedBy { it.lastModified() } ?: return
+    internal fun enforceBudget(budget: Long, keep: Set<File>) {
+        val files = editFiles().sortedBy { it.lastModified() }
         var total = files.sumOf { it.length() }
         for (file in files) {
-            if (total <= CACHE_BUDGET_BYTES) return
-            if (file == keep) continue
+            if (total <= budget) return
+            if (file in keep) continue
             val size = file.length()
             if (runCatching { file.delete() }.getOrDefault(false)) total -= size
         }

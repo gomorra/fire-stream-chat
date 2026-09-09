@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.util.ImageEditRasterizer.RasterOp
+import com.firestream.chat.ui.chat.PendingMedia
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -63,7 +64,7 @@ class ImageEditRasterizerTest {
 
     @Test
     fun `an empty op list still rasterizes a readable jpeg`() = runTest {
-        val result = rasterizer.rasterize(sourceImage(120, 80), emptyList())
+        val result = rasterizer.rasterize(sourceImage(120, 80), emptyList(), liveSteps = emptySet())
 
         assertEquals(120 to 80, dimensionsOf(result))
         assertTrue(rasterizer.exists(result))
@@ -72,14 +73,14 @@ class ImageEditRasterizerTest {
 
     @Test
     fun `a quarter turn swaps the output dimensions`() = runTest {
-        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Rotate(90)))
+        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Rotate(90)), liveSteps = emptySet())
 
         assertEquals(80 to 120, dimensionsOf(result))
     }
 
     @Test
     fun `a flip keeps the output dimensions`() = runTest {
-        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Flip(horizontal = true)))
+        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Flip(horizontal = true)), liveSteps = emptySet())
 
         assertEquals(120 to 80, dimensionsOf(result))
     }
@@ -88,14 +89,14 @@ class ImageEditRasterizerTest {
     fun `a crop writes only the requested fraction`() = runTest {
         val crop = RasterOp.Crop(left = 0f, top = 0.5f, right = 0.5f, bottom = 1f)
 
-        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(crop))
+        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(crop), liveSteps = emptySet())
 
         assertEquals(60 to 40, dimensionsOf(result))
     }
 
     @Test
     fun `a resize caps the long edge`() = runTest {
-        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Resize(60)))
+        val result = rasterizer.rasterize(sourceImage(120, 80), listOf(RasterOp.Resize(60)), liveSteps = emptySet())
 
         assertEquals(60 to 40, dimensionsOf(result))
     }
@@ -108,22 +109,22 @@ class ImageEditRasterizerTest {
         )
 
         // 120x80 -> rotate -> 80x120 -> crop the top half -> 80x60.
-        val result = rasterizer.rasterize(sourceImage(120, 80), ops)
+        val result = rasterizer.rasterize(sourceImage(120, 80), ops, liveSteps = emptySet())
 
         assertEquals(80 to 60, dimensionsOf(result))
     }
 
     @Test
     fun `a source above the working ceiling is decoded down to it`() = runTest {
-        // Not 108 MP — a Robolectric-sized stand-in for the same arithmetic, with
-        // the ceiling lowered to what the fixture can afford. The production
-        // ceiling itself is covered by the JVM geometry test.
+        // Not 108 MP — a fixture small enough for the test JVM that still
+        // exceeds the real ceiling, so the production constant is what is under
+        // test here, not a lowered stand-in.
         val ceiling = ImageEditRasterizer.WORKING_MAX_DIMENSION
         assertEquals(4096, ceiling)
 
         // 5120 x 1280 scales by exactly 0.8, so the expected output is arithmetic
         // rather than a rounding guess — and it stays small enough for the test JVM.
-        val result = rasterizer.rasterize(sourceImage(5120, 1280, "huge.jpg"), emptyList())
+        val result = rasterizer.rasterize(sourceImage(5120, 1280, "huge.jpg"), emptyList(), liveSteps = emptySet())
 
         assertEquals(4096 to 1024, dimensionsOf(result))
     }
@@ -132,8 +133,8 @@ class ImageEditRasterizerTest {
     fun `each rasterize writes its own file`() = runTest {
         val source = sourceImage(60, 40)
 
-        val first = rasterizer.rasterize(source, emptyList())
-        val second = rasterizer.rasterize(first, listOf(RasterOp.Rotate(90)))
+        val first = rasterizer.rasterize(source, emptyList(), liveSteps = emptySet())
+        val second = rasterizer.rasterize(first, listOf(RasterOp.Rotate(90)), liveSteps = emptySet())
 
         assertNotEquals(first, second)
         assertTrue(rasterizer.exists(first))
@@ -143,8 +144,8 @@ class ImageEditRasterizerTest {
 
     @Test
     fun `discard deletes the steps it is given`() = runTest {
-        val kept = rasterizer.rasterize(sourceImage(60, 40), emptyList())
-        val abandoned = rasterizer.rasterize(sourceImage(60, 40), listOf(RasterOp.Rotate(180)))
+        val kept = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = emptySet())
+        val abandoned = rasterizer.rasterize(sourceImage(60, 40), listOf(RasterOp.Rotate(180)), liveSteps = emptySet())
 
         rasterizer.discard(listOf(abandoned))
 
@@ -170,7 +171,7 @@ class ImageEditRasterizerTest {
 
     @Test
     fun `exists reports a step the cache dropped`() = runTest {
-        val step = rasterizer.rasterize(sourceImage(60, 40), emptyList())
+        val step = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = emptySet())
         assertTrue(rasterizer.exists(step))
 
         File(requireNotNull(step.path)).delete()
@@ -183,8 +184,8 @@ class ImageEditRasterizerTest {
 
     @Test
     fun `the app-start sweep drops stale steps and keeps recent ones`() = runTest {
-        val recent = rasterizer.rasterize(sourceImage(60, 40), emptyList())
-        val stale = rasterizer.rasterize(sourceImage(60, 40), listOf(RasterOp.Rotate(180)))
+        val recent = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = emptySet())
+        val stale = rasterizer.rasterize(sourceImage(60, 40), listOf(RasterOp.Rotate(180)), liveSteps = emptySet())
         File(requireNotNull(stale.path))
             .setLastModified(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(30))
 
@@ -224,5 +225,98 @@ class ImageEditRasterizerTest {
     @Test
     fun `estimateSize returns null for a URI it cannot read`() = runTest {
         assertNull(rasterizer.estimateSize(Uri.fromFile(File(context.cacheDir, "absent.jpg")), hd = false))
+    }
+
+    // ── the byte budget ──────────────────────────────────────────────────────
+
+    /** A file of [bytes] in the edit cache, back-dated so ordering is decidable. */
+    private fun step(name: String, bytes: Int, ageMillis: Long): File {
+        editsDir.mkdirs()
+        return File(editsDir, name).apply {
+            writeBytes(ByteArray(bytes))
+            setLastModified(System.currentTimeMillis() - ageMillis)
+        }
+    }
+
+    @Test
+    fun `the budget evicts oldest first until it is back under`() {
+        val oldest = step("a.jpg", 400, ageMillis = 3_000)
+        val middle = step("b.jpg", 400, ageMillis = 2_000)
+        val newest = step("c.jpg", 400, ageMillis = 1_000)
+
+        rasterizer.enforceBudget(budget = 500, keep = emptySet())
+
+        assertFalse(oldest.exists())
+        assertFalse(middle.exists())
+        assertTrue(newest.exists())
+    }
+
+    @Test
+    fun `the budget never evicts a step an item is currently on`() {
+        // The regression this test exists for: eviction ranks the whole
+        // directory oldest-first, so page 3's *current* step is old in global
+        // terms while the user edits page 1 — and losing it loses an edit they
+        // can still see, not just how far back undo reaches.
+        val liveStepOfAnotherItem = step("a.jpg", 400, ageMillis = 3_000)
+        val stale = step("b.jpg", 400, ageMillis = 2_000)
+        val justWritten = step("c.jpg", 400, ageMillis = 0)
+
+        rasterizer.enforceBudget(
+            budget = 500,
+            keep = setOf(liveStepOfAnotherItem, justWritten),
+        )
+
+        assertTrue(liveStepOfAnotherItem.exists())
+        assertTrue(justWritten.exists())
+        assertFalse(stale.exists())
+    }
+
+    @Test
+    fun `a cache already under the budget is left alone`() {
+        val only = step("a.jpg", 100, ageMillis = 5_000)
+
+        rasterizer.enforceBudget(budget = 500, keep = emptySet())
+
+        assertTrue(only.exists())
+    }
+
+    @Test
+    fun `rasterize spares the live steps it is handed`() = runTest {
+        val live = rasterizer.rasterize(sourceImage(60, 40), emptyList(), liveSteps = emptySet())
+        val stale = step("stale.jpg", 400, ageMillis = 10_000)
+
+        // A budget of zero forces eviction of everything evictable.
+        rasterizer.enforceBudget(budget = 0, keep = setOf(File(requireNotNull(live.path))))
+
+        assertTrue(rasterizer.exists(live))
+        assertFalse(stale.exists())
+    }
+
+    // ── the two halves of "truncate and delete exactly the tail" ─────────────
+
+    @Test
+    fun `landing an edit hands back exactly the files that then get deleted`() = runTest {
+        // PendingMedia decides *which* steps are abandoned and the rasterizer
+        // deletes them; each half is specified on its own elsewhere, and this is
+        // the seam between them — the place a correct list could still be
+        // handed to the wrong deleter.
+        val pick = sourceImage(60, 40, "pick.jpg")
+        val steps = (1..3).map { rasterizer.rasterize(pick, emptyList(), liveSteps = emptySet()) }
+        val item = PendingMedia(
+            originalUri = pick,
+            mimeType = "image/jpeg",
+            editHistory = steps.map { it.toString() },
+            editCursor = 1,
+        )
+
+        val landed = item.landEdit(rasterizer.rasterize(pick, emptyList(), liveSteps = emptySet()))
+        rasterizer.discard(landed.abandoned.map(Uri::parse))
+
+        assertTrue(rasterizer.exists(steps[0]))
+        assertFalse(rasterizer.exists(steps[1]))
+        assertFalse(rasterizer.exists(steps[2]))
+        assertTrue(rasterizer.exists(landed.item.uri))
+        // The pick itself is never a cache file and must survive regardless.
+        assertTrue(File(requireNotNull(pick.path)).exists())
     }
 }

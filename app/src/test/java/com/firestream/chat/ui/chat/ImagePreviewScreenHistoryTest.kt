@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,6 +43,7 @@ class ImagePreviewScreenHistoryTest {
         item: PendingMedia,
         editStepExists: (Uri) -> Boolean = { true },
         onDiscardEditSteps: (List<String>) -> Unit = {},
+        onDismiss: () -> Unit = {},
         onSend: (List<PendingMedia>) -> Unit,
     ) {
         composeTestRule.setContent {
@@ -53,7 +55,7 @@ class ImagePreviewScreenHistoryTest {
                     onEmojiUsed = {},
                     onSend = onSend,
                     onDownload = {},
-                    onDismiss = {},
+                    onDismiss = onDismiss,
                     editStepExists = editStepExists,
                     onDiscardEditSteps = onDiscardEditSteps,
                 )
@@ -203,5 +205,27 @@ class ImagePreviewScreenHistoryTest {
         composeTestRule.waitForIdle()
 
         composeTestRule.onNodeWithContentDescription("Redo edit").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `dismissing the batch hands back every step it was holding`() {
+        // The regression this test exists for: the discard used to read the
+        // caller's original pick list, where no edit ever lands, so back always
+        // handed back an empty list and leaked the whole session's files.
+        var discarded: List<String>? = null
+        var dismissed = false
+        setContent(
+            edited(steps = 3),
+            onDiscardEditSteps = { discarded = it },
+            onDismiss = { dismissed = true },
+        ) {}
+
+        composeTestRule.onNodeWithContentDescription("Back").performClick()
+
+        assertEquals(
+            listOf("file:///edits/step1.jpg", "file:///edits/step2.jpg", "file:///edits/step3.jpg"),
+            discarded,
+        )
+        assertTrue(dismissed)
     }
 }

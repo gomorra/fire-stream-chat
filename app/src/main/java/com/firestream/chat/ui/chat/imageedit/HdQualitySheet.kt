@@ -114,7 +114,7 @@ private fun detailLine(estimate: ImageEditRasterizer.SizeEstimate): String {
  * shows, not a binary-prefixed one. Blank for a size we could not estimate, so
  * the caller drops the label rather than printing a confident "0 KB".
  */
-private fun formatBytes(bytes: Long): String = when {
+internal fun formatBytes(bytes: Long): String = when {
     bytes <= 0 -> ""
     bytes < 1_000_000 -> "${(bytes / 1_000f).toInt().coerceAtLeast(1)} KB"
     else -> "%.1f MB".format(bytes / 1_000_000f)

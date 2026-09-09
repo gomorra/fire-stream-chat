@@ -199,7 +199,22 @@ internal fun ImagePreviewScreen(
         if (resolved != current) updateCurrent { if (it == current) resolved else it }
     }
 
-    BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
+    // Throwing the batch away has to take its rasterized steps with it, and
+    // `drafts` — not the caller's `items` — is where those steps live: edits
+    // land here and are never lifted back out, so nothing outside this screen
+    // can see them to collect them. Undo no longer frees the file it steps off,
+    // so missing this path leaks every step until the next app start.
+    fun dismissBatch() {
+        onDiscardEditSteps(drafts.flatMap { it.editHistory })
+        onDismiss()
+    }
+
+    // One handler rather than two: back closes the emoji sheet if it is open and
+    // otherwise dismisses the batch. Two overlapping BackHandlers would make the
+    // answer depend on declaration order.
+    BackHandler {
+        if (showEmojiSheet) showEmojiSheet = false else dismissBatch()
+    }
 
     Box(
         modifier = Modifier
@@ -237,7 +252,7 @@ internal fun ImagePreviewScreen(
 
         // Back button
         IconButton(
-            onClick = onDismiss,
+            onClick = { dismissBatch() },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
@@ -267,8 +282,8 @@ internal fun ImagePreviewScreen(
         )
 
         // Hidden, not disabled, until this item actually has a step to walk back
-        // to — a fresh pick should look untouched. Inert until Phase 2 starts
-        // producing history files.
+        // to — a fresh pick should look untouched. Unreachable until an editor
+        // screen starts producing history files.
         if (current.hasEdits) {
             ImageEditHistory(
                 canUndo = current.editCursor > 0,
@@ -357,6 +372,10 @@ internal fun ImagePreviewScreen(
                     // Resolve every item, not just the visible one: the pages the
                     // user is not looking at have not been through the effect
                     // above, and a vanished step must never reach the send path.
+                    // Synchronous, unlike the effect above: the send needs the
+                    // answer now. Bounded by the batch size times
+                    // PendingMedia.MAX_EDIT_STEPS stat calls on cacheDir, which
+                    // is cheaper than the frame it would cost to defer it.
                     onSend(
                         drafts.map {
                             it.onSurvivingStep(editStepExists)
