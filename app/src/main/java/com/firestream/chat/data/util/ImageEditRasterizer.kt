@@ -3,8 +3,10 @@ package com.firestream.chat.data.util
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
+import android.graphics.Paint
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.VisibleForTesting
@@ -12,6 +14,7 @@ import com.firestream.chat.domain.util.ImageEditGeometry
 import com.firestream.chat.domain.util.PixelRect
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
+import com.firestream.chat.domain.util.SourceImage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -138,15 +141,8 @@ class ImageEditRasterizer @Inject constructor(
     suspend fun rasterize(source: Uri, ops: List<RasterOp>, liveSteps: Set<Uri>): Uri =
         processingLimiter.withPermit {
             withContext(Dispatchers.IO) {
-                var bitmap = decodeCapped(source)
+                val bitmap = decodeAndApply(source, ops, ImageEditGeometry.WORKING_MAX_DIMENSION)
                 try {
-                    for (op in ops) {
-                        val next = applyOp(bitmap, op)
-                        if (next !== bitmap) {
-                            bitmap.recycle()
-                            bitmap = next
-                        }
-                    }
                     val output = File(editsDir, "edit_${System.currentTimeMillis()}_${sequence.incrementAndGet()}.jpg")
                     // Registered before the bytes exist, so a concurrent
                     // rasterize's eviction can never pick it up mid-write.
@@ -169,6 +165,41 @@ class ImageEditRasterizer @Inject constructor(
         }
 
     /**
+     * [ops] applied to [source] at a long edge of at most [maxDimension], as a
+     * bitmap that is never written to disk — what an editor screen displays
+     * while the user is still deciding.
+     *
+     * The same decode and the same [applyOp] the real [rasterize] runs, at
+     * screen resolution instead of working resolution. That sharing is the
+     * whole point: a preview computed by a second implementation would be a
+     * second chance to get a rotation's direction or a crop's origin wrong, and
+     * the screen would look right while the file came out wrong. What the user
+     * sees here is what Done writes, scaled.
+     *
+     * Takes a permit like [rasterize] does — a screen-sized bitmap is small,
+     * but the *decode* still momentarily holds the source at its capped size.
+     * Returns null rather than throwing when the URI cannot be read, so a
+     * revoked gallery permission closes the editor instead of crashing it.
+     */
+    suspend fun preview(source: Uri, ops: List<RasterOp>, maxDimension: Int): Bitmap? =
+        processingLimiter.withPermit {
+            withContext(Dispatchers.IO) {
+                val ceiling = maxDimension.coerceIn(1, ImageEditGeometry.WORKING_MAX_DIMENSION)
+                runCatching { decodeAndApply(source, ops, ceiling) }.getOrNull()
+            }
+        }
+
+    /**
+     * [source]'s own pixel dimensions and file size, read from its header —
+     * the numbers the adjust screen labels its resize presets from.
+     *
+     * Header-only, so it allocates no bitmap and takes no permit, exactly as
+     * [estimateSize] does. Null when the URI cannot be read at all.
+     */
+    suspend fun probeSource(source: Uri): SourceImage? =
+        withContext(Dispatchers.IO) { probe(source) }
+
+    /**
      * Output dimensions and approximate encoded size for sending [source] with
      * [hd] on or off, or null when the URI cannot be read at all — the sheet
      * then renders its rows without a size line rather than with a confident
@@ -185,7 +216,7 @@ class ImageEditRasterizer @Inject constructor(
             ImageEditGeometry.estimatedSize(
                 width = header.width,
                 height = header.height,
-                sourceBytes = header.sourceBytes,
+                sourceBytes = header.bytes,
                 hd = hd,
                 standardMaxDimension = ImageCompressor.MAX_DIMENSION,
             )
@@ -287,15 +318,35 @@ class ImageEditRasterizer @Inject constructor(
         }
     }
 
-    /** Decodes [source] with its long edge capped at [ImageEditGeometry.WORKING_MAX_DIMENSION]. */
-    private fun decodeCapped(source: Uri): Bitmap {
+    /**
+     * Decodes [source] at [ceiling] and folds [ops] into it, recycling each
+     * intermediate as it goes so only one full bitmap is ever resident.
+     *
+     * The single interpretation of an op list, shared by [rasterize] and
+     * [preview] — see [preview] for why that sharing is not merely tidy.
+     */
+    private fun decodeAndApply(source: Uri, ops: List<RasterOp>, ceiling: Int): Bitmap {
+        var bitmap = decodeCapped(source, ceiling)
+        for (op in ops) {
+            val next = applyOp(bitmap, op)
+            if (next !== bitmap) {
+                bitmap.recycle()
+                bitmap = next
+            }
+        }
+        return bitmap
+    }
+
+    /** Decodes [source] with its long edge capped at [ceiling]. */
+    private fun decodeCapped(source: Uri, ceiling: Int): Bitmap {
         val decoderSource = ImageDecoder.createSource(context.contentResolver, source)
         return ImageDecoder.decodeBitmap(decoderSource) { decoder, info, _ ->
             // Software allocation because the ops below read and re-encode these
             // pixels; a hardware bitmap cannot be read back.
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             decoder.isMutableRequired = false
-            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height)
+            val (width, height) =
+                ImageEditGeometry.cappedSize(info.size.width, info.size.height, ceiling)
             if (width > 0 && height > 0) decoder.setTargetSize(width, height)
         }
     }
@@ -318,6 +369,32 @@ class ImageEditRasterizer @Inject constructor(
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         }
 
+        is RasterOp.Straighten -> {
+            val degrees = op.degrees.coerceIn(
+                -ImageEditGeometry.STRAIGHTEN_LIMIT,
+                ImageEditGeometry.STRAIGHTEN_LIMIT,
+            )
+            val (width, height) =
+                ImageEditGeometry.straightenSize(bitmap.width, bitmap.height, degrees)
+            if (width == bitmap.width && height == bitmap.height) {
+                bitmap
+            } else {
+                // Drawn into an output the size of the inscribed rectangle rather
+                // than rotated into a larger canvas and cropped afterwards: the
+                // two-step version would hold the expanded bitmap *and* the crop
+                // at once, which is the allocation the working-resolution ceiling
+                // exists to keep off the heap.
+                val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val matrix = Matrix().apply {
+                    postTranslate(-bitmap.width / 2f, -bitmap.height / 2f)
+                    postRotate(degrees)
+                    postTranslate(width / 2f, height / 2f)
+                }
+                Canvas(output).drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+                output
+            }
+        }
+
         is RasterOp.Crop -> {
             val rect: PixelRect = ImageEditGeometry.cropRect(bitmap.width, bitmap.height, op)
             if (rect.width == bitmap.width && rect.height == bitmap.height) {
@@ -337,7 +414,7 @@ class ImageEditRasterizer @Inject constructor(
         }
     }
 
-    private fun probe(source: Uri): Probe? = try {
+    private fun probe(source: Uri): SourceImage? = try {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(source)?.use {
             BitmapFactory.decodeStream(it, null, options)
@@ -345,7 +422,7 @@ class ImageEditRasterizer @Inject constructor(
         if (options.outWidth <= 0 || options.outHeight <= 0) {
             null
         } else {
-            Probe(options.outWidth, options.outHeight, sourceBytes(source))
+            SourceImage(options.outWidth, options.outHeight, sourceBytes(source))
         }
     } catch (_: Exception) {
         null
@@ -371,9 +448,6 @@ class ImageEditRasterizer @Inject constructor(
         val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
         return if (file.parentFile == dir) file else null
     }
-
-    /** Header facts about a source image: enough to estimate, not enough to decode. */
-    private data class Probe(val width: Int, val height: Int, val sourceBytes: Long)
 
     companion object {
         /** Subdirectory of `cacheDir` holding every rasterized step. */

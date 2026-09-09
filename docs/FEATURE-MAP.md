@@ -79,6 +79,10 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditToolbar.kt` | The overlay rail — HD pill, adjust/overlay/draw entry points, download, and the undo/redo/original history pill |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/HdQualitySheet.kt` | Per-image Standard-vs-HD sheet with estimated output size |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapper.kt` | Pure screen ↔ normalized ↔ bitmap-pixel mapping under `ContentScale.Fit`, shared by every overlay tool |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/AdjustImageScreen.kt` | The adjust overlay — rotate / flip / straighten / crop / resize, with `AdjustCallbacks` to stay under the param ceiling |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/AdjustStack.kt` | The adjust screen's op stack + cursor, the collapse rule for slider-driven ops, and its rotation-safe saver |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/CropGeometry.kt` | Pure crop-frame arithmetic — aspect presets across two spaces, corner drags, clamping, handle hit-testing |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditServices.kt` | The editor's ViewModel-supplied capabilities in one `@Immutable` bundle — keeps both screens under the ~15-param ceiling |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
@@ -96,8 +100,12 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerTest.kt` | Robolectric bitmap round-trips, edit-cache discard/sweep, size estimates |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapperTest.kt` | Fit-rect mapping round-trips, letterbox and pillarbox |
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenHistoryTest.kt` | Undo/redo/original⇄edited through the screen, and the vanished-step fallback |
+| `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenAdjustTest.kt` | The adjust → `landEdit` → `discard` join: what lands, what is orphaned, and which steps are named live |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/AdjustImageScreenTest.kt` | What the adjust screen hands back — the ops, the skipped no-op flatten, the history controls |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/AdjustStackTest.kt` | Undo/redo cursor, the collapse rule, `previewOps`, and the saver round-trip |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/CropGeometryTest.kt` | Crop drags on the JVM — past the opposite corner, past the photo's edge, and under an aspect lock |
 
-**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
+**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`**, which replaces the preview's content rather than floating over it, flattens its op stack once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 
 The `ui/chat/imageedit/` package is Phase 1 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell, per-image HD and download. The rasterizer, the editor screens and the shared picker land in later phases and will extend this table.
 

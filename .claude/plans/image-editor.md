@@ -1,9 +1,12 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phases 1–2 shipped; Phases 3–6 planned, not implemented.** Phase 1 (the
-toolbar shell, per-image HD and download) and Phase 2 (the rasterizer, the fit
-mapper and the live preview-level history) both landed on 2026-09-09; the rest is
-still the agreed design awaiting its implementation sessions.
+Status: **Phases 1–3 shipped; Phases 4–6 planned, not implemented.** Phase 1 (the
+toolbar shell, per-image HD and download), Phase 2 (the rasterizer, the fit mapper
+and the live preview-level history) and Phase 3 (the adjust screen) all landed on
+2026-09-09; the rest is still the agreed design awaiting its implementation
+sessions. **Phase 3 is build- and test-verified only — nothing in it has been on
+hardware**, and every unchecked item is listed in `docs/BACKLOG.md` §*Pending
+on-device verification*.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -470,7 +473,56 @@ asks for.
   deletes exactly the abandoned tail; redo is unavailable after that truncation; a
   history entry whose file has vanished is skipped rather than sent.
 
-### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)
+### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)  ✅ shipped 2026-09-09
+
+Delivered, **except the on-device pass**, which nobody has run — see the header.
+Six departures from the bullets below were taken during implementation and are
+**flagged here for sign-off rather than settled**:
+
+1. **Four files, not one.** `AdjustImageScreen.kt` is the screen; `CropGeometry.kt`
+   (crop-frame arithmetic), `AdjustStack.kt` (the op stack, its cursor and its
+   saver) and `ImageEditServices.kt` (the ViewModel-supplied capability bundle)
+   are separate because the first two are **pure Kotlin and JVM-testable**, which
+   is the only way the crop and straighten arithmetic gets checked at all — this
+   phase is gestures over a coordinate mapping, and a Robolectric test renders
+   the screen without ever moving a pointer across it. Same seam and same reason
+   as `ImageFitMapper` in Phase 2.
+2. **`ImageEditServices` replaced three `ImagePreviewScreen` parameters with one
+   bundle.** Phase 3 needed three more services (rasterize, preview render,
+   header probe), which would have put that screen at 14 parameters against a
+   ceiling ART enforces with a `VerifyError` **on first render** — and
+   Robolectric runs on the JVM, so the existing tests would have gone on passing
+   while the app crashed on opening a photo. Same shape as `MessageBubbleCallbacks`
+   and `AdjustCallbacks`.
+3. **`RasterOp.Straighten` auto-crops to the largest inscribed rectangle of the
+   *same aspect ratio*.** The plan settled that it crops; the contract it does
+   not state is what shape comes out. Preserving the aspect ratio is what lets
+   the editor preview a straighten by scaling a screen-sized bitmap up — the
+   scale depends only on the ratio, not the pixel count — so the preview and the
+   flatten cannot disagree. `ImageEditGeometry.straightenScale` derives it and
+   `ImageEditGeometryTest` checks the inscribed rectangle really fits, at five
+   angles across four aspect ratios.
+4. **The straighten slider and the resize row edit their op in place rather than
+   appending one per interaction** (`AdjustStack.collapse`). Dragging a slider
+   from 0° to 5° is one thing the user did, and it is not decomposable anyway:
+   3° then 2° is not 5°, because the second rotation acts on the already-cropped
+   result of the first. Re-entering the tool later edits the same step, which is
+   also why the slider comes back showing the angle the photo has.
+5. **Done on an untouched photo cancels instead of flattening.** Writing a
+   re-encoded copy of an unchanged image would burn a history step, a cache file
+   and a generation of JPEG quality on a no-op.
+6. **The resize row scrolls.** Five presets each carrying `W × H · ~size` do not
+   fit a 390 dp row. Unlike the picker's island (§4), a preset row is not a mode
+   switcher — nothing is hidden by scrolling except more of the same kind of
+   choice — so a `LazyRow` is the answer rather than dropping the labels. The
+   test that found this had to be taught to scroll, which is the honest version.
+
+Also worth knowing before Phase 4: `ImageEditRasterizer.preview(source, ops,
+maxDimension)` applies an op stack at screen resolution without writing a file,
+and shares `decodeAndApply` with `rasterize` — so what an editor shows is what
+Done writes, scaled, rather than a second implementation that can drift. Phase 4
+should render its strokes over that rather than decoding its own bitmap.
+
 
 - Rotate 90° CW, flip horizontal, straighten slider (−45°..45°) with a faint grid.
 - **Straighten auto-crops live, during the drag** (decided 2026-09-09). As the

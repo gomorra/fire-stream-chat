@@ -335,4 +335,132 @@ class ImageEditRasterizerTest {
         assertTrue(rasterizer.exists(live))
         assertTrue(rasterizer.exists(next))
     }
+
+    // ── Straighten ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a straighten crops back to a full rectangle of the same aspect ratio`() = runTest {
+        // The output must never be the expanded canvas with black triangles in
+        // it: the auto-crop is the op's contract, not a follow-up step.
+        val result = rasterizer.rasterize(
+            source = sourceImage(400, 300, "straighten-source.jpg"),
+            ops = listOf(RasterOp.Straighten(10f)),
+            liveSteps = emptySet(),
+        )
+
+        val (width, height) = dimensionsOf(result)
+        assertEquals(ImageEditGeometry.straightenSize(400, 300, 10f), width to height)
+        assertTrue("a straighten always costs pixels", width < 400)
+        assertEquals(400f / 300f, width.toFloat() / height, 0.02f)
+    }
+
+    @Test
+    fun `a zero-degree straighten writes the image through unchanged`() = runTest {
+        val result = rasterizer.rasterize(
+            source = sourceImage(320, 240, "straighten-zero.jpg"),
+            ops = listOf(RasterOp.Straighten(0f)),
+            liveSteps = emptySet(),
+        )
+
+        assertEquals(320 to 240, dimensionsOf(result))
+    }
+
+    @Test
+    fun `a straighten past the limit is clamped rather than inverted`() = runTest {
+        val result = rasterizer.rasterize(
+            source = sourceImage(400, 400, "straighten-clamped.jpg"),
+            ops = listOf(RasterOp.Straighten(400f)),
+            liveSteps = emptySet(),
+        )
+
+        val (width, height) = dimensionsOf(result)
+        assertEquals(ImageEditGeometry.straightenSize(400, 400, 45f), width to height)
+        assertTrue(width > 0 && height > 0)
+    }
+
+    @Test
+    fun `a straighten fills its output rather than leaving transparent corners`() = runTest {
+        // The pathology this op exists to avoid, checked in pixels: every corner
+        // of the written file must be opaque photo, not the empty canvas a
+        // rotate-then-crop would leave behind if the arithmetic were wrong.
+        val source = File(context.cacheDir, "straighten-opaque.jpg")
+        val painted = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+        painted.eraseColor(android.graphics.Color.RED)
+        source.outputStream().use { painted.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+        painted.recycle()
+
+        val result = rasterizer.rasterize(
+            source = Uri.fromFile(source),
+            ops = listOf(RasterOp.Straighten(12f)),
+            liveSteps = emptySet(),
+        )
+
+        val output = BitmapFactory.decodeFile(requireNotNull(result.path))
+        val corners = listOf(
+            0 to 0,
+            output.width - 1 to 0,
+            0 to output.height - 1,
+            output.width - 1 to output.height - 1,
+        )
+        for ((x, y) in corners) {
+            val pixel = output.getPixel(x, y)
+            assertTrue("corner ($x, $y) is transparent", android.graphics.Color.alpha(pixel) == 255)
+            assertTrue(
+                "corner ($x, $y) is black rather than photo",
+                android.graphics.Color.red(pixel) > 100,
+            )
+        }
+        output.recycle()
+    }
+
+    // ── The preview render ────────────────────────────────────────────────────
+
+    @Test
+    fun `a preview applies the same ops the rasterize would, at screen size`() = runTest {
+        val source = sourceImage(2000, 1000, "preview-source.jpg")
+        val ops = listOf(RasterOp.Rotate(90), RasterOp.Crop(0f, 0f, 1f, 0.5f))
+
+        val preview = requireNotNull(rasterizer.preview(source, ops, maxDimension = 400))
+
+        // Same shape as the flattened result, only smaller — which is the whole
+        // promise: what the editor shows is what Done writes, scaled.
+        val (flattenedWidth, flattenedHeight) =
+            dimensionsOf(rasterizer.rasterize(source, ops, liveSteps = emptySet()))
+        assertEquals(
+            flattenedWidth.toFloat() / flattenedHeight,
+            preview.width.toFloat() / preview.height,
+            0.05f,
+        )
+        assertTrue("the preview must respect its ceiling", maxOf(preview.width, preview.height) <= 400)
+        preview.recycle()
+    }
+
+    @Test
+    fun `a preview writes nothing to the edit cache`() = runTest {
+        rasterizer.preview(sourceImage(300, 200, "preview-clean.jpg"), emptyList(), maxDimension = 200)
+            ?.recycle()
+
+        assertTrue(editsDir.listFiles().orEmpty().none { it.isFile })
+    }
+
+    @Test
+    fun `an unreadable source previews as null rather than throwing`() = runTest {
+        assertNull(rasterizer.preview(Uri.parse("file:///nope/missing.jpg"), emptyList(), 400))
+    }
+
+    // ── The header probe ──────────────────────────────────────────────────────
+
+    @Test
+    fun `probing a source reports its own dimensions, not a capped decode`() = runTest {
+        val probe = requireNotNull(rasterizer.probeSource(sourceImage(1234, 567, "probe.jpg")))
+
+        assertEquals(1234, probe.width)
+        assertEquals(567, probe.height)
+        assertTrue("a real file has a size", probe.bytes > 0)
+    }
+
+    @Test
+    fun `probing an unreadable source reports nothing rather than zeroes`() = runTest {
+        assertNull(rasterizer.probeSource(Uri.parse("file:///nope/missing.jpg")))
+    }
 }

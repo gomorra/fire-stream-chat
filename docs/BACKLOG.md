@@ -21,13 +21,45 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — the adjust screen (Phase 3, 2026-09-09)
+
+**Nothing in this phase has been on hardware.** Every item below is a gesture over a
+coordinate mapping, which is exactly the class of bug a Robolectric test passes through:
+`AdjustImageScreenTest` renders the screen without ever moving a pointer across it, and
+`CropGeometryTest` checks the arithmetic in isolation from the pointer that feeds it.
+Check in **both orientations** — the crop frame is normalized to the image and the op
+stack is saved, so a rotation mid-crop is a supported path and an untested one.
+
+- **Crop handles land where the finger expects them.** Grab each of the four corners near
+  its bracket and confirm the one that moves is the one under the finger, that the
+  opposite corner does not drift, and that a drag running off the photo stops at the edge
+  rather than cropping black in from outside it. Also drag the frame's interior to move it.
+- **A straighten leaves the image genuinely axis-aligned.** Photograph something with a
+  hard horizontal (a windowsill, a table edge), straighten it against the thirds grid, press
+  Done, and check the *written file* — not the preview — is level. A degree of drift between
+  what the slider showed and what was flattened would be invisible on screen.
+- **The live auto-crop matches the flatten.** While dragging the slider the image scales up
+  so the corners stay full; confirm the framing Done writes is the framing that was on
+  screen when the finger lifted, and that no black triangle survives anywhere in the output.
+- **Rotate does not fight the pager's own drag.** The editor replaces the preview's content
+  rather than floating over it, so the pager should be unreachable while the editor is open —
+  confirm a horizontal crop drag never pages the batch, and that system back closes the
+  editor rather than throwing the whole pick away.
+- **The resize presets are honest.** Send the same photo at 1080 and at 720 and compare the
+  received files against the labels; they say "~" but should be the right order of magnitude
+  and in the right order.
+- **The whole undo axis end to end.** Adjust a photo three times, undo back to the pick,
+  redo forward, then adjust again mid-history and confirm the redo tail is gone and the
+  photo that sends is the one on screen.
+
 ### Image editor — the rasterizer and the edit cache (Phase 2, 2026-09-09)
 - `ImageEditRasterizer` decodes through `ImageDecoder` with a 4096 px target size. Robolectric
   covers the round trip on synthetic bitmaps; what it cannot cover is the pathology the decoder
   was chosen for — large *real* camera originals, which come back black through a subsampled
-  `BitmapFactory` (see `ScaledImageDecoder`'s KDoc). Nothing in production calls `rasterize` yet,
-  so this becomes checkable with the adjust screen in Phase 3: rasterize a 12 MP+ original and
-  confirm the result is the photo, not a black rectangle.
+  `BitmapFactory` (see `ScaledImageDecoder`'s KDoc). **Phase 3 is the first phase that calls
+  `rasterize`, so this is now checkable**: open the adjust screen on a 12 MP+ camera original,
+  rotate it, press Done, and confirm the preview and the sent photo are the photo rather than
+  a black rectangle.
 - Also unconfirmed: the HD sheet's size estimates against what actually leaves the device. Send
   the same photo Standard and HD and compare the two labels to the received file sizes — the
   labels say "about", but they should be in the right order and the right order of magnitude.

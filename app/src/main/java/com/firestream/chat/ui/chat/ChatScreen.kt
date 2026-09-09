@@ -146,6 +146,7 @@ import com.firestream.chat.ui.search.isSearchSelecting
 import com.firestream.chat.ui.search.SearchResultList
 import com.firestream.chat.ui.search.SearchResultsSummary
 import com.firestream.chat.ui.search.searchResultsSummary
+import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -2292,6 +2293,20 @@ fun ChatScreen(
         }
     }
 
+    // Remembered rather than rebuilt inline: the bundle is `@Immutable`, so fresh
+    // lambdas on every recomposition would make it compare unequal every time and
+    // restart the effects keyed on it inside the preview and the editor.
+    val imageEditServices = remember(viewModel) {
+        ImageEditServices(
+            estimateSendSize = viewModel::estimateSendSize,
+            editStepExists = viewModel::editStepExists,
+            discardEditSteps = viewModel::discardEditSteps,
+            probeSource = viewModel::probeEditSource,
+            renderPreview = viewModel::renderEditPreview,
+            rasterize = viewModel::rasterizeEdit,
+        )
+    }
+
     AnimatedVisibility(visible = pendingMedia.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
         if (pendingMedia.isNotEmpty()) {
             ImagePreviewScreen(
@@ -2312,9 +2327,7 @@ fun ChatScreen(
                 },
                 onDownload = viewModel::savePendingMediaToDownloads,
                 onDismiss = { pendingMedia = emptyList() },
-                estimateSendSize = viewModel::estimateSendSize,
-                editStepExists = viewModel::editStepExists,
-                onDiscardEditSteps = viewModel::discardEditSteps,
+                edit = imageEditServices,
                 snackbarHostState = previewSnackbarHostState,
             )
         }

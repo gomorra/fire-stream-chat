@@ -1,6 +1,9 @@
 package com.firestream.chat.domain.util
 
+import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.roundToInt
+import kotlin.math.sin
 
 /**
  * One flattening step of the image editor, in image space and plain numbers.
@@ -27,6 +30,27 @@ sealed interface RasterOp {
     data class Flip(val horizontal: Boolean) : RasterOp
 
     /**
+     * Level a tilted horizon by rotating [degrees] clockwise, then **crop back
+     * to the largest centred rectangle of the same aspect ratio that the
+     * rotation still covers** — so the output is a full photo, never one with
+     * black triangles in its corners.
+     *
+     * The auto-crop is not a separate step the user can forget. It was chosen
+     * over expanding the bounds and offering an explicit "auto crop" button
+     * (`.claude/plans/image-editor.md` §3, decided 2026-09-09) precisely
+     * because that alternative has a failure mode this one cannot have:
+     * straighten, miss the button, press Done, and send a photo with black
+     * corners. What it costs is pixels — [straightenScale] says how many — and
+     * that cost is what the editor shows live as the image scales up under the
+     * slider.
+     *
+     * [degrees] is clamped to ±[ImageEditGeometry.STRAIGHTEN_LIMIT]; past that
+     * the inscribed rectangle has thrown away more of the photo than a
+     * straighten is worth, and a quarter-turn [Rotate] is the honest tool.
+     */
+    data class Straighten(val degrees: Float) : RasterOp
+
+    /**
      * Keep the sub-rectangle bounded by these fractions of the current image,
      * `0..1` from the top-left. Values are clamped and the result is never
      * narrower or shorter than one pixel, so a degenerate drag yields a tiny
@@ -49,6 +73,19 @@ sealed interface RasterOp {
 
 /** Where a [RasterOp.Crop] lands, in whole pixels of the image it applies to. */
 data class PixelRect(val x: Int, val y: Int, val width: Int, val height: Int)
+
+/**
+ * What an image's header says about it: its true pixel dimensions and the size
+ * of the file behind it, with nothing decoded.
+ *
+ * The editor needs all three before it can label anything — a resize preset's
+ * `W × H` is arithmetic over the source dimensions, and its approximate file
+ * size needs the source's own bytes-per-pixel to be anything better than a
+ * guess. [bytes] is `0` when the provider withholds a size, which
+ * [ImageEditGeometry.estimatedBytes] treats as "assume a typical photo" rather
+ * than as "zero bytes".
+ */
+data class SourceImage(val width: Int, val height: Int, val bytes: Long)
 
 /**
  * Output pixels and approximate encoded bytes for one send — what the HD sheet
@@ -78,6 +115,17 @@ object ImageEditGeometry {
      * rotation, which holds source and destination at once.
      */
     const val WORKING_MAX_DIMENSION = 4096
+
+    /**
+     * How far [RasterOp.Straighten] may tilt, in either direction.
+     *
+     * Past 45° the inscribed rectangle keeps less than half of a square photo,
+     * so the tool would be quietly throwing away more than it fixes; a
+     * quarter-turn [RasterOp.Rotate] is what a bigger correction actually
+     * wants. It is also the range a slider can resolve by hand — ±45° across
+     * ~330 dp is about a quarter of a degree per pixel.
+     */
+    const val STRAIGHTEN_LIMIT = 45f
 
     /**
      * Bytes per pixel assumed when the source's own file size is unknown —
@@ -136,6 +184,44 @@ object ImageEditGeometry {
     }
 
     /**
+     * How much of the image a [RasterOp.Straighten] of [degrees] keeps, as a
+     * factor on each edge — `1` for no tilt, about `0.71` for a square at the
+     * ±45° limit.
+     *
+     * The straighten crops back to the largest **centred rectangle of the same
+     * aspect ratio** that the rotated photo still covers, so there is one
+     * unknown: the common scale `s` applied to both edges. Rotating that
+     * candidate back into the photo's own frame gives it a bounding box of
+     * `s·(W·cos + H·sin)` by `s·(W·sin + H·cos)`, and a centred convex shape
+     * fits inside a centred axis-aligned rectangle exactly when its bounding
+     * box does. Each edge therefore caps `s`, and the smaller cap wins.
+     *
+     * Depends only on the aspect ratio, not on the pixel count — which is what
+     * lets the editor preview a straighten by scaling up a screen-sized bitmap
+     * and still promise the same framing at full resolution.
+     */
+    fun straightenScale(width: Int, height: Int, degrees: Float): Float {
+        if (width <= 0 || height <= 0) return 1f
+        val clamped = degrees.coerceIn(-STRAIGHTEN_LIMIT, STRAIGHTEN_LIMIT)
+        val radians = Math.toRadians(clamped.toDouble())
+        val cosine = abs(cos(radians))
+        val sine = abs(sin(radians))
+        if (sine == 0.0) return 1f
+        val w = width.toDouble()
+        val h = height.toDouble()
+        val scale = minOf(w / (w * cosine + h * sine), h / (w * sine + h * cosine))
+        return scale.toFloat().coerceIn(0f, 1f)
+    }
+
+    /** Dimensions after a [RasterOp.Straighten]; the aspect ratio is preserved. */
+    fun straightenSize(width: Int, height: Int, degrees: Float): Pair<Int, Int> {
+        val scale = straightenScale(width, height, degrees)
+        if (scale >= 1f) return width to height
+        return (width * scale).roundToInt().coerceAtLeast(1) to
+            (height * scale).roundToInt().coerceAtLeast(1)
+    }
+
+    /**
      * Dimensions [ops] would produce from a source of [width] × [height],
      * without decoding anything — the arithmetic half of the rasterize, so an
      * editor screen can label a preset with its result before the user commits
@@ -153,6 +239,13 @@ object ImageEditGeometry {
                     }
 
                 is RasterOp.Flip -> Unit
+
+                is RasterOp.Straighten -> {
+                    val (straightenedWidth, straightenedHeight) =
+                        straightenSize(currentWidth, currentHeight, op.degrees)
+                    currentWidth = straightenedWidth
+                    currentHeight = straightenedHeight
+                }
 
                 is RasterOp.Crop -> {
                     val rect = cropRect(currentWidth, currentHeight, op)
@@ -201,16 +294,49 @@ object ImageEditGeometry {
         hd: Boolean,
         standardMaxDimension: Int,
     ): SizeEstimate {
-        val sourcePixels = width.toLong() * height.toLong()
         val (outputWidth, outputHeight) = estimatedDimensions(width, height, hd, standardMaxDimension)
-        if (sourcePixels <= 0) return SizeEstimate(outputWidth, outputHeight, 0)
-        val bytesPerPixel = if (sourceBytes > 0) {
-            (sourceBytes.toFloat() / sourcePixels).coerceIn(MIN_BYTES_PER_PIXEL, MAX_BYTES_PER_PIXEL)
+        return SizeEstimate(
+            width = outputWidth,
+            height = outputHeight,
+            bytes = estimatedBytes(
+                outputWidth = outputWidth,
+                outputHeight = outputHeight,
+                source = SourceImage(width, height, sourceBytes),
+                hd = hd,
+            ),
+        )
+    }
+
+    /**
+     * Approximate encoded bytes for an output of [outputWidth] × [outputHeight]
+     * derived from [source] — the number a resize preset is labelled with, and
+     * the arithmetic half of [estimatedSize].
+     *
+     * Taken separately because the two callers know different things: the HD
+     * sheet knows only a source URI and asks what sending it costs, while the
+     * adjust screen already knows the exact output dimensions its own op stack
+     * produces and only needs them priced. Both price them the same way, which
+     * is the point of sharing this: a resize preset labelled `~340 KB` and an
+     * HD row labelled `about 340 KB` must not disagree about the same photo.
+     *
+     * `0` when there is nothing to measure against, which the callers render as
+     * no size line at all rather than as a confident zero.
+     */
+    fun estimatedBytes(
+        outputWidth: Int,
+        outputHeight: Int,
+        source: SourceImage,
+        hd: Boolean,
+    ): Long {
+        val sourcePixels = source.width.toLong() * source.height.toLong()
+        val pixels = outputWidth.toLong() * outputHeight.toLong()
+        if (sourcePixels <= 0 || pixels <= 0) return 0
+        val bytesPerPixel = if (source.bytes > 0) {
+            (source.bytes.toFloat() / sourcePixels).coerceIn(MIN_BYTES_PER_PIXEL, MAX_BYTES_PER_PIXEL)
         } else {
             DEFAULT_BYTES_PER_PIXEL
         }
-        val pixels = outputWidth.toLong() * outputHeight.toLong()
         val factor = if (hd) HD_QUALITY_FACTOR else STANDARD_QUALITY_FACTOR
-        return SizeEstimate(outputWidth, outputHeight, (pixels * bytesPerPixel * factor).toLong())
+        return (pixels * bytesPerPixel * factor).toLong()
     }
 }

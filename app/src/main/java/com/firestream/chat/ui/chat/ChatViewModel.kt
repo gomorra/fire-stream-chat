@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -36,7 +37,9 @@ import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
+import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
+import com.firestream.chat.domain.util.SourceImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -384,6 +387,37 @@ class ChatViewModel @Inject constructor(
      */
     internal suspend fun estimateSendSize(uri: Uri, hd: Boolean): SizeEstimate? =
         imageEditRasterizer.estimateSize(uri, hd)
+
+    /** The source's true dimensions and file size — what a resize preset is labelled from. */
+    internal suspend fun probeEditSource(uri: Uri): SourceImage? =
+        imageEditRasterizer.probeSource(uri)
+
+    /**
+     * [ops] applied at screen resolution, for an editor screen to display while
+     * the user is still deciding. Nothing is written to disk.
+     */
+    internal suspend fun renderEditPreview(
+        uri: Uri,
+        ops: List<RasterOp>,
+        maxDimension: Int,
+    ): Bitmap? = imageEditRasterizer.preview(uri, ops, maxDimension)
+
+    /**
+     * Flattens [ops] into a new JPEG and returns its URI, or null when the
+     * source could not be read — which an editor surfaces as a failure to apply
+     * rather than by closing over a lost edit.
+     *
+     * [liveSteps] is every batch item's *current* step and is exempt from the
+     * cache's byte-budget eviction. It is not defaulted anywhere on the way down
+     * from here: eviction is globally oldest-first, so a forgotten argument
+     * would not fail to compile, it would delete the crop the user made on
+     * another page of the batch (`.claude/plans/image-editor.md` §3).
+     */
+    internal suspend fun rasterizeEdit(
+        source: Uri,
+        ops: List<RasterOp>,
+        liveSteps: Set<Uri>,
+    ): Uri? = runCatching { imageEditRasterizer.rasterize(source, ops, liveSteps) }.getOrNull()
 
     /**
      * Whether a rasterized edit step is still on disk.
