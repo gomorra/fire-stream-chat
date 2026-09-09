@@ -8,6 +8,13 @@ download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
 resize), movable emoji stickers, a paint screen — plus text, blur-to-redact, and
 an entry point from the fullscreen viewer.
 
+**UI direction: Option A, "overlay rail"** (chosen 2026-09-09 from three drafted
+directions). Entry icons float top-right over the photo; each tool is a full-screen
+overlay with cancel / undo / redo / layer-eye / done in one top bar; the history
+controls appear top-left only once an edit exists. The two directions not taken were
+a thumb-reachable bottom dock (B) and a single editor with mode tabs and a layer
+list (C) — C is noted in §5, since it would have reopened §2.1.
+
 `Order: 1 → 2 → 3 → 4 → 5 → 6`
 
 ---
@@ -211,6 +218,71 @@ The cost of keeping redo is that intermediates now live for the whole preview
 session rather than being freed on undo — which is what makes the cap and the cache
 budget in §4 load-bearing rather than tidy.
 
+### 2.8 One picker, four hosts, host-declared tabs
+
+The editor's sticker step needs an emoji picker, and the app already has one —
+`EmojiHandlerPanel`, ~700 lines mounted from three places (`ChatScreen:1962`
+composer, `ChatScreen:2138` reaction sheet, `ImagePreviewScreen:330` caption bar).
+Adding a fourth copy for the editor would be the third mistake in a row. It becomes
+a shared module instead, and the editor is the reason to build the shell now.
+
+**The chrome.** A circular **search button** on the left, and to its right a
+segmented **island** — Emoji · Sticker · GIF — with a sliding selector. Tapping
+search expands the field out of the button and the island slides right and fades;
+the field's × collapses it and brings the island back. One row, two states, and the
+tab you are in stays visible whenever you are not typing.
+
+**The island's tabs are declared by the host, not fixed** — this is the part that
+keeps it honest:
+
+| Host | Emoji | Sticker | GIF | Why |
+|---|:--:|:--:|:--:|---|
+| Composer | ✓ | later | later | Sending either needs a new `MessageType` + a Room version bump |
+| Reaction sheet | ✓ | — | — | A reaction is one grapheme stored on the message; a sticker reaction is a different data model |
+| Caption bar (preview) | ✓ | — | — | It types into a text field |
+| **Editor overlay** (Phase 5) | ✓ | ✓ | — | Placed and flattened into the JPEG — an animation cannot be |
+
+A host that declares one tab renders **no island at all**, just the search button,
+so the reaction sheet and the caption bar look exactly as they do today. Nothing
+ships greyed-out and unreachable.
+
+**GIF is impossible in the editor, not merely unbuilt.** The pipeline ends at
+`ImageCompressor` → JPEG; placing an animated GIF could only flatten one frame,
+which is a worse sticker. GIF-on-photo would require an animated output format
+(WEBP) and would touch upload, Room, the bubble renderer and the backfill worker.
+That is a different feature, not a checkbox here.
+
+**Search scopes to the active tab**, and the three are not alike: emoji filters a
+local list synchronously (`buildSearchResults`, already written), stickers filter
+local packs, and **GIF search is a debounced network query** with loading, empty,
+error and rate-limit states plus pagination. So the query is per-tab state with a
+per-tab placeholder, never one shared string — switching tabs must not carry a
+query that means nothing where it lands.
+
+**The split.** `ui/chat/picker/` gains `PickerPanel.kt` (the shell: search button,
+island, animated swap, per-tab state — owns no content), `EmojiTab.kt` (today's
+grid, category headers, recents, quick-reactions row, backspace and the long-press
+size drag, moved out essentially unchanged) and `StickerTab.kt` (new). `PickerTab`
+enumerates the tabs and a `PickerSelection` sealed result (`Emoji(emoji, size)` /
+`Sticker(id)` / `Gif(...)`) gives a host one callback instead of three.
+
+`EmojiHandlerPanel` survives as a thin alias over `PickerPanel(tabs = setOf(EMOJI))`
+so the three existing call sites are untouched by the extraction commit. The risky
+refactor and the new feature stay separable — and `sessionRecents` freezing (the fix
+for the grid reordering under your finger) must survive the move intact.
+
+**Stickers in the editor need no schema change.** A sticker placed on a photo is
+flattened into the JPEG; only *sending* a sticker as its own message needs
+`MessageType.STICKER`, a Room bump and a sync path. That is why the sticker tab can
+ship with the editor while sticker-as-message stays in `docs/BACKLOG.md` §4.6.
+
+**Before anyone reaches for the Giphy SDK**, the GIF feature has a privacy decision
+to make that this app cannot duck: sending a provider URL means the recipient's
+device fetches from Giphy, which tells a third party who received what and hollows
+out the Signal-Protocol story; downloading and re-uploading the bytes as an ordinary
+media message keeps it private and costs bandwidth. For this app only the second is
+consistent. Written down here so it is decided, not defaulted.
+
 ---
 
 ## 3. Phases
@@ -298,14 +370,26 @@ entry and its version bump (`feat:` → minor).
   on Done.
 - File: `ui/chat/imageedit/DrawImageScreen.kt`.
 
-### Phase 5 — Overlay screen (emoji stickers + text)
+### Phase 5 — Overlay screen (emoji, stickers + text) and the shared picker
 
-One screen for both, because drag / pinch-scale / rotate / z-order / delete are the
-same machinery for an emoji and for a text run; splitting them would mean writing
-that twice.
+One screen for emoji, stickers and text, because drag / pinch-scale / rotate /
+z-order / delete are the same machinery for all three; splitting them would mean
+writing it three times.
 
-- Emoji chosen through the existing `EmojiHandlerPanel` (`EmojiMode.TEXT_INPUT`) —
+**5a — extract the picker shell first, as its own commit** (§2.8). `ui/chat/picker/`
+gains `PickerPanel` + `EmojiTab` + `PickerTab`/`PickerSelection`; `EmojiHandlerPanel`
+becomes a one-tab alias so the composer, reaction sheet and caption bar are byte-for-
+byte unchanged in behaviour. No new feature in this commit — it is a refactor with a
+test to prove the three existing hosts still behave.
+
+**5b — the sticker tab and the overlay screen.**
+
+- The picker mounts here with `tabs = setOf(EMOJI, STICKER)`; the search button and
+  island appear because there are two tabs. Emoji content is the existing grid —
   do not build a second picker.
+- `StickerTab`: a bundled local pack plus recents. Placed stickers are flattened
+  into the JPEG, so **no `MessageType` and no Room bump** — sticker-as-message stays
+  in `docs/BACKLOG.md` §4.6.
 - Text objects: colour strip, a filled/outline style toggle, centre alignment.
 - Manipulation: one-finger drag, two-finger pinch-scale and rotate, tap to select,
   drag onto a trash zone that appears at the bottom while dragging.
@@ -314,9 +398,14 @@ that twice.
   rotations of an already-placed object therefore collapse into its placement rather
   than each becoming a history step. **Layer visibility** hides every emoji and text
   run at once, same contract as the draw screen.
-- Rendered on Done with `Canvas.drawText` for both (emoji are text), at output
-  resolution so glyphs stay crisp.
-- File: `ui/chat/imageedit/OverlayImageScreen.kt`.
+- Rendered on Done with `Canvas.drawText` for emoji and text (emoji are text) and
+  `drawBitmap` for stickers, at output resolution so glyphs and edges stay crisp.
+- Files: `ui/chat/imageedit/OverlayImageScreen.kt`, `ui/chat/picker/PickerPanel.kt`,
+  `ui/chat/picker/EmojiTab.kt`, `ui/chat/picker/StickerTab.kt`,
+  `ui/chat/picker/PickerTab.kt`.
+- Tests: the three pre-existing hosts still render one tab and no island; the
+  editor host renders two and switches between them; a query typed on one tab does
+  not survive a tab switch; `sessionRecents` still freezes for the panel's lifetime.
 
 ### Phase 6 — Edit from the fullscreen viewer
 
@@ -373,6 +462,15 @@ that twice.
   pager's read set.
 - **Videos.** Every editor entry point is gated on `!item.isVideo`; the toolbar
   shows only HD-less controls for a video page.
+- **The picker extraction is where a regression hides.** `EmojiHandlerPanel` carries
+  behaviour that is easy to lose in a move: the frozen `sessionRecents` order, the
+  long-press drag-to-size gesture with its row-sibling fade, the quick-reactions row
+  that only `EmojiMode.REACTION` shows, and the backspace key that only
+  `TEXT_INPUT` shows. All four are emoji-*tab* concerns, not shell concerns — putting
+  any of them in `PickerPanel` is the wrong seam and will leak into the sticker tab.
+- **Collapsing the search must be reachable.** The island slides away when search
+  opens, so the field needs its own × (and back must close search before it closes
+  the panel) — otherwise the tab switcher is gone with no way back to it.
 - **Cloud sessions cannot run `./gradlew`** (blocked `dl.google.com`). Every phase
   lands build-unverified from the web and needs a local
   `./gradlew test assembleDebug` before it is trusted.
@@ -387,6 +485,16 @@ that twice.
   `GroupSettingsScreen` take whatever aspect the picker returns; the adjust screen's
   1:1 preset would serve them. Deliberately out of scope — it is an avatar change,
   not an image-editor change, and it would widen the diff across three more screens.
+- **Option C, "one editor, four modes"** (from the drafted directions): a single
+  Edit entry, bottom mode tabs, and a Layers panel giving each addition its own eye
+  and delete. Not taken because per-layer visibility only holds while edits are still
+  data — it wants one flatten when you leave the editor rather than one per tool,
+  which reopens §2.1. Revisit together with that decision, never separately.
+- **Sticker-as-message and GIF-as-message** — `docs/BACKLOG.md` §4.6. Both need a
+  new `MessageType`, a Room version bump, a sync path and a bubble renderer; GIF also
+  needs the provider-privacy decision recorded in §2.8. The picker's `PickerTab`
+  enum already has the shape for them, and no host declares them until then.
+- **GIF on a photo.** Impossible while the output is JPEG (§2.8), not merely unbuilt.
 - **Branching history.** Undo/redo is linear: editing after an undo discards the
   forward steps. Keeping abandoned branches alive would mean a tree UI and unbounded
   disk in a send-preview.
@@ -402,9 +510,15 @@ that twice.
 
 - `docs/FEATURE-MAP.md` — the *Image / Media Pipeline* table gains the
   `ui/chat/imageedit/` files and `ImageEditRasterizer`; the entry-point line gains
-  the editor hop.
+  the editor hop. The picker becomes a cross-cutting feature of its own (four hosts,
+  three packages) and earns its own table.
 - `docs/PATTERNS.md` + a one-line pointer in `CLAUDE.md` §Key Conventions — a new
   entry for the rasterize-per-screen convention and the normalized-overlay rule.
 - `TECH_DEBT.md` — the `ImageEditRasterizer` allowlist entry, and the 4096 px
   edited-HD ceiling with its revisit trigger.
-- `CHANGELOG.md` — one entry per phase, editorial, with the commit hash.
+- `CHANGELOG.md` — one entry per phase, editorial, with the commit hash. The
+  picker extraction (5a) is refactor-only and gets **no** entry; the sticker tab (5b)
+  does.
+- `docs/BACKLOG.md` §4.6 — reword once the picker shell lands: the shell and its
+  `PickerTab` seam exist, so what remains open is sticker/GIF *as messages* and the
+  provider decision, not "a picker".
