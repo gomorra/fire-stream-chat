@@ -15,6 +15,22 @@ controls appear top-left only once an edit exists. The two directions not taken 
 a thumb-reachable bottom dock (B) and a single editor with mode tabs and a layer
 list (C) — C is noted in §5, since it would have reopened §2.1.
 
+**Screen mockups** (all three directions, 15 artboards):
+<https://claude.ai/code/artifact/f21151fb-7d70-4f98-99b9-52a0bd816541> — row A is the
+chosen direction (preview → adjust → draw → overlay, then the shared picker in the
+composer and its search-expanded state). Frames are drawn from the real theme: Plus
+Jakarta Sans, `#F26A1F`, the `Fs*` dark surfaces, and the 40/36 dp circular controls
+and 6/12/24 dp radii already in `ImagePreviewScreen` and `FullscreenImageViewer`. The
+`.dc.html` sources were only ever in a session scratchpad; to change the canvas from a
+later session, extract them back out of the published page (the `design` skill's
+"Updating an existing canvas") rather than redrawing.
+
+**Build gate for this work** (verified 2026-09-09 in a cloud container, see CLAUDE.md):
+`./gradlew :app:testFirebaseDebugUnitTest` — 910 tests, and the only expected failure is
+`ApkDownloaderTest.unresolvable host…`, which fails behind the sandbox proxy and nowhere
+else. `./gradlew :app:assembleFirebaseDebug` for the build half. Use the flavor-qualified
+tasks: bare `test` also builds pocketbase, which is not maintained yet.
+
 `Order: 1 → 2 → 3 → 4 → 5 → 6`
 
 ---
