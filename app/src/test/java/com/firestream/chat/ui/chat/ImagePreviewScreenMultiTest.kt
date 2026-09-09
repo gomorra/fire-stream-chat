@@ -36,7 +36,9 @@ class ImagePreviewScreenMultiTest {
 
     private fun setContent(
         items: List<PendingMedia>,
+        defaultIsHd: Boolean = false,
         onSend: (List<PendingMedia>) -> Unit = {},
+        onDownload: (PendingMedia) -> Unit = {},
         onDismiss: () -> Unit = {},
     ) {
         composeTestRule.setContent {
@@ -44,8 +46,10 @@ class ImagePreviewScreenMultiTest {
                 ImagePreviewScreen(
                     items = items,
                     recentEmojis = emptyList(),
+                    defaultIsHd = defaultIsHd,
                     onEmojiUsed = {},
                     onSend = onSend,
+                    onDownload = onDownload,
                     onDismiss = onDismiss,
                 )
             }

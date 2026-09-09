@@ -40,12 +40,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
@@ -249,6 +251,20 @@ class ChatViewModel @Inject constructor(
     fun sendMediaMessage(uri: Uri, mimeType: String, caption: String = "") = messageSender.sendMediaMessage(uri, mimeType, caption)
 
     internal fun sendMediaMessages(items: List<PendingMedia>) = messageSender.sendMediaMessages(items)
+
+    /**
+     * The global "send images in HD" preference, for the send preview's HD pill.
+     *
+     * Exposed directly rather than folded into a [ChatUiState] slice: it is a
+     * read-only preference belonging to no manager's slice, and it is the
+     * *fallback* the preview renders when a `PendingMedia.isHd` is still null —
+     * the per-item override lives on the item, never here. Eager so the pill has
+     * the real value the first time the preview opens rather than flashing the
+     * default.
+     */
+    val sendImagesFullQuality: StateFlow<Boolean> =
+        preferencesDataStore.sendImagesFullQualityFlow
+            .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) = messageSender.sendVoiceMessage(uri, durationSeconds)
     fun sendLocationMessage(latitude: Double, longitude: Double, comment: String = "") = messageSender.sendLocationMessage(latitude, longitude, comment)
     fun retrySend(message: Message) = messageSender.retrySend(message)
@@ -353,16 +369,50 @@ class ChatViewModel @Inject constructor(
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
 
     // ── Save to downloads ──
+
+    /**
+     * Save a picked-but-unsent image straight from the send preview.
+     *
+     * Distinct from [saveImageToDownloads], which resolves a *sent* message's
+     * local file or media URL: here the source is still the gallery provider's
+     * (or the edit cache's) URI, so it streams through the resolver and gets a
+     * generated name — the provider's own display name is often a bare id.
+     */
+    internal fun savePendingMediaToDownloads(item: PendingMedia) {
+        val label = if (item.isVideo) "Video" else "Image"
+        val extension = if (item.isVideo) "mp4" else "jpg"
+        saveToDownloads(label) {
+            mediaFileManager.saveToDownloads(
+                sourceUri = item.uri,
+                mimeType = item.mimeType,
+                displayName = "FireStream_${System.currentTimeMillis()}.$extension",
+            )
+        }
+    }
+
     fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
+        saveToDownloads("Image") {
+            val file = when {
+                localUri != null && File(localUri).exists() -> File(localUri)
+                mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
+                else -> throw Exception("No image source available")
+            }
+            mediaFileManager.saveToDownloads(file, mimeType)
+        }
+    }
+
+    /**
+     * Runs a save off the main thread and reports it the one way this app
+     * reports a save: a snackbar with an Open action, or the failure's message.
+     * Only [resolve] — where the bytes come from — differs between callers.
+     */
+    private fun saveToDownloads(label: String, resolve: suspend () -> Uri) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val file = when {
-                    localUri != null && File(localUri).exists() -> File(localUri)
-                    mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
-                    else -> throw Exception("No image source available")
-                }
-                val uri = mediaFileManager.saveToDownloads(file, mimeType)
-                _snackbarEvent.emit(SnackbarEvent("Image saved to Downloads", actionLabel = "Open", actionUri = uri))
+                val uri = resolve()
+                _snackbarEvent.emit(
+                    SnackbarEvent("$label saved to Downloads", actionLabel = "Open", actionUri = uri)
+                )
             } catch (e: Exception) {
                 _snackbarEvent.emit(SnackbarEvent("Failed to save: ${e.message}"))
             }

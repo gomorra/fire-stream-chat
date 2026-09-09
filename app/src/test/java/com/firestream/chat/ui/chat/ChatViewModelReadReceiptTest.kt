@@ -83,6 +83,7 @@ class ChatViewModelReadReceiptTest {
         every { preferencesDataStore.recentEmojisFlow } returns flowOf(emptyList())
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(com.firestream.chat.data.local.DictationLanguage.GERMAN)
         every { preferencesDataStore.lastChatScrollFlow } returns flowOf(null)
+        every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
         every { reminderRepository.observePendingIdsForChat(any()) } returns flowOf(emptySet())
 
         chatRepository.chatByIdResult = Result.success(Chat(id = "chat1", type = ChatType.INDIVIDUAL))

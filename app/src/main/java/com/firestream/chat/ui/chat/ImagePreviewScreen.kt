@@ -43,6 +43,8 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -68,6 +70,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
+import com.firestream.chat.ui.chat.imageedit.ImageEditActions
+import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 
@@ -78,27 +83,47 @@ import com.firestream.chat.ui.components.rememberVideoFrameRequest
  * there is more than one item, so a single pick looks exactly as it always did.
  *
  * Captions are **per item**: the caption box always edits the page you are
- * looking at. They are held in [captions], keyed by URI and read only inside
- * [CaptionBar], so a keystroke invalidates the caption row rather than the pager
- * — otherwise every typed character would re-run the full-screen `AsyncImage`
- * for the current page and its neighbours.
+ * looking at. They are held in [captions], keyed by the pick's URI and read
+ * only inside [CaptionBar], so a keystroke invalidates the caption row rather
+ * than the pager — otherwise every typed character would re-run the full-screen
+ * `AsyncImage` for the current page and its neighbours.
  *
- * The caller gets the final list back through [onSend], captions and removals
- * already applied; [onDismiss] throws the whole batch away.
+ * The editor rail ([ImageEditActions]) floats top-right over the photo, and the
+ * history pill ([ImageEditHistory]) appears top-left only once the current item
+ * has edits to step through. Both act on the page you are looking at, never on
+ * the batch: HD, the edit history and the caption are all per-item.
+ *
+ * The caller gets the final list back through [onSend], captions, removals and
+ * per-item HD already applied; [onDismiss] throws the whole batch away.
+ *
+ * [defaultIsHd] is the global "send images in HD" preference, used to render the
+ * pill for an item whose own `isHd` is still null — that is, one the user has
+ * not overridden. Nothing here writes the preference back.
  */
 @Composable
 internal fun ImagePreviewScreen(
     items: List<PendingMedia>,
     recentEmojis: List<String>,
+    defaultIsHd: Boolean,
     onEmojiUsed: (String) -> Unit,
     onSend: (List<PendingMedia>) -> Unit,
+    onDownload: (PendingMedia) -> Unit,
     onDismiss: () -> Unit,
+    snackbarHostState: SnackbarHostState? = null,
 ) {
     var drafts by rememberSaveable(items, stateSaver = PendingMedia.ListSaver) {
         mutableStateOf(items)
     }
     val captions = rememberSaveable(items, saver = CaptionsSaver) {
         mutableStateMapOf<String, String>()
+    }
+    // Where each item's cursor was before the user jumped to the original, so
+    // Original⇄Edited comes back to the step they were on rather than to the top
+    // (§2.7) — toggling off and back from step 2 of 4 must not silently re-apply
+    // steps 3 and 4. Screen state, not model state: the item still has exactly
+    // one cursor, and this only remembers where a peek started from.
+    val stepBeforePeek = rememberSaveable(items, saver = CursorsSaver) {
+        mutableStateMapOf<String, Int>()
     }
 
     // Removing the last remaining item is a dismissal — there is nothing left to
@@ -116,15 +141,22 @@ internal fun ImagePreviewScreen(
 
     var currentPageZoomed by remember { mutableStateOf(false) }
     var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
+    var showHdSheet by rememberSaveable { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
 
     val onRemove: (Int) -> Unit = remember(items) {
         { index ->
             drafts = drafts.toMutableList().also { list ->
-                captions.remove(list[index].uri.toString())
+                captions.remove(list[index].originalUri.toString())
                 list.removeAt(index)
             }
         }
+    }
+
+    // Replaces the page currently under the pager, which is the only item any of
+    // the editor controls ever act on.
+    fun updateCurrent(transform: (PendingMedia) -> PendingMedia) {
+        drafts = drafts.toMutableList().also { it[currentIndex] = transform(it[currentIndex]) }
     }
 
     BackHandler(enabled = showEmojiSheet) { showEmojiSheet = false }
@@ -181,6 +213,57 @@ internal fun ImagePreviewScreen(
             )
         }
 
+        // Tools top-right, opposite the back arrow. HD and the three editor entry
+        // points are image-only; a video page keeps just the download button.
+        ImageEditActions(
+            isHd = if (current.isVideo) null else (current.isHd ?: defaultIsHd),
+            onToggleHd = { showHdSheet = true },
+            showEditTools = !current.isVideo,
+            onDownload = { onDownload(current) },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(8.dp)
+        )
+
+        // Hidden, not disabled, until this item actually has a step to walk back
+        // to — a fresh pick should look untouched. Inert until Phase 2 starts
+        // producing history files.
+        if (current.hasEdits) {
+            ImageEditHistory(
+                canUndo = current.editCursor > 0,
+                canRedo = current.editCursor < current.editHistory.size,
+                showingOriginal = current.editCursor == 0,
+                // Undo and redo are deliberate moves along the axis, so they
+                // retire any half-finished peek rather than letting it snap the
+                // cursor back to where the user no longer is.
+                onUndo = {
+                    stepBeforePeek.remove(current.originalUri.toString())
+                    updateCurrent { it.copy(editCursor = it.editCursor - 1) }
+                },
+                onRedo = {
+                    stepBeforePeek.remove(current.originalUri.toString())
+                    updateCurrent { it.copy(editCursor = it.editCursor + 1) }
+                },
+                onToggleOriginal = {
+                    val key = current.originalUri.toString()
+                    updateCurrent { item ->
+                        if (item.editCursor == 0) {
+                            val back = stepBeforePeek.remove(key) ?: item.editHistory.size
+                            item.copy(editCursor = back.coerceIn(0, item.editHistory.size))
+                        } else {
+                            stepBeforePeek[key] = item.editCursor
+                            item.copy(editCursor = 0)
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(start = 12.dp, top = 56.dp)
+            )
+        }
+
         if (isBatch) {
             Text(
                 text = "${currentIndex + 1} / ${drafts.size}",
@@ -189,7 +272,9 @@ internal fun ImagePreviewScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = 16.dp)
+                    // Below the tool rail, not beside it: the rail is wide enough
+                    // that a centred counter on the same line runs into it.
+                    .padding(top = 56.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.5f),
                         shape = RoundedCornerShape(12.dp)
@@ -215,7 +300,9 @@ internal fun ImagePreviewScreen(
 
             CaptionBar(
                 captions = captions,
-                captionKey = current.uri.toString(),
+                // Keyed by the pick, not by `uri`: the displayed URI moves every
+                // time an edit lands, and a caption must not move with it.
+                captionKey = current.originalUri.toString(),
                 isBatch = isBatch,
                 itemCount = drafts.size,
                 showEmojiSheet = showEmojiSheet,
@@ -227,10 +314,38 @@ internal fun ImagePreviewScreen(
                 },
                 onHideEmojiSheet = { showEmojiSheet = false },
                 onSend = {
-                    onSend(drafts.map { it.copy(caption = captions[it.uri.toString()].orEmpty()) })
+                    onSend(
+                        drafts.map {
+                            it.copy(caption = captions[it.originalUri.toString()].orEmpty())
+                        }
+                    )
                 }
             )
         }
+
+        // Snackbars ("Image saved to Downloads") need a host above this overlay:
+        // the Scaffold's own is behind it. Same pattern as FullscreenImageViewer.
+        if (snackbarHostState != null) {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 88.dp)
+            )
+        }
+    }
+
+    if (showHdSheet && !current.isVideo) {
+        HdQualitySheet(
+            uri = current.uri,
+            isHd = current.isHd ?: defaultIsHd,
+            onSelect = { hd ->
+                updateCurrent { it.copy(isHd = hd) }
+                showHdSheet = false
+            },
+            onDismiss = { showHdSheet = false },
+        )
     }
 }
 
@@ -397,7 +512,7 @@ private fun ThumbnailStrip(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(horizontal = 12.dp)
     ) {
-        itemsIndexed(items, key = { _, item -> item.uri.toString() }) { index, item ->
+        itemsIndexed(items, key = { _, item -> item.originalUri.toString() }) { index, item ->
             Box {
                 val tileModifier = Modifier
                     .size(56.dp)
@@ -452,6 +567,23 @@ private fun ThumbnailStrip(
         }
     }
 }
+
+/**
+ * Flattens the peeked-from cursor map to `[key, cursor]` pairs. Saved rather
+ * than merely remembered: a rotation mid-peek that forgot the step would send
+ * the user back to the top of the history, which is exactly the re-applied-edits
+ * bug the map exists to prevent.
+ */
+private val CursorsSaver = listSaver<SnapshotStateMap<String, Int>, String>(
+    save = { map -> map.entries.flatMap { listOf(it.key, it.value.toString()) } },
+    restore = { flat ->
+        mutableStateMapOf<String, Int>().apply {
+            flat.chunked(2).forEach { pair ->
+                if (pair.size == 2) pair[1].toIntOrNull()?.let { put(pair[0], it) }
+            }
+        }
+    }
+)
 
 /** Flattens the caption map to `[key, value]` pairs so edits survive rotation. */
 private val CaptionsSaver = listSaver<SnapshotStateMap<String, String>, String>(
