@@ -4,9 +4,11 @@ import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -43,6 +45,7 @@ class ImagePreviewScreenAdjustTest {
     private var rasterizedLiveSteps: Set<Uri>? = null
     private var discarded = mutableListOf<String>()
     private var sent: List<PendingMedia>? = null
+    private var rasterizedOps: List<RasterOp>? = null
 
     private fun item(steps: Int = 0, cursor: Int = steps) = PendingMedia(
         originalUri = pick,
@@ -215,5 +218,56 @@ class ImagePreviewScreenAdjustTest {
         composeTestRule.onNodeWithContentDescription("Send").performClick()
         composeTestRule.waitForIdle()
         assertEquals(pick.toString(), sent?.single()?.uri?.toString())
+    }
+
+    // ── Turning the phone ─────────────────────────────────────────────────────
+
+    @Test
+    fun `the editor and its unflattened transforms survive a state restore`() {
+        // Regression: the editor was held in a plain `remember`, so turning the
+        // phone closed it and discarded the op stack — which also made
+        // AdjustStack.StackSaver dead code in production despite its KDoc
+        // promising exactly this. §3 asks for both orientations.
+        val restorationTester = StateRestorationTester(composeTestRule)
+        restorationTester.setContent {
+            MaterialTheme {
+                ImagePreviewScreen(
+                    items = listOf(item()),
+                    recentEmojis = emptyList(),
+                    defaultIsHd = false,
+                    onEmojiUsed = {},
+                    onSend = { sent = it },
+                    onDownload = {},
+                    onDismiss = {},
+                    edit = ImageEditServices(
+                        discardEditSteps = { discarded += it },
+                        renderPreview = { _, _, _ ->
+                            Bitmap.createBitmap(80, 60, Bitmap.Config.ARGB_8888)
+                        },
+                        rasterize = { _, ops, _ ->
+                            rasterizedOps = ops
+                            flattened
+                        },
+                    ),
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription("Adjust").performClick()
+        composeTestRule.onNodeWithContentDescription("Rotate").performClick()
+        composeTestRule.onNodeWithContentDescription("Flip").performClick()
+
+        restorationTester.emulateSavedInstanceStateRestore()
+
+        // Still in the editor, and still holding both transforms.
+        composeTestRule.onNodeWithContentDescription("Apply adjustments").assertExists()
+        composeTestRule.onNodeWithContentDescription("Undo adjustment").assertIsEnabled()
+        composeTestRule.onNodeWithContentDescription("Apply adjustments").performClick()
+        composeTestRule.waitForIdle()
+
+        assertEquals(
+            listOf(RasterOp.Rotate(90), RasterOp.Flip(horizontal = true)),
+            rasterizedOps,
+        )
     }
 }

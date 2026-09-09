@@ -2,8 +2,13 @@ package com.firestream.chat.ui.chat.imageedit
 
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -259,12 +264,31 @@ class AdjustImageScreenTest {
         composeTestRule.onNodeWithContentDescription("Resize").performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithText("2048 × 1536", substring = true).assertExists()
-        // The row scrolls — five presets each carrying their own dimensions and
-        // size do not fit a phone-width row, which is what makes it a LazyRow.
+        composeTestRule.onNodeWithText("1600 × 1200", substring = true).assertExists()
+        // The row scrolls — presets carrying their own dimensions and size do not
+        // all fit a phone-width row, which is what makes it a LazyRow.
         composeTestRule.onNodeWithContentDescription("Resize presets")
             .performScrollToNode(hasText("720 × 540", substring = true))
         composeTestRule.onNodeWithText("720 × 540", substring = true).assertExists()
+    }
+
+    @Test
+    fun `every preset offered is one a standard send will not quietly override`() {
+        // Regression: a 2048 preset takes effect on an HD send and is re-capped
+        // to 1600 by the compressor on a standard one, so it silently did nothing
+        // in one of the two quality modes. Dropping it is what makes §2.5's
+        // "an explicit resize wins" true without touching the send pipeline.
+        setContent()
+
+        composeTestRule.onNodeWithContentDescription("Resize").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithText("2048", substring = true).assertDoesNotExist()
+        for (preset in listOf("Original", "1600", "1080", "720")) {
+            composeTestRule.onNodeWithContentDescription("Resize presets")
+                .performScrollToNode(hasText(preset))
+            composeTestRule.onNodeWithText(preset).assertExists()
+        }
     }
 
     @Test
@@ -296,7 +320,7 @@ class AdjustImageScreenTest {
         composeTestRule.onNodeWithContentDescription("Resize").performClick()
         composeTestRule.waitForIdle()
 
-        composeTestRule.onNodeWithText("1536 × 2048", substring = true).assertExists()
+        composeTestRule.onNodeWithText("1200 × 1600", substring = true).assertExists()
     }
 
     @Test
@@ -336,4 +360,70 @@ class AdjustImageScreenTest {
         composeTestRule.onNodeWithText("1080").assertExists()
         assertTrue(true)
     }
+
+    // ── Where the photo actually lands ────────────────────────────────────────
+
+    @Test
+    fun `the photo is laid out exactly on the fit rect the crop overlay draws against`() {
+        // Regression: the photo's container centres its children *and* the photo
+        // was offset by the fit mapper's own centring offset, so it sat half a
+        // letterbox down and right of the frame the crop overlay was drawing —
+        // every handle a finger-width from the photo it belonged to. Robolectric
+        // cannot move a pointer across the screen, but it can say where the
+        // layout put things, which is the half of that bug it can catch.
+        val canvas = 400
+        val bitmapWidth = 200
+        val bitmapHeight = 100
+
+        composeTestRule.setContent {
+            MaterialTheme {
+                Box(modifier = Modifier.size(canvas.dp)) {
+                    AdjustImageScreen(
+                        source = source,
+                        onDone = {},
+                        onCancel = {},
+                        services = ImageEditServices(
+                            renderPreview = { _, _, _ ->
+                                Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        // The crop overlay fills the photo area exactly, so its bounds are the
+        // area the handles are drawn against — which is the thing the photo has
+        // to agree with.
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        val photo = composeTestRule.onNodeWithContentDescription("Image being adjusted")
+            .getBoundsInRoot()
+        val area = composeTestRule.onNodeWithContentDescription("Crop frame").getBoundsInRoot()
+
+        val photoWidth = photo.right.value - photo.left.value
+        val photoHeight = photo.bottom.value - photo.top.value
+
+        // The 2:1 bitmap letterboxes inside the photo area, so what matters is
+        // that the photo is centred *once*: its own centre must sit on the centre
+        // of the area the overlay draws over.
+        assertEquals(
+            (area.left.value + area.right.value) / 2f,
+            (photo.left.value + photo.right.value) / 2f,
+            1f,
+        )
+        assertEquals(
+            (area.top.value + area.bottom.value) / 2f,
+            (photo.top.value + photo.bottom.value) / 2f,
+            1f,
+        )
+        assertEquals(
+            "the fit is uniform, so the drawn aspect ratio is the bitmap's",
+            bitmapWidth.toFloat() / bitmapHeight,
+            photoWidth / photoHeight,
+            0.05f,
+        )
+        assertTrue("the photo must not overflow the area it is fitted into", photoWidth <= area.right.value - area.left.value + 1f)
+    }
+
 }

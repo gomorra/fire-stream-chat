@@ -68,6 +68,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -198,8 +200,13 @@ internal fun AdjustImageScreen(
     }
     var tool by rememberSaveable(source) { mutableStateOf(AdjustTool.NONE) }
     var aspect by rememberSaveable(source) { mutableStateOf(CropAspect.FREE) }
-    var cropRect by remember(source) { mutableStateOf(CropRect.Full) }
-    var angle by remember(source) { mutableFloatStateOf(0f) }
+    // Saved, not merely remembered, for the reason the whole stack is: turning
+    // the phone mid-crop must not throw the frame away, and the frame is
+    // normalized to the image so it means the same thing in either orientation.
+    var cropRect by rememberSaveable(source, stateSaver = CropRect.Saver) {
+        mutableStateOf(CropRect.Full)
+    }
+    var angle by rememberSaveable(source) { mutableFloatStateOf(0f) }
 
     var preview by remember(source) { mutableStateOf<Bitmap?>(null) }
     var sourceImage by remember(source) { mutableStateOf<SourceImage?>(null) }
@@ -312,13 +319,7 @@ internal fun AdjustImageScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black)
-            // The send preview's pager is a sibling of this overlay, and Compose
-            // hit-tests siblings under the same pointer independently — without
-            // this, a crop drag near the edge of the photo would also page the
-            // batch underneath. Consumed on the Main pass, after the screen's own
-            // children have had the event.
-            .swallowStrayGestures(),
+            .background(Color.Black),
     ) {
         AdjustPhoto(
             preview = preview,
@@ -442,6 +443,13 @@ private fun AdjustPhoto(
 
         Box(
             modifier = Modifier
+                // Anchored at the origin, not centred: [mapper] already *is* the
+                // centring, and letting the Box centre it as well would offset the
+                // photo by half the letterbox while the crop overlay below kept
+                // drawing at the mapper's coordinates — handles a finger-width away
+                // from the photo they belong to. Every layer here places itself
+                // through the mapper or through none of it.
+                .align(Alignment.TopStart)
                 .offset { IntOffset(mapper.offsetX.roundToInt(), mapper.offsetY.roundToInt()) }
                 .size(
                     width = with(density) { mapper.fittedWidth.toDp() },
@@ -489,24 +497,36 @@ private fun AdjustPhoto(
 @Composable
 private fun StraightenGrid(mapper: ImageFitMapper) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        val line = Color.White.copy(alpha = 0.22f)
-        for (index in 1 until GRID_DIVISIONS) {
-            val fraction = index.toFloat() / GRID_DIVISIONS
-            val x = mapper.offsetX + mapper.fittedWidth * fraction
-            val y = mapper.offsetY + mapper.fittedHeight * fraction
-            drawLine(
-                color = line,
-                start = Offset(x, mapper.offsetY),
-                end = Offset(x, mapper.offsetY + mapper.fittedHeight),
-                strokeWidth = 1f,
-            )
-            drawLine(
-                color = line,
-                start = Offset(mapper.offsetX, y),
-                end = Offset(mapper.offsetX + mapper.fittedWidth, y),
-                strokeWidth = 1f,
-            )
-        }
+        thirdsGrid(
+            left = mapper.offsetX,
+            top = mapper.offsetY,
+            width = mapper.fittedWidth,
+            height = mapper.fittedHeight,
+            alpha = 0.22f,
+        )
+    }
+}
+
+/**
+ * The thirds lines inside a rectangle, drawn the same way for the straighten
+ * tool and the crop frame — the two places in this screen that show one, and
+ * two places that must not drift apart in weight or spacing when only one of
+ * them is edited.
+ */
+private fun DrawScope.thirdsGrid(
+    left: Float,
+    top: Float,
+    width: Float,
+    height: Float,
+    alpha: Float,
+) {
+    val line = Color.White.copy(alpha = alpha)
+    for (index in 1 until GRID_DIVISIONS) {
+        val fraction = index.toFloat() / GRID_DIVISIONS
+        val x = left + width * fraction
+        val y = top + height * fraction
+        drawLine(line, Offset(x, top), Offset(x, top + height), strokeWidth = 1f)
+        drawLine(line, Offset(left, y), Offset(left + width, y), strokeWidth = 1f)
     }
 }
 
@@ -597,27 +617,13 @@ private fun CropOverlay(
                 size = Size((size.width - right).coerceAtLeast(0f), frameHeight),
             )
 
-            for (index in 1 until GRID_DIVISIONS) {
-                val fraction = index.toFloat() / GRID_DIVISIONS
-                drawLine(
-                    color = Color.White.copy(alpha = 0.25f),
-                    start = Offset(left + frameWidth * fraction, top),
-                    end = Offset(left + frameWidth * fraction, bottom),
-                    strokeWidth = 1f,
-                )
-                drawLine(
-                    color = Color.White.copy(alpha = 0.25f),
-                    start = Offset(left, top + frameHeight * fraction),
-                    end = Offset(right, top + frameHeight * fraction),
-                    strokeWidth = 1f,
-                )
-            }
+            thirdsGrid(left = left, top = top, width = frameWidth, height = frameHeight, alpha = 0.25f)
 
             drawRect(
                 color = Color.White.copy(alpha = 0.85f),
                 topLeft = Offset(left, top),
                 size = Size(frameWidth, frameHeight),
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 1f),
+                style = Stroke(width = 1f),
             )
 
             // L-shaped brackets rather than dots: a bracket says which two edges
@@ -759,47 +765,63 @@ private fun AdjustToolPanel(
             )
         }
 
-        AdjustTool.CROP -> LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(PANEL_HEIGHT_DP.dp)
-                .semantics { contentDescription = "Aspect presets" },
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(CropAspect.entries.toList(), key = { it.name }) { option ->
+        AdjustTool.CROP -> ChipRow(
+            label = "Aspect presets",
+            options = CropAspect.entries.toList(),
+            key = { it.name },
+            chip = { option ->
                 AdjustChip(
                     label = option.label,
                     detail = null,
                     selected = option == aspect,
                     onClick = { callbacks.onAspect(option) },
                 )
-            }
-        }
+            },
+        )
 
-        // Scrolls, and that is the right answer here rather than a compromise:
-        // five presets each carrying their own `W × H · ~size` do not fit a
-        // 390 dp row, and a preset row is not a mode switcher — nothing is
-        // hidden by scrolling except more of the same kind of choice.
-        AdjustTool.RESIZE -> LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(PANEL_HEIGHT_DP.dp)
-                .semantics { contentDescription = "Resize presets" },
-            contentPadding = PaddingValues(horizontal = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            items(RESIZE_PRESETS, key = { it ?: 0 }) { preset ->
+        AdjustTool.RESIZE -> ChipRow(
+            label = "Resize presets",
+            options = RESIZE_PRESETS,
+            key = { it ?: 0 },
+            chip = { preset ->
                 AdjustChip(
                     label = preset?.toString() ?: "Original",
                     detail = resizeDetail(source, ops, preset, isHd),
                     selected = preset == longEdge,
                     onClick = { callbacks.onResize(preset) },
                 )
-            }
-        }
+            },
+        )
+    }
+}
+
+/**
+ * A row of preset chips.
+ *
+ * **Scrolls**, and that is the right answer here rather than a compromise: five
+ * resize presets each carrying their own `W × H · ~size` do not fit a 390 dp
+ * row. Unlike the picker's island (§4), a preset row is not a mode switcher —
+ * nothing is hidden by scrolling except more of the same kind of choice — so a
+ * `LazyRow` costs nothing the alternative (dropping the labels) would not cost
+ * more of.
+ */
+@Composable
+private fun <T> ChipRow(
+    label: String,
+    options: List<T>,
+    key: (T) -> Any,
+    chip: @Composable (T) -> Unit,
+) {
+    LazyRow(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(PANEL_HEIGHT_DP.dp)
+            .semantics { contentDescription = label },
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(options, key = key) { option -> chip(option) }
     }
 }
 
@@ -808,9 +830,14 @@ private fun AdjustToolPanel(
  * not be read.
  *
  * Computed through the *whole* op stack, not from the source alone: a preset
- * offered after a 16:9 crop has to quote the dimensions that crop leaves, and
- * a "1600" preset on an image already smaller than that is honestly labelled
- * with the size it will actually keep, because a resize never upscales.
+ * offered after a 16:9 crop has to quote the dimensions that crop leaves, and a
+ * preset below the image's current long edge is honestly labelled with the size
+ * it keeps, because a resize never upscales.
+ *
+ * These are the dimensions the **edit** writes, and every preset offered here is
+ * at or below the long edge a standard-quality send caps at, so they are also
+ * the dimensions that get sent — which is what §2.5's "an explicit resize wins"
+ * asks for. That constraint is why 2048 is not on the row; see §3, departure 7.
  */
 private fun resizeDetail(
     source: SourceImage?,
@@ -935,9 +962,13 @@ private fun AdjustChip(
 }
 
 /**
- * Consumes whatever the screen's own children did not, so a sibling overlay
- * underneath this one never sees the same gesture. Main pass, so children still
- * get first refusal.
+ * Swallows every pointer event that reaches the flatten scrim.
+ *
+ * The controls underneath are already disabled while a flatten is in flight,
+ * but they are still visible through a half-transparent overlay and still
+ * hit-testable as far as the layout is concerned — the scrim is what makes
+ * "nothing here is live right now" true rather than merely intended. Main pass,
+ * so anything the scrim's own content wants still gets first refusal.
  */
 private fun Modifier.swallowStrayGestures(): Modifier = this.then(
     Modifier.pointerInput(Unit) {
@@ -994,9 +1025,18 @@ private const val BOTTOM_PANEL_HEIGHT_DP = PANEL_HEIGHT_DP + TOOL_ROW_HEIGHT_DP
 /**
  * The long edges offered by the resize row, plus `null` for "leave it alone".
  *
- * This is the part of the adjust screen with no WhatsApp equivalent: 2048 and
- * 1600 are "still a photo", 1080 matches the screen it will most likely be
- * looked at on, and 720 is the one to pick when the point is to get it sent on a
- * bad connection.
+ * This is the part of the adjust screen with no WhatsApp equivalent: 1600 is
+ * "still a photo", 1080 matches the screen it will most likely be looked at on,
+ * and 720 is the one to pick when the point is to get it sent on a bad
+ * connection.
+ *
+ * **Every preset here is at or below the long edge a standard-quality send caps
+ * at**, which is what makes §2.5's "an explicit resize wins" true without the
+ * send pipeline learning that editing exists (§2.1). A 2048 preset was drafted
+ * and dropped for exactly that reason: it takes effect only on an HD send, and
+ * on a standard one the compressor would quietly re-cap it to 1600 — a preset
+ * that silently does nothing in one of the two quality modes. See §3,
+ * departure 7. "Original" is the one row that still defers to the HD pill, and
+ * that is the behaviour §2.5 says is unchanged when there is no explicit resize.
  */
-private val RESIZE_PRESETS = listOf<Int?>(null, 2048, 1600, 1080, 720)
+private val RESIZE_PRESETS = listOf<Int?>(null, 1600, 1080, 720)

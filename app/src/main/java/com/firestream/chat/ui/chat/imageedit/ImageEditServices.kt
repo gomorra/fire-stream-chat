@@ -72,4 +72,5 @@ internal data class ImageEditServices(
      * shows. It is computed at call time, not captured, so it is current.
      */
     val rasterize: suspend (Uri, List<RasterOp>, Set<Uri>) -> Uri? = { _, _, _ -> null },
+
 )

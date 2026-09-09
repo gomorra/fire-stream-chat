@@ -401,6 +401,35 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### The image editor's resize presets cannot exceed `ImageCompressor.MAX_DIMENSION`
+
+**The smell.** `.claude/plans/image-editor.md` §2.5 says "an explicit resize wins. If the
+user sets an output long edge in the adjust screen, that is the resolution; HD then governs
+only the encode quality (100 vs 80), not a second downscale." Nothing carries that choice
+into the send: `MessageRepositoryImpl.sendMediaMessage` calls
+`imageCompressor.processImage(uri, sendAsHd)`, which re-caps a standard-quality send at
+`MAX_DIMENSION = 1600` however faithfully the edit pass wrote a larger image. Phase 3
+sidesteps it by offering only presets **at or below** that cap (Original / 1600 / 1080 /
+720), so every preset that ships does win — but the row cannot grow upward, and the drafted
+2048 preset was dropped for exactly this reason.
+
+**Why we're not doing it now.** The fix is not one parameter. `sendMediaMessage` needs an
+`outputLongEdge`, `ImageCompressor.processImage` needs a `maxDimension`, `PendingMedia` needs
+a field and a seventh saver slot — and the retry path at `MessageRepositoryImpl:891`
+re-compresses from the stored `Message` rather than from the draft, so surviving a failed
+send means a Room column and a version bump. That is precisely the send-pipeline change §2.1
+set out to avoid ("leaves the send pipeline completely untouched"), traded for one preset
+that only ever mattered on an HD send. There is also a semantic question the field shape
+alone does not answer: the chosen edge belongs to *one history step*, so an undo past that
+step has to drop it, and `PendingMedia.editHistory` is a `List<String>` with no room for it.
+
+**When to revisit.** When a resize preset above 1600 is actually wanted — most likely
+alongside an "original resolution" send mode — or when `Message` gains a media-parameters
+column for another reason and the field can ride along. Do the per-step question first: a
+resize the user has undone must not still be shrinking their photo.
+
+---
+
 ### `google-services` plugin is applied to every variant, including `pocketbase`
 
 **The smell.** `app/build.gradle.kts` applies `alias(libs.plugins.google.services)` at

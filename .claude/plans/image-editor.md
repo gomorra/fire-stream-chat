@@ -511,11 +511,32 @@ Six departures from the bullets below were taken during implementation and are
 5. **Done on an untouched photo cancels instead of flattening.** Writing a
    re-encoded copy of an unchanged image would burn a history step, a cache file
    and a generation of JPEG quality on a no-op.
-6. **The resize row scrolls.** Five presets each carrying `W × H · ~size` do not
-   fit a 390 dp row. Unlike the picker's island (§4), a preset row is not a mode
+6. **The resize row scrolls.** Presets each carrying `W × H · ~size` do not fit
+   a 390 dp row. Unlike the picker's island (§4), a preset row is not a mode
    switcher — nothing is hidden by scrolling except more of the same kind of
    choice — so a `LazyRow` is the answer rather than dropping the labels. The
    test that found this had to be taught to scroll, which is the honest version.
+7. **The resize presets are Original / 1600 / 1080 / 720 — the drafted 2048 is
+   not offered.** §2.5 says "an explicit resize wins … HD then governs only the
+   encode quality, not a second downscale", and the send path cannot honour that
+   for a preset above `ImageCompressor.MAX_DIMENSION`: a standard-quality send
+   re-caps at 1600 whatever the edit wrote, so a 2048 preset would take effect on
+   an HD send and silently do nothing on a standard one. Threading the chosen
+   edge down instead would mean an argument on `sendMediaMessage`, a parameter on
+   `ImageCompressor`, a field on `PendingMedia` **and** — because the retry path
+   at `MessageRepositoryImpl:891` re-compresses from the stored `Message` — a
+   Room column and a version bump, which is precisely the send-pipeline change
+   §2.1 exists to avoid. Dropping the one preset above the cap makes §2.5 true
+   for every preset that ships, with no send-path change at all. Recorded in
+   `TECH_DEBT.md` with the trigger for revisiting.
+8. **`AdjustCallbacks` is joined by two more bundles, and both are the same
+   rule.** `ImageEditServices` (§3 departure 2) and `AdjustCallbacks` exist for
+   the ART parameter ceiling; `AdjustTarget`, `CropRect.Saver` and
+   `AdjustStack.StackSaver` exist so the editor survives a rotation. The last was
+   caught by review, not by a test: the stack's saver was written and unit-tested
+   while the *screen* was held in a plain `remember`, so turning the phone closed
+   the editor and made the saver dead code in production. It is now covered by a
+   `StateRestorationTester` case that round-trips through a real `Bundle`.
 
 Also worth knowing before Phase 4: `ImageEditRasterizer.preview(source, ops,
 maxDimension)` applies an op stack at screen resolution without writing a file,
@@ -548,7 +569,8 @@ should render its strokes over that rather than decoding its own bitmap.
   class, the way `MessageBubbleCallbacks` does it.
 - Crop with draggable corner handles and aspect presets: Free / Original / 1:1 /
   4:5 / 16:9.
-- Resize presets on the same screen — Original / 2048 / 1600 / 1080 / 720 long edge
+- Resize presets on the same screen — Original / 1600 / 1080 / 720 long edge
+  (2048 was drafted and dropped; see departure 7)
   — each showing the resulting `W × H` and an approximate file size. This is the
   part that has no WhatsApp equivalent.
 - **Undo / Redo** step through the transform stack — the crop, then the straighten,

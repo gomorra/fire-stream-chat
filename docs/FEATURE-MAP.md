@@ -107,7 +107,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 
 **Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`**, which replaces the preview's content rather than floating over it, flattens its op stack once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 
-The `ui/chat/imageedit/` package is Phase 1 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell, per-image HD and download. The rasterizer, the editor screens and the shared picker land in later phases and will extend this table.
+The `ui/chat/imageedit/` package is Phases 1–3 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), and the adjust screen (3). The draw screen, the overlay screen and the shared picker land in Phases 4–5 and will extend this table.
 
 ---
 

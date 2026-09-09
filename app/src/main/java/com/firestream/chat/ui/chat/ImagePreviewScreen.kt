@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -173,7 +174,9 @@ internal fun ImagePreviewScreen(
     // than to an index: an item can be removed from the thumbnail strip while the
     // editor is open, and landing an edit on whatever slid into that index would
     // write it onto the wrong photo. Null means the editor is closed.
-    var adjusting by remember(items) { mutableStateOf<AdjustTarget?>(null) }
+    var adjusting by rememberSaveable(items, stateSaver = AdjustTarget.Saver) {
+        mutableStateOf<AdjustTarget?>(null)
+    }
 
     var currentPageZoomed by remember { mutableStateOf(false) }
     var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
@@ -700,7 +703,26 @@ private fun ThumbnailStrip(
  * [source] is pinned at open time so the flatten reads the bytes the user is
  * actually looking at, even if the item's cursor moves in between.
  */
-private data class AdjustTarget(val key: String, val source: Uri)
+private data class AdjustTarget(val key: String, val source: Uri) {
+    companion object {
+        /**
+         * Saved, not merely remembered. The adjust screen saves its own op
+         * stack and crop frame, and all of that is unreachable if the *screen*
+         * closes on rotation — turning the phone mid-crop would throw the crop
+         * away and make three tested savers dead code.
+         *
+         * Null round-trips as an empty list rather than as a null the saver
+         * would have to special-case, since `rememberSaveable` treats a null
+         * save value as "nothing to restore".
+         */
+        val Saver: Saver<AdjustTarget?, Any> = listSaver(
+            save = { target -> target?.let { listOf(it.key, it.source.toString()) }.orEmpty() },
+            restore = { flat ->
+                if (flat.size == 2) AdjustTarget(flat[0], Uri.parse(flat[1])) else null
+            },
+        )
+    }
+}
 
 /**
  * Flattens the peeked-from cursor map to `[key, cursor]` pairs. Saved rather

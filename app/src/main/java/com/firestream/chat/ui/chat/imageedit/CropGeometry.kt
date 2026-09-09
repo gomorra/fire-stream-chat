@@ -1,6 +1,8 @@
 package com.firestream.chat.ui.chat.imageedit
 
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
 import com.firestream.chat.domain.util.RasterOp
 
 /**
@@ -36,6 +38,18 @@ internal data class CropRect(
         val Full = CropRect(0f, 0f, 1f, 1f)
 
         /**
+         * Survives a rotation, because the frame is normalized to the image and
+         * therefore means the same thing in either orientation — a saver that
+         * dropped it would throw away a half-finished crop for turning the
+         * phone, which is the failure the plan's "check it in both
+         * orientations" is most likely to find.
+         */
+        val Saver: Saver<CropRect, Any> = listSaver(
+            save = { listOf(it.left, it.top, it.right, it.bottom) },
+            restore = { CropRect(it[0], it[1], it[2], it[3]) },
+        )
+
+        /**
          * Below this, a frame edge is on the image edge as far as anyone can
          * tell. A drag lands on sub-pixel floats, so an exact `== 0f` test
          * would keep offering to crop a frame the user has dragged back to the
@@ -56,15 +70,19 @@ internal enum class CropHandle(val onLeft: Boolean, val onTop: Boolean) {
 /**
  * The aspect presets on the crop row.
  *
- * [pixels] is the ratio the *output file* must have, which is not the ratio the
- * frame has on screen: the frame is normalized to the image, so a 1:1 crop of a
- * 4000 × 3000 photo is a frame three-quarters as wide as it is tall.
+ * [fixedPixelRatio] is the ratio the *output file* must have, which is not the
+ * ratio the frame has on screen: the frame is normalized to the image, so a 1:1
+ * crop of a 4000 × 3000 photo is a frame three-quarters as wide as it is tall.
  * [CropGeometry.normalizedRatio] is the conversion, and forgetting it is the
  * bug this type exists to make hard.
  *
- * `null` is Free — no constraint, each corner moves on its own.
+ * It is null for the two presets that have no *fixed* ratio, and they are null
+ * for opposite reasons — [FREE] has no constraint at all, while [ORIGINAL]'s
+ * constraint is the image's own ratio and so cannot be a constant.
+ * [CropGeometry.pixelAspect] is the one place that distinction is resolved;
+ * read that rather than this field.
  */
-internal enum class CropAspect(val label: String, val pixels: Float?) {
+internal enum class CropAspect(val label: String, val fixedPixelRatio: Float?) {
     FREE("Free", null),
     ORIGINAL("Original", null),
     SQUARE("1:1", 1f),
@@ -95,11 +113,17 @@ internal object CropGeometry {
      */
     const val MIN_SIDE = 0.05f
 
-    /** The output ratio [aspect] asks for, resolving ORIGINAL against the image. */
+    /**
+     * The output ratio [aspect] asks for, or null when the corners are free.
+     *
+     * The one place [CropAspect.FREE] and [CropAspect.ORIGINAL] stop looking
+     * alike: both carry a null ratio, but Original's is null only because it
+     * cannot be a constant, and it is resolved against the image here.
+     */
     fun pixelAspect(aspect: CropAspect, imageWidth: Int, imageHeight: Int): Float? = when {
         aspect == CropAspect.ORIGINAL && imageWidth > 0 && imageHeight > 0 ->
             imageWidth.toFloat() / imageHeight
-        else -> aspect.pixels
+        else -> aspect.fixedPixelRatio
     }
 
     /**
