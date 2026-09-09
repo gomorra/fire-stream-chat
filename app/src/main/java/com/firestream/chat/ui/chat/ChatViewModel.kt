@@ -36,6 +36,7 @@ import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
+import com.firestream.chat.domain.util.SizeEstimate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -381,7 +382,7 @@ class ChatViewModel @Inject constructor(
      * of them takes plain lambdas and is constructible in a Robolectric test
      * with a fake.
      */
-    internal suspend fun estimateSendSize(uri: Uri, hd: Boolean): ImageEditRasterizer.SizeEstimate? =
+    internal suspend fun estimateSendSize(uri: Uri, hd: Boolean): SizeEstimate? =
         imageEditRasterizer.estimateSize(uri, hd)
 
     /**

@@ -71,7 +71,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
-import com.firestream.chat.data.util.ImageEditRasterizer
+import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
 import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
@@ -124,7 +124,7 @@ internal fun ImagePreviewScreen(
     onDownload: (PendingMedia) -> Unit,
     onDismiss: () -> Unit,
     /** Approximate output size for the HD sheet's two rows; see §2.5. */
-    estimateSendSize: suspend (Uri, Boolean) -> ImageEditRasterizer.SizeEstimate? = { _, _ -> null },
+    estimateSendSize: suspend (Uri, Boolean) -> SizeEstimate? = { _, _ -> null },
     /** Whether a rasterized edit step is still on disk. */
     editStepExists: (Uri) -> Boolean = { true },
     /** Rasterized steps nothing can reach any more, for the rasterizer to delete. */
@@ -162,7 +162,7 @@ internal fun ImagePreviewScreen(
     // Remembered against the URI it estimates, so the sheet's LaunchedEffect
     // does not restart on every recomposition and re-probe the same header.
     val currentUri = current.uri
-    val hdEstimate: suspend (Boolean) -> ImageEditRasterizer.SizeEstimate? =
+    val hdEstimate: suspend (Boolean) -> SizeEstimate? =
         remember(currentUri, estimateSendSize) { { hd -> estimateSendSize(currentUri, hd) } }
 
     var currentPageZoomed by remember { mutableStateOf(false) }

@@ -26,7 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.firestream.chat.data.util.ImageEditRasterizer
+import com.firestream.chat.domain.util.SizeEstimate
 
 /**
  * Standard-vs-HD for the image currently on screen.
@@ -51,13 +51,13 @@ import com.firestream.chat.data.util.ImageEditRasterizer
 @Composable
 internal fun HdQualitySheet(
     isHd: Boolean,
-    estimate: suspend (hd: Boolean) -> ImageEditRasterizer.SizeEstimate?,
+    estimate: suspend (hd: Boolean) -> SizeEstimate?,
     onSelect: (Boolean) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState()
-    var standardEstimate by remember(estimate) { mutableStateOf<ImageEditRasterizer.SizeEstimate?>(null) }
-    var hdEstimate by remember(estimate) { mutableStateOf<ImageEditRasterizer.SizeEstimate?>(null) }
+    var standardEstimate by remember(estimate) { mutableStateOf<SizeEstimate?>(null) }
+    var hdEstimate by remember(estimate) { mutableStateOf<SizeEstimate?>(null) }
 
     LaunchedEffect(estimate) {
         standardEstimate = estimate(false)
@@ -103,7 +103,7 @@ internal fun HdQualitySheet(
 }
 
 /** `1600 × 1200 · about 340 KB`, or just the dimensions when the size is unknown. */
-private fun detailLine(estimate: ImageEditRasterizer.SizeEstimate): String {
+private fun detailLine(estimate: SizeEstimate): String {
     val dimensions = "${estimate.width} × ${estimate.height}"
     val size = formatBytes(estimate.bytes)
     return if (size.isEmpty()) dimensions else "$dimensions · about $size"

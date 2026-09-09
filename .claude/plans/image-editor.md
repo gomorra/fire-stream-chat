@@ -372,13 +372,21 @@ implementation and are **flagged here for sign-off rather than settled**. Both
 axes of `/code-review` ran on the diff and each found a real bug — the eviction
 scope in #7 and the dismiss-path leak — which are fixed rather than recorded:
 
-1. **`RasterOp` and `SizeEstimate` are nested inside `ImageEditRasterizer`,**
-   not top-level in that file. §2.2 budgets *one* `UI_ALLOWED_DATA_IMPORTS`
-   entry for the whole editor, but the allowlist matches import names, so a
-   top-level `RasterOp` would need a second entry the moment Phase 3 writes
-   `suspend (List<RasterOp>) -> Uri` in a screen signature. Nested, the whole
-   surface crosses the boundary under the one allowed name, at the cost of
-   `ImageEditRasterizer.RasterOp.Crop(...)` at the call site.
+1. **`RasterOp`, `SizeEstimate` and the dimension arithmetic live in
+   `domain/util/ImageEditGeometry.kt`** — *amended 2026-09-09, signed off.*
+   This first shipped as types nested inside `ImageEditRasterizer`, to hold the
+   editor to the one `UI_ALLOWED_DATA_IMPORTS` entry §2.2 budgets. Phase 3
+   disproved that within minutes: nesting works for a type reached through the
+   outer name, but the moment a screen wants a *companion helper* it is a fresh
+   import name again, and `AdjustImageScreen` immediately wanted `outputSize`
+   (to label each resize preset with its `W × H`, exactly as §3 Phase 3
+   specifies) and `normalizeQuarterTurn`. The ops and the arithmetic are pure
+   functions over floats with no Android type in them, so they are not a
+   platform adapter at all — they belong in `domain/`, which the UI may import
+   without any allowlist. `ImageEditRasterizer` keeps only decode, encode, the
+   cache lifecycle, the limiter permit and the header probe, and is now imported
+   by exactly one UI file, `ChatViewModel`, which injects it. One allowlist
+   entry, permanently, and clean call sites.
 2. **`estimateSize` returns `SizeEstimate(width, height, bytes)?`, not `Long`.**
    The HD sheet already renders `1600 x 1200 - about 340 KB`; returning bytes
    alone would either drop the dimensions line Phase 1 shipped or force a second
@@ -418,6 +426,13 @@ scope in #7 and the dismiss-path leak — which are fixed rather than recorded:
    know which steps are live, so the caller now says. Deliberately **not**
    defaulted — a forgotten argument would be a silent data loss, so the compiler
    asks Phase 3 for it.
+   *Re-reviewed on request and found incomplete:* `MediaProcessingLimiter`
+   allows two operations at once, so a second `rasterize` could evict the
+   first's just-written output, which is in nobody's `liveSteps` until it has
+   been returned and recorded. Outputs are now registered as in-flight before
+   the bytes are written and eviction is serialised behind a `Mutex`; when the
+   protected set makes the budget unreachable the cache stays over budget rather
+   than deleting a live step.
 8. **A sent batch's current step is not swept at send time.** §4 says the cache
    is swept "when a batch is sent"; `ChatScreen.onSend` discards every step
    *except* the one being sent, because `sendMediaMessage` is about to read
@@ -458,6 +473,27 @@ asks for.
 ### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)
 
 - Rotate 90° CW, flip horizontal, straighten slider (−45°..45°) with a faint grid.
+- **Straighten auto-crops live, during the drag** (decided 2026-09-09). As the
+  angle changes the image scales up so it never stops being a full rectangle —
+  what Google Photos, Snapseed and iOS Photos all do. The alternative considered
+  and rejected was to expand the frame, show the black corners and offer an
+  explicit "auto crop" button: it is more honest about what rotation costs, but
+  it has a failure mode this one cannot have — straighten, miss the button,
+  press Done, and send a photo with black triangles in the corners.
+  If the trade is ever to be exposed, the control is **not** an auto-crop
+  button but a **fit ⇄ fill toggle**, and it belongs at the **right end of the
+  straighten slider row**, not floating over the photo: it is a property of the
+  straighten *tool*, so it sits with the tool and appears only while that tool is
+  active. Same reasoning that separates the draw screen's width slider (a tool
+  property) from the overlay screen's scale handle (a selection property). A
+  48 dp target at the row's end leaves ~330 dp for the slider and its angle
+  readout, which fits 390 dp.
+- **`AdjustImageScreen` will hit the ~15-parameter Composable ceiling**, which
+  throws `VerifyError` on first render rather than at compile time — this repo
+  has paid for that once already with a chat-open crash. Rotate, flip,
+  straighten, crop, resize, undo, redo, reset, cancel and done is ten callbacks
+  before anything else. Collapse them into an `@Immutable AdjustCallbacks` data
+  class, the way `MessageBubbleCallbacks` does it.
 - Crop with draggable corner handles and aspect presets: Free / Original / 1:1 /
   4:5 / 16:9.
 - Resize presets on the same screen — Original / 2048 / 1600 / 1080 / 720 long edge

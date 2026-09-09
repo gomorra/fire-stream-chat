@@ -5,7 +5,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
-import com.firestream.chat.data.util.ImageEditRasterizer.RasterOp
+import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.ui.chat.PendingMedia
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -119,7 +120,7 @@ class ImageEditRasterizerTest {
         // Not 108 MP — a fixture small enough for the test JVM that still
         // exceeds the real ceiling, so the production constant is what is under
         // test here, not a lowered stand-in.
-        val ceiling = ImageEditRasterizer.WORKING_MAX_DIMENSION
+        val ceiling = ImageEditGeometry.WORKING_MAX_DIMENSION
         assertEquals(4096, ceiling)
 
         // 5120 x 1280 scales by exactly 0.8, so the expected output is arithmetic

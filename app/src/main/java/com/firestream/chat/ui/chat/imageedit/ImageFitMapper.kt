@@ -30,7 +30,7 @@ internal data class FitPoint(val x: Float, val y: Float)
  *   without drifting: the numbers mean "40% across this photo", not "212 px into
  *   the canvas I happened to be laid out in".
  * - **bitmap** — pixels in the source image, which is what an
- *   `ImageEditRasterizer.RasterOp` ultimately needs.
+ *   `com.firestream.chat.domain.util.RasterOp` ultimately needs.
  *
  * Points outside the image are **not clamped**: a drag that leaves the photo
  * produces normalized values below 0 or above 1, and it is the caller's business

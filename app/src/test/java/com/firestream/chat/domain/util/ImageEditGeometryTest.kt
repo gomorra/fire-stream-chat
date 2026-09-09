@@ -1,24 +1,24 @@
-package com.firestream.chat.data.util
+package com.firestream.chat.domain.util
 
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.cappedSize
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.cropRect
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.estimatedDimensions
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.normalizeQuarterTurn
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.outputSize
-import com.firestream.chat.data.util.ImageEditRasterizer.Companion.resizedSize
-import com.firestream.chat.data.util.ImageEditRasterizer.RasterOp
+import com.firestream.chat.domain.util.ImageEditGeometry.cappedSize
+import com.firestream.chat.domain.util.ImageEditGeometry.cropRect
+import com.firestream.chat.domain.util.ImageEditGeometry.estimatedDimensions
+import com.firestream.chat.domain.util.ImageEditGeometry.normalizeQuarterTurn
+import com.firestream.chat.domain.util.ImageEditGeometry.outputSize
+import com.firestream.chat.domain.util.ImageEditGeometry.resizedSize
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The dimension arithmetic behind [ImageEditRasterizer.rasterize], on the JVM.
+ * The dimension arithmetic behind the image editor, on the JVM.
  *
  * Split out from the bitmap work on purpose: what an op list *does to the
  * dimensions* is the part an editor screen has to agree with — a crop handle is
  * drawn against these numbers, and a resize preset is labelled with them — so it
  * is worth checking without a decoder in the loop.
  */
-class ImageEditRasterizerGeometryTest {
+class ImageEditGeometryTest {
 
     @Test
     fun `a source under the ceiling decodes at its own size`() {
@@ -66,7 +66,7 @@ class ImageEditRasterizerGeometryTest {
     @Test
     fun `a crop takes the fractions of the image it is given`() {
         val half = RasterOp.Crop(left = 0.25f, top = 0.5f, right = 0.75f, bottom = 1f)
-        assertEquals(ImageEditRasterizer.PixelRect(200, 300, 400, 300), cropRect(800, 600, half))
+        assertEquals(PixelRect(200, 300, 400, 300), cropRect(800, 600, half))
         assertEquals(400 to 300, outputSize(800, 600, listOf(half)))
     }
 
@@ -74,7 +74,7 @@ class ImageEditRasterizerGeometryTest {
     fun `an inverted or degenerate crop still yields at least one pixel`() {
         // Handles dragged past each other: the rect is normalised, not rejected.
         val inverted = RasterOp.Crop(left = 0.75f, top = 1f, right = 0.25f, bottom = 0.5f)
-        assertEquals(ImageEditRasterizer.PixelRect(200, 300, 400, 300), cropRect(800, 600, inverted))
+        assertEquals(PixelRect(200, 300, 400, 300), cropRect(800, 600, inverted))
 
         val collapsed = RasterOp.Crop(left = 0.5f, top = 0.5f, right = 0.5f, bottom = 0.5f)
         val rect = cropRect(800, 600, collapsed)
@@ -85,7 +85,7 @@ class ImageEditRasterizerGeometryTest {
     @Test
     fun `a crop outside the image is clamped to it`() {
         val overshoot = RasterOp.Crop(left = -0.5f, top = -0.5f, right = 1.5f, bottom = 1.5f)
-        assertEquals(ImageEditRasterizer.PixelRect(0, 0, 800, 600), cropRect(800, 600, overshoot))
+        assertEquals(PixelRect(0, 0, 800, 600), cropRect(800, 600, overshoot))
     }
 
     @Test
@@ -126,10 +126,31 @@ class ImageEditRasterizerGeometryTest {
 
     @Test
     fun `an HD send keeps the source resolution and a standard send caps it`() {
-        assertEquals(4000 to 3000, estimatedDimensions(4000, 3000, hd = true))
-        // ImageCompressor's own MAX_DIMENSION, quoted rather than restated.
-        assertEquals(1600 to 1200, estimatedDimensions(4000, 3000, hd = false))
-        assertEquals(800 to 600, estimatedDimensions(800, 600, hd = false))
-        assertEquals(0 to 0, estimatedDimensions(0, 0, hd = false))
+        // The cap is passed in, not referenced: it is ImageCompressor's number
+        // and domain cannot import the data layer.
+        val standard = 1600
+        assertEquals(4000 to 3000, estimatedDimensions(4000, 3000, hd = true, standardMaxDimension = standard))
+        assertEquals(1600 to 1200, estimatedDimensions(4000, 3000, hd = false, standardMaxDimension = standard))
+        assertEquals(800 to 600, estimatedDimensions(800, 600, hd = false, standardMaxDimension = standard))
+        assertEquals(0 to 0, estimatedDimensions(0, 0, hd = false, standardMaxDimension = standard))
+    }
+
+    @Test
+    fun `a standard estimate is smaller than an HD one for the same source`() {
+        val hd = ImageEditGeometry.estimatedSize(4000, 2000, sourceBytes = 2_000_000, hd = true, standardMaxDimension = 1600)
+        val standard = ImageEditGeometry.estimatedSize(4000, 2000, sourceBytes = 2_000_000, hd = false, standardMaxDimension = 1600)
+
+        assertEquals(4000, hd.width)
+        assertEquals(1600, standard.width)
+        assertTrue(hd.bytes > standard.bytes)
+        assertTrue(standard.bytes > 0)
+    }
+
+    @Test
+    fun `a degenerate source estimates nothing rather than dividing by zero`() {
+        val estimate = ImageEditGeometry.estimatedSize(0, 0, sourceBytes = 0, hd = false, standardMaxDimension = 1600)
+
+        assertEquals(0, estimate.width)
+        assertEquals(0L, estimate.bytes)
     }
 }

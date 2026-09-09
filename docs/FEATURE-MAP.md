@@ -67,7 +67,8 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/data/util/ImageCompressor.kt` | EXIF-aware compress; `inSampleSize` for memory-safe decode |
-| `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | Every full-res edit op (`RasterOp`), the 4096 px working ceiling, the HD size estimate, and the `cacheDir/edits/` lifecycle |
+| `app/src/main/java/com/firestream/chat/domain/util/ImageEditGeometry.kt` | `RasterOp` + the pure dimension arithmetic (ceiling, crop rects, resize, size estimates) — no Android, so both the editor screens and the rasterizer depend on it |
+| `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | The platform half: `ImageDecoder` decode, JPEG encode, limiter permit, `cacheDir/edits/` lifecycle and byte budget |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
@@ -91,7 +92,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenMultiTest.kt` | Batch preview — per-item captions, removal, send-all |
 | `app/src/test/java/com/firestream/chat/ui/chat/PendingMediaTest.kt` | Edit-cursor derivation and the saver's fixed-field history encoding |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryHdPrecedenceTest.kt` | Per-item `isHd` beats the global preference; null falls through to it |
-| `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerGeometryTest.kt` | JVM dimension arithmetic — ceiling, quarter turns, crop rects, resize, op composition |
+| `app/src/test/java/com/firestream/chat/domain/util/ImageEditGeometryTest.kt` | JVM dimension arithmetic — ceiling, quarter turns, crop rects, resize, op composition, size estimates |
 | `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerTest.kt` | Robolectric bitmap round-trips, edit-cache discard/sweep, size estimates |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapperTest.kt` | Fit-rect mapping round-trips, letterbox and pillarbox |
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenHistoryTest.kt` | Undo/redo/original⇄edited through the screen, and the vanished-step fallback |

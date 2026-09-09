@@ -8,6 +8,10 @@ import android.graphics.Matrix
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.VisibleForTesting
+import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.PixelRect
+import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.domain.util.SizeEstimate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -35,20 +39,21 @@ import kotlin.math.roundToInt
  * of two decoded bitmaps is what stands between a twenty-image batch and an OOM
  * (docs/PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering).
  *
- * ### One name crosses the layer boundary
+ * ### What crosses the layer boundary
  *
- * [RasterOp] and [SizeEstimate] are nested rather than top-level on purpose.
- * `ArchitectureTest` forbids `data → ui` imports, so the editor screens convert
- * their Compose-flavoured state into ops at the boundary and the ops carry plain
- * numbers, never Compose types. Nesting means the whole editor surface reaches
- * the UI through the *one* `UI_ALLOWED_DATA_IMPORTS` entry §2.2 budgets for it —
- * a screen writes `ImageEditRasterizer.RasterOp.Crop(…)` under a single import
- * instead of spending a fresh allowlist entry per type.
+ * The *arithmetic* — [RasterOp] and everything in [ImageEditGeometry] — lives in
+ * `domain/util/`, because it is pure functions over floats with no Android type
+ * in it. That is what lets an editor screen build its ops and label its resize
+ * presets without importing anything from `data/`. What stays here is only what
+ * genuinely needs the platform: decode, encode, the cache lifecycle, the
+ * limiter permit and the header probe. So this class is the single
+ * `UI_ALLOWED_DATA_IMPORTS` entry the editor spends, and only the hosting
+ * ViewModel needs even that (`.claude/plans/image-editor.md` §2.2).
  *
  * ### What it deliberately does not do
  *
  * - **It never decodes at true source resolution.** A 108 MP camera original
- *   would OOM, so an edit pass works at [WORKING_MAX_DIMENSION] on the long
+ *   would OOM, so an edit pass works at [ImageEditGeometry.WORKING_MAX_DIMENSION] on the long
  *   edge. An HD send of an *edited* photo is therefore capped at 4096 px while
  *   an HD send of an untouched photo stays at full resolution — a deliberate
  *   trade, recorded in `TECH_DEBT.md` with its revisit trigger.
@@ -70,57 +75,6 @@ class ImageEditRasterizer @Inject constructor(
     @ApplicationContext private val context: Context,
     private val processingLimiter: MediaProcessingLimiter,
 ) {
-
-    /**
-     * One flattening step, in image space and plain numbers.
-     *
-     * Ops apply in list order, each to the result of the last, so a crop
-     * expressed in fractions of the image means fractions of the image *as the
-     * previous op left it* — which is what an editor screen naturally produces,
-     * because the user is looking at that intermediate.
-     */
-    sealed interface RasterOp {
-        /** Quarter-turn clockwise; [degrees] is normalised to 0 / 90 / 180 / 270. */
-        data class Rotate(val degrees: Int) : RasterOp
-
-        /** Mirror across the vertical axis when [horizontal], else the horizontal one. */
-        data class Flip(val horizontal: Boolean) : RasterOp
-
-        /**
-         * Keep the sub-rectangle bounded by these fractions of the current image,
-         * `0..1` from the top-left. Values are clamped and the result is never
-         * narrower or shorter than one pixel, so a degenerate drag yields a tiny
-         * image rather than a crash.
-         */
-        data class Crop(
-            val left: Float,
-            val top: Float,
-            val right: Float,
-            val bottom: Float,
-        ) : RasterOp
-
-        /**
-         * Scale so the long edge is [longEdge] pixels. **Downscale only** — the
-         * resize presets exist to make an image smaller, and upscaling a JPEG
-         * would add bytes and no detail, so a [longEdge] above the current one
-         * is a no-op.
-         */
-        data class Resize(val longEdge: Int) : RasterOp
-    }
-
-    /**
-     * What the HD sheet needs to describe a send: the pixels it would produce
-     * and roughly how many bytes that is.
-     *
-     * "Roughly" is the contract, and the sheet says so. Measuring exactly means
-     * a second full decode-and-encode per image, which is the very thing the
-     * limiter exists to prevent (§2.5), so this is arithmetic over the source's
-     * header and file size against the numbers [ImageCompressor] actually uses.
-     */
-    data class SizeEstimate(val width: Int, val height: Int, val bytes: Long)
-
-    /** Where a [RasterOp.Crop] lands, in whole pixels of the image it applies to. */
-    internal data class PixelRect(val x: Int, val y: Int, val width: Int, val height: Int)
 
     private val sequence = AtomicLong(0)
 
@@ -228,8 +182,13 @@ class ImageEditRasterizer @Inject constructor(
     suspend fun estimateSize(source: Uri, hd: Boolean): SizeEstimate? =
         withContext(Dispatchers.IO) {
             val header = probe(source) ?: return@withContext null
-            val (width, height) = estimatedDimensions(header.width, header.height, hd)
-            SizeEstimate(width, height, estimatedBytes(header, hd))
+            ImageEditGeometry.estimatedSize(
+                width = header.width,
+                height = header.height,
+                sourceBytes = header.sourceBytes,
+                hd = hd,
+                standardMaxDimension = ImageCompressor.MAX_DIMENSION,
+            )
         }
 
     /**
@@ -328,7 +287,7 @@ class ImageEditRasterizer @Inject constructor(
         }
     }
 
-    /** Decodes [source] with its long edge capped at [WORKING_MAX_DIMENSION]. */
+    /** Decodes [source] with its long edge capped at [ImageEditGeometry.WORKING_MAX_DIMENSION]. */
     private fun decodeCapped(source: Uri): Bitmap {
         val decoderSource = ImageDecoder.createSource(context.contentResolver, source)
         return ImageDecoder.decodeBitmap(decoderSource) { decoder, info, _ ->
@@ -336,14 +295,14 @@ class ImageEditRasterizer @Inject constructor(
             // pixels; a hardware bitmap cannot be read back.
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             decoder.isMutableRequired = false
-            val (width, height) = cappedSize(info.size.width, info.size.height)
+            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height)
             if (width > 0 && height > 0) decoder.setTargetSize(width, height)
         }
     }
 
     private fun applyOp(bitmap: Bitmap, op: RasterOp): Bitmap = when (op) {
         is RasterOp.Rotate -> {
-            val degrees = normalizeQuarterTurn(op.degrees)
+            val degrees = ImageEditGeometry.normalizeQuarterTurn(op.degrees)
             if (degrees == 0) {
                 bitmap
             } else {
@@ -360,7 +319,7 @@ class ImageEditRasterizer @Inject constructor(
         }
 
         is RasterOp.Crop -> {
-            val rect = cropRect(bitmap.width, bitmap.height, op)
+            val rect: PixelRect = ImageEditGeometry.cropRect(bitmap.width, bitmap.height, op)
             if (rect.width == bitmap.width && rect.height == bitmap.height) {
                 bitmap
             } else {
@@ -369,7 +328,7 @@ class ImageEditRasterizer @Inject constructor(
         }
 
         is RasterOp.Resize -> {
-            val (width, height) = resizedSize(bitmap.width, bitmap.height, op.longEdge)
+            val (width, height) = ImageEditGeometry.resizedSize(bitmap.width, bitmap.height, op.longEdge)
             if (width == bitmap.width && height == bitmap.height) {
                 bitmap
             } else {
@@ -420,14 +379,6 @@ class ImageEditRasterizer @Inject constructor(
         /** Subdirectory of `cacheDir` holding every rasterized step. */
         internal const val EDITS_DIR = "edits"
 
-        /**
-         * Long-edge ceiling for an edit pass (§2.1). Rasterizing at true source
-         * resolution OOMs on a 108 MP original; 4096 px is past what any phone
-         * screen or messaging recipient resolves and still leaves headroom for
-         * a rotation, which holds source and destination at once.
-         */
-        const val WORKING_MAX_DIMENSION = 4096
-
         /** Quality for intermediate steps; only the send re-encodes at q80/q100. */
         private const val INTERMEDIATE_QUALITY = 95
 
@@ -441,120 +392,5 @@ class ImageEditRasterizer @Inject constructor(
 
         /** How long an edit file survives a process restart; see [sweepStale]. */
         private val MAX_AGE_MILLIS = TimeUnit.HOURS.toMillis(24)
-
-        /**
-         * Bytes per pixel assumed when the source's own file size is unknown —
-         * roughly a q85 photo, which is what a camera or gallery pick usually is.
-         */
-        private const val DEFAULT_BYTES_PER_PIXEL = 0.22f
-
-        /**
-         * The source's own bytes-per-pixel is the best available signal, but
-         * only inside the range a JPEG photo actually occupies. A PNG screenshot
-         * or a near-lossless export sits far above it and would inflate both
-         * rows; a heavily-recompressed thumbnail sits below and would flatter
-         * them.
-         */
-        private const val MIN_BYTES_PER_PIXEL = 0.05f
-        private const val MAX_BYTES_PER_PIXEL = 0.60f
-
-        /** q80 against a typical source encode — the standard row's discount. */
-        private const val STANDARD_QUALITY_FACTOR = 0.85f
-
-        /** q100 against the same source — re-encoding at maximum quality inflates. */
-        private const val HD_QUALITY_FACTOR = 1.6f
-
-        /** The decode target for a source of [width] × [height], capped on the long edge. */
-        internal fun cappedSize(
-            width: Int,
-            height: Int,
-            ceiling: Int = WORKING_MAX_DIMENSION,
-        ): Pair<Int, Int> {
-            if (width <= 0 || height <= 0) return width to height
-            val longEdge = maxOf(width, height)
-            if (longEdge <= ceiling) return width to height
-            val scale = ceiling.toFloat() / longEdge
-            return (width * scale).roundToInt().coerceAtLeast(1) to
-                (height * scale).roundToInt().coerceAtLeast(1)
-        }
-
-        /** 0 / 90 / 180 / 270, for any multiple of 90 in either direction. */
-        internal fun normalizeQuarterTurn(degrees: Int): Int = ((degrees % 360) + 360) % 360
-
-        /** Resolves a normalized [RasterOp.Crop] against real pixel dimensions. */
-        internal fun cropRect(width: Int, height: Int, op: RasterOp.Crop): PixelRect {
-            val left = (minOf(op.left, op.right) * width).roundToInt().coerceIn(0, width - 1)
-            val top = (minOf(op.top, op.bottom) * height).roundToInt().coerceIn(0, height - 1)
-            val right = (maxOf(op.left, op.right) * width).roundToInt().coerceIn(left + 1, width)
-            val bottom = (maxOf(op.top, op.bottom) * height).roundToInt().coerceIn(top + 1, height)
-            return PixelRect(left, top, right - left, bottom - top)
-        }
-
-        /** Dimensions after a [RasterOp.Resize]; never upscales. */
-        internal fun resizedSize(width: Int, height: Int, longEdge: Int): Pair<Int, Int> {
-            val current = maxOf(width, height)
-            if (longEdge <= 0 || longEdge >= current) return width to height
-            val scale = longEdge.toFloat() / current
-            return (width * scale).roundToInt().coerceAtLeast(1) to
-                (height * scale).roundToInt().coerceAtLeast(1)
-        }
-
-        /**
-         * Dimensions [ops] would produce from a source of [width] × [height],
-         * without decoding anything — the arithmetic half of [rasterize], split
-         * out so it can be checked on the JVM and so an editor screen can label
-         * a preset with its result before the user commits to it.
-         */
-        internal fun outputSize(width: Int, height: Int, ops: List<RasterOp>): Pair<Int, Int> {
-            var (currentWidth, currentHeight) = cappedSize(width, height)
-            for (op in ops) {
-                when (op) {
-                    is RasterOp.Rotate ->
-                        if (normalizeQuarterTurn(op.degrees) % 180 == 90) {
-                            val swap = currentWidth
-                            currentWidth = currentHeight
-                            currentHeight = swap
-                        }
-
-                    is RasterOp.Flip -> Unit
-
-                    is RasterOp.Crop -> {
-                        val rect = cropRect(currentWidth, currentHeight, op)
-                        currentWidth = rect.width
-                        currentHeight = rect.height
-                    }
-
-                    is RasterOp.Resize -> {
-                        val (resizedWidth, resizedHeight) =
-                            resizedSize(currentWidth, currentHeight, op.longEdge)
-                        currentWidth = resizedWidth
-                        currentHeight = resizedHeight
-                    }
-                }
-            }
-            return currentWidth to currentHeight
-        }
-
-        /** Output dimensions for a send at [hd] or standard quality. */
-        internal fun estimatedDimensions(width: Int, height: Int, hd: Boolean): Pair<Int, Int> {
-            if (width <= 0 || height <= 0) return 0 to 0
-            if (hd) return width to height
-            return resizedSize(width, height, ImageCompressor.MAX_DIMENSION)
-        }
-
-        private fun estimatedBytes(probe: Probe, hd: Boolean): Long {
-            val sourcePixels = probe.width.toLong() * probe.height.toLong()
-            if (sourcePixels <= 0) return 0
-            val bytesPerPixel = if (probe.sourceBytes > 0) {
-                (probe.sourceBytes.toFloat() / sourcePixels)
-                    .coerceIn(MIN_BYTES_PER_PIXEL, MAX_BYTES_PER_PIXEL)
-            } else {
-                DEFAULT_BYTES_PER_PIXEL
-            }
-            val (width, height) = estimatedDimensions(probe.width, probe.height, hd)
-            val pixels = width.toLong() * height.toLong()
-            val factor = if (hd) HD_QUALITY_FACTOR else STANDARD_QUALITY_FACTOR
-            return (pixels * bytesPerPixel * factor).toLong()
-        }
     }
 }
