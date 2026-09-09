@@ -20,8 +20,9 @@ import org.robolectric.annotation.Config
  * that decides which bytes leave the device.
  *
  * The pill is hidden until an item has history, so every test here seeds one.
- * No rasterizer exists yet to produce those files; the URIs are stand-ins, and
- * only the cursor arithmetic is under test.
+ * The URIs are stand-ins for files the rasterizer would have written; what is
+ * under test is the cursor arithmetic and the fallback that runs when one of
+ * those files is no longer on disk.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], application = android.app.Application::class)
@@ -37,7 +38,12 @@ class ImagePreviewScreenHistoryTest {
         editCursor = cursor,
     )
 
-    private fun setContent(item: PendingMedia, onSend: (List<PendingMedia>) -> Unit) {
+    private fun setContent(
+        item: PendingMedia,
+        editStepExists: (Uri) -> Boolean = { true },
+        onDiscardEditSteps: (List<String>) -> Unit = {},
+        onSend: (List<PendingMedia>) -> Unit,
+    ) {
         composeTestRule.setContent {
             MaterialTheme {
                 ImagePreviewScreen(
@@ -48,6 +54,8 @@ class ImagePreviewScreenHistoryTest {
                     onSend = onSend,
                     onDownload = {},
                     onDismiss = {},
+                    editStepExists = editStepExists,
+                    onDiscardEditSteps = onDiscardEditSteps,
                 )
             }
         }
@@ -154,5 +162,46 @@ class ImagePreviewScreenHistoryTest {
         composeTestRule.onNodeWithContentDescription("Send").performClick()
 
         assertEquals("file:///edits/step1.jpg", sentUri(sent))
+    }
+
+    // ── the history is a list of files the OS may delete ──────────────────────
+
+    @Test
+    fun `a step whose file has vanished is skipped rather than sent`() {
+        // cacheDir can be reclaimed under storage pressure at any moment, and
+        // the rasterizer's byte budget evicts deliberately. Sending a URI that
+        // resolves to nothing is the one outcome that is not acceptable.
+        var sent: List<PendingMedia>? = null
+        setContent(
+            edited(steps = 3),
+            editStepExists = { it.toString() != "file:///edits/step3.jpg" },
+            onSend = { sent = it },
+        )
+
+        composeTestRule.onNodeWithContentDescription("Send").performClick()
+
+        assertEquals("file:///edits/step2.jpg", sentUri(sent))
+    }
+
+    @Test
+    fun `an entirely evicted history sends the untouched pick`() {
+        var sent: List<PendingMedia>? = null
+        setContent(edited(steps = 3), editStepExists = { false }, onSend = { sent = it })
+
+        composeTestRule.onNodeWithContentDescription("Send").performClick()
+
+        assertEquals("content://pick/1", sentUri(sent))
+    }
+
+    @Test
+    fun `the page on screen falls back to a surviving step without being sent`() {
+        // The effect that re-resolves the visible page runs on its own, so the
+        // history controls agree with what the pager is showing: at step 1 of 3
+        // with the top two gone, redo has nothing left to walk forward to.
+        setContent(edited(steps = 3), editStepExists = { it.toString() == "file:///edits/step1.jpg" }) {}
+
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithContentDescription("Redo edit").assertIsNotEnabled()
     }
 }

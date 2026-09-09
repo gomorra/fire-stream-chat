@@ -26,7 +26,9 @@ class ImageCompressor @Inject constructor(
     private val processingLimiter: MediaProcessingLimiter,
 ) {
     companion object {
-        private const val MAX_DIMENSION = 1600
+        /** Long-edge cap for a standard (non-HD) send. `internal` so [ImageEditRasterizer]
+         * can quote the same number in the HD sheet's estimate instead of restating it. */
+        internal const val MAX_DIMENSION = 1600
         private const val JPEG_QUALITY = 80
     }
 

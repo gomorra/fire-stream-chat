@@ -154,6 +154,22 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ---
 
+## Image edits rasterize per screen; overlay geometry is normalized
+
+**Definition.** Each editor screen takes a source `Uri`, and on **Done** flattens its layer into a new full-size JPEG in `cacheDir/edits/` via `ImageEditRasterizer.rasterize`, handing that URI back. `PendingMedia` points at the newest file and keeps `originalUri` untouched, so the chain of files *is* the undo history — `editCursor` moves, the files stay, and the send pipeline receives a different URI without ever learning that editing exists. Everything an overlay tool positions (a stroke, a sticker, a text run) is stored **normalized to the image being edited**, `0..1`, and converted at the boundary through `ImageFitMapper`.
+
+**Use when.** Adding any editor screen or tool under `ui/chat/imageedit/`. Convert Compose state into `ImageEditRasterizer.RasterOp` at the boundary — the ops carry plain floats and `Long` ARGB colours, never Compose types, because `ArchitectureTest` forbids `data → ui`.
+**Don't use when.** The change is a *view* control rather than an edit. Layer visibility (the eye toggle) hides what you have added so you can check the photo underneath; it never changes what gets written, and pressing Done with the layer hidden still flattens it.
+
+**Example.** `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` (the ops, the 4096 px working ceiling, the cache lifecycle); `ui/chat/PendingMedia.kt:85` `landEdit` (append, truncate the abandoned tail, hand those files back for deletion) and `:111` `onSurvivingStep` (fall back when the OS reclaimed one); `ui/chat/imageedit/ImageFitMapper.kt`. Full reasoning: `.claude/plans/image-editor.md` §2.1, §2.3, §2.7.
+
+**Trap.** Three, all of which look like tidiness until they bite.
+- **Forgetting the abandoned files.** Redo means undo can no longer free the file it steps off, so the cache grows per edit *step* and stays grown for the whole preview session. `landEdit` returns them; hand them to `discard` or leak until the next app start.
+- **Trusting the cursor.** `cacheDir` can be reclaimed at any moment and the rasterizer's byte budget evicts deliberately, so every read of a history entry goes through `onSurvivingStep`. Losing undo depth is fine; sending a URI that resolves to nothing is not.
+- **Storing overlay geometry in screen pixels.** It survives neither a device rotation nor a screen-size change, and the drift is invisible in a preview and permanent in the JPEG.
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:

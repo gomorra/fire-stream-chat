@@ -75,6 +75,7 @@ private val UI_ALLOWED_DATA_IMPORTS = setOf(
     "com.firestream.chat.data.util.ChangelogParser",
     "com.firestream.chat.data.util.ChangelogVersion",
     "com.firestream.chat.data.util.DictationEvent",
+    "com.firestream.chat.data.util.ImageEditRasterizer",
     "com.firestream.chat.data.util.MediaFileManager",
     "com.firestream.chat.data.util.SpeechRecognizerManager",
     "com.firestream.chat.data.worker.MediaBackfillWorker",

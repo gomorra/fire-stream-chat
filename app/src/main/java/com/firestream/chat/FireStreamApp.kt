@@ -17,6 +17,7 @@ import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
+import com.firestream.chat.data.util.ImageEditRasterizer
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.ApplicationScope
@@ -50,6 +51,9 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
 
     @Inject
     lateinit var messageDao: MessageDao
+
+    @Inject
+    lateinit var imageEditRasterizer: ImageEditRasterizer
 
     @Inject
     @ApplicationScope
@@ -98,7 +102,14 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
         currentActivityHolder.register(this)
         TimerNotificationChannel.ensureCreated(this)
         ReminderNotificationChannel.ensureCreated(this)
-        Executors.newSingleThreadExecutor().execute { cleanOldSharedMedia() }
+        Executors.newSingleThreadExecutor().execute {
+            cleanOldSharedMedia()
+            // The image editor's rasterized steps. Undo can no longer free the
+            // file it steps off (redo has to be able to walk forward again), so
+            // an unswept edit cache grows per edit *step* and never shrinks;
+            // sweepStale keeps only what a recent send might still retry.
+            imageEditRasterizer.sweepStale()
+        }
         recoverOrphanedSends()
         scheduleUpdateCheck()
         scheduleMediaBackfill()

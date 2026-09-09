@@ -24,6 +24,7 @@ import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.reminder.DateTimeDetector
+import com.firestream.chat.data.util.ImageEditRasterizer
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.SpeechRecognizerManager
 import com.firestream.chat.domain.repository.AuthRepository
@@ -96,6 +97,7 @@ class ChatViewModel @Inject constructor(
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val mediaFileManager: MediaFileManager,
+    private val imageEditRasterizer: ImageEditRasterizer,
     private val activeChatTracker: ActiveChatTracker,
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val callStateHolder: CallStateHolder,
@@ -367,6 +369,46 @@ class ChatViewModel @Inject constructor(
 
     // ── Emoji ──
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
+
+    // ── Image editing ──
+
+    /**
+     * Approximate output dimensions and byte size for sending [uri] at [hd] or
+     * standard quality — what the HD sheet's two rows are labelled with.
+     *
+     * The rasterizer is injected here rather than into the sheet so no editor
+     * composable touches Hilt (`.claude/plans/image-editor.md` §2.2): every one
+     * of them takes plain lambdas and is constructible in a Robolectric test
+     * with a fake.
+     */
+    internal suspend fun estimateSendSize(uri: Uri, hd: Boolean): ImageEditRasterizer.SizeEstimate? =
+        imageEditRasterizer.estimateSize(uri, hd)
+
+    /**
+     * Whether a rasterized edit step is still on disk.
+     *
+     * `cacheDir` can be reclaimed under storage pressure at any moment, and the
+     * rasterizer's own byte budget evicts deliberately, so the preview screen
+     * checks before it renders or sends a history entry rather than trusting the
+     * cursor (§4).
+     */
+    internal fun editStepExists(uri: Uri): Boolean = imageEditRasterizer.exists(uri)
+
+    /**
+     * Deletes rasterized steps nothing can reach any more — the tail abandoned
+     * by an edit landing on top of an undo, or a whole batch's chain once it is
+     * sent or thrown away.
+     *
+     * On @ApplicationScope, not viewModelScope: dismissing the preview is often
+     * the last thing that happens before leaving the chat, and a cache cleanup
+     * cancelled halfway is a leak that survives until the next app start.
+     */
+    internal fun discardEditSteps(uris: List<String>) {
+        if (uris.isEmpty()) return
+        appScope.launch(Dispatchers.IO) {
+            imageEditRasterizer.discard(uris.map(Uri::parse))
+        }
+    }
 
     // ── Save to downloads ──
 

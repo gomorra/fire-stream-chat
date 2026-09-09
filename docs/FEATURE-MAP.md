@@ -62,9 +62,12 @@ System `SpeechRecognizer` powering the composer mic button. Language picker in S
 
 Local-first image send: compress → store locally → display immediately → upload with progress → backfill on first launch.
 
+Editing sits *before* that pipeline and leaves it untouched: each editor screen rasterizes its layer into a new JPEG in `cacheDir/edits/` and `PendingMedia` points at the newest one, so `sendMediaMessage` receives a different URI and is otherwise unaware editing exists (`.claude/plans/image-editor.md` §2.1).
+
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/data/util/ImageCompressor.kt` | EXIF-aware compress; `inSampleSize` for memory-safe decode |
+| `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | Every full-res edit op (`RasterOp`), the 4096 px working ceiling, the HD size estimate, and the `cacheDir/edits/` lifecycle |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
@@ -74,7 +77,7 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/main/java/com/firestream/chat/ui/chat/PendingMedia.kt` | The queued-but-unsent item (original uri + mime + caption + per-item HD + edit cursor) and its rotation-safe `Saver` |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditToolbar.kt` | The overlay rail — HD pill, adjust/overlay/draw entry points, download, and the undo/redo/original history pill |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/HdQualitySheet.kt` | Per-image Standard-vs-HD sheet with estimated output size |
-| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageSizeEstimator.kt` | Header-only probe + pure size/dimension arithmetic behind that sheet |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapper.kt` | Pure screen ↔ normalized ↔ bitmap-pixel mapping under `ContentScale.Fit`, shared by every overlay tool |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
@@ -88,6 +91,10 @@ Local-first image send: compress → store locally → display immediately → u
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenMultiTest.kt` | Batch preview — per-item captions, removal, send-all |
 | `app/src/test/java/com/firestream/chat/ui/chat/PendingMediaTest.kt` | Edit-cursor derivation and the saver's fixed-field history encoding |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryHdPrecedenceTest.kt` | Per-item `isHd` beats the global preference; null falls through to it |
+| `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerGeometryTest.kt` | JVM dimension arithmetic — ceiling, quarter turns, crop rects, resize, op composition |
+| `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerTest.kt` | Robolectric bitmap round-trips, edit-cache discard/sweep, size estimates |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapperTest.kt` | Fit-rect mapping round-trips, letterbox and pillarbox |
+| `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenHistoryTest.kt` | Undo/redo/original⇄edited through the screen, and the vanished-step fallback |
 
 **Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 

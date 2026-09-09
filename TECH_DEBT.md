@@ -223,17 +223,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `ImageSizeEstimator` duplicates `ImageCompressor`'s output contract, and probes from the UI layer
+### Edited photos sent in HD are capped at 4096 px on the long edge
 
-**The smell.** Two problems in one file, both introduced knowingly by Phase 1 of the image editor (`.claude/plans/image-editor.md`).
+**The smell.** `ImageEditRasterizer.WORKING_MAX_DIMENSION` decodes every edit pass at 4096 px on the long edge, so an HD send of a photo the user *edited* carries less detail than an HD send of the same photo untouched — which keeps its full resolution through `ImageCompressor`. Two images that look identical in the preview leave the device at different resolutions, and nothing in the UI says so.
 
-First, `ui/chat/imageedit/ImageSizeEstimator.kt` re-states numbers the data layer already owns: `STANDARD_MAX_DIMENSION = 1600` and its q80/q100 factors mirror `ImageCompressor`'s private `MAX_DIMENSION = 1600` and `JPEG_QUALITY = 80`. Nothing links the two, so changing the compressor would silently make every size the HD sheet quotes wrong — and wrong quietly, since the labels are approximate by design and nobody would notice them drifting.
+**Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `.claude/plans/image-editor.md` §2.1 weighed and rejected for this feature.
 
-Second, `probeImage` / `sourceBytes` do `contentResolver` and `BitmapFactory` I/O from the UI layer, called out of a `LaunchedEffect` via `LocalContext`. `ArchitectureTest` passes because it checks *imports* of `com.firestream.chat.data.*`, not where I/O happens; every sibling media probe lives in `data/util/`.
-
-**Why we haven't fixed it.** Both are artefacts of phase ordering, not of taste. The plan's §2.2 gives `ImageEditRasterizer.estimateSize(source, hd)` to Phase 2 and budgets **exactly one** new `UI_ALLOWED_DATA_IMPORTS` entry for the rasterizer itself. Phase 1 has no rasterizer to ask and no allowlist entry to spend, so exposing `ImageCompressor`'s constants — or moving the probe into `data/util/` — would mean spending Phase 2's allowance a phase early on a file that is scheduled to be deleted.
-
-**When to revisit.** In Phase 2, as part of landing `ImageEditRasterizer`: move `HdQualitySheet` onto `estimateSize`, and delete `ImageSizeEstimator.kt` and its test rather than porting them. If Phase 2 slips far enough that the compressor's constants change first, pull the estimate into `data/util/` on its own instead of waiting. Raised by the Standards axis of `/code-review` on the Phase 1 diff (2026-09-09).
+**When to revisit.** If generational quality loss or the ceiling turns out to be visible in practice — the trigger §5 of the plan records for reopening the accumulated-`ImageEdit` decision. Revisit the two together, never separately: raising the ceiling without changing the model just moves the OOM. Landed with Phase 2 of the image editor (2026-09-09).
 
 ---
 
@@ -241,7 +237,7 @@ Second, `probeImage` / `sourceBytes` do `contentResolver` and `BitmapFactory` I/
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
 
-**The smell.** 19 UI files import 25 classes from `data/` directly: `PreferencesDataStore` plus its preference enums (`AppTheme`, `NotificationSound`, `AutoDownloadOption`, `DictationLanguage`, `ScrollPos`, `VideoQualityOption` — added 2026-07-18 with video sharing), `MediaFileManager`, `SpeechRecognizerManager`/`DictationEvent`, `TimerAlarmScheduler`/`ScheduleResult`, `CallService`/`CallStateHolder`, `ActiveChatTracker`, `LinkPreview`/`LinkPreviewSource`, `SharedContentHolder`/`ShareContentResolver`, `ApkInstaller`, `ChangelogParser`/`ChangelogVersion`, `MediaBackfillWorker`, `FirebasePhoneAuth`/`OtpEvent`. Textbook layering says UI reaches data only through domain interfaces.
+**The smell.** 19 UI files import 25 classes from `data/` directly: `PreferencesDataStore` plus its preference enums (`AppTheme`, `NotificationSound`, `AutoDownloadOption`, `DictationLanguage`, `ScrollPos`, `VideoQualityOption` — added 2026-07-18 with video sharing), `MediaFileManager`, `SpeechRecognizerManager`/`DictationEvent`, `TimerAlarmScheduler`/`ScheduleResult`, `CallService`/`CallStateHolder`, `ActiveChatTracker`, `LinkPreview`/`LinkPreviewSource`, `SharedContentHolder`/`ShareContentResolver`, `ApkInstaller`, `ChangelogParser`/`ChangelogVersion`, `MediaBackfillWorker`, `FirebasePhoneAuth`/`OtpEvent`, `ImageEditRasterizer` (added 2026-09-09 with the image editor: a platform/file adapter holding the bitmap work and the edit-cache lifecycle, with `RasterOp` and `SizeEstimate` nested inside it so the whole editor surface crosses the boundary under that one name). Textbook layering says UI reaches data only through domain interfaces.
 
 **Why we're not fixing it.** 2026-06-09 review verdict (LOW/accepted): these are system-boundary adapters — platform services, preference stores, process-wide state holders — not repositories, and none of them leak Firestore/Room types into composables. Wrapping each in a one-impl domain interface would add 6–8 ceremony interfaces with no decision value. The exact set is enforced as an allowlist in `ArchitectureTest.kt` ("ui imports from data are limited to the accepted system-boundary allowlist"), so growth is a conscious decision instead of drift.
 

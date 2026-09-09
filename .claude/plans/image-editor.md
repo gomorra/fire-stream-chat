@@ -1,8 +1,9 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phase 1 shipped; Phases 2–6 planned, not implemented.** Phase 1 (the
-toolbar shell, per-image HD and download) landed on 2026-09-09; the rest is still
-the agreed design awaiting its implementation sessions.
+Status: **Phases 1–2 shipped; Phases 3–6 planned, not implemented.** Phase 1 (the
+toolbar shell, per-image HD and download) and Phase 2 (the rasterizer, the fit
+mapper and the live preview-level history) both landed on 2026-09-09; the rest is
+still the agreed design awaiting its implementation sessions.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -364,7 +365,54 @@ Also worth knowing before Phase 2: caption keys and thumbnail-strip keys are now
   `isHd` precedence (per-item `true` over pref `false`, per-item `null` falls
   through to the pref).
 
-### Phase 2 — the rasterizer
+### Phase 2 — the rasterizer  ✅ shipped 2026-09-09
+
+Delivered. Six departures from the bullets below were taken during
+implementation and are **flagged here for sign-off rather than settled**:
+
+1. **`RasterOp` and `SizeEstimate` are nested inside `ImageEditRasterizer`,**
+   not top-level in that file. §2.2 budgets *one* `UI_ALLOWED_DATA_IMPORTS`
+   entry for the whole editor, but the allowlist matches import names, so a
+   top-level `RasterOp` would need a second entry the moment Phase 3 writes
+   `suspend (List<RasterOp>) -> Uri` in a screen signature. Nested, the whole
+   surface crosses the boundary under the one allowed name, at the cost of
+   `ImageEditRasterizer.RasterOp.Crop(...)` at the call site.
+2. **`estimateSize` returns `SizeEstimate(width, height, bytes)`, not `Long`.**
+   The HD sheet already renders `1600 x 1200 - about 340 KB`; returning bytes
+   alone would either drop the dimensions line Phase 1 shipped or force a second
+   header read for it.
+3. **Four ops, not seven.** `Rotate`, `Flip`, `Crop` and `Resize` are the four
+   Phase 2's own test list names, and all four are fully specified here.
+   `Straighten`, `Strokes` and `Overlays` are *not* declared: each one's output
+   contract is a decision the phase that designs its UI has to make (does
+   straighten expand the bounds or inscribe-crop them? is a blur stroke a mask
+   over a pixelated copy?), and guessing now would ship a data shape Phase 3/4/5
+   would have to change anyway. The sealed hierarchy is one file, so adding a
+   subtype stays local.
+4. **The per-item cap of 8 lives in `PendingMedia.landEdit`, not the
+   rasterizer.** `rasterize(source, ops)` carries no item identity, and giving
+   it one would put per-item bookkeeping in the data layer to enforce a rule
+   about the length of a list the UI owns. The byte budget and its eviction *are*
+   in the rasterizer, as planned. `landEdit` returns the trimmed head alongside
+   the abandoned tail, so both still reach `discard` through one call site.
+5. **The app-start sweep is age-based (24 h), not wholesale.** A send
+   interrupted mid-upload is flipped to FAILED at startup and keeps its manual
+   retry, and that retry re-reads the URI it was given; emptying the directory on
+   every launch would turn every such retry into a broken image. Same shape as
+   `FireStreamApp.cleanOldSharedMedia`.
+6. **`landEdit` has no production call site yet.** The handoff's instruction was
+   that Phase 2 changes nothing about the three editor entry points, which stay
+   nullable until Phase 3/4/5 pass a lambda. So the append-and-truncate half of
+   this phase ships as tested arithmetic plus a tested `discard`, and Phase 3's
+   Done handler is the one line that joins them. The *fallback* half is live: the
+   visible page re-resolves itself and the whole batch re-resolves on send.
+
+Also done here, per the Phase 1 sign-off list: `ImageSizeEstimator.kt` and its
+test are deleted, `HdQualitySheet` runs on `estimateSize`, `ImageCompressor`'s
+`MAX_DIMENSION` is `internal` so the estimate quotes it instead of restating it,
+and that `TECH_DEBT.md` entry is gone — replaced by the 4096 px ceiling entry §6
+asks for.
+
 
 - `data/util/ImageEditRasterizer.kt` + `RasterOp` + the 4096 px ceiling + the
   `cacheDir/edits/` lifecycle (`discard`, and a sweep of the directory on app

@@ -202,4 +202,134 @@ class PendingMediaTest {
         assertEquals(1, restored.editCursor)
         assertEquals("file:///edits/a.jpg", restored.uri.toString())
     }
+
+    // ── landing an edit ───────────────────────────────────────────────────────
+
+    private fun edited(steps: Int, cursor: Int = steps) = PendingMedia(
+        originalUri = uri("content://pick/1"),
+        mimeType = "image/jpeg",
+        editHistory = (1..steps).map { "file:///edits/step$it.jpg" },
+        editCursor = cursor,
+    )
+
+    @Test
+    fun `landing an edit on an untouched pick starts the history`() {
+        val landed = PendingMedia(uri("content://pick/1"), "image/jpeg")
+            .landEdit(uri("file:///edits/step1.jpg"))
+
+        assertEquals(listOf("file:///edits/step1.jpg"), landed.item.editHistory)
+        assertEquals(1, landed.item.editCursor)
+        assertEquals("file:///edits/step1.jpg", landed.item.uri.toString())
+        assertTrue(landed.abandoned.isEmpty())
+    }
+
+    @Test
+    fun `landing an edit at the top appends and abandons nothing`() {
+        val landed = edited(steps = 3).landEdit(uri("file:///edits/step4.jpg"))
+
+        assertEquals(4, landed.item.editHistory.size)
+        assertEquals(4, landed.item.editCursor)
+        assertEquals("file:///edits/step4.jpg", landed.item.uri.toString())
+        assertTrue(landed.abandoned.isEmpty())
+    }
+
+    @Test
+    fun `landing an edit mid-history truncates and abandons exactly the tail`() {
+        // Four steps, undone back to the first: what redo was holding is
+        // discarded, and those are the files nothing can reach any more.
+        val landed = edited(steps = 4, cursor = 1).landEdit(uri("file:///edits/new.jpg"))
+
+        assertEquals(
+            listOf("file:///edits/step1.jpg", "file:///edits/new.jpg"),
+            landed.item.editHistory,
+        )
+        assertEquals(
+            listOf("file:///edits/step2.jpg", "file:///edits/step3.jpg", "file:///edits/step4.jpg"),
+            landed.abandoned,
+        )
+    }
+
+    @Test
+    fun `redo is unavailable after an edit truncated the tail`() {
+        val landed = edited(steps = 4, cursor = 1).landEdit(uri("file:///edits/new.jpg"))
+
+        // The cursor sits at the top of the new, shorter history, so there is
+        // nothing forward of it — linear history, not a tree.
+        assertEquals(landed.item.editHistory.size, landed.item.editCursor)
+    }
+
+    @Test
+    fun `landing an edit from the original abandons the whole history`() {
+        val landed = edited(steps = 3, cursor = 0).landEdit(uri("file:///edits/new.jpg"))
+
+        assertEquals(listOf("file:///edits/new.jpg"), landed.item.editHistory)
+        assertEquals(1, landed.item.editCursor)
+        assertEquals(3, landed.abandoned.size)
+    }
+
+    @Test
+    fun `the ninth step pushes the oldest one out and hands it back for deletion`() {
+        val full = edited(steps = PendingMedia.MAX_EDIT_STEPS)
+
+        val landed = full.landEdit(uri("file:///edits/step9.jpg"))
+
+        assertEquals(PendingMedia.MAX_EDIT_STEPS, landed.item.editHistory.size)
+        assertEquals(PendingMedia.MAX_EDIT_STEPS, landed.item.editCursor)
+        assertEquals("file:///edits/step2.jpg", landed.item.editHistory.first())
+        assertEquals("file:///edits/step9.jpg", landed.item.uri.toString())
+        // Undo reaches one step less far, but the step the user is on is intact.
+        assertEquals(listOf("file:///edits/step1.jpg"), landed.abandoned)
+    }
+
+    // ── the history is a list of files the OS may delete ──────────────────────
+
+    @Test
+    fun `a step whose file survives is left alone`() {
+        val item = edited(steps = 3, cursor = 2)
+
+        assertEquals(item, item.onSurvivingStep { true })
+    }
+
+    @Test
+    fun `a vanished step falls back to the nearest surviving one below it`() {
+        val item = edited(steps = 4, cursor = 4)
+        val gone = setOf("file:///edits/step4.jpg", "file:///edits/step3.jpg")
+
+        val resolved = item.onSurvivingStep { it.toString() !in gone }
+
+        assertEquals(2, resolved.editCursor)
+        assertEquals("file:///edits/step2.jpg", resolved.uri.toString())
+        // The steps it walked past are dropped, so redo is not left enabled over
+        // a hole it could never cross.
+        assertEquals(2, resolved.editHistory.size)
+    }
+
+    @Test
+    fun `an entirely evicted history falls back to the untouched pick`() {
+        val item = edited(steps = 3)
+
+        val resolved = item.onSurvivingStep { false }
+
+        assertEquals(0, resolved.editCursor)
+        assertEquals("content://pick/1", resolved.uri.toString())
+        assertFalse(resolved.hasEdits)
+    }
+
+    @Test
+    fun `an ordinary undo keeps its redo tail`() {
+        // The fallback runs whenever the item changes, so it must not mistake a
+        // deliberate undo for an evicted step and eat what redo was holding.
+        val item = edited(steps = 3, cursor = 1)
+
+        assertEquals(item, item.onSurvivingStep { true })
+    }
+
+    @Test
+    fun `showing the original never stats a file`() {
+        // At cursor 0 the item is on originalUri, which is the one URI here that
+        // is not a cache file — checking it would be asking the wrong question.
+        val item = edited(steps = 3, cursor = 0)
+
+        assertEquals(item, item.onSurvivingStep { error("should not be consulted") })
+    }
 }
