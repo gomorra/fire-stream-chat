@@ -21,6 +21,8 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
+- **Debug builds no longer crash when you open a chat.** Opening any chat in a debug build threw a `VerifyError` before a single message rendered. The message bubble had grown into one very large function, past a limit Android enforces when it loads the class rather than when the code is compiled — so the tests passed and only a real device refused it. Release builds were never affected, which is why it stayed hidden. (`PENDING`)
+
 - **The crop frame can be dragged again.** In the adjust screen the crop corners moved once and then snapped back to the whole photo, and the frame could not be dragged to a new position at all. The gesture was acting on where the frame had been when the drag started rather than where it is now. (`9169ce3`)
 
 - **A photo's crop handles now sit on the photo.** The crop frame was drawn against the photo's fitted rectangle while the photo itself was positioned half a letterbox away from it, so on any image that did not exactly fill the screen the corner handles sat a finger-width from the edges they were supposed to be grabbing. The editor also survives turning the phone now — a half-finished crop used to be thrown away on rotation. (`8e93a95`)

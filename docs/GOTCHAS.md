@@ -25,6 +25,29 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   explicit params with a `VerifyError` **on first render**, not at compile time.
   Collapse callbacks into an `@Immutable *Callbacks` data class (see
   `MessageBubbleCallbacks`). Bit us as a chat-open crash, fixed in `00b15da`.
+- **…and the composable *body* counts too, not just its parameters.** The same
+  `VerifyError` came back to `MessageBubble` on a build with the callbacks bundle
+  already in place: what a dex method is rejected for is **register pressure**, and
+  parameters are only part of the frame. `MessageBubble` had grown to a single
+  ~900-line composable needing **296 registers**, and the crash named `v288` —
+  above the 255 that an 8-bit register operand can address. Fixed by splitting the
+  body into `MessageBubbleBody` and `MessageContextMenu`, which brought it to 250.
+  Two things make this expensive to rediscover, so check the count rather than
+  waiting for a device to refuse the class:
+  - **Nothing under `app/src/test/` can see it.** Robolectric runs on the JVM and
+    the JVM has no dex verifier, so every test passes while the app crashes.
+  - **Release builds hide it.** R8 optimises the method under the ceiling, so a
+    release APK works while every debug build crashes on chat open. "It works on
+    my device" is not evidence unless the device is running a debug build.
+
+  The check, on any built APK, no device required:
+  ```bash
+  unzip -o app/build/outputs/apk/firebase/debug/app-firebase-debug.apk 'classes*.dex' -d /tmp/dex
+  $ANDROID_HOME/build-tools/35.0.0/dexdump -d /tmp/dex/classesN.dex |
+      grep -A3 "name          : 'MessageBubble'" | grep registers
+  ```
+  Anything approaching 256 is a rebuild of this crash. Nothing else in the app is
+  close: the next highest is `PollBubble` at 185.
 - **Local-vs-remote image model: synchronous `remember`, not `produceState`.** For
   `AsyncImage` sources that prefer a local file over a URL, resolve with
   `remember(localUri) { File(it).takeIf { exists() && isFile && canRead() } }`.
