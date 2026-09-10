@@ -6,11 +6,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **Photos can be decorated and annotated before they are sent.** The sticker button in the send preview now opens a full-screen editor for putting things *on* a photo: emoji, a bundled pack of twelve stickers, a line of text, and five shapes — rectangle, rounded rectangle, ellipse, line and arrow. Text and shapes come in the colour you choose and in either a solid or an outlined style, which is what makes an arrow or a box round something readable over any photo. Tap to select, drag to move, and use the two corner handles to resize and turn — bottom-right scales and top-right rotates, each showing what it is doing as you drag, and rotation snaps every 15° with a firmer pull towards square. Two fingers do both at once. A trash button appears beside the picker while something is selected, undo and redo step back one placement at a time (including a deletion), and an eye button hides everything you have placed so you can see the photo underneath — hiding never changes what gets sent. Done adds it all as a single step in the preview's edit history, so it can be undone alongside a crop or a drawing; Cancel writes nothing.
+- **Photos can be decorated and annotated before they are sent.** The sticker button in the send preview now opens a full-screen editor for putting things *on* a photo: emoji, a bundled pack of twelve stickers, a line of text, and five shapes — rectangle, rounded rectangle, ellipse, line and arrow. Text and shapes come in the colour you choose and in either a solid or an outlined style, which is what makes an arrow or a box round something readable over any photo. Tap to select, drag to move, and use the two corner handles to resize and turn — bottom-right scales and top-right rotates, each showing what it is doing as you drag, and rotation snaps every 15° with a firmer pull towards square. Two fingers do both at once. A trash button appears beside the picker while something is selected, undo and redo step back one placement at a time (including a deletion), and an eye button hides everything you have placed so you can see the photo underneath — hiding never changes what gets sent. Done adds it all as a single step in the preview's edit history, so it can be undone alongside a crop or a drawing; Cancel writes nothing. (`021b5b94`)
 
 ### Changed
 
-- **The sticker button in the send preview is no longer dimmed.** It shipped alongside Adjust and Draw with nothing behind it; it now opens the editor above.
+- **The sticker button in the send preview is no longer dimmed.** It shipped alongside Adjust and Draw with nothing behind it; it now opens the editor above. (`021b5b94`)
 
 ## [1.27.0] — 2026-09-10
 
