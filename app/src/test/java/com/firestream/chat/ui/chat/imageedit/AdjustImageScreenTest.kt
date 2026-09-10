@@ -16,6 +16,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.geometry.Offset
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SourceImage
 import org.junit.Assert.assertEquals
@@ -49,6 +51,10 @@ class AdjustImageScreenTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
+
+    /** The preview bitmap every test here renders — 4:3, matching setContent. */
+    private val previewWidth = 400f
+    private val previewHeight = 300f
 
     private val source = Uri.parse("file:///edits/source.jpg")
     private val flattened = Uri.parse("file:///edits/flattened.jpg")
@@ -424,6 +430,115 @@ class AdjustImageScreenTest {
             0.05f,
         )
         assertTrue("the photo must not overflow the area it is fitted into", photoWidth <= area.right.value - area.left.value + 1f)
+    }
+
+    // ── Dragging the crop frame ───────────────────────────────────────────────
+    //
+    // Nothing above this point ever moves a pointer across the screen, which is
+    // how a crop frame that could not be dragged at all shipped green: the
+    // arithmetic in CropGeometryTest was correct the whole time and the wiring
+    // that feeds it was not. These two drive real synthetic touch through the
+    // same `pointerInput` a finger reaches.
+
+    /** The fitted photo rect inside the crop overlay, in the overlay's own pixels. */
+    private data class Fitted(val x: Float, val y: Float, val width: Float, val height: Float)
+
+    private fun fittedRect(): Fitted {
+        val node = composeTestRule.onNodeWithContentDescription("Crop frame").fetchSemanticsNode()
+        val canvasWidth = node.size.width.toFloat()
+        val canvasHeight = node.size.height.toFloat()
+        val scale = minOf(canvasWidth / previewWidth, canvasHeight / previewHeight)
+        val fittedWidth = previewWidth * scale
+        val fittedHeight = previewHeight * scale
+        return Fitted(
+            x = (canvasWidth - fittedWidth) / 2f,
+            y = (canvasHeight - fittedHeight) / 2f,
+            width = fittedWidth,
+            height = fittedHeight,
+        )
+    }
+
+    private fun croppedOp(): RasterOp.Crop? {
+        composeTestRule.onNodeWithContentDescription("Apply adjustments").performClick()
+        composeTestRule.waitForIdle()
+        return rasterizedOps?.filterIsInstance<RasterOp.Crop>()?.lastOrNull()
+    }
+
+    @Test
+    fun `a corner drag keeps following the finger after the frame has already moved once`() {
+        // The regression: the gesture captured the frame it started with and
+        // never saw an update, so the second grab looked for corners where the
+        // frame no longer was, missed them, fell through to move-mode, and
+        // `move` on a full-image frame clamps to zero — the frame snapped back.
+        setContent()
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        val (originX, originY, width, height) = fittedRect()
+
+        // First drag: top-left corner in to a quarter of the way across.
+        composeTestRule.onNodeWithContentDescription("Crop frame").performTouchInput {
+            down(Offset(originX, originY))
+            moveTo(Offset(originX + width * 0.06f, originY + height * 0.06f))
+            moveTo(Offset(originX + width * 0.16f, originY + height * 0.16f))
+            moveTo(Offset(originX + width * 0.25f, originY + height * 0.25f))
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        // Second drag: the same corner, now at 0.25, pulled in to about 0.40.
+        composeTestRule.onNodeWithContentDescription("Crop frame").performTouchInput {
+            down(Offset(originX + width * 0.25f, originY + height * 0.25f))
+            moveTo(Offset(originX + width * 0.31f, originY + height * 0.31f))
+            moveTo(Offset(originX + width * 0.40f, originY + height * 0.40f))
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        val crop = requireNotNull(croppedOp()) { "the two drags produced no crop at all" }
+        assertEquals("left edge follows the second drag", 0.40f, crop.left, 0.06f)
+        assertEquals("top edge follows the second drag", 0.40f, crop.top, 0.06f)
+    }
+
+    @Test
+    fun `the whole crop frame can be dragged to a new position`() {
+        // A drag from inside the frame moves it. Every pointer event has to act
+        // on where the frame is *now*: applied to the frame the gesture started
+        // with, only the last event's delta survives and the frame barely moves.
+        setContent()
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+
+        // A 1:1 preset gives a centred frame with room to move in both
+        // directions, without depending on the corner drag above.
+        composeTestRule.onNodeWithText("1:1").performClick()
+        composeTestRule.waitForIdle()
+        val (originX, originY, width, height) = fittedRect()
+
+        val centreX = originX + width / 2f
+        val centreY = originY + height / 2f
+        val frame = composeTestRule.onNodeWithContentDescription("Crop frame")
+
+        // One event per block, with a recomposition between each, because that
+        // is what a finger gets: pointer events arrive a frame apart and the
+        // frame this gesture is moving is re-read every time. Dispatching the
+        // whole drag inside a single block would hold composition still and
+        // measure something no user can perform.
+        frame.performTouchInput { down(Offset(centreX, centreY)) }
+        // Deliberately asks for more travel than the frame has room for, so the
+        // result is the edge it stops at rather than a number that would move
+        // with the platform's touch slop — the first few pixels of any drag are
+        // swallowed before onDrag ever sees them.
+        for (step in 1..6) {
+            composeTestRule.waitForIdle()
+            frame.performTouchInput { moveTo(Offset(centreX + width * 0.05f * step, centreY)) }
+        }
+        composeTestRule.waitForIdle()
+        frame.performTouchInput { up() }
+        composeTestRule.waitForIdle()
+
+        val crop = requireNotNull(croppedOp()) { "dragging the frame produced no crop at all" }
+        // A 1:1 frame on a 4:3 photo is 0.75 wide and starts centred at
+        // left = 0.125, so it has 0.125 of travel before it meets the right
+        // edge — which this drag asks for twice over, and must therefore reach.
+        assertEquals("the frame travels until it meets the edge", 0.25f, crop.left, 0.02f)
     }
 
 }

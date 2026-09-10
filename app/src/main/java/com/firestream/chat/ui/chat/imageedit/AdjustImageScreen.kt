@@ -59,6 +59,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -530,6 +531,22 @@ private fun CropOverlay(
     var handle by remember { mutableStateOf<CropHandle?>(null) }
     var moving by remember { mutableStateOf(false) }
 
+    // The frame as it is *now*, not as it was when the gesture coroutine
+    // started. `pointerInput` restarts only when one of its keys changes, and
+    // the frame deliberately is not one of them: adding it would tear down the
+    // detector mid-drag, on the very state change the drag itself is producing.
+    // So the lambdas below would otherwise go on reading the frame they were
+    // created with, and every pointer event would recompute from a frame one
+    // whole gesture out of date.
+    //
+    // The regression that came of that is worth naming, because neither half of
+    // it looks like a stale read: after one corner drag the detector still
+    // believed the frame filled the photo, so the next grab looked for corners
+    // at 0,0 and 1,1, missed them, fell through to move-mode — and `move` on a
+    // full-image frame clamps to zero travel, snapping the crop back. The frame
+    // could be dragged exactly once and never moved bodily at all.
+    val currentRect by rememberUpdatedState(rect)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -538,8 +555,11 @@ private fun CropOverlay(
                 detectDragGestures(
                     onDragStart = { position ->
                         val point = mapper.screenToNormalized(FitPoint(position.x, position.y))
-                        handle = CropGeometry.handleAt(rect, point.x, point.y, toleranceX, toleranceY)
-                        moving = handle == null && CropGeometry.contains(rect, point.x, point.y)
+                        handle = CropGeometry.handleAt(
+                            currentRect, point.x, point.y, toleranceX, toleranceY,
+                        )
+                        moving = handle == null &&
+                            CropGeometry.contains(currentRect, point.x, point.y)
                     },
                     onDragEnd = { handle = null; moving = false },
                     onDragCancel = { handle = null; moving = false },
@@ -552,7 +572,7 @@ private fun CropOverlay(
                             )
                             onCrop(
                                 CropGeometry.drag(
-                                    rect = rect,
+                                    rect = currentRect,
                                     handle = grabbed,
                                     x = point.x,
                                     y = point.y,
@@ -564,7 +584,7 @@ private fun CropOverlay(
                         } else if (moving) {
                             val dx = if (mapper.fittedWidth > 0f) dragAmount.x / mapper.fittedWidth else 0f
                             val dy = if (mapper.fittedHeight > 0f) dragAmount.y / mapper.fittedHeight else 0f
-                            onCrop(CropGeometry.move(rect, dx, dy))
+                            onCrop(CropGeometry.move(currentRect, dx, dy))
                         }
                     },
                 )

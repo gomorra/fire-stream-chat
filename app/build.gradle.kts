@@ -84,14 +84,14 @@ val versionNameOverride: String? =
 
 android {
     namespace = "com.firestream.chat"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.firestream.chat"
         minSdk = 29
-        targetSdk = 35
-        versionCode = versionCodeOverride ?: gitCommitCount
-        versionName = versionNameOverride ?: gitTagVersionName
+        targetSdk = 36
+        versionCode = 725
+        versionName = "1.27.0"
 
         buildConfigField("String", "GIT_SHA", "\"$gitShortSha\"")
         buildConfigField("String", "COMMIT_TIMESTAMP", "\"$commitTimestamp\"")
