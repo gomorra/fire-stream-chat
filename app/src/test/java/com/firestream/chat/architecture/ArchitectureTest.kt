@@ -5,6 +5,7 @@ import com.lemonappdev.konsist.api.declaration.KoFileDeclaration
 import com.lemonappdev.konsist.api.verify.assertFalse
 import com.lemonappdev.konsist.api.verify.assertTrue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -26,20 +27,46 @@ import org.junit.Test
 private val productionScope = Konsist.scopeFromProduction()
 
 /**
- * The production files these rules reason about.
+ * The checkout this gate is running in — the directory Gradle started the test
+ * from, with the module segment dropped.
+ *
+ * Absolute and normalised, because it is compared against Konsist's own absolute
+ * paths below and one of the two carrying a `.` or a symlink would silently
+ * match nothing.
+ */
+private val checkoutRoot: String =
+    java.io.File("").absoluteFile.canonicalFile.let { it.parentFile ?: it }.path
+
+/**
+ * The production files these rules reason about — the files of *one* checkout.
  *
  * Konsist walks the project directory, which means a git worktree checked out
- * *inside* the repo — `.claude/worktrees/<branch>/`, where this harness puts one
+ * inside the repo — `.claude/worktrees/<branch>/`, where this harness puts one
  * when an agent works on a second branch — is scanned as a second copy of every
- * production file. That breaks these rules in two ways at once: the roster check
- * below sees every `Chat*Manager` twice, and an unrelated in-progress branch can
- * fail the main tree's gate with a violation that is not in the main tree at all.
+ * production file when the gate runs from the main tree. That breaks these rules
+ * in two ways at once: the roster check below sees every `Chat*Manager` twice,
+ * and an unrelated in-progress branch fails the main tree's gate with a
+ * violation that is not in the main tree at all.
  *
- * Excluding those paths is a scope fix, not a weakened rule: a worktree is a
- * duplicate checkout, and the rules are about this checkout's source.
+ * The rule is therefore **"is this file part of the checkout I am running in"**,
+ * not "does this path contain `/.claude/worktrees/`". Asking the second question
+ * was a bug: that marker is in *every* path when the gate runs from **inside** a
+ * worktree, which is the ordinary case for an agent working on a branch, so it
+ * emptied the scope and turned every rule below into a vacuous pass — silently,
+ * because a rule with nothing to check does not fail. Only the roster's
+ * `assertEquals` noticed, and it read as a missing manager rather than as a
+ * missing codebase.
+ *
+ * Anchoring on [checkoutRoot] answers it exactly in both directions: from the
+ * main tree the nested worktrees are below the root but under the marker, and
+ * from inside a worktree the root *is* the worktree and the marker is above it.
+ * `the architecture rules have a codebase to check` is the tripwire for the next
+ * time a predicate here goes wrong.
  */
-private val production = productionScope.files
-    .filterNot { it.path.contains("/.claude/worktrees/") }
+private val production = productionScope.files.filter { file ->
+    val relative = file.path.removePrefix(checkoutRoot)
+    file.path.startsWith(checkoutRoot) && !relative.contains("/.claude/worktrees/")
+}
 
 private fun KoFileDeclaration.inLayer(pathFragment: String): Boolean =
     path.contains("/com/firestream/chat/$pathFragment/")
@@ -165,6 +192,20 @@ class ArchitectureTest {
                 val self = file.path.substringAfterLast('/').removeSuffix(".kt")
                 CHAT_MANAGERS.any { other -> other != self && file.text.contains(other) }
             }
+    }
+
+    @Test
+    fun `the architecture rules have a codebase to check`() {
+        // Every Konsist rule in this file is an assertion over a collection, so
+        // an empty [production] scope passes all of them without checking
+        // anything — the rules are not satisfied, they are switched off. That is
+        // exactly what happened when the worktree exclusion above matched every
+        // path because the gate was running from inside a worktree, so this is
+        // the tripwire for it rather than a tautology.
+        assertTrue(
+            "Konsist found ${production.size} production files — the rules below are checking nothing",
+            production.size > 100,
+        )
     }
 
     @Test
