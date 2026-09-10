@@ -86,6 +86,13 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/DrawImageScreen.kt` | The draw overlay — pen / highlighter / blur, colour strip, width slider, layer eye, live capture; `DrawCallbacks` keeps it under the param ceiling |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/DrawStack.kt` | The draw screen's stroke list + cursor (one stroke per undo) and its rotation-safe, point-quantising saver |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditServices.kt` | The editor's ViewModel-supplied capabilities in one `@Immutable` bundle — keeps every screen under the ~15-param ceiling |
+| `app/src/main/java/com/firestream/chat/domain/util/OverlayGeometry.kt` | The overlay screen's arithmetic — base size, handle positions, hit tests, drag→scale/rotation, the 15° snap and its wider cardinal pull. The one copy, for the same reason `StrokeGeometry` is |
+| `app/src/main/java/com/firestream/chat/domain/util/StickerPack.kt` | The bundled pack as flat coloured parts in a `0..1` box — no assets to decode, so both renderers build each sticker from the same description |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/OverlayImageScreen.kt` | The overlay editor — emoji / stickers / text / shapes, the picker with four tabs, the layer eye; `OverlayCallbacks` keeps it under the param ceiling |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/OverlayCanvas.kt` | The photo, the placed objects, the dashed selection frame and the two handles, plus the one gesture that selects, moves, scales and rotates |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/OverlayPainter.kt` | The Compose half of drawing an overlay — the twin of the rasterizer's `android.graphics` half, sharing every number with it |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/OverlayStack.kt` | The overlay screen's history — whole-state snapshots (so delete is undoable) with a cursor, and its rotation-safe saver |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/EditorChrome.kt` | The shell every editor screen wears — top bar, tool button, failure banner, flatten scrim, and the colour strip shared by draw, text and shapes |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
@@ -110,10 +117,14 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/test/java/com/firestream/chat/domain/util/StrokeGeometryTest.kt` | Stroke arithmetic on the JVM — width against the long edge, midpoint smoothing, the layer split, resolution-independent mosaic blocks |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/DrawImageScreenTest.kt` | The draw screen under a real pointer — a swipe becomes one normalized stroke, the layer eye does not change the output, undo/redo per stroke, and a `Bundle` round-trip |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/DrawStackTest.kt` | Stroke cursor, the discarded redo tail, and the saver's quantised, thinned encoding |
+| `app/src/test/java/com/firestream/chat/domain/util/OverlayGeometryTest.kt` | Overlay arithmetic on the JVM — resolution-independent size, local⇄world round-trips, rotated hit tests, handle corners, drag→scale/rotation, and the snap tolerances |
+| `app/src/test/java/com/firestream/chat/domain/util/StickerPackTest.kt` | The hand-written pack's invariants — unique ids, whole points, every coordinate inside its box |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/OverlayStackTest.kt` | Placement/delete as steps, drags that collapse into a placement, the caps, and the saver round-trip for all four kinds |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/OverlayImageScreenTest.kt` | What the overlay screen hands back — the four tabs, delete and its undo, the layer eye not changing the output, and a `Bundle` round-trip |
 
-**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`** or **`DrawImageScreen`**, each of which replaces the preview's content rather than floating over it, flattens its layer once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
+**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`**, **`DrawImageScreen`** or **`OverlayImageScreen`**, each of which replaces the preview's content rather than floating over it, flattens its layer once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 
-The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below); the overlay screen lands in 5b and will extend this table.
+The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below) and 5b added the overlay screen and its three editor-only tabs. Phase 6 — editing from the fullscreen viewer — is the one still open.
 
 ---
 
@@ -134,7 +145,7 @@ shell existed.
 | Composer | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)`, with a backspace key |
 | Reaction sheet | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = REACTION)`, with the quick-reactions strip |
 | Caption bar | Emoji | `ImagePreviewScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)` |
-| Editor overlay | Emoji · Sticker · Text · Shapes | Phase 5b — the one host with a selection to delete |
+| Editor overlay | Emoji · Sticker · Text · Shapes | `imageedit/OverlayImageScreen.kt` — the one host with a selection to delete, and the only one with an island |
 
 | File | Role |
 |---|---|
@@ -146,6 +157,9 @@ shell existed.
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Owns `recentEmojis` in `OverlaysState` and the DataStore write behind it |
 | `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelTest.kt` | That the one-tab hosts are unchanged by the extraction, and the chrome only a multi-tab host sees |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerTab.kt` | The bundled pack as a grid, drawn by the same code that paints a placed sticker |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/TextTab.kt` | A single-line draft, its solid/outline style and the shared colour strip; places on an explicit Add |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/ShapeTab.kt` | Rectangle / rounded / ellipse / line / arrow, each previewed in the colour and fill it will be placed with |
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatInfoManagerRecentEmojiTest.kt` | Recents ordering and the cap, on the manager side of the panel |
 
 **Entry point:** whichever host mounts it. The panel is `internal` and takes no Hilt

@@ -453,6 +453,31 @@ becomes a packaging bug.
 
 ---
 
+### The overlay editor rebuilds every sticker's `Path` on every draw pass
+
+**The smell.** `OverlayPainter.polyline()` allocates a fresh `androidx.compose.ui.graphics.Path`
+per sticker part, per overlay, per draw pass, and the same shape is rebuilt in
+`ImageEditRasterizer.paintSticker` on the flatten. A drag re-runs the whole draw pass on
+every pointer-move frame, so a canvas carrying many stickers allocates a path per part per
+frame — the worst case inside the 40-overlay cap is `40 × 9` (the `sun` design's part
+count) ≈ 360 short-lived `Path` objects a frame.
+
+**Why we haven't fixed it.** The parts are static data in a `0..1` box, so a cached path
+would have to be built once in normalized space and drawn through a transform rather than
+rebuilt in canvas coordinates — a real change to how `drawSticker` works, on the one file
+whose entire purpose is being provably identical to its `android.graphics` twin. The
+sizes involved do not obviously justify it: this is the same shape as the draw screen's
+per-frame stroke paths, which ship and are fine, and nobody has yet placed even ten
+stickers on one photo, let alone forty. Flagged by `/simplify`'s efficiency pass on
+Phase 5b (2026-09-10) as real but edge-case.
+
+**When to revisit.** When a device pass reports a dropped frame while dragging on a
+sticker-heavy photo — or if the overlay cap is ever raised. Fix is a per-`StickerDesign`
+normalized `Path` cache plus a `withTransform`, in `OverlayPainter` and its rasterizer
+twin together, never one alone.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

@@ -6,11 +6,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +22,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -63,6 +68,7 @@ import com.firestream.chat.ui.theme.FsTextMute
 internal object EditorChrome {
     const val TOP_BAR_HEIGHT_DP = 56
     const val TOOL_ROW_HEIGHT_DP = 68
+    const val COLOUR_ROW_HEIGHT_DP = 52
 }
 
 /**
@@ -173,6 +179,88 @@ internal fun EditToolButton(
             color = tint,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
+    }
+}
+
+/**
+ * The swatches every editor tool that has a colour chooses from, in the order
+ * they appear.
+ *
+ * White and black first because an annotation's job is to be seen against a
+ * photo and one of the two always is; the brand orange next because it is what
+ * the rest of the app marks things with; then the five hues an annotation
+ * usually reaches for. Stored as ARGB `Long`s, which is what a `RasterOp`
+ * carries — no Compose type reaches the domain layer.
+ *
+ * Shared by the draw screen's stroke colour and the overlay screen's text and
+ * shape colours, because they are the same decision made in three places: a
+ * second palette would let an arrow and the box round it be almost the same red.
+ */
+internal val EDIT_COLORS = listOf(
+    0xFFFFFFFF,
+    0xFF000000,
+    0xFFF26A1F,
+    0xFFE53935,
+    0xFFFFD600,
+    0xFF43A047,
+    0xFF1E88E5,
+    0xFFAB47BC,
+)
+
+/** The name a screen reader reads for a swatch, and the handle a test grabs it by. */
+internal fun editColourName(argb: Long): String = when (argb) {
+    0xFFFFFFFF -> "White"
+    0xFF000000 -> "Black"
+    0xFFF26A1F -> "Orange"
+    0xFFE53935 -> "Red"
+    0xFFFFD600 -> "Yellow"
+    0xFF43A047 -> "Green"
+    0xFF1E88E5 -> "Blue"
+    else -> "Purple"
+}
+
+/**
+ * The colour strip: a 44 dp target around a 26 dp dot, so the swatches read as a
+ * tight row while every one of them is still a real touch target.
+ */
+@Composable
+internal fun EditColorStrip(
+    selected: Long,
+    onSelect: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    /** What the row is *for*, which differs per host — "Stroke colours", "Shape colours". */
+    label: String = "Colours",
+) {
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(EditorChrome.COLOUR_ROW_HEIGHT_DP.dp)
+            .semantics { contentDescription = label },
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(EDIT_COLORS, key = { it }) { swatch ->
+            val isSelected = swatch == selected
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clickable(onClickLabel = "Choose colour") { onSelect(swatch) }
+                    .semantics { contentDescription = editColourName(swatch) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (isSelected) 30.dp else 26.dp)
+                        .background(Color(swatch), CircleShape)
+                        .border(
+                            width = if (isSelected) 3.dp else 1.dp,
+                            color = if (isSelected) FireOrange else Color.White.copy(alpha = 0.35f),
+                            shape = CircleShape,
+                        ),
+                )
+            }
+        }
     }
 }
 

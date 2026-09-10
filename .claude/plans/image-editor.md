@@ -1,6 +1,6 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phases 1–4 and 5a shipped; 5b and 6 planned, not implemented.** Phase 1 (the
+Status: **Phases 1–5 shipped; Phase 6 planned, not implemented.** Phase 1 (the
 toolbar shell, per-image HD and download), Phase 2 (the rasterizer, the fit mapper
 and the live preview-level history) and Phase 3 (the adjust screen) landed on
 2026-09-09; Phase 4 (the draw screen) on 2026-09-10. The rest is still the agreed
@@ -709,7 +709,11 @@ Five departures from the bullets below were taken during implementation and are
    **above** the search row and the backspace key **at the end of** it, so moving
    them into the tab literally would have moved them on screen, which is the one
    thing this commit promised not to do. They are `header` and `searchTrailing`
-   slots instead. The seam §4 actually cares about holds: `PickerPanel` still knows
+   slots instead — and not symmetrically, which is worth stating: the
+   quick-reactions strip is emoji content and lives in `EmojiTab.kt` as
+   `EmojiQuickReactions`, while the backspace is a *host's* control over its own
+   text field and is written in the alias, never touching the tab at all. The
+   seam §4 actually cares about holds either way: `PickerPanel` still knows
    nothing about a backspace or a reaction, and neither can leak into the sticker
    tab, because the shell cannot name either of them.
 2. **A one-tab host renders no search *button* either.** §2.8 says it renders "just
@@ -749,7 +753,70 @@ composer, the reaction sheet and the caption bar on hardware and confirm each is
 indistinguishable from before; log anything still unchecked under
 [`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending on-device verification*.
 
-**5b — the sticker and shape tabs, and the overlay screen.**
+**5b — the sticker and shape tabs, and the overlay screen.**  ✅ shipped 2026-09-10
+
+Delivered, **except the on-device pass**, which nobody has run — see the header and
+`docs/BACKLOG.md` §*Pending on-device verification*. Nine departures from the bullets
+below were taken during implementation and are **flagged here for sign-off rather than
+settled**:
+
+1. **The overlay history is whole-state snapshots, not a list with a cursor.**
+   `DrawStack` and `AdjustStack` can be a prefix cursor because their unit of work
+   only ever *appends*, so "everything up to the cursor" describes what is in
+   effect. This screen has an operation those two do not — **delete** — and after
+   placing A and B and deleting A, no prefix of `[A, B]` is `[B]`. A step here is
+   therefore the whole set of objects. It costs a few dozen small immutable
+   objects and buys the thing nobody would expect to be missing: deleting
+   something and undoing brings it back.
+2. **Scale is uniform, and each `ShapeKind` carries a fixed aspect ratio.** §3
+   specifies one scale handle with a `1.4×` readout, which cannot express a
+   non-square resize. So a rectangle comes out 3:2 — the proportion of the thing
+   people draw a box around — and is *turned* rather than reshaped. Two-axis
+   sizing would need either a second handle or a handle that means something
+   different depending on what is selected, which is the ambiguity the two-handle
+   decision exists to avoid.
+3. **The sticker pack is drawn, not decoded.** No image assets: each sticker is a
+   list of flat coloured parts (circle / polygon / stroked polyline) in a `0..1`
+   box, in `domain/util/StickerPack.kt`, walked by both renderers. A pack of PNGs
+   would have had a thumbnail size *and* a placed size, two filtering paths, and
+   an intrinsic size the geometry would have to ask about — three more chances
+   for the preview and the file to disagree, on a screen whose whole design is
+   about them not being able to. What no test can check is whether a heart looks
+   like a heart, which is on the device pass.
+4. **No recents row on the sticker tab.** §3 pairs the pack with recents. Twelve
+   stickers fit on screen without scrolling, so a recents row would take a fifth
+   of the panel to save no scrolling at all — and persisting it means a DataStore
+   key, a manager and a ViewModel path that the emoji recents already own and
+   this would duplicate. It becomes worth building when pack management does
+   (`docs/BACKLOG.md` §4.6).
+5. **A text run is one line, and `filled` means solid-versus-stroked glyphs.** A
+   wrapping text box needs a width and a uniform scale handle has nothing to
+   express one with; one line is also what lets the Compose preview and the
+   `android.graphics` flatten centre it by the same measurement. `filled` is the
+   same property the shape toggle sets, deliberately — one word for one thing
+   across two tabs, rather than "filled" meaning a background pill here and an
+   interior there.
+6. **Placing text happens on an explicit Add, not on every keystroke.** Typing
+   "meet me here" would otherwise leave twelve overlapping runs on the photo,
+   each its own undo step.
+7. **`PickerPanel` gained a `BackHandler`.** 5a's spec review found §4's "back
+   must close search before it closes the panel" unimplemented. It is enabled
+   only while a multi-tab host has search open, so it is inert for the three
+   one-tab hosts, which own back themselves.
+8. **The colour strip moved into `EditorChrome` and the draw screen now uses
+   it.** §3 says the shape tab uses "the draw screen's colour strip"; taking that
+   literally would have meant a second copy of the palette, and two palettes are
+   how an arrow and the box round it end up almost the same red.
+9. **The rotate snap has a wider mouth on the cardinals.** §3 asks for "every 15°
+   and to 0/90/180/270", and every cardinal is already a multiple of 15 — so the
+   second half only means something if the cardinals pull harder. They do: 8°
+   against 4°. "Exactly square" is the angle a hand cannot hit and the one a
+   rectangle drawn round something most often wants.
+
+`OverlayImageScreen` was measured at **95 registers** against ART's 256 ceiling
+(the plan makes that check part of this phase); the highest new method is
+`TextTab` at 159, and `MessageBubble` is still the app's tightest at 252.
+
 
 - The picker mounts here with `tabs = setOf(EMOJI, STICKER, TEXT, SHAPE)`. Four
   segments plus the search and delete buttons do not fit a 390 dp row with labels, so

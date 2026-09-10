@@ -16,11 +16,18 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.VisibleForTesting
 import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.ImageOverlay
+import com.firestream.chat.domain.util.OverlayContent
+import com.firestream.chat.domain.util.OverlayGeometry
 import com.firestream.chat.domain.util.PathSink
 import com.firestream.chat.domain.util.PixelRect
 import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.domain.util.ShapeKind
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.domain.util.SourceImage
+import com.firestream.chat.domain.util.StickerDesign
+import com.firestream.chat.domain.util.StickerPack
+import com.firestream.chat.domain.util.StickerPart
 import com.firestream.chat.domain.util.Stroke
 import com.firestream.chat.domain.util.StrokeGeometry
 import com.firestream.chat.domain.util.StrokeTool
@@ -428,6 +435,205 @@ class ImageEditRasterizer @Inject constructor(
 
         is RasterOp.Strokes ->
             if (op.strokes.isEmpty()) bitmap else drawStrokes(bitmap, op.strokes)
+
+        is RasterOp.Overlays ->
+            if (op.overlays.isEmpty()) bitmap else drawOverlays(bitmap, op.overlays)
+    }
+
+    /**
+     * Paints placed emoji, stickers, text and shapes into [bitmap] — the flatten
+     * half of what the overlay screen has been showing live.
+     *
+     * In list order, which is the z-order: no layer split, because unlike a blur
+     * an overlay has no relationship with what it covers, and the last thing you
+     * dragged on top being on top is the only rule anyone would predict.
+     *
+     * Every number comes from [OverlayGeometry], which is also what the editor's
+     * Compose preview draws from, so the two renderers cannot disagree about how
+     * big an object is or where its centre lands. Only the *painting* is written
+     * twice, and only because the two graphics stacks share no path object —
+     * exactly the arrangement [drawStrokes] is in.
+     */
+    private fun drawOverlays(bitmap: Bitmap, overlays: List<ImageOverlay>): Bitmap {
+        val output = if (bitmap.isMutable) {
+            bitmap
+        } else {
+            bitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return bitmap
+        }
+        val canvas = Canvas(output)
+        val longEdge = maxOf(output.width, output.height).toFloat()
+        for (overlay in overlays) {
+            val size = OverlayGeometry.sizePx(overlay.scale, longEdge)
+            if (size <= 0f) continue
+            val centerX = overlay.centerX * output.width
+            val centerY = overlay.centerY * output.height
+            val saved = canvas.save()
+            canvas.rotate(overlay.rotationDegrees, centerX, centerY)
+            when (val content = overlay.content) {
+                is OverlayContent.Emoji ->
+                    paintGlyphs(canvas, content.emoji, centerX, centerY, size, WHITE_ARGB, filled = true)
+
+                is OverlayContent.Text -> paintGlyphs(
+                    canvas = canvas,
+                    text = content.text,
+                    centerX = centerX,
+                    centerY = centerY,
+                    fontSize = size,
+                    colorArgb = content.colorArgb,
+                    filled = content.filled,
+                )
+
+                is OverlayContent.Sticker ->
+                    StickerPack.byId(content.stickerId)?.let { design ->
+                        paintSticker(canvas, design, centerX, centerY, size)
+                    }
+
+                is OverlayContent.Shape -> paintShape(canvas, content, centerX, centerY, size)
+            }
+            canvas.restoreToCount(saved)
+        }
+        return output
+    }
+
+    /**
+     * One emoji or text run, centred on the placement.
+     *
+     * [fontSize] is the size, not a bounding box: an emoji and a text run both
+     * scale by *type size*, which is the only measure that means the same thing
+     * to Compose and to `android.graphics` without either of them measuring
+     * anything. Vertically centred through the font's own metrics rather than
+     * its reported height, so a glyph with descenders sits where its body is.
+     */
+    private fun paintGlyphs(
+        canvas: Canvas,
+        text: String,
+        centerX: Float,
+        centerY: Float,
+        fontSize: Float,
+        colorArgb: Long,
+        filled: Boolean,
+    ) {
+        if (text.isEmpty()) return
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = fontSize
+            textAlign = Paint.Align.CENTER
+            color = colorArgb.toInt()
+            if (!filled) {
+                style = Paint.Style.STROKE
+                strokeWidth = fontSize * OverlayGeometry.TEXT_OUTLINE_RATIO
+                strokeJoin = Paint.Join.ROUND
+            }
+        }
+        val metrics = paint.fontMetrics
+        val baseline = centerY - (metrics.ascent + metrics.descent) / 2f
+        canvas.drawText(text, centerX, baseline, paint)
+    }
+
+    /** One sticker, its `0..1` parts scaled into a [size]-square box around the centre. */
+    private fun paintSticker(
+        canvas: Canvas,
+        design: StickerDesign,
+        centerX: Float,
+        centerY: Float,
+        size: Float,
+    ) {
+        val left = centerX - size / 2f
+        val top = centerY - size / 2f
+        fun x(value: Float) = left + value * size
+        fun y(value: Float) = top + value * size
+
+        for (part in design.parts) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            when (part) {
+                is StickerPart.Circle -> {
+                    paint.color = part.colorArgb.toInt()
+                    canvas.drawCircle(x(part.centerX), y(part.centerY), part.radius * size, paint)
+                }
+
+                is StickerPart.Polygon -> {
+                    paint.color = part.colorArgb.toInt()
+                    val path = Path()
+                    part.points.chunked(2).forEachIndexed { index, pair ->
+                        if (pair.size < 2) return@forEachIndexed
+                        if (index == 0) path.moveTo(x(pair[0]), y(pair[1]))
+                        else path.lineTo(x(pair[0]), y(pair[1]))
+                    }
+                    path.close()
+                    canvas.drawPath(path, paint)
+                }
+
+                is StickerPart.Line -> {
+                    paint.color = part.colorArgb.toInt()
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = part.width * size
+                    paint.strokeCap = Paint.Cap.ROUND
+                    paint.strokeJoin = Paint.Join.ROUND
+                    val path = Path()
+                    part.points.chunked(2).forEachIndexed { index, pair ->
+                        if (pair.size < 2) return@forEachIndexed
+                        if (index == 0) path.moveTo(x(pair[0]), y(pair[1]))
+                        else path.lineTo(x(pair[0]), y(pair[1]))
+                    }
+                    canvas.drawPath(path, paint)
+                }
+            }
+        }
+    }
+
+    /** One annotation primitive, in a box [size] tall and as wide as its kind wants. */
+    private fun paintShape(
+        canvas: Canvas,
+        shape: OverlayContent.Shape,
+        centerX: Float,
+        centerY: Float,
+        size: Float,
+    ) {
+        val halfHeight = size / 2f
+        val halfWidth = halfHeight * OverlayGeometry.aspectFor(shape.kind)
+        val stroke = size * OverlayGeometry.SHAPE_STROKE_RATIO
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = shape.colorArgb.toInt()
+            style = if (OverlayGeometry.isOutlined(shape)) Paint.Style.STROKE else Paint.Style.FILL
+            strokeWidth = stroke
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        // Inset by half the stroke so an outline stays inside the box the editor
+        // drew its selection frame around, rather than straddling it.
+        val inset = if (paint.style == Paint.Style.STROKE) stroke / 2f else 0f
+        val left = centerX - halfWidth + inset
+        val right = centerX + halfWidth - inset
+        val top = centerY - halfHeight + inset
+        val bottom = centerY + halfHeight - inset
+
+        when (shape.kind) {
+            ShapeKind.RECTANGLE -> canvas.drawRect(left, top, right, bottom, paint)
+            ShapeKind.ROUNDED_RECTANGLE -> {
+                val radius = size * OverlayGeometry.ROUNDED_SHAPE_RADIUS_RATIO
+                canvas.drawRoundRect(left, top, right, bottom, radius, radius, paint)
+            }
+
+            ShapeKind.ELLIPSE -> canvas.drawOval(left, top, right, bottom, paint)
+            ShapeKind.LINE -> canvas.drawLine(centerX - halfWidth, centerY, centerX + halfWidth, centerY, paint)
+            ShapeKind.ARROW -> {
+                val head = size * OverlayGeometry.ARROW_HEAD_RATIO
+                val tip = centerX + halfWidth
+                canvas.drawLine(
+                    centerX - halfWidth,
+                    centerY,
+                    tip - head * OverlayGeometry.ARROW_SHAFT_TRIM_RATIO,
+                    centerY,
+                    paint,
+                )
+                val path = Path().apply {
+                    moveTo(tip, centerY)
+                    lineTo(tip - head, centerY - head * OverlayGeometry.ARROW_BARB_RATIO)
+                    lineTo(tip - head, centerY + head * OverlayGeometry.ARROW_BARB_RATIO)
+                    close()
+                }
+                canvas.drawPath(path, Paint(paint).apply { style = Paint.Style.FILL })
+            }
+        }
     }
 
     /**
@@ -612,6 +818,10 @@ class ImageEditRasterizer @Inject constructor(
 
         /** Quality for intermediate steps; only the send re-encodes at q80/q100. */
         private const val INTERMEDIATE_QUALITY = 95
+
+        /** An emoji has no colour of its own to choose; the glyph carries it. */
+        private const val WHITE_ARGB = 0xFFFFFFFF
+
 
         /**
          * Ceiling on `cacheDir/edits/`. Eight steps of a 4096 px q95 JPEG is

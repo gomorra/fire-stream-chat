@@ -21,6 +21,44 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — the overlay screen and the sticker/text/shape tabs (Phase 5b, 2026-09-10)
+
+**Nothing in this phase has been on hardware.** More of it is machine-checkable than
+Phase 3's was — `OverlayGeometryTest` pins every drag, snap and hit-test on the JVM, and
+`ImageEditRasterizerTest` reads the flattened pixels back — but the whole phase is a
+gesture over a coordinate mapping, and the two claims it was designed on are claims about
+a *hand*. Check in **both orientations**: placements are saved and normalized to the
+image, so a rotation mid-placement is a supported path and an untested one.
+
+- **A 26 dp handle with a 48 dp reach is grabbable without occluding what it sits on.**
+  *The claim the two-handle design rests on.* Place a small sticker, then try to grab the
+  bottom-right (scale) and top-right (rotate) corners. If the handle covers the thing it
+  is attached to in practice, the fallback is **the readout pill becoming the drag
+  target — not a second left-edge slider**, which would read like the draw screen's width
+  control and mean something else entirely.
+- **The four-segment island plus the search and delete buttons fit a 390 dp row.** The
+  island is icon-only except the active segment for exactly this reason. Check on the
+  narrowest device to hand, and check that expanding search still slides the island away
+  cleanly and that its × brings it back.
+- **The rotate snap feels right, not sticky.** 15° everywhere, 8° of pull on the
+  cardinals. Confirm a deliberate 22° tilt stays at 22° and that "exactly square" is easy
+  to hit.
+- **A drag keeps up with the finger.** Place several objects on a full-resolution photo
+  and drag the topmost. Also confirm a second finger landing mid-drag does not tug the
+  object to it, and that tapping bare photo deselects.
+- **The flattened file matches the preview.** Place a sticker, a text run and a shape,
+  press Done, and inspect the **written file** via the preview's *Save to Downloads*
+  button — not the preview. Check position, size, angle and the text's vertical centring,
+  which is the one measurement the two renderers compute by different routes.
+- **The layer eye does not change the output.** Place objects, press the eye until they
+  vanish, press Done, and confirm they are still in the file (§2.7). Re-open and confirm
+  it comes back visible.
+- **Placements survive a rotation.** Place several, undo one, turn the phone, and confirm
+  both the objects and the redo are still there.
+- **The stickers look like what they are called.** Twelve hand-written vector designs
+  that no test can eyeball — check the heart, the pin and the speech bubble in particular,
+  at both thumbnail and placed size.
+
 ### Image editor — the picker extraction (Phase 5a, 2026-09-10)
 
 A pure refactor: the ~700-line emoji panel became a shared `ui/chat/picker/` shell
@@ -296,8 +334,8 @@ open is not "a picker" but *sending* a sticker or a GIF as its own message, whic
 data-model change, and the provider decision a GIF forces:
 
 - **Sticker-as-message** — a new `MessageType.STICKER`, an `AppDatabase` version bump, a
-  sync path and a bubble renderer. Placing a sticker *on a photo* needs none of this and
-  ships with the editor (Phase 5b), because it is flattened into the JPEG.
+  sync path and a bubble renderer. Placing a sticker *on a photo* needed none of this and
+  **shipped with the editor in Phase 5b**, because it is flattened into the JPEG.
 - **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
   impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
   one frame and a worse sticker (`.claude/plans/image-editor.md` §2.8).
@@ -306,8 +344,10 @@ data-model change, and the provider decision a GIF forces:
   what and hollows out the Signal-Protocol story. For this app only downloading the bytes
   and re-uploading them as an ordinary media message is consistent — it costs bandwidth
   and keeps the recipient private.
-- **Downloadable sticker packs** — pack management is its own feature; Phase 5b ships one
-  bundled local pack.
+- **Downloadable sticker packs** — pack management is its own feature. Phase 5b shipped
+  one bundled local pack of twelve drawn marks, and the sticker tab has no recents row
+  because twelve fit on screen; both become worth revisiting together with pack
+  management.
 - Files: `ui/chat/picker/` (exists), new `data/remote/GifSource.kt`, `MessageType`,
   `AppDatabase`, `MessageBubble.kt`
 

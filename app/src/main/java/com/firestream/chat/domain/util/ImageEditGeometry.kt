@@ -103,6 +103,111 @@ sealed interface RasterOp {
      * output rather than merely smeared. The tool is still labelled "Blur".
      */
     data class Strokes(val strokes: List<Stroke>) : RasterOp
+
+    /**
+     * Place [overlays] on the image: emoji, stickers, text runs and shapes,
+     * each at its own position, size and angle.
+     *
+     * ### What comes out
+     *
+     * The image keeps its dimensions, exactly as [Strokes] does — placing an
+     * object repaints pixels, it never changes how many there are. Everything
+     * about *where* an object sits and how big it is is stored as a fraction of
+     * the image ([ImageOverlay]), so one placement means the same thing on the
+     * editor's screen-sized preview and in the full-resolution file, and
+     * [OverlayGeometry] is deliberately the only copy of that arithmetic.
+     *
+     * ### Painted in list order, which is the z-order
+     *
+     * Unlike [Strokes], there is no layer split here: the last thing you placed
+     * is the thing on top, which is the only ordering anyone would predict from
+     * dragging objects around. Blur needed the split because a mosaic is a copy
+     * of the *photo* and would have swallowed the arrow pointing at it; an
+     * emoji has no such relationship with what it covers.
+     *
+     * ### Overlays are not a redaction
+     *
+     * A sticker over a face hides it in the flattened JPEG as thoroughly as a
+     * blur does — the pixels underneath are gone from the output, since this is
+     * the same rasterize-per-screen flatten. That is a consequence, not a
+     * promise: the tool for redacting is the draw screen's blur, which says so.
+     */
+    data class Overlays(val overlays: List<ImageOverlay>) : RasterOp
+}
+
+/**
+ * One object placed on the image, in the image's own coordinates.
+ *
+ * [centerX] and [centerY] are fractions of the image, and [scale] multiplies a
+ * base size that is itself a fraction of the image's long edge
+ * ([OverlayGeometry.BASE_SIZE]) — so nothing here is a pixel count, and a
+ * placement made on a 1600 px preview lands identically in a 4096 px flatten.
+ * The same reason [StrokePoint] is normalized (`.claude/plans/image-editor.md`
+ * §2.3), and the same reason both survive a device rotation.
+ *
+ * [rotationDegrees] is clockwise, `0` upright, and is what the rotate handle
+ * writes — snapped to [OverlayGeometry.ROTATION_SNAP_DEGREES] as it goes.
+ */
+data class ImageOverlay(
+    val content: OverlayContent,
+    val centerX: Float,
+    val centerY: Float,
+    val scale: Float = 1f,
+    val rotationDegrees: Float = 0f,
+)
+
+/**
+ * What a placed overlay actually is.
+ *
+ * Four kinds, one manipulation. Drag, scale, rotate, z-order and delete are the
+ * same machinery whichever of these is selected, which is why the editor has
+ * one overlay screen rather than four (`.claude/plans/image-editor.md` §3
+ * Phase 5) — the kinds differ only in how they are *painted*.
+ */
+sealed interface OverlayContent {
+    /** An emoji, painted as text: at this size a glyph is a glyph. */
+    data class Emoji(val emoji: String) : OverlayContent
+
+    /**
+     * One sticker from the bundled pack, by its [StickerPack] id.
+     *
+     * An id rather than a bitmap or a resource: a sticker is a list of flat
+     * coloured parts in normalized space ([StickerPart]), so both renderers
+     * build it themselves from the same description and there is no asset to
+     * decode, scale or disagree about.
+     */
+    data class Sticker(val stickerId: String) : OverlayContent
+
+    /**
+     * A typed run, painted at [OverlayGeometry.BASE_SIZE] of the long edge and
+     * centred on the placement.
+     *
+     * [filled] paints solid glyphs; `false` strokes their outlines, which is
+     * the same fill-or-outline choice a [Shape] offers and reads as the same
+     * control in the picker. Multi-line text is not offered — the run is one
+     * line, because a text box that wraps needs a width the single scale handle
+     * cannot express.
+     */
+    data class Text(val text: String, val colorArgb: Long, val filled: Boolean) : OverlayContent
+
+    /**
+     * An annotation primitive — the other half of the blur tool's job.
+     * "Put a box round this" is what makes a redaction legible, and both serve
+     * the same redact-before-sending purpose.
+     *
+     * [filled] is ignored for [ShapeKind.LINE] and [ShapeKind.ARROW], which
+     * have no interior to fill.
+     */
+    data class Shape(val kind: ShapeKind, val colorArgb: Long, val filled: Boolean) : OverlayContent
+}
+
+/** The shapes the shape tab offers, each with its own default proportions. */
+enum class ShapeKind {
+    RECTANGLE,
+    ROUNDED_RECTANGLE,
+    ELLIPSE,
+    LINE,
+    ARROW,
 }
 
 /** Which of the draw screen's three tools laid a stroke down. */
@@ -333,8 +438,11 @@ object ImageEditGeometry {
                     currentHeight = resizedHeight
                 }
 
-                // A drawing repaints pixels; it never changes how many there are.
+                // A drawing and a placed overlay both repaint pixels; neither
+                // changes how many there are.
                 is RasterOp.Strokes -> Unit
+
+                is RasterOp.Overlays -> Unit
             }
         }
         return currentWidth to currentHeight

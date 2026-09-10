@@ -79,6 +79,7 @@ import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
 import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
+import com.firestream.chat.ui.chat.imageedit.OverlayImageScreen
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import kotlinx.coroutines.Dispatchers
@@ -223,7 +224,7 @@ internal fun ImagePreviewScreen(
         onDismiss()
     }
 
-    // One handler rather than several: back closes the adjust screen, then the
+    // One handler rather than several: back closes whichever editor is open, then the
     // emoji sheet, and only then throws the batch away. Overlapping BackHandlers
     // would make the answer depend on declaration order — and the one that must
     // never win by accident is the one that discards the whole pick.
@@ -281,6 +282,16 @@ internal fun ImagePreviewScreen(
             Editor.DRAW -> DrawImageScreen(
                 source = target.source,
                 services = edit,
+                liveSteps = liveSteps,
+                onCancel = { editing = null },
+                onDone = onEditDone,
+            )
+
+            Editor.OVERLAY -> OverlayImageScreen(
+                source = target.source,
+                services = edit,
+                recentEmojis = recentEmojis,
+                onEmojiUsed = onEmojiUsed,
                 liveSteps = liveSteps,
                 onCancel = { editing = null },
                 onDone = onEditDone,
@@ -352,6 +363,13 @@ internal fun ImagePreviewScreen(
                     key = current.originalUri.toString(),
                     source = current.uri,
                     editor = Editor.ADJUST,
+                )
+            },
+            onOverlay = {
+                editing = EditTarget(
+                    key = current.originalUri.toString(),
+                    source = current.uri,
+                    editor = Editor.OVERLAY,
                 )
             },
             onDraw = {
@@ -719,7 +737,7 @@ private fun ThumbnailStrip(
 }
 
 /** Which of the editor screens an [EditTarget] is open on. */
-private enum class Editor { ADJUST, DRAW }
+private enum class Editor { ADJUST, DRAW, OVERLAY }
 
 /**
  * Which item an editor screen is editing, which editor it is, and which of the

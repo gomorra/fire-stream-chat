@@ -150,10 +150,12 @@ private fun encodeOp(op: RasterOp): String = when (op) {
     is RasterOp.Straighten -> "straighten:${op.degrees}"
     is RasterOp.Crop -> "crop:${op.left},${op.top},${op.right},${op.bottom}"
     is RasterOp.Resize -> "resize:${op.longEdge}"
-    // The adjust screen never builds one — a drawing belongs to the draw screen
-    // and its own stack — so this encodes to something `decodeOp` refuses,
+    // The adjust screen never builds either — a drawing belongs to the draw
+    // screen and a placement to the overlay screen, each with its own stack — so
+    // both encode to something `decodeOp` refuses,
     // rather than teaching this saver a stroke format it can never be handed.
     is RasterOp.Strokes -> UNSUPPORTED_OP
+    is RasterOp.Overlays -> UNSUPPORTED_OP
 }
 
 /** What [encodeOp] writes for an op this screen cannot produce; [decodeOp] drops it. */

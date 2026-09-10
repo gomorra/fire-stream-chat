@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat.picker
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -120,6 +121,16 @@ internal fun PickerPanel(
     val hasIsland = declared.size > 1
     var searchOpen by rememberSaveable(declared) { mutableStateOf(false) }
     val fieldExpanded = !hasIsland || searchOpen
+
+    // Back closes the search before anything else gets a say. The island slides
+    // away when search opens and the field's × is otherwise the only way to
+    // bring it back (§4), so a back press that skipped straight to closing the
+    // panel would take the tab switcher with it. Disabled entirely for a
+    // one-tab host, whose field never collapses and whose host owns back.
+    BackHandler(enabled = hasIsland && searchOpen) {
+        query = ""
+        searchOpen = false
+    }
 
     Column(modifier = modifier.background(MaterialTheme.colorScheme.surface)) {
         header(active)

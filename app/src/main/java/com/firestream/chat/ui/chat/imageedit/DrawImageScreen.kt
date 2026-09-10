@@ -9,14 +9,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -29,8 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -179,7 +175,7 @@ internal fun DrawImageScreen(
         mutableStateOf(DrawStack())
     }
     var tool by rememberSaveable(source) { mutableStateOf(StrokeTool.PEN) }
-    var color by rememberSaveable(source) { mutableLongStateOf(DRAW_COLORS.first()) }
+    var color by rememberSaveable(source) { mutableLongStateOf(EDIT_COLORS.first()) }
     var width by rememberSaveable(source) { mutableFloatStateOf(StrokeGeometry.DEFAULT_WIDTH) }
     // Saved so a rotation does not flip the layer back on mid-check, but not
     // carried across a visit: the screen leaves the composition when it closes,
@@ -575,7 +571,7 @@ private fun ColourRow(tool: StrokeTool, selected: Long, onSelect: (Long) -> Unit
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(COLOUR_ROW_HEIGHT_DP.dp)
+                .height(EditorChrome.COLOUR_ROW_HEIGHT_DP.dp)
                 .padding(horizontal = 20.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -588,39 +584,7 @@ private fun ColourRow(tool: StrokeTool, selected: Long, onSelect: (Long) -> Unit
         return
     }
 
-    LazyRow(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(COLOUR_ROW_HEIGHT_DP.dp)
-            .semantics { contentDescription = "Stroke colours" },
-        contentPadding = PaddingValues(horizontal = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        items(DRAW_COLORS, key = { it }) { swatch ->
-            val isSelected = swatch == selected
-            Box(
-                // A 44 dp box around a 26 dp dot: the swatches read as a tight
-                // strip while every one of them is still a real touch target.
-                modifier = Modifier
-                    .size(44.dp)
-                    .clickable(onClickLabel = "Choose colour") { onSelect(swatch) }
-                    .semantics { contentDescription = colourName(swatch) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(if (isSelected) 30.dp else 26.dp)
-                        .background(Color(swatch), CircleShape)
-                        .border(
-                            width = if (isSelected) 3.dp else 1.dp,
-                            color = if (isSelected) FireOrange else Color.White.copy(alpha = 0.35f),
-                            shape = CircleShape,
-                        ),
-                )
-            }
-        }
-    }
+    EditColorStrip(selected = selected, onSelect = onSelect, label = "Stroke colours")
 }
 
 /**
@@ -775,38 +739,6 @@ private fun ImageFitMapper.normalizedPoint(position: Offset): StrokePoint {
 
 private fun StrokePoint.toFit(): FitPoint = FitPoint(x, y)
 
-/** The name a screen reader reads for a swatch, and the handle a test grabs it by. */
-private fun colourName(argb: Long): String = when (argb) {
-    0xFFFFFFFF -> "White"
-    0xFF000000 -> "Black"
-    0xFFF26A1F -> "Orange"
-    0xFFE53935 -> "Red"
-    0xFFFFD600 -> "Yellow"
-    0xFF43A047 -> "Green"
-    0xFF1E88E5 -> "Blue"
-    else -> "Purple"
-}
-
-/**
- * The swatches, in the order they appear.
- *
- * White and black first because an annotation's job is to be seen against a
- * photo and one of the two always is; the brand orange next because it is what
- * the rest of the app marks things with; then the five hues an annotation
- * usually reaches for. Stored as ARGB `Long`s, which is what a `RasterOp` carries
- * — no Compose type reaches the domain layer.
- */
-private val DRAW_COLORS = listOf(
-    0xFFFFFFFF,
-    0xFF000000,
-    0xFFF26A1F,
-    0xFFE53935,
-    0xFFFFD600,
-    0xFF43A047,
-    0xFF1E88E5,
-    0xFFAB47BC,
-)
-
 /**
  * Long-edge ceiling for the preview decode, in pixels rather than dp: this is a
  * decode target, and it should not change with the display's density the way a
@@ -816,11 +748,10 @@ private val DRAW_COLORS = listOf(
 private const val PREVIEW_MAX_PX = 1600
 
 private const val TOP_BAR_HEIGHT_DP = 56
-private const val COLOUR_ROW_HEIGHT_DP = 52
 private const val WIDTH_ROW_HEIGHT_DP = 48
 private const val TOOL_ROW_HEIGHT_DP = 68
 private const val BOTTOM_PANEL_HEIGHT_DP =
-    COLOUR_ROW_HEIGHT_DP + WIDTH_ROW_HEIGHT_DP + TOOL_ROW_HEIGHT_DP
+    EditorChrome.COLOUR_ROW_HEIGHT_DP + WIDTH_ROW_HEIGHT_DP + TOOL_ROW_HEIGHT_DP
 
 private const val WIDTH_PREVIEW_BOX_DP = 34
 private const val WIDTH_PREVIEW_MIN_DP = 4f

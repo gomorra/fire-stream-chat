@@ -1,5 +1,7 @@
 package com.firestream.chat.ui.chat.picker
 
+import com.firestream.chat.domain.util.OverlayContent
+
 /**
  * A tab the picker can offer, and the seam that keeps the picker honest about
  * what each of its hosts can actually do.
@@ -37,17 +39,30 @@ internal enum class PickerTab(
  * lambda however many tabs it declares — and so adding a tab is a new subtype
  * here rather than a new parameter on every host.
  *
- * Only [Emoji] is declared so far, for the reason `RasterOp` shipped with four
- * of its seven ops in Phase 2: a selection's shape is a decision the phase that
- * designs the tab's UI has to make, and guessing now would ship a data shape
- * that phase would have to change anyway. The hierarchy is one file, so adding
- * a subtype stays local.
+ * Two subtypes, not five, because there are only two kinds of answer. An emoji
+ * is a *character* with a size the long-press drag chose, which is what the
+ * composer inserts into a message and the reaction sheet stores on one; a
+ * sticker, a text run and a shape are all *objects to place*, and the picker
+ * hands those over as the domain type that already describes them rather than
+ * re-declaring their fields here and forcing every host to map between two
+ * identical shapes.
  */
 internal sealed interface PickerSelection {
     /**
      * One emoji, and how large the long-press size drag made it — `1f` for an
      * ordinary tap. The size is meaningful only to hosts that can render an
-     * emoji at a size; a reaction ignores it.
+     * emoji at a size; a reaction ignores it, and so does the image editor,
+     * which has a scale handle of its own.
      */
     data class Emoji(val emoji: String, val size: Float) : PickerSelection
+
+    /**
+     * Something to place on a photo, ready to become an
+     * `com.firestream.chat.domain.util.ImageOverlay`.
+     *
+     * Only the image editor declares the tabs that produce these, and only the
+     * image editor can do anything with one — placing an object is meaningless
+     * to a text field or a reaction.
+     */
+    data class Overlay(val content: OverlayContent) : PickerSelection
 }

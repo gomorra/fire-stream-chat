@@ -9,7 +9,10 @@ import android.graphics.Paint
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.ImageOverlay
+import com.firestream.chat.domain.util.OverlayContent
 import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.domain.util.ShapeKind
 import com.firestream.chat.domain.util.Stroke
 import com.firestream.chat.domain.util.StrokeGeometry
 import com.firestream.chat.domain.util.StrokePoint
@@ -683,5 +686,112 @@ class ImageEditRasterizerTest {
     @Test
     fun `probing an unreadable source reports nothing rather than zeroes`() = runTest {
         assertNull(rasterizer.probeSource(Uri.parse("file:///nope/missing.jpg")))
+    }
+
+    // ── Overlays ─────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a placed shape lands where it was placed and leaves the rest of the photo alone`() = runTest {
+        val source = flatSource(400, 400, Color.WHITE, "overlay-shape.png")
+
+        val output = decode(
+            rasterizer.rasterize(
+                source,
+                listOf(
+                    RasterOp.Overlays(
+                        listOf(
+                            ImageOverlay(
+                                content = OverlayContent.Shape(ShapeKind.RECTANGLE, 0xFFFF0000, filled = true),
+                                centerX = 0.5f,
+                                centerY = 0.5f,
+                            ),
+                        ),
+                    ),
+                ),
+                emptySet(),
+            ),
+        )
+
+        // A filled rectangle centred on the photo: red in the middle, and the
+        // corners untouched. The point is the *centre* — everything about where
+        // an overlay lands comes from `OverlayGeometry`, and this is what proves
+        // the flatten reads the same normalized coordinates the editor writes.
+        assertRed(output.getPixel(200, 200))
+        assertWhite("the corner", output.getPixel(5, 5))
+        assertWhite("the corner", output.getPixel(395, 395))
+        output.recycle()
+    }
+
+    @Test
+    fun `an overlay repaints pixels without changing the photo's dimensions`() = runTest {
+        val source = flatSource(320, 240, Color.WHITE, "overlay-dimensions.png")
+
+        val output = rasterizer.rasterize(
+            source,
+            listOf(
+                RasterOp.Overlays(
+                    listOf(ImageOverlay(OverlayContent.Sticker("heart"), 0.5f, 0.5f)),
+                ),
+            ),
+            emptySet(),
+        )
+
+        assertEquals(320 to 240, dimensionsOf(output))
+    }
+
+    @Test
+    fun `a sticker id nothing answers to loses that sticker rather than the whole flatten`() = runTest {
+        val source = flatSource(200, 200, Color.WHITE, "overlay-unknown.png")
+
+        val output = decode(
+            rasterizer.rasterize(
+                source,
+                listOf(
+                    RasterOp.Overlays(
+                        listOf(ImageOverlay(OverlayContent.Sticker("not-in-any-pack"), 0.5f, 0.5f)),
+                    ),
+                ),
+                emptySet(),
+            ),
+        )
+
+        // A pack that shrinks under a saved placement must not take the send
+        // with it: the unknown id draws nothing and the photo comes out whole.
+        assertWhite("an unresolvable sticker draws nothing", output.getPixel(100, 100))
+        output.recycle()
+    }
+
+    @Test
+    fun `stacking overlays paints the last one on top`() = runTest {
+        val source = flatSource(400, 400, Color.WHITE, "overlay-z.png")
+
+        val output = decode(
+            rasterizer.rasterize(
+                source,
+                listOf(
+                    RasterOp.Overlays(
+                        listOf(
+                            ImageOverlay(
+                                OverlayContent.Shape(ShapeKind.RECTANGLE, 0xFF00FF00, filled = true),
+                                0.5f,
+                                0.5f,
+                                scale = 2f,
+                            ),
+                            ImageOverlay(
+                                OverlayContent.Shape(ShapeKind.RECTANGLE, 0xFFFF0000, filled = true),
+                                0.5f,
+                                0.5f,
+                            ),
+                        ),
+                    ),
+                ),
+                emptySet(),
+            ),
+        )
+
+        // List order is z-order: the last thing placed is the thing on top,
+        // which is the only rule anyone would predict from dragging objects.
+        assertRed(output.getPixel(200, 200))
+        output.recycle()
     }
 }
