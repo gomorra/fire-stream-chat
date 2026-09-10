@@ -1,0 +1,684 @@
+package com.firestream.chat.ui.chat.picker
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
+
+private const val GRID_COLUMNS = 8
+// Glyph fills this fraction of the (square) cell, leaving a small gap on
+// every side so neighbouring emojis stay visually separated (WhatsApp-style).
+private const val EMOJI_FILL_FRACTION = 0.7f
+private const val RECENTS_ICON = "⏱"
+private const val RECENTS_MAX_ROWS = 3
+private const val SIZE_MIN = 0.8f
+private const val SIZE_MAX = 5.0f
+private const val SIZE_DEFAULT = 1.0f
+
+// ---------------------------------------------------------------------------
+// Grid item model for the flat LazyVerticalGrid
+// ---------------------------------------------------------------------------
+
+private sealed class GridItem {
+    data class Header(val icon: String, val title: String, val categoryIndex: Int) : GridItem()
+    data class Emoji(val emoji: String) : GridItem()
+    data object EmptySlot : GridItem()
+}
+
+// ---------------------------------------------------------------------------
+// Category data
+// ---------------------------------------------------------------------------
+
+private data class PanelCategory(val icon: String, val label: String, val emojis: List<String>)
+
+private val PANEL_CATEGORIES = listOf(
+    PanelCategory("😀", "Smileys", listOf(
+        "😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃",
+        "🫠","😉","😊","😇","🥰","😍","🤩","😘","😗","😚",
+        "😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭",
+        "🫢","🫣","🤫","🤔","🫡","🤐","🤨","😐","😑","😶",
+        "🫥","😶‍🌫️","😏","😒","🙄","😬","🤥","🫨","😌","😔",
+        "😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🤧","🥵",
+        "🥶","🥴","😵","😵‍💫","🤯","🤠","🥳","🥸","😎","🤓",
+        "🧐","😕","🫤","😟","🙁","☹️","😮","😯","😲","😳",
+        "🥺","🥹","😦","😧","😨","😰","😥","😢","😭","😱",
+        "😖","😣","😞","😓","😩","😫","🥱","😤","😡","😠",
+        "🤬","😈","👿","💀","☠️","💩","🤡","👹","👺","👻",
+        "👽","👾","🤖","😺","😸","😹","😻","😼","😽","🙀",
+        "😿","😾","🙈","🙉","🙊"
+    )),
+    PanelCategory("👋", "People", listOf(
+        "👋","🤚","🖐️","✋","🖖","🫱","🫲","🫳","🫴","🫷",
+        "🫸","👌","🤌","🤏","✌️","🤞","🫰","🤟","🤘","🤙",
+        "👈","👉","👆","🖕","👇","☝️","🫵","👍","👎","✊",
+        "👊","🤛","🤜","👏","🙌","🫶","👐","🤲","🤝","🙏",
+        "💪","🦾","🦿","🦵","🦶","👂","🦻","👃","🧠","🫀",
+        "🫁","🦷","🦴","👀","👁️","👅","👄","🫦","💋","🫂",
+        "👶","🧒","👦","👧","🧑","👱","👨","🧔","👩","👴",
+        "👵","🧓","🧕","👲","👳","🧙","🧝","🧛","🧟","🧞",
+        "🧜","🧚","👼","🤶","🎅","🦸","🦹","🕵️","👮","👷",
+        "💂","🤴","👸","👰","🤵","🙋","🙋‍♂️","🙋‍♀️","🤦","🤦‍♂️",
+        "🤦‍♀️","🤷","🤷‍♂️","🤷‍♀️","💁","💁‍♂️","💁‍♀️","🙅","🙅‍♂️","🙅‍♀️",
+        "🙆","🙆‍♂️","🙆‍♀️","💏","💑","👫","👬","👭","👪","👨‍👩‍👦",
+        "👨‍👩‍👧","👨‍👦","👨‍👧","👩‍👦","👩‍👧"
+    )),
+    PanelCategory("🐶", "Animals", listOf(
+        "🐶","🐱","🐭","🐹","🐰","🦊","🐻","🐼","🐻‍❄️","🐨",
+        "🐯","🦁","🐮","🐷","🐽","🐸","🐵","🙈","🙉","🙊",
+        "🐒","🐔","🐧","🐦","🐤","🐣","🐥","🦆","🦅","🦉",
+        "🦇","🐺","🐗","🐴","🦄","🐝","🪱","🐛","🦋","🐌",
+        "🐞","🐜","🪲","🦟","🦗","🪳","🕷️","🦂","🐢","🦎",
+        "🐍","🐲","🦕","🦖","🐳","🐋","🐬","🦭","🐟","🐠",
+        "🐡","🦈","🐙","🦑","🦐","🦞","🦀","🦪","🦔","🦫",
+        "🦦","🦥","🐿️","🦌","🦬","🐄","🐎","🐖","🐏","🐑",
+        "🦙","🐐","🦃","🦤","🦚","🦜","🦢","🦩","🕊️","🐇",
+        "🦝","🐁","🐀","🐓","🐾","🐉","🌵","🎄","🌲","🌳",
+        "🌴","🪵","🌱","🌿","☘️","🍀","🎍","🪴","🎋","🍃",
+        "🍂","🍁","🍄","🌾","💐","🌷","🌹","🥀","🪷","🌺",
+        "🌸","🌼","🌻","🌞","🌝","🌛","🌜","🌚","🌕","🌙",
+        "⭐","🌟","🌠","🌌","☁️","⛅","🌈","❄️","☃️","⛄",
+        "💨","💧","💦","🌊","🔥","🌊","🫧"
+    )),
+    PanelCategory("🍎", "Food", listOf(
+        "🍎","🍐","🍊","🍋","🍌","🍉","🍇","🍓","🫐","🍈",
+        "🍒","🍑","🥭","🍍","🥥","🥝","🍅","🫒","🥑","🍆",
+        "🥔","🥕","🌽","🌶️","🫑","🥒","🥬","🥦","🧄","🧅",
+        "🍄","🥜","🫘","🌰","🍞","🥐","🥖","🫓","🥨","🥯",
+        "🥞","🧇","🧈","🍳","🥚","🧀","🥓","🥩","🍗","🍖",
+        "🌭","🍔","🍟","🍕","🫔","🥪","🥙","🧆","🌮","🌯",
+        "🥗","🥘","🫕","🥫","🍝","🍜","🍲","🍛","🍣","🍱",
+        "🥟","🍤","🍙","🍚","🍘","🍥","🥮","🍢","🧁","🍡",
+        "🍧","🍨","🍦","🥧","🍰","🎂","🍮","🍭","🍬","🍫",
+        "🍿","🍩","🍪","🌰","🥜","🍯","🧃","🥤","🧋","🍵",
+        "☕","🫖","🍺","🍻","🥂","🍷","🥃","🍸","🍹","🧉",
+        "🍾","🧊","🥄","🍴","🍽️","🥢","🧂"
+    )),
+    PanelCategory("⚽", "Activities", listOf(
+        "⚽","🏀","🏈","⚾","🥎","🎾","🏐","🏉","🥏","🎱",
+        "🪀","🏓","🏸","🏒","🏑","🥍","🏏","🪃","🥅","⛳",
+        "🪁","🏹","🎣","🤿","🥊","🥋","🎽","🛹","🛼","🛷",
+        "⛸️","🥌","🎿","⛷️","🏂","🪂","🏋️","🤸","🤼","🤺",
+        "🏇","🏊","🏄","🤽","🚣","🧗","🚵","🚴","🧘","🏆",
+        "🥇","🥈","🥉","🏅","🎖️","🎗️","🎟️","🎫","🎮","🕹️",
+        "🎰","🎲","♟️","🎭","🎨","🖼️","🎪","🎬","🎤","🎧",
+        "🎼","🎵","🎶","🎹","🪘","🥁","🎷","🎺","🎸","🪕",
+        "🎻","🪈","🎯","🎳","🎠","🎡","🎢","🤹"
+    )),
+    PanelCategory("🚗", "Travel", listOf(
+        "🚗","🚕","🚙","🚌","🚎","🏎️","🚓","🚑","🚒","🚐",
+        "🛻","🚚","🚛","🚜","🏍️","🛵","🚲","🛴","🛹","🛺",
+        "⛽","🚨","🚥","🚦","🛑","🚧","⚓","🛟","⛵","🚤",
+        "🛥️","🛳️","⛴️","🚢","✈️","🛩️","🛫","🛬","💺","🚁",
+        "🚟","🚠","🚡","🚃","🚋","🚞","🚝","🚄","🚅","🚈",
+        "🚂","🚆","🚇","🚊","🚉","🌍","🌎","🌏","🗺️","🌐",
+        "🧭","🏔️","⛰️","🌋","🗻","🏕️","🏖️","🏜️","🏝️","🏟️",
+        "🏛️","🏗️","🧱","🏘️","🏚️","🏠","🏡","🏢","🏣","🏤",
+        "🏥","🏦","🏨","🏩","🏪","🏫","🏬","🏭","🏯","🏰",
+        "💒","🗼","🗽","⛪","🕌","🛕","🕍","⛩️","🌆","🌇",
+        "🌃","🌉","🌁","🌄","🌅","🎑","🏞️","🎆","🎇","⌚",
+        "🕐","🕑","🕒","🕓","🕔","🕕","🕖","🕗","🕘","🕙",
+        "🕚","🕛","⏰","⏱️","⏲️","⏳","⌛","📡","🌡️"
+    )),
+    PanelCategory("💡", "Objects", listOf(
+        "📱","💻","⌨️","🖥️","🖨️","🖱️","🖲️","💾","💿","📀",
+        "📼","📷","📸","📹","🎥","📺","📻","🎙️","🎛️","🔋",
+        "🪫","🔌","💡","🔦","🕯️","🪔","🧲","🔧","🪛","🔨",
+        "⚒️","🛠️","⛏️","⚙️","🔩","🪤","💣","🔫","🪓","⚔️",
+        "🛡️","🔪","🗡️","🔑","🗝️","🪝","🔒","🔓","🔍","🔎",
+        "🪜","🏺","🪄","🧳","👓","🕶️","🥽","🌂","☂️","☔",
+        "🎒","👝","👛","👜","💼","🧵","🪢","🧶","🪡","🧷",
+        "💎","👑","💍","💄","💅","👠","👡","👢","🥿","👞",
+        "👟","🥾","🧤","🧣","🎩","🧢","🪖","⛑️","👒","👗",
+        "👘","👙","🩱","🩲","🩳","👚","👔","👕","👖","🧦",
+        "🩴","🧸","🪆","🎎","🎏","🎐","🧧","🎁","🎀","🎊",
+        "🎉","🎈","📦","📫","📬","📭","📮","📪","📩","📤",
+        "📥","✉️","📧","📨","📝","📒","📓","📔","📕","📗",
+        "📘","📙","📚","📖","🔖","🏷️","💰","🪙","💴","💵",
+        "💶","💷","💸","💳","🪞","🛋️","🪑","🚽","🚿","🛁",
+        "🧴","🧹","🧺","🧻","🪣","🧼","🪥","🧽","🪒","🧯",
+        "🛒","🚪","🛏️","🔔","🔕","📢","📣","📯","🎵","🎶"
+    )),
+    PanelCategory("❤️", "Symbols", listOf(
+        "❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔",
+        "❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟",
+        "✨","⚡","🔥","💥","💫","💦","💧","❄️","🌊","🌈",
+        "☮️","✝️","☪️","🕉️","☸️","✡️","🔯","🕎","☯️","☦️",
+        "🛐","⛎","♈","♉","♊","♋","♌","♍","♎","♏",
+        "♐","♑","♒","♓","🔱","⚜️","♻️","🔰","📛","⚠️",
+        "☢️","☣️","🚫","⛔","📵","🔞","🚷","🚯","🚳","🚱",
+        "✅","❌","❎","⭕","🔴","🟠","🟡","🟢","🔵","🟣",
+        "⚫","⚪","🟥","🟧","🟨","🟩","🟦","🟪","⬛","⬜",
+        "◼️","◻️","◾","◽","▪️","▫️","🔶","🔷","🔸","🔹",
+        "🔺","🔻","💠","🔘","🔳","🔲","💯","🔅","🔆","📶",
+        "♠️","♥️","♦️","♣️","♟️","🃏","🀄","🎴","🔮","🧿",
+        "🪬","↗️","➡️","↘️","⬇️","↙️","⬅️","↖️","⬆️","↕️",
+        "↔️","↩️","↪️","⤴️","⤵️","🔄","🔃","🔙","🔚","🔛",
+        "🔜","🔝","🆕","🆙","🆒","🆓","🆖","🆗","🆘","🆙",
+        "🆚","🈶","🈚","🈷️","🈶","🉐","🈹","🈲","🈴","🅰️",
+        "🅱️","🆎","🅾️","🆑","🅿️","🔤","🔡","🔢","🔣"
+    )),
+    PanelCategory("🔞", "Special", listOf(
+        "🖕","💀","☠️","👿","😈","🤬","😡","😤","🤮","🤢",
+        "💩","👻","👹","👺","🤡","🎃","⚰️","🪦","🩸","🦴",
+        "😰","😨","😱","🥶","🥵","🤯","😳","🫣","🥴","😵‍💫",
+        "🫠","💋","🫦","🍑","🍆","🍺","🍻","🥃","🍷","🥂",
+        "🍾","🚬","🎲","🃏","♠️","♥️","♦️","♣️","🎰","🔞",
+        "⚠️","💥","💣","🔥","⚡","☢️","☣️","💊","💉","🗡️",
+        "⚔️","🔫","💸","🤑","🏴‍☠️","😼","😾","😒","🙄","🤥"
+    ))
+)
+
+// Toolbar icons: Recents + all categories
+private data class ToolbarEntry(val icon: String, val categoryIndex: Int)
+
+private val TOOLBAR_ENTRIES: List<ToolbarEntry> = buildList {
+    add(ToolbarEntry(RECENTS_ICON, 0))
+    PANEL_CATEGORIES.forEachIndexed { i, cat -> add(ToolbarEntry(cat.icon, i + 1)) }
+}
+
+// Quick reactions shared by the full picker and the swipe-to-react panel
+internal val QUICK_REACTION_EMOJIS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+
+// Pre-built static category portion (never changes — only Recents section varies)
+private val STATIC_CATEGORY_GRID: List<GridItem> = buildList {
+    PANEL_CATEGORIES.forEachIndexed { index, category ->
+        add(GridItem.Header(category.icon, category.label, categoryIndex = index + 1))
+        category.emojis.forEach { add(GridItem.Emoji(it)) }
+    }
+}
+
+// ===========================================================================
+// Long-press size picker state
+// ===========================================================================
+
+private data class SizePickerState(
+    val gridItemIndex: Int,      // index in gridItems list
+    val emoji: String,
+    val columnIndex: Int,        // 0-7 within the row
+    val cellOffset: Offset,      // position of the pressed cell relative to grid
+    val sizeMultiplier: Float = SIZE_DEFAULT
+)
+
+// ===========================================================================
+// The emoji tab
+// ===========================================================================
+
+/**
+ * The emoji grid, its category rail and its long-press size drag — the picker's
+ * oldest tab, and the one every host declares.
+ *
+ * Content only: the search field, the tab island and the delete button belong to
+ * [PickerPanel], and [query] arrives from it already scoped to this tab. What
+ * stays here is what is genuinely about emoji and would leak into the sticker
+ * tab if the shell owned it (`.claude/plans/image-editor.md` §4):
+ *
+ * - **The frozen recents order.** [recentEmojis] is snapshotted once per
+ *   composition of this tab, so the grid never reorders under the user's finger
+ *   as taps stream into DataStore. Every host disposes the panel on close
+ *   (`AnimatedVisibility` / `ModalBottomSheet` / a conditional), and switching
+ *   tabs disposes this one, so each fresh open re-captures the latest order.
+ * - **The long-press size drag**, with its row-sibling fade — hold an emoji and
+ *   drag up to grow it, which is how the composer sends an oversized emoji.
+ * - **The category rail**, which hides itself while a search is running because
+ *   jumping to a category in a filtered list means nothing.
+ *
+ * The quick-reactions strip is here too, as [EmojiQuickReactions], but it is
+ * drawn *above* the search row rather than inside the tab — the reaction sheet
+ * passes it to [PickerPanel] as a header. It is emoji content living where emoji
+ * content belongs, mounted where the host wants it.
+ *
+ * A pick leaves as a [PickerSelection], not as two loose primitives: a host with
+ * four tabs wires one callback rather than one per tab, and an emoji's size —
+ * which only the long-press drag ever changes — travels with the emoji it
+ * belongs to instead of beside it.
+ */
+@Composable
+internal fun EmojiTab(
+    query: String,
+    recentEmojis: List<String>,
+    onSelection: (PickerSelection.Emoji) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val isSearching = query.isNotBlank()
+
+    val sessionRecents = remember { recentEmojis }
+
+    val gridItems = remember(sessionRecents, query) {
+        if (isSearching) buildSearchResults(query) else buildCategoryGrid(sessionRecents)
+    }
+
+    val categoryHeaderIndices = remember(gridItems) {
+        gridItems.mapIndexedNotNull { idx, item ->
+            (item as? GridItem.Header)?.let { it.categoryIndex to idx }
+        }
+    }
+
+    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
+
+    val activeCategoryIndex by remember(categoryHeaderIndices) {
+        derivedStateOf {
+            val firstVisible = gridState.firstVisibleItemIndex
+            categoryHeaderIndices.lastOrNull { (_, gridIdx) -> gridIdx <= firstVisible }?.first ?: 0
+        }
+    }
+
+    // Long-press size picker state — null means picker is hidden
+    var sizePicker by remember { mutableStateOf<SizePickerState?>(null) }
+
+    // Track cell positions so the size slider can anchor to the pressed cell
+    val cellPositions = remember { mutableMapOf<Int, Offset>() }
+
+    Column(modifier = modifier.fillMaxSize()) {
+        val hasEmojiResults = remember(gridItems) { gridItems.any { it is GridItem.Emoji } }
+        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (isSearching && !hasEmojiResults) {
+                Box(modifier = Modifier.fillMaxWidth().align(Alignment.Center)) {
+                    Text(
+                        text = "No emoji found",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center).padding(16.dp)
+                    )
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(GRID_COLUMNS),
+                    state = gridState,
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    userScrollEnabled = sizePicker == null  // lock scroll during size pick
+                ) {
+                    items(
+                        count = gridItems.size,
+                        span = { index ->
+                            GridItemSpan(if (gridItems[index] is GridItem.Header) GRID_COLUMNS else 1)
+                        }
+                    ) { index ->
+                        when (val item = gridItems[index]) {
+                            is GridItem.Header -> CategoryHeader(item.icon, item.title)
+                            is GridItem.Emoji -> {
+                                val sp = sizePicker
+                                // Siblings in the same row as the held cell fade out
+                                val heldRow = sp?.let { sp.gridItemIndex / GRID_COLUMNS }
+                                val thisRow = index / GRID_COLUMNS
+                                val isSiblingFaded = sp != null &&
+                                    thisRow == heldRow &&
+                                    index != sp.gridItemIndex
+                                val targetAlpha = if (isSiblingFaded) 0f else 1f
+                                val alpha by animateFloatAsState(
+                                    targetValue = targetAlpha,
+                                    animationSpec = tween(150),
+                                    label = "sibling_alpha"
+                                )
+                                EmojiCell(
+                                    emoji = item.emoji,
+                                    modifier = Modifier
+                                        .alpha(alpha)
+                                        .onGloballyPositioned { coords ->
+                                            cellPositions[index] = coords.positionInParent()
+                                        }
+                                        .pointerInput(item.emoji) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = { _ ->
+                                                    val pos = cellPositions[index] ?: Offset.Zero
+                                                    val colIdx = index % GRID_COLUMNS
+                                                    sizePicker = SizePickerState(
+                                                        gridItemIndex = index,
+                                                        emoji = item.emoji,
+                                                        columnIndex = colIdx,
+                                                        cellOffset = pos
+                                                    )
+                                                },
+                                                onDrag = { _, dragAmount ->
+                                                    val sp2 = sizePicker ?: return@detectDragGesturesAfterLongPress
+                                                    // Drag up (negative y) → larger; drag down → smaller
+                                                    val delta = -dragAmount.y / 200f
+                                                    val newSize = (sp2.sizeMultiplier + delta)
+                                                        .coerceIn(SIZE_MIN, SIZE_MAX)
+                                                    // Skip write when already at bounds (avoids recomposition churn)
+                                                    if (newSize != sp2.sizeMultiplier) {
+                                                        sizePicker = sp2.copy(sizeMultiplier = newSize)
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    val sp2 = sizePicker ?: return@detectDragGesturesAfterLongPress
+                                                    onSelection(
+                                                        PickerSelection.Emoji(sp2.emoji, sp2.sizeMultiplier),
+                                                    )
+                                                    sizePicker = null
+                                                },
+                                                onDragCancel = {
+                                                    sizePicker = null
+                                                }
+                                            )
+                                        },
+                                    onClick = {
+                                        onSelection(PickerSelection.Emoji(item.emoji, SIZE_DEFAULT))
+                                    }
+                                )
+                            }
+                            is GridItem.EmptySlot -> EmptySlotCell()
+                        }
+                    }
+                }
+
+                // Size picker overlay — anchored to the held cell
+                sizePicker?.let { sp ->
+                    SizePickerOverlay(
+                        emoji = sp.emoji,
+                        sizeMultiplier = sp.sizeMultiplier,
+                        anchorOffset = sp.cellOffset,
+                        showOnRight = sp.columnIndex < GRID_COLUMNS - 1
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(thickness = 0.5.dp)
+
+        if (!isSearching) {
+            CategoryToolbar(
+                activeCategoryIndex = activeCategoryIndex,
+                onCategoryClick = { catIdx ->
+                    val target = categoryHeaderIndices
+                        .firstOrNull { it.first == catIdx }?.second ?: return@CategoryToolbar
+                    scope.launch { gridState.scrollToItem(target) }
+                }
+            )
+        }
+    }
+}
+
+// ===========================================================================
+// Size picker overlay
+// ===========================================================================
+
+@Composable
+private fun SizePickerOverlay(
+    emoji: String,
+    sizeMultiplier: Float,
+    anchorOffset: Offset,
+    showOnRight: Boolean
+) {
+    val pct = ((sizeMultiplier - SIZE_MIN) / (SIZE_MAX - SIZE_MIN)).coerceIn(0f, 1f)
+    val displaySize = (22 * sizeMultiplier).sp
+
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val xOffset = with(density) {
+        if (showOnRight) (anchorOffset.x + 56.dp.toPx()).roundToInt()
+        else (anchorOffset.x - 120.dp.toPx()).roundToInt()
+    }
+    // Anchor the bottom of the panel at the cell's top so it grows upward as emoji size increases
+    val bottomAnchor = with(density) { anchorOffset.y.roundToInt() }
+    var panelHeight by remember { mutableStateOf(0) }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(xOffset, bottomAnchor - panelHeight) }
+            .wrapContentSize()
+            .onSizeChanged { panelHeight = it.height }
+    ) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            shadowElevation = 6.dp,
+            color = MaterialTheme.colorScheme.surfaceContainer
+        ) {
+            Column(
+                modifier = Modifier.padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Label at top so it is never clipped as the emoji grows larger
+                Text(
+                    text = "↑ drag ↓",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { pct },
+                    modifier = Modifier.width(48.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                    drawStopIndicator = {}  // hide the stop-indicator dot at the right end
+                )
+                Text(
+                    text = "${(sizeMultiplier * 100).roundToInt()}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(text = emoji, fontSize = displaySize)
+            }
+        }
+    }
+}
+
+// ===========================================================================
+// Quick Reactions Row
+// ===========================================================================
+
+/**
+ * The six one-tap reactions and the rule below them, for a host to hand to
+ * [PickerPanel] as its header.
+ *
+ * Above the search row rather than inside the tab, which is where the reaction
+ * sheet has always drawn it — and a `ColumnScope` extension so it can only be
+ * mounted somewhere that stacking makes sense. The size a long-press drag would
+ * have chosen does not apply: a reaction is one grapheme on a message, not a
+ * glyph with a size.
+ */
+@Composable
+internal fun ColumnScope.EmojiQuickReactions(
+    currentReaction: String?,
+    onSelection: (PickerSelection.Emoji) -> Unit,
+) {
+    QuickReactionsRow(
+        currentReaction = currentReaction,
+        onSelect = { emoji -> onSelection(PickerSelection.Emoji(emoji, SIZE_DEFAULT)) },
+    )
+    HorizontalDivider(thickness = 0.5.dp)
+}
+
+@Composable
+private fun QuickReactionsRow(
+    currentReaction: String?,
+    onSelect: (String) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        QUICK_REACTION_EMOJIS.forEach { emoji ->
+            SelectableEmojiBox(
+                icon = emoji,
+                isActive = currentReaction == emoji,
+                onClick = { onSelect(emoji) },
+                modifier = Modifier.size(48.dp),
+                shape = CircleShape,
+                fontSize = 24.sp
+            )
+        }
+    }
+}
+
+// ===========================================================================
+// Grid cells
+// ===========================================================================
+
+@Composable
+private fun CategoryHeader(icon: String, title: String) {
+    Text(
+        text = "$icon $title",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+    )
+}
+
+@Composable
+private fun EmojiCell(
+    emoji: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    BoxWithConstraints(
+        modifier = modifier
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        // Scale the glyph to the cell so emojis are as large as the space
+        // allows while keeping a small gap between neighbours.
+        val emojiSize = with(LocalDensity.current) { (maxWidth * EMOJI_FILL_FRACTION).toSp() }
+        Text(text = emoji, fontSize = emojiSize)
+    }
+}
+
+@Composable
+private fun EmptySlotCell() {
+    Box(
+        modifier = Modifier.aspectRatio(1f),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = "\u00B7",
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+        )
+    }
+}
+
+// ===========================================================================
+// Shared selectable emoji/icon box (used by QuickReactionsRow + CategoryToolbar)
+// ===========================================================================
+
+@Composable
+private fun SelectableEmojiBox(
+    icon: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    shape: Shape = RoundedCornerShape(6.dp),
+    fontSize: TextUnit = 16.sp,
+    activeTextColor: Color = Color.Unspecified,
+    inactiveTextColor: Color = Color.Unspecified
+) {
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(if (isActive) MaterialTheme.colorScheme.primaryContainer else Color.Transparent)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = icon,
+            fontSize = fontSize,
+            color = if (isActive) activeTextColor else inactiveTextColor
+        )
+    }
+}
+
+// ===========================================================================
+// Bottom Category Toolbar
+// ===========================================================================
+
+@Composable
+private fun CategoryToolbar(
+    activeCategoryIndex: Int,
+    onCategoryClick: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        TOOLBAR_ENTRIES.forEach { entry ->
+            SelectableEmojiBox(
+                icon = entry.icon,
+                isActive = entry.categoryIndex == activeCategoryIndex,
+                onClick = { onCategoryClick(entry.categoryIndex) },
+                modifier = Modifier.size(32.dp),
+                activeTextColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                inactiveTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+        }
+    }
+}
+
+// ===========================================================================
+// Grid builders
+// ===========================================================================
+
+private fun buildCategoryGrid(recentEmojis: List<String>): List<GridItem> = buildList {
+    add(GridItem.Header(RECENTS_ICON, "Recents", categoryIndex = 0))
+    val cappedRecents = recentEmojis.take(GRID_COLUMNS * RECENTS_MAX_ROWS)
+    cappedRecents.forEach { add(GridItem.Emoji(it)) }
+    val recentCount = cappedRecents.size
+    val nextFullRow = if (recentCount == 0) GRID_COLUMNS
+        else ((recentCount + GRID_COLUMNS - 1) / GRID_COLUMNS) * GRID_COLUMNS
+    repeat(nextFullRow - recentCount) { add(GridItem.EmptySlot) }
+    addAll(STATIC_CATEGORY_GRID)
+}
+
+private fun buildSearchResults(query: String): List<GridItem> = buildList {
+    add(GridItem.Header("\uD83D\uDD0D", "Results for \"$query\"", categoryIndex = -1))
+    EmojiSearchData.searchEmojis(query).forEach { add(GridItem.Emoji(it)) }
+}

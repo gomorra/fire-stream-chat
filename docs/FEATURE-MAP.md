@@ -1,4 +1,4 @@
-<!-- last-verified: 2026-07-18 -->
+<!-- last-verified: 2026-09-10 -->
 
 # Feature → File Map
 
@@ -113,7 +113,44 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 
 **Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`** or **`DrawImageScreen`**, each of which replaces the preview's content rather than floating over it, flattens its layer once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 
-The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). The overlay screen and the shared picker land in Phase 5 and will extend this table.
+The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below); the overlay screen lands in 5b and will extend this table.
+
+---
+
+## Emoji / Sticker Picker (one shell, several hosts)
+
+One panel mounted from several places, which is why it is a feature of its own rather than
+a detail of any screen. `PickerPanel` owns the chrome — a search control, an island of
+tabs, a delete button for the host's selection — and **implements no content**: what a tab
+shows is the host's business, so a tab's own state stays with the host that has it.
+
+**The island's tabs are declared by the host** (`.claude/plans/image-editor.md` §2.8), and
+a host that declares one tab renders no island at all — so nothing ever ships greyed-out
+and unreachable, and the three pre-existing hosts look exactly as they did before the
+shell existed.
+
+| Host | Tabs | Where |
+|---|---|---|
+| Composer | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)`, with a backspace key |
+| Reaction sheet | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = REACTION)`, with the quick-reactions strip |
+| Caption bar | Emoji | `ImagePreviewScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)` |
+| Editor overlay | Emoji · Sticker · Text · Shapes | Phase 5b — the one host with a selection to delete |
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`GIF` enumerated, declared by nobody) and the `PickerSelection` a tab hands back |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
+| `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the composer, reaction sheet and caption bar call — `EmojiMode` and the two controls that differ by host |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiSearchData.kt` | Bundled emoji → keyword table for in-panel search; no network |
+| `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Owns `recentEmojis` in `OverlaysState` and the DataStore write behind it |
+| `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelTest.kt` | That the one-tab hosts are unchanged by the extraction, and the chrome only a multi-tab host sees |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatInfoManagerRecentEmojiTest.kt` | Recents ordering and the cap, on the manager side of the panel |
+
+**Entry point:** whichever host mounts it. The panel is `internal` and takes no Hilt
+dependency — recents arrive as a `List<String>` and leave as a callback, so every host is
+testable without a ViewModel.
 
 ---
 

@@ -1,4 +1,4 @@
-package com.firestream.chat.ui.chat
+package com.firestream.chat.ui.chat.picker
 
 /**
  * Bundled emoji keyword lookup table for in-panel search (no network required).

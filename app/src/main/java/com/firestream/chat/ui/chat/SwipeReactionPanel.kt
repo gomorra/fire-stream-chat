@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.firestream.chat.ui.chat.picker.QUICK_REACTION_EMOJIS
 
 // Subset of QUICK_REACTION_EMOJIS — skip 😮 for the compact swipe panel
 private val DEFAULT_EMOJIS = QUICK_REACTION_EMOJIS.filter { it != "😮" }

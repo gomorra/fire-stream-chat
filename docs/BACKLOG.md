@@ -21,6 +21,26 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — the picker extraction (Phase 5a, 2026-09-10)
+
+A pure refactor: the ~700-line emoji panel became a shared `ui/chat/picker/` shell
+(`PickerPanel`) plus its emoji content (`EmojiTab`), and `EmojiHandlerPanel` is now a
+one-tab alias over it so the composer, the reaction sheet and the caption bar call
+exactly what they called before. `PickerPanelTest` asserts the structural half — no
+island, no delete button, backspace only where a text field is, the quick strip only on
+the reaction sheet, a frozen recents order. What it cannot assert is the half that is
+**felt**, which is precisely the half a move puts at risk:
+
+- **The long-press size drag still feels the same.** Hold an emoji in the composer and
+  drag up: the size readout, the anchored preview panel, and the fade of the *other*
+  emoji in that row. Release and confirm the emoji is inserted at the size chosen.
+- **The recents block holds still under the finger.** Tap several emoji in quick
+  succession without closing the panel; the Recents row must not reorder while it is open.
+  Close and reopen and confirm the new order has been picked up.
+- **All three hosts are indistinguishable from before.** Composer, reaction sheet
+  (long-press a message) and the caption bar in the send preview — the search field
+  expanded with no island, the category rail at the bottom, and the same panel height.
+
 ### Image editor — the draw screen (Phase 4, 2026-09-10)
 
 **Nothing in this phase has been on hardware either.** More of it is machine-checkable than
@@ -268,10 +288,28 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 - Live location sharing with a configurable duration (15min / 1h / 8h)
 
 ### Stickers & GIFs (4.6)
-- Built-in sticker packs with download/management
-- GIF search via Giphy/Tenor API integration
-- Sticker/GIF picker accessible from the composer
-- Files: new `ui/chat/StickerPicker.kt`, new `data/remote/GiphySource.kt`
+
+**The picker is no longer the missing piece.** Phase 5a of the image editor extracted
+`ui/chat/picker/` — a shell whose tabs are declared by the host, with `PickerTab` already
+enumerating `STICKER` and `GIF` and `PickerSelection` shaped to carry them. What is left
+open is not "a picker" but *sending* a sticker or a GIF as its own message, which is a
+data-model change, and the provider decision a GIF forces:
+
+- **Sticker-as-message** — a new `MessageType.STICKER`, an `AppDatabase` version bump, a
+  sync path and a bubble renderer. Placing a sticker *on a photo* needs none of this and
+  ships with the editor (Phase 5b), because it is flattened into the JPEG.
+- **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
+  impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
+  one frame and a worse sticker (`.claude/plans/image-editor.md` §2.8).
+- **The provider-privacy decision, already made and written down:** sending a Giphy URL
+  makes the recipient's device fetch from Giphy, which tells a third party who received
+  what and hollows out the Signal-Protocol story. For this app only downloading the bytes
+  and re-uploading them as an ordinary media message is consistent — it costs bandwidth
+  and keeps the recipient private.
+- **Downloadable sticker packs** — pack management is its own feature; Phase 5b ships one
+  bundled local pack.
+- Files: `ui/chat/picker/` (exists), new `data/remote/GifSource.kt`, `MessageType`,
+  `AppDatabase`, `MessageBubble.kt`
 
 ### Document sharing enhancements (4.7)
 - In-app document viewer (PDF, images)

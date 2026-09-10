@@ -1,6 +1,6 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phases 1–4 shipped; Phases 5–6 planned, not implemented.** Phase 1 (the
+Status: **Phases 1–4 and 5a shipped; 5b and 6 planned, not implemented.** Phase 1 (the
 toolbar shell, per-image HD and download), Phase 2 (the rasterizer, the fit mapper
 and the live preview-level history) and Phase 3 (the adjust screen) landed on
 2026-09-09; Phase 4 (the draw screen) on 2026-09-10. The rest is still the agreed
@@ -690,11 +690,57 @@ One screen for emoji, stickers, text and shapes, because drag / scale / rotate /
 z-order / delete are the same machinery for all four; splitting them would mean
 writing it four times.
 
-**5a — extract the picker shell first, as its own commit** (§2.8). `ui/chat/picker/`
-gains `PickerPanel` + `EmojiTab` + `PickerTab`/`PickerSelection`; `EmojiHandlerPanel`
-becomes a one-tab alias so the composer, reaction sheet and caption bar are byte-for-
-byte unchanged in behaviour. No new feature in this commit — it is a refactor with a
-test to prove the three existing hosts still behave.
+**5a — extract the picker shell first, as its own commit** (§2.8).  ✅ shipped 2026-09-10
+
+`ui/chat/picker/` gains `PickerPanel` + `EmojiTab` + `PickerTab`/`PickerSelection`;
+`EmojiHandlerPanel` becomes a one-tab alias so the composer, reaction sheet and caption
+bar are byte-for-byte unchanged in behaviour. No new feature in this commit — it is a
+refactor with a test to prove the three existing hosts still behave.
+
+Five departures from the bullets below were taken during implementation and are
+**flagged here for sign-off rather than settled**:
+
+1. **The two host-varying controls are slots the caller fills, not fields the shell
+   knows.** §4 names four behaviours as emoji-*tab* concerns rather than shell
+   concerns, and warns that putting any of them in `PickerPanel` is the wrong seam.
+   Two of them — the frozen `sessionRecents` order and the long-press size drag with
+   its row-sibling fade — moved into `EmojiTab` unchanged, exactly as written. The
+   other two are drawn *outside* the tab's own box: the quick-reactions row sits
+   **above** the search row and the backspace key **at the end of** it, so moving
+   them into the tab literally would have moved them on screen, which is the one
+   thing this commit promised not to do. They are `header` and `searchTrailing`
+   slots instead. The seam §4 actually cares about holds: `PickerPanel` still knows
+   nothing about a backspace or a reaction, and neither can leak into the sticker
+   tab, because the shell cannot name either of them.
+2. **A one-tab host renders no search *button* either.** §2.8 says it renders "just
+   the search button", but with no island to hide there is nothing a collapsed field
+   buys, and collapsing would have been a visible change to three screens the
+   refactor exists not to touch. The field is simply always expanded there — which is
+   what the same sentence's "look exactly as they do today" actually requires.
+3. **The query is one string keyed on the active tab, not a per-tab map.** §2.8 asks
+   for "per-tab state with a per-tab placeholder, never one shared string", and
+   `rememberSaveable(active) { mutableStateOf("") }` is exactly that in one line: a
+   switch arrives at that tab's own empty field asking that tab's own question, and a
+   query can never follow you somewhere it means nothing. A map keyed by tab would
+   also have *restored* the old query on return, which the collapse rule makes moot —
+   the field's × clears as well as collapses, because a filter still running behind a
+   field that is no longer on screen is a tab that looks broken.
+4. **`PickerSelection` ships with only its `Emoji` subtype**, and `EmojiTab`
+   emits it rather than handing back two loose primitives — so the type §2.8
+   asks for is live code from the first commit rather than a shape waiting for
+   a user. The alias unpacks it again for the three hosts, which is what keeps
+   their call sites untouched. On the subtype itself: Same rule Phase 2
+   applied to `RasterOp` and for the same reason: a selection's shape is a decision
+   the phase that designs the tab's UI has to make, and the hierarchy is one file so
+   adding a subtype stays local.
+5. **`EmojiHandlerPanel.kt` stays in `ui/chat/`.** The alias could have moved to the
+   picker package, but leaving it where it is means the three call sites are untouched
+   by a single character — which is what makes a regression in the move bisectable
+   away from anything else.
+
+`PickerPanelTest` covers the structural half (no island, no delete button, backspace
+and quick strip only where they belong, a frozen recents order, and the multi-tab
+chrome). The felt half is on the device pass.
 
 **Verify on device before calling 5a done.** The behaviour most at risk in the
 move is felt, not asserted: the long-press size drag with its row-sibling fade,
