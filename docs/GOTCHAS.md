@@ -48,6 +48,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   ```
   Anything approaching 256 is a rebuild of this crash. Nothing else in the app is
   close: the next highest is `PollBubble` at 185.
+
+  Scripting that sweep across all `classes*.dex` is the practical form of it — but
+  **`dexdump`'s output is not valid UTF-8** (it prints raw string-pool bytes), so a
+  reader that decodes strictly dies partway through with `UnicodeDecodeError` on a
+  byte like `0xc0`. Decode with `errors="replace"`; the `registers:` lines are ASCII
+  and survive intact.
 - **Local-vs-remote image model: synchronous `remember`, not `produceState`.** For
   `AsyncImage` sources that prefer a local file over a URL, resolve with
   `remember(localUri) { File(it).takeIf { exists() && isFile && canRead() } }`.
