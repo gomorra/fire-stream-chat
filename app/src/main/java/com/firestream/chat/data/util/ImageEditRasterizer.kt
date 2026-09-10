@@ -3,15 +3,27 @@ package com.firestream.chat.data.util
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.BlendMode
 import android.graphics.Matrix
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.VisibleForTesting
 import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.PathSink
 import com.firestream.chat.domain.util.PixelRect
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
+import com.firestream.chat.domain.util.SourceImage
+import com.firestream.chat.domain.util.Stroke
+import com.firestream.chat.domain.util.StrokeGeometry
+import com.firestream.chat.domain.util.StrokeTool
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -138,15 +150,8 @@ class ImageEditRasterizer @Inject constructor(
     suspend fun rasterize(source: Uri, ops: List<RasterOp>, liveSteps: Set<Uri>): Uri =
         processingLimiter.withPermit {
             withContext(Dispatchers.IO) {
-                var bitmap = decodeCapped(source)
+                val bitmap = decodeAndApply(source, ops, ImageEditGeometry.WORKING_MAX_DIMENSION)
                 try {
-                    for (op in ops) {
-                        val next = applyOp(bitmap, op)
-                        if (next !== bitmap) {
-                            bitmap.recycle()
-                            bitmap = next
-                        }
-                    }
                     val output = File(editsDir, "edit_${System.currentTimeMillis()}_${sequence.incrementAndGet()}.jpg")
                     // Registered before the bytes exist, so a concurrent
                     // rasterize's eviction can never pick it up mid-write.
@@ -169,6 +174,41 @@ class ImageEditRasterizer @Inject constructor(
         }
 
     /**
+     * [ops] applied to [source] at a long edge of at most [maxDimension], as a
+     * bitmap that is never written to disk — what an editor screen displays
+     * while the user is still deciding.
+     *
+     * The same decode and the same [applyOp] the real [rasterize] runs, at
+     * screen resolution instead of working resolution. That sharing is the
+     * whole point: a preview computed by a second implementation would be a
+     * second chance to get a rotation's direction or a crop's origin wrong, and
+     * the screen would look right while the file came out wrong. What the user
+     * sees here is what Done writes, scaled.
+     *
+     * Takes a permit like [rasterize] does — a screen-sized bitmap is small,
+     * but the *decode* still momentarily holds the source at its capped size.
+     * Returns null rather than throwing when the URI cannot be read, so a
+     * revoked gallery permission closes the editor instead of crashing it.
+     */
+    suspend fun preview(source: Uri, ops: List<RasterOp>, maxDimension: Int): Bitmap? =
+        processingLimiter.withPermit {
+            withContext(Dispatchers.IO) {
+                val ceiling = maxDimension.coerceIn(1, ImageEditGeometry.WORKING_MAX_DIMENSION)
+                runCatching { decodeAndApply(source, ops, ceiling) }.getOrNull()
+            }
+        }
+
+    /**
+     * [source]'s own pixel dimensions and file size, read from its header —
+     * the numbers the adjust screen labels its resize presets from.
+     *
+     * Header-only, so it allocates no bitmap and takes no permit, exactly as
+     * [estimateSize] does. Null when the URI cannot be read at all.
+     */
+    suspend fun probeSource(source: Uri): SourceImage? =
+        withContext(Dispatchers.IO) { probe(source) }
+
+    /**
      * Output dimensions and approximate encoded size for sending [source] with
      * [hd] on or off, or null when the URI cannot be read at all — the sheet
      * then renders its rows without a size line rather than with a confident
@@ -185,7 +225,7 @@ class ImageEditRasterizer @Inject constructor(
             ImageEditGeometry.estimatedSize(
                 width = header.width,
                 height = header.height,
-                sourceBytes = header.sourceBytes,
+                sourceBytes = header.bytes,
                 hd = hd,
                 standardMaxDimension = ImageCompressor.MAX_DIMENSION,
             )
@@ -287,15 +327,39 @@ class ImageEditRasterizer @Inject constructor(
         }
     }
 
-    /** Decodes [source] with its long edge capped at [ImageEditGeometry.WORKING_MAX_DIMENSION]. */
-    private fun decodeCapped(source: Uri): Bitmap {
+    /**
+     * Decodes [source] at [ceiling] and folds [ops] into it, recycling each
+     * intermediate as it goes so only one full bitmap is ever resident.
+     *
+     * The single interpretation of an op list, shared by [rasterize] and
+     * [preview] — see [preview] for why that sharing is not merely tidy.
+     */
+    private fun decodeAndApply(source: Uri, ops: List<RasterOp>, ceiling: Int): Bitmap {
+        var bitmap = decodeCapped(source, ceiling)
+        for (op in ops) {
+            val next = applyOp(bitmap, op)
+            if (next !== bitmap) {
+                bitmap.recycle()
+                bitmap = next
+            }
+        }
+        return bitmap
+    }
+
+    /** Decodes [source] with its long edge capped at [ceiling]. */
+    private fun decodeCapped(source: Uri, ceiling: Int): Bitmap {
         val decoderSource = ImageDecoder.createSource(context.contentResolver, source)
         return ImageDecoder.decodeBitmap(decoderSource) { decoder, info, _ ->
             // Software allocation because the ops below read and re-encode these
             // pixels; a hardware bitmap cannot be read back.
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            decoder.isMutableRequired = false
-            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height)
+            // Mutable so a drawing can be painted straight into the decode
+            // rather than into a copy of it. The draw screen's whole op list is
+            // a single `RasterOp.Strokes`, so this is the difference between one
+            // working-resolution bitmap resident and two.
+            decoder.isMutableRequired = true
+            val (width, height) =
+                ImageEditGeometry.cappedSize(info.size.width, info.size.height, ceiling)
             if (width > 0 && height > 0) decoder.setTargetSize(width, height)
         }
     }
@@ -318,6 +382,32 @@ class ImageEditRasterizer @Inject constructor(
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         }
 
+        is RasterOp.Straighten -> {
+            val degrees = op.degrees.coerceIn(
+                -ImageEditGeometry.STRAIGHTEN_LIMIT,
+                ImageEditGeometry.STRAIGHTEN_LIMIT,
+            )
+            val (width, height) =
+                ImageEditGeometry.straightenSize(bitmap.width, bitmap.height, degrees)
+            if (width == bitmap.width && height == bitmap.height) {
+                bitmap
+            } else {
+                // Drawn into an output the size of the inscribed rectangle rather
+                // than rotated into a larger canvas and cropped afterwards: the
+                // two-step version would hold the expanded bitmap *and* the crop
+                // at once, which is the allocation the working-resolution ceiling
+                // exists to keep off the heap.
+                val output = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                val matrix = Matrix().apply {
+                    postTranslate(-bitmap.width / 2f, -bitmap.height / 2f)
+                    postRotate(degrees)
+                    postTranslate(width / 2f, height / 2f)
+                }
+                Canvas(output).drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+                output
+            }
+        }
+
         is RasterOp.Crop -> {
             val rect: PixelRect = ImageEditGeometry.cropRect(bitmap.width, bitmap.height, op)
             if (rect.width == bitmap.width && rect.height == bitmap.height) {
@@ -335,9 +425,153 @@ class ImageEditRasterizer @Inject constructor(
                 Bitmap.createScaledBitmap(bitmap, width, height, true)
             }
         }
+
+        is RasterOp.Strokes ->
+            if (op.strokes.isEmpty()) bitmap else drawStrokes(bitmap, op.strokes)
     }
 
-    private fun probe(source: Uri): Probe? = try {
+    /**
+     * Paints a drawing into [bitmap] and returns the result — the flatten half
+     * of what the draw screen has been showing live.
+     *
+     * Both layers come from [StrokeGeometry], which is also what the editor's
+     * Compose preview draws from, so the two renderers cannot disagree about
+     * how wide a stroke is or where its curve runs. Only the *painting* is
+     * written twice, and only because there is no path object the two graphics
+     * stacks share.
+     *
+     * Drawn in place when the decode handed back a mutable bitmap, which is the
+     * ordinary case: a copy at working resolution is another 64 MB resident
+     * beside the original.
+     */
+    private fun drawStrokes(bitmap: Bitmap, strokes: List<Stroke>): Bitmap {
+        val output = if (bitmap.isMutable) {
+            bitmap
+        } else {
+            bitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return bitmap
+        }
+        val canvas = Canvas(output)
+        val longEdge = maxOf(output.width, output.height).toFloat()
+        val layers = StrokeGeometry.layers(strokes)
+
+        if (layers.blur.isNotEmpty()) {
+            // The mosaic is computed from the photo as it arrived, not from the
+            // canvas as it stands: blur redacts the image, and it must not be
+            // able to redact an arrow the user drew pointing at what it hides.
+            // Painted strokes go on afterwards for the same reason.
+            val mosaic = pixelate(bitmap)
+            try {
+                // One layer for every blur stroke at once. The strokes are the
+                // mask and the mosaic is drawn through them with SRC_IN, which
+                // is what makes overlapping strokes reveal the same pixels
+                // rather than compounding into something darker.
+                val saved = canvas.saveLayer(null, null)
+                val mask = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+                for (stroke in layers.blur) paintStroke(canvas, stroke, mask, longEdge, output)
+                canvas.drawBitmap(
+                    mosaic,
+                    null,
+                    Rect(0, 0, output.width, output.height),
+                    Paint().apply {
+                        // Nearest-neighbour on the way back up: this is what makes
+                        // the mosaic read as blocks rather than as a soft blur, and
+                        // it is the half of "pixelate" that does the redacting.
+                        isFilterBitmap = false
+                        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                    },
+                )
+                canvas.restoreToCount(saved)
+            } finally {
+                if (mosaic !== bitmap) mosaic.recycle()
+            }
+        }
+
+        for (stroke in layers.painted) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = stroke.colorArgb.toInt()
+                // After the colour, deliberately: this overwrites whatever alpha
+                // the stored ARGB carried, so a highlighter is translucent by
+                // virtue of being a highlighter and not by virtue of its swatch.
+                alpha = (StrokeGeometry.alphaFor(stroke.tool) * 255f).roundToInt().coerceIn(0, 255)
+                if (stroke.tool == StrokeTool.HIGHLIGHTER) blendMode = BlendMode.MULTIPLY
+            }
+            paintStroke(canvas, stroke, paint, longEdge, output)
+        }
+        return output
+    }
+
+    /** One stroke — a round-capped path, or a dot when the finger never moved. */
+    private fun paintStroke(canvas: Canvas, stroke: Stroke, paint: Paint, longEdge: Float, target: Bitmap) {
+        val width = StrokeGeometry.widthPx(stroke.width, longEdge)
+        if (StrokeGeometry.isDot(stroke)) {
+            val point = stroke.points.first()
+            val dot = Paint(paint).apply { style = Paint.Style.FILL }
+            canvas.drawCircle(point.x * target.width, point.y * target.height, width / 2f, dot)
+            return
+        }
+        val path = Path()
+        StrokeGeometry.buildPath(
+            points = stroke.points,
+            scaleX = target.width.toFloat(),
+            scaleY = target.height.toFloat(),
+            offsetX = 0f,
+            offsetY = 0f,
+            sink = object : PathSink {
+                override fun moveTo(x: Float, y: Float) = path.moveTo(x, y)
+                override fun lineTo(x: Float, y: Float) = path.lineTo(x, y)
+                override fun quadTo(controlX: Float, controlY: Float, x: Float, y: Float) =
+                    path.quadTo(controlX, controlY, x, y)
+            },
+        )
+        canvas.drawPath(
+            path,
+            Paint(paint).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = width
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            },
+        )
+    }
+
+    /**
+     * The downscaled copy a blur stroke reveals — [StrokeGeometry.PIXELATE_BLOCKS]
+     * blocks across the long edge. Callers scale it back up with
+     * nearest-neighbour filtering; keeping it small is what makes the editor's
+     * preview and the flatten produce the *same* blocks at their own sizes.
+     *
+     * **Halved repeatedly rather than scaled straight down**, and that is the
+     * difference between a redaction and a decoration: a single 85× bilinear
+     * downscale samples four neighbours per output pixel, so fine detail
+     * survives as aliasing instead of being averaged away — a striped or
+     * textured region would come back as a pattern rather than as a flat block.
+     * Halving averages every source pixel into the result.
+     *
+     * Public so the editor's live preview reveals the mosaic this produces
+     * rather than computing a second one of its own.
+     */
+    fun pixelate(bitmap: Bitmap): Bitmap {
+        val (targetWidth, targetHeight) =
+            StrokeGeometry.pixelatedSize(bitmap.width, bitmap.height)
+        if (targetWidth >= bitmap.width || targetHeight >= bitmap.height) {
+            // Already at or below the mosaic's own resolution. An independent
+            // copy, because every caller recycles what this hands back.
+            return bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+        }
+        var stage = bitmap
+        var owned = false
+        while (stage.width / 2 > targetWidth && stage.height / 2 > targetHeight) {
+            val next = Bitmap.createScaledBitmap(stage, stage.width / 2, stage.height / 2, true)
+            if (owned) stage.recycle()
+            stage = next
+            owned = true
+        }
+        val mosaic = Bitmap.createScaledBitmap(stage, targetWidth, targetHeight, true)
+        if (owned && mosaic !== stage) stage.recycle()
+        return mosaic
+    }
+
+    private fun probe(source: Uri): SourceImage? = try {
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(source)?.use {
             BitmapFactory.decodeStream(it, null, options)
@@ -345,7 +579,7 @@ class ImageEditRasterizer @Inject constructor(
         if (options.outWidth <= 0 || options.outHeight <= 0) {
             null
         } else {
-            Probe(options.outWidth, options.outHeight, sourceBytes(source))
+            SourceImage(options.outWidth, options.outHeight, sourceBytes(source))
         }
     } catch (_: Exception) {
         null
@@ -371,9 +605,6 @@ class ImageEditRasterizer @Inject constructor(
         val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
         return if (file.parentFile == dir) file else null
     }
-
-    /** Header facts about a source image: enough to estimate, not enough to decode. */
-    private data class Probe(val width: Int, val height: Int, val sourceBytes: Long)
 
     companion object {
         /** Subdirectory of `cacheDir` holding every rasterized step. */

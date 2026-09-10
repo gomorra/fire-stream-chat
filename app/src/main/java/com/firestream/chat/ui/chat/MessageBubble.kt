@@ -416,462 +416,17 @@ internal fun MessageBubble(
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
-                    when (message.type) {
-                        MessageType.IMAGE -> {
-                            val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
-                                message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
-                            } else {
-                                4f / 3f // fallback for old messages without dimensions
-                            }
-
-                            val imageModel = rememberMessageImageModel(message)
-
-                            Box(
-                                modifier = Modifier
-                                    .widthIn(max = 280.dp)
-                                    .then(
-                                        if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
-                                        else Modifier
-                                    )
-                                    .heightIn(min = 100.dp, max = 400.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .combinedClickable(
-                                        onClick = {
-                                            val clickUrl = message.localUri ?: message.mediaUrl
-                                            clickUrl?.let { callbacks.onImageClick(it) }
-                                        },
-                                        onLongClick = { showMenu = true }
-                                    )
-                            ) {
-                                if (imageModel != null) {
-                                    AsyncImage(
-                                        model = imageModel,
-                                        contentDescription = "Image",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                        error = rememberVectorPainter(Icons.Default.BrokenImage)
-                                    )
-
-                                    // Upload progress overlay
-                                    val progress = state.uploadProgress
-                                    if (progress != null && progress < 1f) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(8.dp)
-                                                .size(28.dp)
-                                                .background(
-                                                    color = Color.Black.copy(alpha = 0.5f),
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                progress = { progress },
-                                                modifier = Modifier.size(20.dp),
-                                                color = Color.White,
-                                                strokeWidth = 2.dp
-                                            )
-                                        }
-                                    }
-
-                                    // Failed-send retry overlay. Suppressed while a retry is in
-                                    // flight (uploadProgress != null) so it doesn't fight the
-                                    // progress spinner.
-                                    val onRetry = callbacks.onRetrySend
-                                    if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .matchParentSize()
-                                                .background(Color.Black.copy(alpha = 0.35f))
-                                                .clickable { onRetry() },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(48.dp)
-                                                        .background(
-                                                            color = Color.Black.copy(alpha = 0.6f),
-                                                            shape = CircleShape
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Refresh,
-                                                        contentDescription = "Retry sending",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(28.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                                Text(
-                                                    text = "Failed to send",
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.labelSmall
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.BrokenImage,
-                                            contentDescription = "Image unavailable",
-                                            modifier = Modifier.size(40.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                            if (message.content.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = message.content,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        lineHeightStyle = CenteredLineHeight
-                                    ),
-                                    color = textColor
-                                )
-                            }
-                        }
-                        MessageType.VIDEO -> {
-                            val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
-                                message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
-                            } else {
-                                4f / 3f // fallback for old messages without dimensions
-                            }
-
-                            val videoThumbModel = rememberMessageVideoThumbModel(message)
-                            val progress = state.uploadProgress
-                            // Hide the play affordance while an upload is in flight — the
-                            // progress ring is the only interactive overlay in that state.
-                            val showPlayButton = progress == null || progress >= 1f
-
-                            Box(
-                                modifier = Modifier
-                                    .widthIn(max = 280.dp)
-                                    .then(
-                                        if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
-                                        else Modifier
-                                    )
-                                    .heightIn(min = 100.dp, max = 400.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .combinedClickable(
-                                        onClick = {
-                                            val clickUrl = message.localUri ?: message.mediaUrl
-                                            clickUrl?.let { callbacks.onVideoClick(it) }
-                                        },
-                                        onLongClick = { showMenu = true }
-                                    )
-                            ) {
-                                if (videoThumbModel != null) {
-                                    AsyncImage(
-                                        model = videoThumbModel,
-                                        contentDescription = "Video",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                        error = rememberVectorPainter(Icons.Default.BrokenImage)
-                                    )
-
-                                    if (showPlayButton) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.Center)
-                                                .size(48.dp)
-                                                .background(
-                                                    color = Color.Black.copy(alpha = 0.45f),
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Default.PlayArrow,
-                                                contentDescription = "Play video",
-                                                tint = Color.White,
-                                                modifier = Modifier.size(28.dp)
-                                            )
-                                        }
-                                    }
-
-                                    val durationSeconds = message.duration
-                                    if (durationSeconds != null && durationSeconds > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomStart)
-                                                .padding(6.dp)
-                                                .clip(RoundedCornerShape(4.dp))
-                                                .background(Color.Black.copy(alpha = 0.55f))
-                                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text(
-                                                text = formatDuration(durationSeconds),
-                                                color = Color.White,
-                                                style = MaterialTheme.typography.labelSmall
-                                            )
-                                        }
-                                    }
-
-                                    // Upload progress overlay
-                                    if (progress != null && progress < 1f) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.BottomEnd)
-                                                .padding(8.dp)
-                                                .size(28.dp)
-                                                .background(
-                                                    color = Color.Black.copy(alpha = 0.5f),
-                                                    shape = CircleShape
-                                                ),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            CircularProgressIndicator(
-                                                progress = { progress },
-                                                modifier = Modifier.size(20.dp),
-                                                color = Color.White,
-                                                strokeWidth = 2.dp
-                                            )
-                                        }
-                                    }
-
-                                    // Failed-send retry overlay. Suppressed while a retry is in
-                                    // flight (uploadProgress != null) so it doesn't fight the
-                                    // progress spinner.
-                                    val onRetry = callbacks.onRetrySend
-                                    if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
-                                        Box(
-                                            modifier = Modifier
-                                                .matchParentSize()
-                                                .background(Color.Black.copy(alpha = 0.35f))
-                                                .clickable { onRetry() },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(48.dp)
-                                                        .background(
-                                                            color = Color.Black.copy(alpha = 0.6f),
-                                                            shape = CircleShape
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Refresh,
-                                                        contentDescription = "Retry sending",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(28.dp)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.height(6.dp))
-                                                Text(
-                                                    text = "Failed to send",
-                                                    color = Color.White,
-                                                    style = MaterialTheme.typography.labelSmall
-                                                )
-                                            }
-                                        }
-                                    }
-                                } else {
-                                    Box(
-                                        modifier = Modifier.fillMaxSize(),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.BrokenImage,
-                                            contentDescription = "Video unavailable",
-                                            modifier = Modifier.size(40.dp),
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-                            if (message.content.isNotBlank()) {
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = message.content,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        lineHeightStyle = CenteredLineHeight
-                                    ),
-                                    color = textColor
-                                )
-                            }
-                        }
-                        MessageType.VOICE -> {
-                            VoiceMessagePlayer(
-                                mediaUrl = message.mediaUrl,
-                                durationSeconds = message.duration ?: 0,
-                                textColor = textColor
-                            )
-                        }
-                        MessageType.DOCUMENT -> {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.AttachFile,
-                                    contentDescription = null,
-                                    tint = textColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = message.content,
-                                    color = textColor,
-                                    style = MaterialTheme.typography.bodyMedium.copy(
-                                        lineHeightStyle = CenteredLineHeight
-                                    )
-                                )
-                            }
-                        }
-                        MessageType.CALL -> {
-                            val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
-                            val isMissed = !isOwnMessage && endReason == "timeout"
-                            val isDeclined = !isOwnMessage && endReason == "declined"
-                            val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
-                            val callIcon = when {
-                                isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed
-                                else -> Icons.Default.Call
-                            }
-                            val callLabel = when {
-                                isOwnMessage && endReason == "timeout" -> "No answer"
-                                isOwnMessage && endReason == "declined" -> "Declined"
-                                isOwnMessage -> "Outgoing call"
-                                isMissed -> "Missed call"
-                                isDeclined -> "Declined"
-                                else -> "Incoming call"
-                            }
-                            val durationSeconds = message.duration ?: 0
-                            val callDetail = when {
-                                durationSeconds > 0 -> {
-                                    val m = durationSeconds / 60
-                                    val s = durationSeconds % 60
-                                    if (m > 0) "${m}m ${s}s" else "${s}s"
-                                }
-                                else -> null
-                            }
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = callIcon,
-                                    contentDescription = null,
-                                    tint = callColor,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = callLabel,
-                                        color = callColor,
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            lineHeightStyle = CenteredLineHeight
-                                        )
-                                    )
-                                    if (callDetail != null) {
-                                        Text(
-                                            text = callDetail,
-                                            color = callColor.copy(alpha = 0.7f),
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
-                                    }
-                                    Text(
-                                        text = formatTimestamp(message.timestamp),
-                                        color = callColor.copy(alpha = 0.6f),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
-                                }
-                            }
-                        }
-                        MessageType.LOCATION -> {
-                            LocationBubbleContent(
-                                latitude = message.latitude,
-                                longitude = message.longitude,
-                                comment = message.content,
-                                isOwnMessage = isOwnMessage
-                            )
-                        }
-                        MessageType.TIMER -> {
-                            TimerBubbleContent(
-                                message = message,
-                                textColor = textColor,
-                                onPauseTimer = callbacks.onPauseTimer,
-                                onResumeTimer = callbacks.onResumeTimer,
-                            )
-                        }
-                        else -> {
-                            val isEmojiOnlyMsg = remember(message.content) { isEmojiOnly(message.content) }
-                            if (isEmojiOnlyMsg) {
-                                val baseSize = MaterialTheme.typography.bodyMedium.fontSize
-                                val emojiOnlySize = baseSize * EMOJI_ONLY_SCALE
-                                val sized = remember(message.content, emojiOnlySize, message.emojiSizes) {
-                                    addEmojiSpans(message.content, emojiOnlySize, message.emojiSizes)
-                                }
-                                Text(
-                                    text = sized,
-                                    fontSize = emojiOnlySize,
-                                    lineHeight = emojiOnlySize * 1.2f,
-                                    color = textColor,
-                                    style = LocalTextStyle.current.copy(
-                                        lineHeightStyle = CenteredLineHeight
-                                    )
-                                )
-                            } else {
-                            val highlightColor = MaterialTheme.colorScheme.primary
-                            val linkUrl = linkPreview?.url
-                            val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
-                                val base = MentionFormatter.formatMentionText(
-                                    text = message.content,
-                                    mentions = message.mentions,
-                                    currentUserId = currentUserId,
-                                    highlightColor = highlightColor,
-                                    userIdToDisplayName = userIdToDisplayName
-                                )
-                                if (linkUrl != null) {
-                                    val idx = base.text.indexOf(linkUrl)
-                                    if (idx >= 0) buildAnnotatedString {
-                                        append(base.subSequence(0, idx))
-                                        withLink(LinkAnnotation.Url(
-                                            url = linkUrl,
-                                            styles = TextLinkStyles(SpanStyle(
-                                                fontSize = 12.sp,
-                                                color = textColor.copy(alpha = 0.85f),
-                                                textDecoration = TextDecoration.Underline
-                                            ))
-                                        )) { append(linkUrl) }
-                                        if (idx + linkUrl.length < base.length)
-                                            append(base.subSequence(idx + linkUrl.length, base.length))
-                                    } else base
-                                } else base
-                            }
-                            val emojiInlineSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE
-                            val displayTextWithEmojis = remember(displayText, emojiInlineSize, message.emojiSizes) {
-                                addEmojiSpans(displayText, emojiInlineSize, message.emojiSizes)
-                            }
-                            Text(
-                                text = displayTextWithEmojis,
-                                color = textColor,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    lineHeightStyle = CenteredLineHeight
-                                )
-                            )
-                            } // end non-emoji-only branch
-                            if (message.editedAt != null) {
-                                Text(
-                                    text = "(edited)",
-                                    color = textColor.copy(alpha = 0.6f),
-                                    style = MaterialTheme.typography.labelSmall
-                                )
-                            }
-                            if (linkPreview != null) {
-                                Spacer(modifier = Modifier.height(6.dp))
-                                LinkPreviewCard(
-                                    preview = linkPreview,
-                                    textColor = textColor,
-                                    onImageClick = callbacks.onPreviewImageClick.takeIf { linkPreview.imageUrl != null }
-                                )
-                            }
-                        }
-                    }
+                    MessageBubbleBody(
+                        message = message,
+                        isOwnMessage = isOwnMessage,
+                        linkPreview = linkPreview,
+                        currentUserId = currentUserId,
+                        userIdToDisplayName = userIdToDisplayName,
+                        textColor = textColor,
+                        callbacks = callbacks,
+                        state = state,
+                        onLongPress = { showMenu = true },
+                    )
 
                     if (showTail) {
                     Row(
@@ -971,130 +526,14 @@ internal fun MessageBubble(
                 }
             }
 
-            DropdownMenu(expanded = showMenu && message.deletedAt == null, onDismissRequest = { showMenu = false }) {
-                Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                    FilledTonalButton(
-                        onClick = { showMenu = false; callbacks.onReply() },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.Reply, null, modifier = Modifier.padding(end = 4.dp))
-                        Text("Reply")
-                    }
-                    FilledTonalButton(
-                        onClick = { showMenu = false; callbacks.onReaction() },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    ) {
-                        Icon(Icons.Default.EmojiEmotions, null, modifier = Modifier.padding(end = 4.dp))
-                        Text("React")
-                    }
-                    FilledTonalButton(
-                        onClick = { showMenu = false; callbacks.onForward() },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    ) {
-                        Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
-                        Text("Forward")
-                    }
-                    callbacks.onSaveImage?.let {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; it() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.Download, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Save image")
-                        }
-                    }
-                    if (copyableText != null) {
-                        FilledTonalButton(
-                            onClick = {
-                                showMenu = false
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText("Message", copyableText))
-                                // API 33+ shows a system clipboard confirmation; avoid the duplicate toast.
-                                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                                    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.ContentCopy, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Copy text")
-                        }
-                    }
-                    FilledTonalButton(
-                        onClick = { showMenu = false; callbacks.onStar() },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    ) {
-                        Icon(Icons.Default.Star, null, modifier = Modifier.padding(end = 4.dp))
-                        Text(if (message.isStarred) "Unstar" else "Star")
-                    }
-                    FilledTonalButton(
-                        onClick = { showMenu = false; callbacks.onPin() },
-                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                    ) {
-                        Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
-                        Text(if (message.isPinned) "Unpin" else "Pin")
-                    }
-                    callbacks.onCancelTimer?.let {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; it() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.AlarmOff, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Cancel timer")
-                        }
-                    }
-                    if (state.hasReminder && callbacks.onCancelReminder != null) {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; callbacks.onCancelReminder.invoke() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.NotificationsOff, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Cancel reminder")
-                        }
-                    } else {
-                        callbacks.onSnooze?.let {
-                            FilledTonalButton(
-                                onClick = { showMenu = false; it() },
-                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                            ) {
-                                Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp))
-                                Text("Reminder")
-                            }
-                        }
-                    }
-                    callbacks.onEdit?.let {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; it() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.Edit, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Edit")
-                        }
-                    }
-                    callbacks.onInfo?.let {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; it() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
-                        ) {
-                            Icon(Icons.Default.Info, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Message Info")
-                        }
-                    }
-                    callbacks.onDelete?.let {
-                        FilledTonalButton(
-                            onClick = { showMenu = false; it() },
-                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                            colors = ButtonDefaults.filledTonalButtonColors(
-                                containerColor = MaterialTheme.colorScheme.errorContainer,
-                                contentColor = MaterialTheme.colorScheme.onErrorContainer
-                            )
-                        ) {
-                            Icon(Icons.Default.Delete, null, modifier = Modifier.padding(end = 4.dp))
-                            Text("Delete for everyone")
-                        }
-                    }
-                }
-            }
+            MessageContextMenu(
+                expanded = showMenu,
+                onDismiss = { showMenu = false },
+                message = message,
+                copyableText = copyableText,
+                callbacks = callbacks,
+                state = state,
+            )
 
             // Reply icon: fixed 8dp gap left of bubble, vertically centered
             SwipeActionIcon(
@@ -1318,5 +757,650 @@ private fun rememberMessageVideoThumbModel(message: Message): Any? {
         localFile != null -> rememberVideoFrameRequest(localFile)
         message.mediaThumbnailUrl != null -> message.mediaThumbnailUrl
         else -> null
+    }
+}
+
+/**
+ * Everything inside the bubble that depends on what kind of message it is —
+ * the image, the video, the voice note, the location, the file, the poll and
+ * the text with its link preview.
+ *
+ * ### Why this is not inlined into [MessageBubble]
+ *
+ * It used to be, and that is what made every debug build crash on opening a
+ * chat. ART verifies a class when it is first loaded and rejects a method whose
+ * register pressure is too high, throwing `VerifyError` at that moment rather
+ * than at compile time — so the failure surfaces as a chat that will not open,
+ * on a build the tests have already passed. Robolectric runs on the JVM, which
+ * has no dex verifier, so nothing under `app/src/test/` can see it, and R8
+ * shrinks the release build enough to hide it: the crash appears only in debug,
+ * only on a device. `MessageBubble` had grown into a single ~900-line
+ * composable compiling to a method that needed **296 registers**, and the crash
+ * named `v288`.
+ *
+ * This is the second time. `00b15da` fixed it by collapsing ten parameters into
+ * [MessageBubbleCallbacks]; that bought headroom and the file grew back into it.
+ * What the recurrence adds is that the parameter count was only the visible
+ * half — the **body** counts too, and one composable holding a `when` over every
+ * message type will reach the ceiling again however few parameters it takes.
+ *
+ * See `docs/GOTCHAS.md` for how to check it without a device: read the register
+ * count straight out of the built dex.
+ */
+@Composable
+private fun MessageBubbleBody(
+    message: Message,
+    isOwnMessage: Boolean,
+    linkPreview: LinkPreview?,
+    currentUserId: String,
+    userIdToDisplayName: Map<String, String>,
+    textColor: Color,
+    callbacks: MessageBubbleCallbacks,
+    state: MessageBubbleState,
+    onLongPress: () -> Unit,
+) {
+        when (message.type) {
+            MessageType.IMAGE -> {
+                val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
+                    message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
+                } else {
+                    4f / 3f // fallback for old messages without dimensions
+                }
+
+                val imageModel = rememberMessageImageModel(message)
+
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .then(
+                            if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
+                            else Modifier
+                        )
+                        .heightIn(min = 100.dp, max = 400.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .combinedClickable(
+                            onClick = {
+                                val clickUrl = message.localUri ?: message.mediaUrl
+                                clickUrl?.let { callbacks.onImageClick(it) }
+                            },
+                            onLongClick = { onLongPress() }
+                        )
+                ) {
+                    if (imageModel != null) {
+                        AsyncImage(
+                            model = imageModel,
+                            contentDescription = "Image",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            error = rememberVectorPainter(Icons.Default.BrokenImage)
+                        )
+
+                        // Upload progress overlay
+                        val progress = state.uploadProgress
+                        if (progress != null && progress < 1f) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .size(28.dp)
+                                    .background(
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+
+                        // Failed-send retry overlay. Suppressed while a retry is in
+                        // flight (uploadProgress != null) so it doesn't fight the
+                        // progress spinner.
+                        val onRetry = callbacks.onRetrySend
+                        if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .background(Color.Black.copy(alpha = 0.35f))
+                                    .clickable { onRetry() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .background(
+                                                color = Color.Black.copy(alpha = 0.6f),
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Retry sending",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Failed to send",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BrokenImage,
+                                contentDescription = "Image unavailable",
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                if (message.content.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            lineHeightStyle = CenteredLineHeight
+                        ),
+                        color = textColor
+                    )
+                }
+            }
+            MessageType.VIDEO -> {
+                val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
+                    message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
+                } else {
+                    4f / 3f // fallback for old messages without dimensions
+                }
+
+                val videoThumbModel = rememberMessageVideoThumbModel(message)
+                val progress = state.uploadProgress
+                // Hide the play affordance while an upload is in flight — the
+                // progress ring is the only interactive overlay in that state.
+                val showPlayButton = progress == null || progress >= 1f
+
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 280.dp)
+                        .then(
+                            if (aspectRatio > 0) Modifier.aspectRatio(aspectRatio, matchHeightConstraintsFirst = aspectRatio < 0.5f)
+                            else Modifier
+                        )
+                        .heightIn(min = 100.dp, max = 400.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .combinedClickable(
+                            onClick = {
+                                val clickUrl = message.localUri ?: message.mediaUrl
+                                clickUrl?.let { callbacks.onVideoClick(it) }
+                            },
+                            onLongClick = { onLongPress() }
+                        )
+                ) {
+                    if (videoThumbModel != null) {
+                        AsyncImage(
+                            model = videoThumbModel,
+                            contentDescription = "Video",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            error = rememberVectorPainter(Icons.Default.BrokenImage)
+                        )
+
+                        if (showPlayButton) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.Center)
+                                    .size(48.dp)
+                                    .background(
+                                        color = Color.Black.copy(alpha = 0.45f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Play video",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+
+                        val durationSeconds = message.duration
+                        if (durationSeconds != null && durationSeconds > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomStart)
+                                    .padding(6.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.Black.copy(alpha = 0.55f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = formatDuration(durationSeconds),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+
+                        // Upload progress overlay
+                        if (progress != null && progress < 1f) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(8.dp)
+                                    .size(28.dp)
+                                    .background(
+                                        color = Color.Black.copy(alpha = 0.5f),
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = { progress },
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+
+                        // Failed-send retry overlay. Suppressed while a retry is in
+                        // flight (uploadProgress != null) so it doesn't fight the
+                        // progress spinner.
+                        val onRetry = callbacks.onRetrySend
+                        if (message.status == MessageStatus.FAILED && progress == null && onRetry != null) {
+                            Box(
+                                modifier = Modifier
+                                    .matchParentSize()
+                                    .background(Color.Black.copy(alpha = 0.35f))
+                                    .clickable { onRetry() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(48.dp)
+                                            .background(
+                                                color = Color.Black.copy(alpha = 0.6f),
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Refresh,
+                                            contentDescription = "Retry sending",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(28.dp)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Failed to send",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BrokenImage,
+                                contentDescription = "Video unavailable",
+                                modifier = Modifier.size(40.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+                if (message.content.isNotBlank()) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = message.content,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            lineHeightStyle = CenteredLineHeight
+                        ),
+                        color = textColor
+                    )
+                }
+            }
+            MessageType.VOICE -> {
+                VoiceMessagePlayer(
+                    mediaUrl = message.mediaUrl,
+                    durationSeconds = message.duration ?: 0,
+                    textColor = textColor
+                )
+            }
+            MessageType.DOCUMENT -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.AttachFile,
+                        contentDescription = null,
+                        tint = textColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = message.content,
+                        color = textColor,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            lineHeightStyle = CenteredLineHeight
+                        )
+                    )
+                }
+            }
+            MessageType.CALL -> {
+                val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
+                val isMissed = !isOwnMessage && endReason == "timeout"
+                val isDeclined = !isOwnMessage && endReason == "declined"
+                val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
+                val callIcon = when {
+                    isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed
+                    else -> Icons.Default.Call
+                }
+                val callLabel = when {
+                    isOwnMessage && endReason == "timeout" -> "No answer"
+                    isOwnMessage && endReason == "declined" -> "Declined"
+                    isOwnMessage -> "Outgoing call"
+                    isMissed -> "Missed call"
+                    isDeclined -> "Declined"
+                    else -> "Incoming call"
+                }
+                val durationSeconds = message.duration ?: 0
+                val callDetail = when {
+                    durationSeconds > 0 -> {
+                        val m = durationSeconds / 60
+                        val s = durationSeconds % 60
+                        if (m > 0) "${m}m ${s}s" else "${s}s"
+                    }
+                    else -> null
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = callIcon,
+                        contentDescription = null,
+                        tint = callColor,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = callLabel,
+                            color = callColor,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                lineHeightStyle = CenteredLineHeight
+                            )
+                        )
+                        if (callDetail != null) {
+                            Text(
+                                text = callDetail,
+                                color = callColor.copy(alpha = 0.7f),
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        }
+                        Text(
+                            text = formatTimestamp(message.timestamp),
+                            color = callColor.copy(alpha = 0.6f),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
+            MessageType.LOCATION -> {
+                LocationBubbleContent(
+                    latitude = message.latitude,
+                    longitude = message.longitude,
+                    comment = message.content,
+                    isOwnMessage = isOwnMessage
+                )
+            }
+            MessageType.TIMER -> {
+                TimerBubbleContent(
+                    message = message,
+                    textColor = textColor,
+                    onPauseTimer = callbacks.onPauseTimer,
+                    onResumeTimer = callbacks.onResumeTimer,
+                )
+            }
+            else -> {
+                val isEmojiOnlyMsg = remember(message.content) { isEmojiOnly(message.content) }
+                if (isEmojiOnlyMsg) {
+                    val baseSize = MaterialTheme.typography.bodyMedium.fontSize
+                    val emojiOnlySize = baseSize * EMOJI_ONLY_SCALE
+                    val sized = remember(message.content, emojiOnlySize, message.emojiSizes) {
+                        addEmojiSpans(message.content, emojiOnlySize, message.emojiSizes)
+                    }
+                    Text(
+                        text = sized,
+                        fontSize = emojiOnlySize,
+                        lineHeight = emojiOnlySize * 1.2f,
+                        color = textColor,
+                        style = LocalTextStyle.current.copy(
+                            lineHeightStyle = CenteredLineHeight
+                        )
+                    )
+                } else {
+                val highlightColor = MaterialTheme.colorScheme.primary
+                val linkUrl = linkPreview?.url
+                val displayText = remember(message.content, message.mentions, currentUserId, userIdToDisplayName, highlightColor, linkUrl, textColor) {
+                    val base = MentionFormatter.formatMentionText(
+                        text = message.content,
+                        mentions = message.mentions,
+                        currentUserId = currentUserId,
+                        highlightColor = highlightColor,
+                        userIdToDisplayName = userIdToDisplayName
+                    )
+                    if (linkUrl != null) {
+                        val idx = base.text.indexOf(linkUrl)
+                        if (idx >= 0) buildAnnotatedString {
+                            append(base.subSequence(0, idx))
+                            withLink(LinkAnnotation.Url(
+                                url = linkUrl,
+                                styles = TextLinkStyles(SpanStyle(
+                                    fontSize = 12.sp,
+                                    color = textColor.copy(alpha = 0.85f),
+                                    textDecoration = TextDecoration.Underline
+                                ))
+                            )) { append(linkUrl) }
+                            if (idx + linkUrl.length < base.length)
+                                append(base.subSequence(idx + linkUrl.length, base.length))
+                        } else base
+                    } else base
+                }
+                val emojiInlineSize = MaterialTheme.typography.bodyMedium.fontSize * EMOJI_INLINE_SCALE
+                val displayTextWithEmojis = remember(displayText, emojiInlineSize, message.emojiSizes) {
+                    addEmojiSpans(displayText, emojiInlineSize, message.emojiSizes)
+                }
+                Text(
+                    text = displayTextWithEmojis,
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        lineHeightStyle = CenteredLineHeight
+                    )
+                )
+                } // end non-emoji-only branch
+                if (message.editedAt != null) {
+                    Text(
+                        text = "(edited)",
+                        color = textColor.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.labelSmall
+                    )
+                }
+                if (linkPreview != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinkPreviewCard(
+                        preview = linkPreview,
+                        textColor = textColor,
+                        onImageClick = callbacks.onPreviewImageClick.takeIf { linkPreview.imageUrl != null }
+                    )
+                }
+            }
+        }
+}
+
+/**
+ * The long-press menu: reply, react, forward, copy, star, pin, edit, delete and
+ * the reminder actions.
+ *
+ * Split out of [MessageBubble] for the register-pressure reason spelled out on
+ * [MessageBubbleBody]. It is also the natural seam — every item closes the menu
+ * and then calls one thing, so the block reads as a single decision, and the
+ * only state it needs from the bubble is whether it is open.
+ *
+ * It takes its own `LocalContext` rather than being handed one: the clipboard
+ * and the toast are the menu's business, not the bubble's.
+ */
+@Composable
+private fun MessageContextMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    message: Message,
+    copyableText: String?,
+    callbacks: MessageBubbleCallbacks,
+    state: MessageBubbleState,
+) {
+    val context = LocalContext.current
+    DropdownMenu(expanded = expanded && message.deletedAt == null, onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+            FilledTonalButton(
+                onClick = { onDismiss(); callbacks.onReply() },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.AutoMirrored.Filled.Reply, null, modifier = Modifier.padding(end = 4.dp))
+                Text("Reply")
+            }
+            FilledTonalButton(
+                onClick = { onDismiss(); callbacks.onReaction() },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+                Icon(Icons.Default.EmojiEmotions, null, modifier = Modifier.padding(end = 4.dp))
+                Text("React")
+            }
+            FilledTonalButton(
+                onClick = { onDismiss(); callbacks.onForward() },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+                Icon(Icons.Default.Share, null, modifier = Modifier.padding(end = 4.dp))
+                Text("Forward")
+            }
+            callbacks.onSaveImage?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Save image")
+                }
+            }
+            if (copyableText != null) {
+                FilledTonalButton(
+                    onClick = {
+                        onDismiss()
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("Message", copyableText))
+                        // API 33+ shows a system clipboard confirmation; avoid the duplicate toast.
+                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                            Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.ContentCopy, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Copy text")
+                }
+            }
+            FilledTonalButton(
+                onClick = { onDismiss(); callbacks.onStar() },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+                Icon(Icons.Default.Star, null, modifier = Modifier.padding(end = 4.dp))
+                Text(if (message.isStarred) "Unstar" else "Star")
+            }
+            FilledTonalButton(
+                onClick = { onDismiss(); callbacks.onPin() },
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            ) {
+                Icon(Icons.Default.PushPin, null, modifier = Modifier.padding(end = 4.dp))
+                Text(if (message.isPinned) "Unpin" else "Pin")
+            }
+            callbacks.onCancelTimer?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.AlarmOff, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Cancel timer")
+                }
+            }
+            if (state.hasReminder && callbacks.onCancelReminder != null) {
+                FilledTonalButton(
+                    onClick = { onDismiss(); callbacks.onCancelReminder.invoke() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.NotificationsOff, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Cancel reminder")
+                }
+            } else {
+                callbacks.onSnooze?.let {
+                    FilledTonalButton(
+                        onClick = { onDismiss(); it() },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                    ) {
+                        Icon(Icons.Default.Schedule, null, modifier = Modifier.padding(end = 4.dp))
+                        Text("Reminder")
+                    }
+                }
+            }
+            callbacks.onEdit?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.Edit, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Edit")
+                }
+            }
+            callbacks.onInfo?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.Info, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Message Info")
+                }
+            }
+            callbacks.onDelete?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Delete for everyone")
+                }
+            }
+        }
     }
 }

@@ -1,9 +1,12 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phases 1–2 shipped; Phases 3–6 planned, not implemented.** Phase 1 (the
-toolbar shell, per-image HD and download) and Phase 2 (the rasterizer, the fit
-mapper and the live preview-level history) both landed on 2026-09-09; the rest is
-still the agreed design awaiting its implementation sessions.
+Status: **Phases 1–4 shipped; Phases 5–6 planned, not implemented.** Phase 1 (the
+toolbar shell, per-image HD and download), Phase 2 (the rasterizer, the fit mapper
+and the live preview-level history) and Phase 3 (the adjust screen) landed on
+2026-09-09; Phase 4 (the draw screen) on 2026-09-10. The rest is still the agreed
+design awaiting its implementation sessions. **Phases 3 and 4 are build- and
+test-verified only — nothing in either has been on hardware**, and every unchecked
+item is listed in `docs/BACKLOG.md` §*Pending on-device verification*.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -470,7 +473,77 @@ asks for.
   deletes exactly the abandoned tail; redo is unavailable after that truncation; a
   history entry whose file has vanished is skipped rather than sent.
 
-### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)
+### Phase 3 — Adjust screen (rotate / flip / straighten / crop / resize)  ✅ shipped 2026-09-09
+
+Delivered, **except the on-device pass**, which nobody has run — see the header.
+Six departures from the bullets below were taken during implementation and are
+**flagged here for sign-off rather than settled**:
+
+1. **Four files, not one.** `AdjustImageScreen.kt` is the screen; `CropGeometry.kt`
+   (crop-frame arithmetic), `AdjustStack.kt` (the op stack, its cursor and its
+   saver) and `ImageEditServices.kt` (the ViewModel-supplied capability bundle)
+   are separate because the first two are **pure Kotlin and JVM-testable**, which
+   is the only way the crop and straighten arithmetic gets checked at all — this
+   phase is gestures over a coordinate mapping, and a Robolectric test renders
+   the screen without ever moving a pointer across it. Same seam and same reason
+   as `ImageFitMapper` in Phase 2.
+2. **`ImageEditServices` replaced three `ImagePreviewScreen` parameters with one
+   bundle.** Phase 3 needed three more services (rasterize, preview render,
+   header probe), which would have put that screen at 14 parameters against a
+   ceiling ART enforces with a `VerifyError` **on first render** — and
+   Robolectric runs on the JVM, so the existing tests would have gone on passing
+   while the app crashed on opening a photo. Same shape as `MessageBubbleCallbacks`
+   and `AdjustCallbacks`.
+3. **`RasterOp.Straighten` auto-crops to the largest inscribed rectangle of the
+   *same aspect ratio*.** The plan settled that it crops; the contract it does
+   not state is what shape comes out. Preserving the aspect ratio is what lets
+   the editor preview a straighten by scaling a screen-sized bitmap up — the
+   scale depends only on the ratio, not the pixel count — so the preview and the
+   flatten cannot disagree. `ImageEditGeometry.straightenScale` derives it and
+   `ImageEditGeometryTest` checks the inscribed rectangle really fits, at five
+   angles across four aspect ratios.
+4. **The straighten slider and the resize row edit their op in place rather than
+   appending one per interaction** (`AdjustStack.collapse`). Dragging a slider
+   from 0° to 5° is one thing the user did, and it is not decomposable anyway:
+   3° then 2° is not 5°, because the second rotation acts on the already-cropped
+   result of the first. Re-entering the tool later edits the same step, which is
+   also why the slider comes back showing the angle the photo has.
+5. **Done on an untouched photo cancels instead of flattening.** Writing a
+   re-encoded copy of an unchanged image would burn a history step, a cache file
+   and a generation of JPEG quality on a no-op.
+6. **The resize row scrolls.** Presets each carrying `W × H · ~size` do not fit
+   a 390 dp row. Unlike the picker's island (§4), a preset row is not a mode
+   switcher — nothing is hidden by scrolling except more of the same kind of
+   choice — so a `LazyRow` is the answer rather than dropping the labels. The
+   test that found this had to be taught to scroll, which is the honest version.
+7. **The resize presets are Original / 1600 / 1080 / 720 — the drafted 2048 is
+   not offered.** §2.5 says "an explicit resize wins … HD then governs only the
+   encode quality, not a second downscale", and the send path cannot honour that
+   for a preset above `ImageCompressor.MAX_DIMENSION`: a standard-quality send
+   re-caps at 1600 whatever the edit wrote, so a 2048 preset would take effect on
+   an HD send and silently do nothing on a standard one. Threading the chosen
+   edge down instead would mean an argument on `sendMediaMessage`, a parameter on
+   `ImageCompressor`, a field on `PendingMedia` **and** — because the retry path
+   at `MessageRepositoryImpl:891` re-compresses from the stored `Message` — a
+   Room column and a version bump, which is precisely the send-pipeline change
+   §2.1 exists to avoid. Dropping the one preset above the cap makes §2.5 true
+   for every preset that ships, with no send-path change at all. Recorded in
+   `TECH_DEBT.md` with the trigger for revisiting.
+8. **`AdjustCallbacks` is joined by two more bundles, and both are the same
+   rule.** `ImageEditServices` (§3 departure 2) and `AdjustCallbacks` exist for
+   the ART parameter ceiling; `AdjustTarget`, `CropRect.Saver` and
+   `AdjustStack.StackSaver` exist so the editor survives a rotation. The last was
+   caught by review, not by a test: the stack's saver was written and unit-tested
+   while the *screen* was held in a plain `remember`, so turning the phone closed
+   the editor and made the saver dead code in production. It is now covered by a
+   `StateRestorationTester` case that round-trips through a real `Bundle`.
+
+Also worth knowing before Phase 4: `ImageEditRasterizer.preview(source, ops,
+maxDimension)` applies an op stack at screen resolution without writing a file,
+and shares `decodeAndApply` with `rasterize` — so what an editor shows is what
+Done writes, scaled, rather than a second implementation that can drift. Phase 4
+should render its strokes over that rather than decoding its own bitmap.
+
 
 - Rotate 90° CW, flip horizontal, straighten slider (−45°..45°) with a faint grid.
 - **Straighten auto-crops live, during the drag** (decided 2026-09-09). As the
@@ -496,7 +569,8 @@ asks for.
   class, the way `MessageBubbleCallbacks` does it.
 - Crop with draggable corner handles and aspect presets: Free / Original / 1:1 /
   4:5 / 16:9.
-- Resize presets on the same screen — Original / 2048 / 1600 / 1080 / 720 long edge
+- Resize presets on the same screen — Original / 1600 / 1080 / 720 long edge
+  (2048 was drafted and dropped; see departure 7)
   — each showing the resulting `W × H` and an approximate file size. This is the
   part that has no WhatsApp equivalent.
 - **Undo / Redo** step through the transform stack — the crop, then the straighten,
@@ -514,7 +588,76 @@ asks for.
   [`docs/BACKLOG.md`](../../docs/BACKLOG.md) § *Pending on-device verification*.
 - File: `ui/chat/imageedit/AdjustImageScreen.kt`.
 
-### Phase 4 — Draw screen (pen, highlighter, blur)
+### Phase 4 — Draw screen (pen, highlighter, blur)  ✅ shipped 2026-09-10
+
+Delivered, **except the on-device pass**, which nobody has run — see the header
+and `docs/BACKLOG.md` §*Pending on-device verification*. Seven departures from
+the bullets below were taken during implementation and are **flagged here for
+sign-off rather than settled**:
+
+1. **The mosaic is a fixed 48 blocks across the long edge, not a fixed ×1/16
+   scale.** The bullet's "×1/16 downscale" makes the block size a property of
+   whatever bitmap it is computed from: the editor's 1600 px preview would get
+   blocks 1% of the frame wide and the 4096 px file blocks 0.4% wide, so the
+   preview would show a *coarser* redaction than the one written — which is
+   exactly the failure this phase's own verification bullet calls a privacy
+   failure rather than a cosmetic one. Pinning the count instead makes the
+   mosaic the same fraction of the photo at every size, and 48 across is coarse
+   enough that a face inside a stroke is gone rather than softened.
+   `StrokeGeometry.PIXELATE_BLOCKS`, tested at two resolutions.
+2. **The mosaic is produced by halving repeatedly, not by one downscale.** A
+   single 85× bilinear downscale samples four neighbours per output pixel, so a
+   striped or textured region survives as aliasing instead of being averaged
+   away — a "redaction" that still carries the pattern it was hiding. Halving
+   averages every source pixel in. `ImageEditRasterizerTest` pins it with 4 px
+   stripes under 10 px blocks and asserts the contrast across the covered run
+   collapses.
+3. **Blur is a layer under the drawing, not a stroke in sequence.** Every blur
+   stroke is painted first, whatever order it was drawn in
+   (`StrokeGeometry.layers`). The mosaic is a copy of the *photo* and knows
+   nothing about the marks over it, so painting in capture order would let a
+   blur drawn afterwards swallow the arrow that pointed at the thing being
+   blurred. Blur redacts; pen and highlighter annotate; annotation is on top.
+   Undo and redo still walk capture order, because the unit a user expects back
+   is the last thing they *did*.
+4. **`ImageEditRasterizer` gained `pixelate` and `ImageEditServices` a seventh
+   entry.** The alternative was to pixelate the preview bitmap in the screen,
+   which would have been a second implementation of the one thing on this screen
+   that must not differ between the preview and the file. Same argument §3 makes
+   for `preview` sharing `decodeAndApply`, and the brief explicitly budgets the
+   bundle for this. `decodeCapped` also now asks `ImageDecoder` for a **mutable**
+   bitmap so a drawing paints into the decode rather than into a copy of it —
+   at working resolution that copy is another 64 MB resident.
+5. **Drawing is suspended while the layer is hidden.** The eye stays a pure view
+   control — Done flattens every stroke either way, and the screen always
+   re-opens visible (§2.7) — but a stroke captured while nothing is drawn would
+   be worse feedback than none, so the canvas stops accepting input rather than
+   accepting it invisibly.
+6. **One width slider shared by all three tools, not one remembered per tool.**
+   Per-tool memory is what most editors do and it makes the slider jump on every
+   tool change with no visible cause. A shared value is always the value on
+   screen.
+7. **`AdjustTarget` was generalised to `EditTarget` with an `Editor` enum**, as
+   the brief asked, and the Done handler that lands a flattened step is now one
+   lambda shared by both editors — landing a step is the same act whichever
+   screen produced it.
+
+**Also fixed here, and not part of this phase:** `ArchitectureTest`'s worktree
+exclusion matched *every* path when the gate ran from **inside** a worktree,
+which is the ordinary case for an agent on a branch. That emptied the Konsist
+scope and turned every architecture rule into a vacuous pass — silently, because
+a rule with nothing to check does not fail; only the roster's `assertEquals`
+noticed, and it read as a missing manager rather than as a missing codebase. The
+exclusion now applies only when it leaves a checkout behind, and
+`the architecture rules have a codebase to check` is the tripwire.
+
+**CHANGELOG placement judgment call:** the `changelog-release` skill says to open
+a fresh section when the top one is not dated today, but `[UNRELEASED] [1.26.0]`
+is genuinely untagged (`git describe` → `v1.25.0-28-…`), and two `[UNRELEASED]`
+sections would break `cut-release.sh`, which drops the prefix from the top one
+only. The existing section was retitled `[UNRELEASED] [1.27.0] — 2026-09-10`
+instead, taking the minor bump the `feat:` warrants.
+
 
 - Tools: **pen**, **highlighter** (alpha, `BlendMode.Multiply`), **blur** — plus
   colour strip and width slider.

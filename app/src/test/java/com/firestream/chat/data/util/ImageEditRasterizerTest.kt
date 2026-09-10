@@ -3,10 +3,17 @@ package com.firestream.chat.data.util
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.domain.util.ImageEditGeometry
 import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.domain.util.Stroke
+import com.firestream.chat.domain.util.StrokeGeometry
+import com.firestream.chat.domain.util.StrokePoint
+import com.firestream.chat.domain.util.StrokeTool
 import com.firestream.chat.ui.chat.PendingMedia
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -53,6 +60,61 @@ class ImageEditRasterizerTest {
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }
         bitmap.recycle()
         return Uri.fromFile(file)
+    }
+
+    /** A solid [color] PNG, so the fixture's own pixels carry no JPEG artefacts. */
+    private fun flatSource(width: Int, height: Int, color: Int, name: String): Uri =
+        pngSource(width, height, name) { bitmap ->
+            Canvas(bitmap).drawColor(color)
+        }
+
+    /** Vertical black-and-white stripes [stripe] pixels wide — detail to destroy. */
+    private fun stripedSource(width: Int, height: Int, stripe: Int, name: String): Uri =
+        pngSource(width, height, name) { bitmap ->
+            val canvas = Canvas(bitmap)
+            canvas.drawColor(Color.WHITE)
+            val paint = Paint().apply { color = Color.BLACK }
+            var x = 0
+            while (x < width) {
+                canvas.drawRect(x.toFloat(), 0f, (x + stripe).toFloat(), height.toFloat(), paint)
+                x += stripe * 2
+            }
+        }
+
+    private fun pngSource(width: Int, height: Int, name: String, paint: (Bitmap) -> Unit): Uri {
+        val file = File(context.cacheDir, name)
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        paint(bitmap)
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        return Uri.fromFile(file)
+    }
+
+    private fun decode(uri: Uri): Bitmap =
+        requireNotNull(BitmapFactory.decodeFile(requireNotNull(uri.path))) { "unreadable output $uri" }
+
+    /**
+     * How far apart the brightest and darkest pixels are along one row — the
+     * measure of whether detail survived. A run of stripes scores high; a flat
+     * mosaic block scores near zero.
+     */
+    private fun contrastAcross(bitmap: Bitmap, y: Int, fromX: Int, toX: Int): Int {
+        val luminance = (fromX until toX).map { x -> Color.red(bitmap.getPixel(x, y)) }
+        return (luminance.max() - luminance.min())
+    }
+
+    private fun assertRed(pixel: Int) {
+        assertTrue(
+            "expected the stroke's red, got #${Integer.toHexString(pixel)}",
+            Color.red(pixel) > 150 && Color.green(pixel) < 100 && Color.blue(pixel) < 100,
+        )
+    }
+
+    private fun assertWhite(what: String, pixel: Int) {
+        assertTrue(
+            "expected $what to stay white, got #${Integer.toHexString(pixel)}",
+            Color.red(pixel) > 200 && Color.green(pixel) > 200 && Color.blue(pixel) > 200,
+        )
     }
 
     private fun dimensionsOf(uri: Uri): Pair<Int, Int> {
@@ -334,5 +396,292 @@ class ImageEditRasterizerTest {
 
         assertTrue(rasterizer.exists(live))
         assertTrue(rasterizer.exists(next))
+    }
+
+    // ── Straighten ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a straighten crops back to a full rectangle of the same aspect ratio`() = runTest {
+        // The output must never be the expanded canvas with black triangles in
+        // it: the auto-crop is the op's contract, not a follow-up step.
+        val result = rasterizer.rasterize(
+            source = sourceImage(400, 300, "straighten-source.jpg"),
+            ops = listOf(RasterOp.Straighten(10f)),
+            liveSteps = emptySet(),
+        )
+
+        val (width, height) = dimensionsOf(result)
+        assertEquals(ImageEditGeometry.straightenSize(400, 300, 10f), width to height)
+        assertTrue("a straighten always costs pixels", width < 400)
+        assertEquals(400f / 300f, width.toFloat() / height, 0.02f)
+    }
+
+    @Test
+    fun `a zero-degree straighten writes the image through unchanged`() = runTest {
+        val result = rasterizer.rasterize(
+            source = sourceImage(320, 240, "straighten-zero.jpg"),
+            ops = listOf(RasterOp.Straighten(0f)),
+            liveSteps = emptySet(),
+        )
+
+        assertEquals(320 to 240, dimensionsOf(result))
+    }
+
+    @Test
+    fun `a straighten past the limit is clamped rather than inverted`() = runTest {
+        val result = rasterizer.rasterize(
+            source = sourceImage(400, 400, "straighten-clamped.jpg"),
+            ops = listOf(RasterOp.Straighten(400f)),
+            liveSteps = emptySet(),
+        )
+
+        val (width, height) = dimensionsOf(result)
+        assertEquals(ImageEditGeometry.straightenSize(400, 400, 45f), width to height)
+        assertTrue(width > 0 && height > 0)
+    }
+
+    @Test
+    fun `a straighten fills its output rather than leaving transparent corners`() = runTest {
+        // The pathology this op exists to avoid, checked in pixels: every corner
+        // of the written file must be opaque photo, not the empty canvas a
+        // rotate-then-crop would leave behind if the arithmetic were wrong.
+        val source = File(context.cacheDir, "straighten-opaque.jpg")
+        val painted = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+        painted.eraseColor(android.graphics.Color.RED)
+        source.outputStream().use { painted.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+        painted.recycle()
+
+        val result = rasterizer.rasterize(
+            source = Uri.fromFile(source),
+            ops = listOf(RasterOp.Straighten(12f)),
+            liveSteps = emptySet(),
+        )
+
+        val output = BitmapFactory.decodeFile(requireNotNull(result.path))
+        val corners = listOf(
+            0 to 0,
+            output.width - 1 to 0,
+            0 to output.height - 1,
+            output.width - 1 to output.height - 1,
+        )
+        for ((x, y) in corners) {
+            val pixel = output.getPixel(x, y)
+            assertTrue("corner ($x, $y) is transparent", android.graphics.Color.alpha(pixel) == 255)
+            assertTrue(
+                "corner ($x, $y) is black rather than photo",
+                android.graphics.Color.red(pixel) > 100,
+            )
+        }
+        output.recycle()
+    }
+
+    // ── The preview render ────────────────────────────────────────────────────
+
+    @Test
+    fun `a preview applies the same ops the rasterize would, at screen size`() = runTest {
+        val source = sourceImage(2000, 1000, "preview-source.jpg")
+        val ops = listOf(RasterOp.Rotate(90), RasterOp.Crop(0f, 0f, 1f, 0.5f))
+
+        val preview = requireNotNull(rasterizer.preview(source, ops, maxDimension = 400))
+
+        // Same shape as the flattened result, only smaller — which is the whole
+        // promise: what the editor shows is what Done writes, scaled.
+        val (flattenedWidth, flattenedHeight) =
+            dimensionsOf(rasterizer.rasterize(source, ops, liveSteps = emptySet()))
+        assertEquals(
+            flattenedWidth.toFloat() / flattenedHeight,
+            preview.width.toFloat() / preview.height,
+            0.05f,
+        )
+        assertTrue("the preview must respect its ceiling", maxOf(preview.width, preview.height) <= 400)
+        preview.recycle()
+    }
+
+    @Test
+    fun `a preview writes nothing to the edit cache`() = runTest {
+        rasterizer.preview(sourceImage(300, 200, "preview-clean.jpg"), emptyList(), maxDimension = 200)
+            ?.recycle()
+
+        assertTrue(editsDir.listFiles().orEmpty().none { it.isFile })
+    }
+
+    @Test
+    fun `an unreadable source previews as null rather than throwing`() = runTest {
+        assertNull(rasterizer.preview(Uri.parse("file:///nope/missing.jpg"), emptyList(), 400))
+    }
+
+    // ── Strokes ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a pen stroke paints its colour into the file, and only where it was drawn`() = runTest {
+        val stroke = Stroke(
+            tool = StrokeTool.PEN,
+            colorArgb = 0xFFFF0000,
+            width = 0.08f,
+            points = listOf(StrokePoint(0.1f, 0.5f), StrokePoint(0.9f, 0.5f)),
+        )
+
+        val result = rasterizer.rasterize(
+            flatSource(240, 240, Color.WHITE, "pen-source.png"),
+            listOf(RasterOp.Strokes(listOf(stroke))),
+            liveSteps = emptySet(),
+        )
+
+        val output = decode(result)
+        assertRed(output.getPixel(120, 120))
+        assertWhite("a corner the stroke never reached", output.getPixel(10, 10))
+        assertEquals(240 to 240, output.width to output.height)
+        output.recycle()
+    }
+
+    @Test
+    fun `a tap with no drag lands as a dot rather than as nothing at all`() = runTest {
+        val tap = Stroke(
+            tool = StrokeTool.PEN,
+            colorArgb = 0xFFFF0000,
+            width = 0.2f,
+            points = listOf(StrokePoint(0.5f, 0.5f)),
+        )
+
+        val result = rasterizer.rasterize(
+            flatSource(240, 240, Color.WHITE, "dot-source.png"),
+            listOf(RasterOp.Strokes(listOf(tap))),
+            liveSteps = emptySet(),
+        )
+
+        val output = decode(result)
+        assertRed(output.getPixel(120, 120))
+        assertWhite("outside the dot", output.getPixel(10, 10))
+        output.recycle()
+    }
+
+    @Test
+    fun `an empty drawing writes the photo through untouched`() = runTest {
+        val result = rasterizer.rasterize(
+            flatSource(120, 80, Color.WHITE, "empty-strokes.png"),
+            listOf(RasterOp.Strokes(emptyList())),
+            liveSteps = emptySet(),
+        )
+
+        assertEquals(120 to 80, dimensionsOf(result))
+        val output = decode(result)
+        assertWhite("an empty drawing changes nothing", output.getPixel(60, 40))
+        output.recycle()
+    }
+
+    @Test
+    fun `a blur stroke destroys the detail it covers and leaves the rest sharp`() = runTest {
+        // Four-pixel stripes under a mosaic whose blocks are ten pixels wide:
+        // inside the stroke the alternation has to be gone, not merely softened,
+        // because "gone" is the whole claim the tool makes when someone is
+        // hiding a face or a bank card.
+        val blur = Stroke(
+            tool = StrokeTool.BLUR,
+            colorArgb = 0,
+            width = 0.3f,
+            points = listOf(StrokePoint(0.1f, 0.5f), StrokePoint(0.9f, 0.5f)),
+        )
+
+        val result = rasterizer.rasterize(
+            stripedSource(480, 480, stripe = 4, name = "blur-source.png"),
+            listOf(RasterOp.Strokes(listOf(blur))),
+            liveSteps = emptySet(),
+        )
+
+        val output = decode(result)
+        val covered = contrastAcross(output, y = 240, fromX = 200, toX = 280)
+        val untouched = contrastAcross(output, y = 40, fromX = 200, toX = 280)
+        assertTrue("the stripes must survive outside the stroke (was $untouched)", untouched > 120)
+        assertTrue("the stripes must be gone inside it (was $covered)", covered < 60)
+        output.recycle()
+    }
+
+    @Test
+    fun `a blur drawn afterwards does not swallow the mark that pointed at it`() = runTest {
+        // Blur redacts the photo, pen annotates it, so the pen goes on top
+        // whatever order the two were drawn in (`StrokeGeometry.layers`).
+        val pen = Stroke(
+            tool = StrokeTool.PEN,
+            colorArgb = 0xFFFF0000,
+            width = 0.08f,
+            points = listOf(StrokePoint(0.1f, 0.5f), StrokePoint(0.9f, 0.5f)),
+        )
+        val blurOverIt = Stroke(
+            tool = StrokeTool.BLUR,
+            colorArgb = 0,
+            width = 0.4f,
+            points = listOf(StrokePoint(0.1f, 0.5f), StrokePoint(0.9f, 0.5f)),
+        )
+
+        val result = rasterizer.rasterize(
+            flatSource(240, 240, Color.WHITE, "order-source.png"),
+            listOf(RasterOp.Strokes(listOf(pen, blurOverIt))),
+            liveSteps = emptySet(),
+        )
+
+        val output = decode(result)
+        assertRed(output.getPixel(120, 120))
+        output.recycle()
+    }
+
+    @Test
+    fun `a highlighter leaves what is under it legible where a pen would not`() = runTest {
+        val yellow = 0xFFFFFF00
+        fun mark(tool: StrokeTool) = Stroke(
+            tool = tool,
+            colorArgb = yellow,
+            width = 0.15f,
+            points = listOf(StrokePoint(0.1f, 0.5f), StrokePoint(0.9f, 0.5f)),
+        )
+
+        val source = stripedSource(240, 240, stripe = 8, name = "highlighter-source.png")
+        val highlighted = decode(
+            rasterizer.rasterize(source, listOf(RasterOp.Strokes(listOf(mark(StrokeTool.HIGHLIGHTER)))), emptySet()),
+        )
+        val penned = decode(
+            rasterizer.rasterize(source, listOf(RasterOp.Strokes(listOf(mark(StrokeTool.PEN)))), emptySet()),
+        )
+
+        val underHighlighter = contrastAcross(highlighted, y = 120, fromX = 100, toX = 180)
+        val underPen = contrastAcross(penned, y = 120, fromX = 100, toX = 180)
+        assertTrue("a pen covers what it crosses (was $underPen)", underPen < 40)
+        assertTrue(
+            "a highlighter must not (was $underHighlighter, pen was $underPen)",
+            underHighlighter > underPen + 60,
+        )
+        highlighted.recycle()
+        penned.recycle()
+    }
+
+    @Test
+    fun `the mosaic is the same fraction of the photo whatever size the photo is`() = runTest {
+        // The property the editor's preview depends on: it pixelates a
+        // screen-sized bitmap and promises that the full-resolution flatten
+        // redacts the same region, at the same coarseness.
+        val small = Bitmap.createBitmap(600, 400, Bitmap.Config.ARGB_8888)
+        val large = Bitmap.createBitmap(3000, 2000, Bitmap.Config.ARGB_8888)
+
+        val smallMosaic = rasterizer.pixelate(small)
+        val largeMosaic = rasterizer.pixelate(large)
+
+        assertEquals(smallMosaic.width to smallMosaic.height, largeMosaic.width to largeMosaic.height)
+        assertEquals(StrokeGeometry.PIXELATE_BLOCKS, smallMosaic.width)
+        listOf(small, large, smallMosaic, largeMosaic).forEach(Bitmap::recycle)
+    }
+
+    // ── The header probe ──────────────────────────────────────────────────────
+
+    @Test
+    fun `probing a source reports its own dimensions, not a capped decode`() = runTest {
+        val probe = requireNotNull(rasterizer.probeSource(sourceImage(1234, 567, "probe.jpg")))
+
+        assertEquals(1234, probe.width)
+        assertEquals(567, probe.height)
+        assertTrue("a real file has a size", probe.bytes > 0)
+    }
+
+    @Test
+    fun `probing an unreadable source reports nothing rather than zeroes`() = runTest {
+        assertNull(rasterizer.probeSource(Uri.parse("file:///nope/missing.jpg")))
     }
 }

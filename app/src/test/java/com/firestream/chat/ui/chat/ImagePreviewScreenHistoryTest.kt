@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -56,8 +57,10 @@ class ImagePreviewScreenHistoryTest {
                     onSend = onSend,
                     onDownload = {},
                     onDismiss = onDismiss,
-                    editStepExists = editStepExists,
-                    onDiscardEditSteps = onDiscardEditSteps,
+                    edit = ImageEditServices(
+                        editStepExists = editStepExists,
+                        discardEditSteps = onDiscardEditSteps,
+                    ),
                 )
             }
         }
