@@ -21,6 +21,41 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — the draw screen (Phase 4, 2026-09-10)
+
+**Nothing in this phase has been on hardware either.** More of it is machine-checkable than
+Phase 3's was — `DrawImageScreenTest` drives a real pointer across the canvas, and
+`ImageEditRasterizerTest` reads the flattened pixels back — but the two questions that
+matter most are still hardware questions, and one of them is a privacy question rather
+than a cosmetic one. Check in **both orientations**: the drawing is saved and the strokes
+are normalized to the image, so a rotation mid-drawing is a supported path and an
+untested one.
+
+- **The flattened file redacts what the preview showed as covered.** *The one check
+  nothing else can stand in for.* Blur a face or a card number, press Done, and inspect
+  the **written file** — not the preview. A blur landing a few pixels off in the JPEG is a
+  privacy failure. The installed APK is not debuggable (`run-as: package not debuggable`)
+  and `adb root` is refused, so either reinstall
+  `app/build/outputs/apk/firebase/debug/app-firebase-debug.apk` and confirm `run-as`
+  reaches `cacheDir/edits/`, or route the check through the preview's **Save to Downloads**
+  button, which lands the current image where `adb pull` can reach it and tests a real
+  user path besides.
+- **The layer eye does not change the output.** Draw, press the eye until the strokes
+  vanish, press Done, and confirm the strokes are still in the file (§2.7). Then re-open
+  the draw screen and confirm it comes back visible.
+- **A stroke keeps up with the finger on a full-resolution photo.** The preview decodes at
+  1600 px; drawing on a 12 MP original is where a dropped frame would show. Check a fast
+  scribble and a slow curve, and that a second finger landing mid-stroke does not tug the
+  line to it.
+- **A blur is coarse enough to actually redact.** The mosaic is 48 blocks across the long
+  edge. Blur a face at a realistic size and confirm the result reads as redacted rather
+  than as softened, and that the blocks look the same size in the preview and in the file.
+- **Pen survives a blur drawn over it.** Circle something, then blur across the circle;
+  the circle must still be there, because blur is painted under the annotation layer.
+- **A drawing survives a rotation.** Draw several strokes, undo one, turn the phone, and
+  confirm both the strokes and the redo are still there. A long scribble is thinned on
+  save (`StrokeGeometry.MAX_SAVED_POINTS`) — confirm the thinning is invisible in practice.
+
 ### Image editor — the adjust screen (Phase 3, 2026-09-09)
 
 **Nothing in this phase has been on hardware.** Every item below is a gesture over a

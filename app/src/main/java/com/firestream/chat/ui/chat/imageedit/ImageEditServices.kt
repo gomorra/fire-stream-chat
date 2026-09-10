@@ -63,6 +63,18 @@ internal data class ImageEditServices(
     val renderPreview: suspend (Uri, List<RasterOp>, Int) -> Bitmap? = { _, _, _ -> null },
 
     /**
+     * The downscaled copy a blur stroke reveals, for the draw screen to upscale
+     * with nearest-neighbour filtering.
+     *
+     * Supplied rather than computed on the screen for the reason
+     * [renderPreview] is: the *rasterizer* owns the one implementation, so the
+     * blocks the user checks against a face are the blocks that get written.
+     * A second mosaic computed up here would be a second chance for the preview
+     * to promise a redaction the file does not deliver.
+     */
+    val pixelate: suspend (Bitmap) -> Bitmap? = { null },
+
+    /**
      * Flattens an op stack into a new JPEG and returns its URI, or null when the
      * source could not be read.
      *

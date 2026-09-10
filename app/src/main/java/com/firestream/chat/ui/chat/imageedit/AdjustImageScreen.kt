@@ -330,7 +330,7 @@ internal fun AdjustImageScreen(
             onCrop = callbacks.onCrop,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = TOP_BAR_HEIGHT_DP.dp, bottom = BOTTOM_PANEL_HEIGHT_DP.dp),
+                .padding(top = EditorChrome.TOP_BAR_HEIGHT_DP.dp, bottom = BOTTOM_PANEL_HEIGHT_DP.dp),
         )
 
         AdjustTopBar(
@@ -350,20 +350,7 @@ internal fun AdjustImageScreen(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .background(Color.Black.copy(alpha = 0.75f)),
         ) {
-            AnimatedVisibility(
-                visible = failed,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically(),
-            ) {
-                Text(
-                    text = "Couldn't apply the edit. Try again.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                )
-            }
+            EditFailureBanner(visible = failed, message = "Couldn't apply the edit. Try again.")
 
             AdjustToolPanel(
                 tool = tool,
@@ -379,17 +366,7 @@ internal fun AdjustImageScreen(
             AdjustToolRow(tool = tool, enabled = !flattening, callbacks = callbacks)
         }
 
-        if (flattening) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.5f))
-                    .swallowStrayGestures(),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(color = FireOrange)
-            }
-        }
+        if (flattening) EditFlattenScrim()
     }
 }
 
@@ -664,36 +641,20 @@ private fun AdjustTopBar(
     callbacks: AdjustCallbacks,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(TOP_BAR_HEIGHT_DP.dp)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    EditTopBar(
+        labels = AdjustTopBarLabels,
+        canUndo = canUndo,
+        canRedo = canRedo,
+        enabled = enabled,
+        onCancel = callbacks.onCancel,
+        onUndo = callbacks.onUndo,
+        onRedo = callbacks.onRedo,
+        onDone = callbacks.onDone,
+        modifier = modifier,
     ) {
-        IconButton(onClick = callbacks.onCancel, enabled = enabled) {
-            Icon(Icons.Default.Close, contentDescription = "Cancel adjustments", tint = FsText)
-        }
-
-        Spacer(modifier = Modifier.width(4.dp))
-
-        IconButton(onClick = callbacks.onUndo, enabled = enabled && canUndo) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Undo,
-                contentDescription = "Undo adjustment",
-                tint = if (enabled && canUndo) FsText else FsTextMute,
-            )
-        }
-        IconButton(onClick = callbacks.onRedo, enabled = enabled && canRedo) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Redo,
-                contentDescription = "Redo adjustment",
-                tint = if (enabled && canRedo) FsText else FsTextMute,
-            )
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
+        // Reset is this screen's alone, which is why it goes in the slot rather
+        // than into the shared bar: the draw screen has no all-at-once escape,
+        // because undo there already walks one stroke at a time.
         TextButton(
             onClick = callbacks.onReset,
             enabled = enabled && canReset,
@@ -702,19 +663,18 @@ private fun AdjustTopBar(
             Text(
                 text = "Reset",
                 style = MaterialTheme.typography.labelLarge,
-                color = if (enabled && canReset) FsText else FsTextMute,
-            )
-        }
-
-        IconButton(onClick = callbacks.onDone, enabled = enabled) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Apply adjustments",
-                tint = if (enabled) FireOrange else FsTextMute,
+                color = editTint(enabled = enabled && canReset),
             )
         }
     }
 }
+
+private val AdjustTopBarLabels = EditTopBarLabels(
+    cancel = "Cancel adjustments",
+    undo = "Undo adjustment",
+    redo = "Redo adjustment",
+    done = "Apply adjustments",
+)
 
 /** The contextual panel for whichever tool is open; nothing at all for [AdjustTool.NONE]. */
 @Composable
@@ -863,64 +823,32 @@ private fun AdjustToolRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(TOOL_ROW_HEIGHT_DP.dp),
+            .height(EditorChrome.TOOL_ROW_HEIGHT_DP.dp),
         horizontalArrangement = Arrangement.SpaceEvenly,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        AdjustToolButton(Icons.Default.Rotate90DegreesCw, "Rotate", false, enabled, callbacks.onRotate)
-        AdjustToolButton(Icons.Default.Flip, "Flip", false, enabled, callbacks.onFlip)
-        AdjustToolButton(
+        EditToolButton(Icons.Default.Rotate90DegreesCw, "Rotate", false, enabled, callbacks.onRotate)
+        EditToolButton(Icons.Default.Flip, "Flip", false, enabled, callbacks.onFlip)
+        EditToolButton(
             icon = Icons.Default.Straighten,
             label = "Straighten",
             selected = tool == AdjustTool.STRAIGHTEN,
             enabled = enabled,
             onClick = { callbacks.onSelectTool(AdjustTool.STRAIGHTEN) },
         )
-        AdjustToolButton(
+        EditToolButton(
             icon = Icons.Default.Crop,
             label = "Crop",
             selected = tool == AdjustTool.CROP,
             enabled = enabled,
             onClick = { callbacks.onSelectTool(AdjustTool.CROP) },
         )
-        AdjustToolButton(
+        EditToolButton(
             icon = Icons.Default.PhotoSizeSelectLarge,
             label = "Resize",
             selected = tool == AdjustTool.RESIZE,
             enabled = enabled,
             onClick = { callbacks.onSelectTool(AdjustTool.RESIZE) },
-        )
-    }
-}
-
-@Composable
-private fun AdjustToolButton(
-    icon: ImageVector,
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val tint = when {
-        !enabled -> FsTextMute
-        selected -> FireOrange
-        else -> FsText
-    }
-    Column(
-        modifier = Modifier
-            .size(width = 64.dp, height = TOOL_ROW_HEIGHT_DP.dp)
-            .semantics { contentDescription = label }
-            .clickable(enabled = enabled, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = tint,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
         )
     }
 }
@@ -961,27 +889,6 @@ private fun AdjustChip(
     }
 }
 
-/**
- * Swallows every pointer event that reaches the flatten scrim.
- *
- * The controls underneath are already disabled while a flatten is in flight,
- * but they are still visible through a half-transparent overlay and still
- * hit-testable as far as the layout is concerned — the scrim is what makes
- * "nothing here is live right now" true rather than merely intended. Main pass,
- * so anything the scrim's own content wants still gets first refusal.
- */
-private fun Modifier.swallowStrayGestures(): Modifier = this.then(
-    Modifier.pointerInput(Unit) {
-        awaitPointerEventScope {
-            while (true) {
-                awaitPointerEvent(PointerEventPass.Main).changes.forEach { change ->
-                    if (change.pressed || change.previousPressed) change.consume()
-                }
-            }
-        }
-    },
-)
-
 /** One tap of the rotate button. Clockwise, matching the icon's arrow. */
 private const val QUARTER_TURN = 90
 
@@ -1017,10 +924,9 @@ private const val HANDLE_STROKE_DP = 3
  */
 private const val PREVIEW_MAX_DP = 1200
 
-private const val TOP_BAR_HEIGHT_DP = 56
+/** The contextual tool panel above the tool row; this screen's alone. */
 private const val PANEL_HEIGHT_DP = 64
-private const val TOOL_ROW_HEIGHT_DP = 68
-private const val BOTTOM_PANEL_HEIGHT_DP = PANEL_HEIGHT_DP + TOOL_ROW_HEIGHT_DP
+private const val BOTTOM_PANEL_HEIGHT_DP = PANEL_HEIGHT_DP + EditorChrome.TOOL_ROW_HEIGHT_DP
 
 /**
  * The long edges offered by the resize row, plus `null` for "leave it alone".

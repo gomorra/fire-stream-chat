@@ -5,16 +5,25 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.ImageDecoder
+import android.graphics.BlendMode
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Rect
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.annotation.VisibleForTesting
 import com.firestream.chat.domain.util.ImageEditGeometry
+import com.firestream.chat.domain.util.PathSink
 import com.firestream.chat.domain.util.PixelRect
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.domain.util.SourceImage
+import com.firestream.chat.domain.util.Stroke
+import com.firestream.chat.domain.util.StrokeGeometry
+import com.firestream.chat.domain.util.StrokeTool
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -344,7 +353,11 @@ class ImageEditRasterizer @Inject constructor(
             // Software allocation because the ops below read and re-encode these
             // pixels; a hardware bitmap cannot be read back.
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            decoder.isMutableRequired = false
+            // Mutable so a drawing can be painted straight into the decode
+            // rather than into a copy of it. The draw screen's whole op list is
+            // a single `RasterOp.Strokes`, so this is the difference between one
+            // working-resolution bitmap resident and two.
+            decoder.isMutableRequired = true
             val (width, height) =
                 ImageEditGeometry.cappedSize(info.size.width, info.size.height, ceiling)
             if (width > 0 && height > 0) decoder.setTargetSize(width, height)
@@ -412,6 +425,150 @@ class ImageEditRasterizer @Inject constructor(
                 Bitmap.createScaledBitmap(bitmap, width, height, true)
             }
         }
+
+        is RasterOp.Strokes ->
+            if (op.strokes.isEmpty()) bitmap else drawStrokes(bitmap, op.strokes)
+    }
+
+    /**
+     * Paints a drawing into [bitmap] and returns the result — the flatten half
+     * of what the draw screen has been showing live.
+     *
+     * Both layers come from [StrokeGeometry], which is also what the editor's
+     * Compose preview draws from, so the two renderers cannot disagree about
+     * how wide a stroke is or where its curve runs. Only the *painting* is
+     * written twice, and only because there is no path object the two graphics
+     * stacks share.
+     *
+     * Drawn in place when the decode handed back a mutable bitmap, which is the
+     * ordinary case: a copy at working resolution is another 64 MB resident
+     * beside the original.
+     */
+    private fun drawStrokes(bitmap: Bitmap, strokes: List<Stroke>): Bitmap {
+        val output = if (bitmap.isMutable) {
+            bitmap
+        } else {
+            bitmap.copy(Bitmap.Config.ARGB_8888, true) ?: return bitmap
+        }
+        val canvas = Canvas(output)
+        val longEdge = maxOf(output.width, output.height).toFloat()
+        val layers = StrokeGeometry.layers(strokes)
+
+        if (layers.blur.isNotEmpty()) {
+            // The mosaic is computed from the photo as it arrived, not from the
+            // canvas as it stands: blur redacts the image, and it must not be
+            // able to redact an arrow the user drew pointing at what it hides.
+            // Painted strokes go on afterwards for the same reason.
+            val mosaic = pixelate(bitmap)
+            try {
+                // One layer for every blur stroke at once. The strokes are the
+                // mask and the mosaic is drawn through them with SRC_IN, which
+                // is what makes overlapping strokes reveal the same pixels
+                // rather than compounding into something darker.
+                val saved = canvas.saveLayer(null, null)
+                val mask = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = android.graphics.Color.WHITE }
+                for (stroke in layers.blur) paintStroke(canvas, stroke, mask, longEdge, output)
+                canvas.drawBitmap(
+                    mosaic,
+                    null,
+                    Rect(0, 0, output.width, output.height),
+                    Paint().apply {
+                        // Nearest-neighbour on the way back up: this is what makes
+                        // the mosaic read as blocks rather than as a soft blur, and
+                        // it is the half of "pixelate" that does the redacting.
+                        isFilterBitmap = false
+                        xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+                    },
+                )
+                canvas.restoreToCount(saved)
+            } finally {
+                if (mosaic !== bitmap) mosaic.recycle()
+            }
+        }
+
+        for (stroke in layers.painted) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = stroke.colorArgb.toInt()
+                // After the colour, deliberately: this overwrites whatever alpha
+                // the stored ARGB carried, so a highlighter is translucent by
+                // virtue of being a highlighter and not by virtue of its swatch.
+                alpha = (StrokeGeometry.alphaFor(stroke.tool) * 255f).roundToInt().coerceIn(0, 255)
+                if (stroke.tool == StrokeTool.HIGHLIGHTER) blendMode = BlendMode.MULTIPLY
+            }
+            paintStroke(canvas, stroke, paint, longEdge, output)
+        }
+        return output
+    }
+
+    /** One stroke — a round-capped path, or a dot when the finger never moved. */
+    private fun paintStroke(canvas: Canvas, stroke: Stroke, paint: Paint, longEdge: Float, target: Bitmap) {
+        val width = StrokeGeometry.widthPx(stroke.width, longEdge)
+        if (StrokeGeometry.isDot(stroke)) {
+            val point = stroke.points.first()
+            val dot = Paint(paint).apply { style = Paint.Style.FILL }
+            canvas.drawCircle(point.x * target.width, point.y * target.height, width / 2f, dot)
+            return
+        }
+        val path = Path()
+        StrokeGeometry.buildPath(
+            points = stroke.points,
+            scaleX = target.width.toFloat(),
+            scaleY = target.height.toFloat(),
+            offsetX = 0f,
+            offsetY = 0f,
+            sink = object : PathSink {
+                override fun moveTo(x: Float, y: Float) = path.moveTo(x, y)
+                override fun lineTo(x: Float, y: Float) = path.lineTo(x, y)
+                override fun quadTo(controlX: Float, controlY: Float, x: Float, y: Float) =
+                    path.quadTo(controlX, controlY, x, y)
+            },
+        )
+        canvas.drawPath(
+            path,
+            Paint(paint).apply {
+                style = Paint.Style.STROKE
+                strokeWidth = width
+                strokeCap = Paint.Cap.ROUND
+                strokeJoin = Paint.Join.ROUND
+            },
+        )
+    }
+
+    /**
+     * The downscaled copy a blur stroke reveals — [StrokeGeometry.PIXELATE_BLOCKS]
+     * blocks across the long edge. Callers scale it back up with
+     * nearest-neighbour filtering; keeping it small is what makes the editor's
+     * preview and the flatten produce the *same* blocks at their own sizes.
+     *
+     * **Halved repeatedly rather than scaled straight down**, and that is the
+     * difference between a redaction and a decoration: a single 85× bilinear
+     * downscale samples four neighbours per output pixel, so fine detail
+     * survives as aliasing instead of being averaged away — a striped or
+     * textured region would come back as a pattern rather than as a flat block.
+     * Halving averages every source pixel into the result.
+     *
+     * Public so the editor's live preview reveals the mosaic this produces
+     * rather than computing a second one of its own.
+     */
+    fun pixelate(bitmap: Bitmap): Bitmap {
+        val (targetWidth, targetHeight) =
+            StrokeGeometry.pixelatedSize(bitmap.width, bitmap.height)
+        if (targetWidth >= bitmap.width || targetHeight >= bitmap.height) {
+            // Already at or below the mosaic's own resolution. An independent
+            // copy, because every caller recycles what this hands back.
+            return bitmap.copy(Bitmap.Config.ARGB_8888, false) ?: bitmap
+        }
+        var stage = bitmap
+        var owned = false
+        while (stage.width / 2 > targetWidth && stage.height / 2 > targetHeight) {
+            val next = Bitmap.createScaledBitmap(stage, stage.width / 2, stage.height / 2, true)
+            if (owned) stage.recycle()
+            stage = next
+            owned = true
+        }
+        val mosaic = Bitmap.createScaledBitmap(stage, targetWidth, targetHeight, true)
+        if (owned && mosaic !== stage) stage.recycle()
+        return mosaic
     }
 
     private fun probe(source: Uri): SourceImage? = try {

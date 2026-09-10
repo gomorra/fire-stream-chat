@@ -55,6 +55,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -401,6 +402,19 @@ class ChatViewModel @Inject constructor(
         ops: List<RasterOp>,
         maxDimension: Int,
     ): Bitmap? = imageEditRasterizer.preview(uri, ops, maxDimension)
+
+    /**
+     * The downscaled copy a blur stroke reveals on the draw screen.
+     *
+     * Routed through the rasterizer rather than computed on the screen so the
+     * mosaic the user checks a redaction against is the same one the flatten
+     * writes — the difference between a preview that promises and a file that
+     * delivers (`.claude/plans/image-editor.md` §3, Phase 4).
+     */
+    internal suspend fun pixelateForEditor(bitmap: Bitmap): Bitmap? =
+        withContext(Dispatchers.Default) {
+            runCatching { imageEditRasterizer.pixelate(bitmap) }.getOrNull()
+        }
 
     /**
      * Flattens [ops] into a new JPEG and returns its URI, or null when the

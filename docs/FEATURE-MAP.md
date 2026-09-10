@@ -67,8 +67,9 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/data/util/ImageCompressor.kt` | EXIF-aware compress; `inSampleSize` for memory-safe decode |
-| `app/src/main/java/com/firestream/chat/domain/util/ImageEditGeometry.kt` | `RasterOp` + the pure dimension arithmetic (ceiling, crop rects, resize, size estimates) — no Android, so both the editor screens and the rasterizer depend on it |
-| `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | The platform half: `ImageDecoder` decode, JPEG encode, limiter permit, `cacheDir/edits/` lifecycle and byte budget |
+| `app/src/main/java/com/firestream/chat/domain/util/ImageEditGeometry.kt` | `RasterOp` + `Stroke`/`StrokePoint`/`StrokeTool` + the pure dimension arithmetic (ceiling, crop rects, resize, size estimates) — no Android, so both the editor screens and the rasterizer depend on it |
+| `app/src/main/java/com/firestream/chat/domain/util/StrokeGeometry.kt` | The draw screen's arithmetic — stroke width against the long edge, the smoothed path via `PathSink`, the blur/painted layer split, mosaic block size. The one copy, because Compose and `android.graphics` both render strokes and must not disagree |
+| `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | The platform half: `ImageDecoder` decode, JPEG encode, stroke flattening, the pixelate mosaic, limiter permit, `cacheDir/edits/` lifecycle and byte budget |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
@@ -82,7 +83,9 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/AdjustImageScreen.kt` | The adjust overlay — rotate / flip / straighten / crop / resize, with `AdjustCallbacks` to stay under the param ceiling |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/AdjustStack.kt` | The adjust screen's op stack + cursor, the collapse rule for slider-driven ops, and its rotation-safe saver |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/CropGeometry.kt` | Pure crop-frame arithmetic — aspect presets across two spaces, corner drags, clamping, handle hit-testing |
-| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditServices.kt` | The editor's ViewModel-supplied capabilities in one `@Immutable` bundle — keeps both screens under the ~15-param ceiling |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/DrawImageScreen.kt` | The draw overlay — pen / highlighter / blur, colour strip, width slider, layer eye, live capture; `DrawCallbacks` keeps it under the param ceiling |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/DrawStack.kt` | The draw screen's stroke list + cursor (one stroke per undo) and its rotation-safe, point-quantising saver |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ImageEditServices.kt` | The editor's ViewModel-supplied capabilities in one `@Immutable` bundle — keeps every screen under the ~15-param ceiling |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
@@ -104,10 +107,13 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/AdjustImageScreenTest.kt` | What the adjust screen hands back — the ops, the skipped no-op flatten, the history controls |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/AdjustStackTest.kt` | Undo/redo cursor, the collapse rule, `previewOps`, and the saver round-trip |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/CropGeometryTest.kt` | Crop drags on the JVM — past the opposite corner, past the photo's edge, and under an aspect lock |
+| `app/src/test/java/com/firestream/chat/domain/util/StrokeGeometryTest.kt` | Stroke arithmetic on the JVM — width against the long edge, midpoint smoothing, the layer split, resolution-independent mosaic blocks |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/DrawImageScreenTest.kt` | The draw screen under a real pointer — a swipe becomes one normalized stroke, the layer eye does not change the output, undo/redo per stroke, and a `Bundle` round-trip |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/DrawStackTest.kt` | Stroke cursor, the discarded redo tail, and the saver's quantised, thinned encoding |
 
-**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`**, which replaces the preview's content rather than floating over it, flattens its op stack once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
+**Entry point:** image picker in `ChatScreen.kt` (`PickMultipleVisualMedia`, capped at `MAX_GALLERY_PICK`) → `ImagePreviewScreen` (editor rail per page) → **`AdjustImageScreen`** or **`DrawImageScreen`**, each of which replaces the preview's content rather than floating over it, flattens its layer once on Done and hands back a URI → `ChatMessageSender.sendMediaMessages()` → `MessageRepositoryImpl.sendMediaMessage()` per item, **sequentially** (each send decodes a full bitmap, so a batch must not run concurrently). Each item carries its own `isHd`; `null` there is what makes the global preference the fallback.
 
-The `ui/chat/imageedit/` package is Phases 1–3 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), and the adjust screen (3). The draw screen, the overlay screen and the shared picker land in Phases 4–5 and will extend this table.
+The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). The overlay screen and the shared picker land in Phase 5 and will extend this table.
 
 ---
 

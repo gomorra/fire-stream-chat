@@ -69,7 +69,80 @@ sealed interface RasterOp {
      * add bytes and no detail, so a [longEdge] above the current one is a no-op.
      */
     data class Resize(val longEdge: Int) : RasterOp
+
+    /**
+     * Paint [strokes] into the image: pen and highlighter marks, and blur
+     * strokes that reveal a pixelated copy of the photo underneath them.
+     *
+     * ### What comes out
+     *
+     * The image keeps its dimensions — a drawing changes pixels, never shape —
+     * and everything about *where* a stroke lands is stored as a fraction of
+     * the image, so one captured stroke means the same thing on the editor's
+     * screen-sized preview and in the full-resolution file. [StrokeGeometry]
+     * owns that arithmetic and is deliberately the only copy of it: the
+     * preview is drawn by Compose and the file by `android.graphics`, and two
+     * implementations of "how wide is this stroke" would be two chances for
+     * the preview to promise a redaction the file does not deliver.
+     *
+     * ### Blur goes under, not over
+     *
+     * Blur strokes are rendered **first**, whatever order they were drawn in
+     * ([StrokeGeometry.layers]), because the mosaic they reveal is a copy
+     * of the *photo* and knows nothing about the marks over it. Rendering in
+     * capture order would let a blur drawn afterwards swallow the arrow that
+     * pointed at the thing being blurred. Blur redacts; pen and highlighter
+     * annotate; the annotation is on top.
+     *
+     * ### Blur is pixelation, and irreversibly so
+     *
+     * A downscale-then-nearest-upscale copy, not a gaussian
+     * (`.claude/plans/image-editor.md` §3, Phase 4): it is cheaper, it reads
+     * unambiguously as *redacted*, and — the part that matters when someone is
+     * hiding a face or a bank card — the detail is genuinely gone from the
+     * output rather than merely smeared. The tool is still labelled "Blur".
+     */
+    data class Strokes(val strokes: List<Stroke>) : RasterOp
 }
+
+/** Which of the draw screen's three tools laid a stroke down. */
+enum class StrokeTool {
+    /** An opaque mark in the chosen colour. */
+    PEN,
+
+    /** A translucent mark that multiplies into the photo, like a marker pen. */
+    HIGHLIGHTER,
+
+    /** Not a colour at all: a mask revealing the pixelated copy (see [RasterOp.Strokes]). */
+    BLUR,
+}
+
+/**
+ * One sample along a stroke, as a fraction of the image it was drawn on.
+ *
+ * Normalized for the reason all overlay geometry is
+ * (`.claude/plans/image-editor.md` §2.3): the point means "40% across this
+ * photo", not "212 px into the canvas I happened to be laid out in", so a
+ * stroke survives a device rotation, a screen-size change and the jump from the
+ * editor's preview-sized bitmap to the full-resolution flatten without drifting.
+ */
+data class StrokePoint(val x: Float, val y: Float)
+
+/**
+ * One continuous mark: everything the two renderers need to draw it identically.
+ *
+ * [width] is a fraction of the image's **long edge**, not a pixel count, so it
+ * scales with the output exactly as [points] do — a stroke that covered a face
+ * on screen covers it in the file. [colorArgb] is a plain `Long` because
+ * [RasterOp] carries no Compose and no Android types; it is ignored entirely
+ * for [StrokeTool.BLUR], which has no colour to choose.
+ */
+data class Stroke(
+    val tool: StrokeTool,
+    val colorArgb: Long,
+    val width: Float,
+    val points: List<StrokePoint>,
+)
 
 /** Where a [RasterOp.Crop] lands, in whole pixels of the image it applies to. */
 data class PixelRect(val x: Int, val y: Int, val width: Int, val height: Int)
@@ -259,6 +332,9 @@ object ImageEditGeometry {
                     currentWidth = resizedWidth
                     currentHeight = resizedHeight
                 }
+
+                // A drawing repaints pixels; it never changes how many there are.
+                is RasterOp.Strokes -> Unit
             }
         }
         return currentWidth to currentHeight

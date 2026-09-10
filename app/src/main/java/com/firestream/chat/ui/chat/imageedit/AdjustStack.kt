@@ -150,7 +150,14 @@ private fun encodeOp(op: RasterOp): String = when (op) {
     is RasterOp.Straighten -> "straighten:${op.degrees}"
     is RasterOp.Crop -> "crop:${op.left},${op.top},${op.right},${op.bottom}"
     is RasterOp.Resize -> "resize:${op.longEdge}"
+    // The adjust screen never builds one — a drawing belongs to the draw screen
+    // and its own stack — so this encodes to something `decodeOp` refuses,
+    // rather than teaching this saver a stroke format it can never be handed.
+    is RasterOp.Strokes -> UNSUPPORTED_OP
 }
+
+/** What [encodeOp] writes for an op this screen cannot produce; [decodeOp] drops it. */
+private const val UNSUPPORTED_OP = "?"
 
 /** Null for anything unparseable — a dropped op loses a step, a throw loses the screen. */
 private fun decodeOp(encoded: String): RasterOp? {

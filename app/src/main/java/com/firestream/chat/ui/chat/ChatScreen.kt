@@ -2303,6 +2303,7 @@ fun ChatScreen(
             discardEditSteps = viewModel::discardEditSteps,
             probeSource = viewModel::probeEditSource,
             renderPreview = viewModel::renderEditPreview,
+            pixelate = viewModel::pixelateForEditor,
             rasterize = viewModel::rasterizeEdit,
         )
     }

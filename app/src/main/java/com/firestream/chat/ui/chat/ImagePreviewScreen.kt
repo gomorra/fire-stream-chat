@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.AdjustImageScreen
+import com.firestream.chat.ui.chat.imageedit.DrawImageScreen
 import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
 import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
@@ -170,12 +171,12 @@ internal fun ImagePreviewScreen(
     val hdEstimate: suspend (Boolean) -> SizeEstimate? =
         remember(currentUri, edit) { { hd -> edit.estimateSendSize(currentUri, hd) } }
 
-    // The page the adjust screen is editing, pinned to the pick's own URI rather
-    // than to an index: an item can be removed from the thumbnail strip while the
+    // The page an editor screen is on, pinned to the pick's own URI rather than
+    // to an index: an item can be removed from the thumbnail strip while the
     // editor is open, and landing an edit on whatever slid into that index would
-    // write it onto the wrong photo. Null means the editor is closed.
-    var adjusting by rememberSaveable(items, stateSaver = AdjustTarget.Saver) {
-        mutableStateOf<AdjustTarget?>(null)
+    // write it onto the wrong photo. Null means no editor is open.
+    var editing by rememberSaveable(items, stateSaver = EditTarget.Saver) {
+        mutableStateOf<EditTarget?>(null)
     }
 
     var currentPageZoomed by remember { mutableStateOf(false) }
@@ -228,7 +229,7 @@ internal fun ImagePreviewScreen(
     // never win by accident is the one that discards the whole pick.
     BackHandler {
         when {
-            adjusting != null -> adjusting = null
+            editing != null -> editing = null
             showEmojiSheet -> showEmojiSheet = false
             else -> dismissBatch()
         }
@@ -238,38 +239,53 @@ internal fun ImagePreviewScreen(
     // sibling: `pendingMedia` and the caption map are remembered here and stay
     // alive either way, while a sibling overlay would leave the pager beneath it
     // hit-testable and let a crop drag page the batch (§2.4).
-    val adjustTarget = adjusting
-    if (adjustTarget != null) {
-        val target = adjustTarget
-        AdjustImageScreen(
-            source = target.source,
-            isHd = drafts.firstOrNull { it.originalUri.toString() == target.key }
-                ?.let { it.isHd ?: defaultIsHd } ?: defaultIsHd,
-            services = edit,
-            // Read now, not when the editor opened: the byte budget evicts
-            // globally oldest-first, so every other page's current step has to be
-            // named or flattening this one can delete an edit on another (§3).
-            liveSteps = { drafts.map { it.uri }.toSet() },
-            onCancel = { adjusting = null },
-            onDone = { rasterized ->
-                val index = drafts.indexOfFirst { it.originalUri.toString() == target.key }
-                if (index >= 0) {
-                    val landed = drafts[index].landEdit(rasterized)
-                    drafts = drafts.toMutableList().also { it[index] = landed.item }
-                    // The other half of landing an edit, and the only moment an
-                    // edit file ever becomes deletable: undo cannot free the file
-                    // it steps off, so a Done that skips this leaks the abandoned
-                    // tail until `sweepStale` collects it 24 h later.
-                    onDiscardEditSteps(landed.abandoned)
-                } else {
-                    // The page was removed from the strip while the editor was
-                    // open, so nothing can reach this step — collect it now
-                    // rather than leaving an orphan in the cache.
-                    onDiscardEditSteps(listOf(rasterized.toString()))
-                }
-                adjusting = null
-            },
-        )
+    val editTarget = editing
+    if (editTarget != null) {
+        val target = editTarget
+        // Read now, not when the editor opened: the byte budget evicts globally
+        // oldest-first, so every other page's current step has to be named or
+        // flattening this one can delete an edit on another (§3).
+        val liveSteps = { drafts.map { it.uri }.toSet() }
+        // Shared by both editors, because landing a flattened step is the same
+        // act whichever screen produced it.
+        val onEditDone: (Uri) -> Unit = { rasterized ->
+            val index = drafts.indexOfFirst { it.originalUri.toString() == target.key }
+            if (index >= 0) {
+                val landed = drafts[index].landEdit(rasterized)
+                drafts = drafts.toMutableList().also { it[index] = landed.item }
+                // The other half of landing an edit, and the only moment an
+                // edit file ever becomes deletable: undo cannot free the file
+                // it steps off, so a Done that skips this leaks the abandoned
+                // tail until `sweepStale` collects it 24 h later.
+                onDiscardEditSteps(landed.abandoned)
+            } else {
+                // The page was removed from the strip while the editor was
+                // open, so nothing can reach this step — collect it now
+                // rather than leaving an orphan in the cache.
+                onDiscardEditSteps(listOf(rasterized.toString()))
+            }
+            editing = null
+        }
+
+        when (target.editor) {
+            Editor.ADJUST -> AdjustImageScreen(
+                source = target.source,
+                isHd = drafts.firstOrNull { it.originalUri.toString() == target.key }
+                    ?.let { it.isHd ?: defaultIsHd } ?: defaultIsHd,
+                services = edit,
+                liveSteps = liveSteps,
+                onCancel = { editing = null },
+                onDone = onEditDone,
+            )
+
+            Editor.DRAW -> DrawImageScreen(
+                source = target.source,
+                services = edit,
+                liveSteps = liveSteps,
+                onCancel = { editing = null },
+                onDone = onEditDone,
+            )
+        }
         return
     }
 
@@ -332,9 +348,17 @@ internal fun ImagePreviewScreen(
             onToggleHd = { showHdSheet = true },
             showEditTools = !current.isVideo,
             onAdjust = {
-                adjusting = AdjustTarget(
+                editing = EditTarget(
                     key = current.originalUri.toString(),
                     source = current.uri,
+                    editor = Editor.ADJUST,
+                )
+            },
+            onDraw = {
+                editing = EditTarget(
+                    key = current.originalUri.toString(),
+                    source = current.uri,
+                    editor = Editor.DRAW,
                 )
             },
             onDownload = { onDownload(current) },
@@ -694,31 +718,47 @@ private fun ThumbnailStrip(
     }
 }
 
+/** Which of the editor screens an [EditTarget] is open on. */
+private enum class Editor { ADJUST, DRAW }
+
 /**
- * Which item the adjust screen is editing, and which of its steps it opened on.
+ * Which item an editor screen is editing, which editor it is, and which of the
+ * item's steps it opened on.
  *
  * [key] is the pick's own URI — the one field of `PendingMedia` that never
  * moves — because the item's index can change under the editor when a page is
  * removed from the thumbnail strip, and its `uri` moves every time a step lands.
  * [source] is pinned at open time so the flatten reads the bytes the user is
  * actually looking at, even if the item's cursor moves in between.
+ *
+ * One type for both editors, rather than one per screen: everything about
+ * *which photo* is being edited and what happens to the result on Done is
+ * identical, and the differences (a crop frame, a stroke stack) belong to the
+ * screens, which save their own.
  */
-private data class AdjustTarget(val key: String, val source: Uri) {
+private data class EditTarget(val key: String, val source: Uri, val editor: Editor) {
     companion object {
         /**
-         * Saved, not merely remembered. The adjust screen saves its own op
-         * stack and crop frame, and all of that is unreachable if the *screen*
-         * closes on rotation — turning the phone mid-crop would throw the crop
-         * away and make three tested savers dead code.
+         * Saved, not merely remembered. The editor screens save their own op
+         * stacks, crop frames and drawings, and all of that is unreachable if
+         * the *screen* closes on rotation — turning the phone mid-crop would
+         * throw the crop away and make four tested savers dead code.
          *
          * Null round-trips as an empty list rather than as a null the saver
          * would have to special-case, since `rememberSaveable` treats a null
          * save value as "nothing to restore".
          */
-        val Saver: Saver<AdjustTarget?, Any> = listSaver(
-            save = { target -> target?.let { listOf(it.key, it.source.toString()) }.orEmpty() },
+        val Saver: Saver<EditTarget?, Any> = listSaver(
+            save = { target ->
+                target?.let { listOf(it.key, it.source.toString(), it.editor.name) }.orEmpty()
+            },
             restore = { flat ->
-                if (flat.size == 2) AdjustTarget(flat[0], Uri.parse(flat[1])) else null
+                val editor = Editor.entries.firstOrNull { it.name == flat.getOrNull(2) }
+                if (flat.size == 3 && editor != null) {
+                    EditTarget(flat[0], Uri.parse(flat[1]), editor)
+                } else {
+                    null
+                }
             },
         )
     }
