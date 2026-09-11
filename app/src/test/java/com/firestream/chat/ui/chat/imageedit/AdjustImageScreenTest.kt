@@ -456,25 +456,25 @@ class AdjustImageScreenTest {
     }
 
     @Test
-    fun `with the crop tool open the photo keeps a full grab radius clear of every edge`() {
+    fun `with the crop tool open the photo keeps a margin clear of every edge`() {
         // Regression: the photo was fitted edge to edge, so on a photo as wide as
         // the phone the crop corners sat on the physical edge of the glass — half
         // of each grab target off the screen and the other half inside the back
         // gesture strip, which takes the touch before the app ever sees it.
         // Robolectric reports no gesture insets, so this pins the grab-radius
-        // half of the margin; the gesture half is CropGeometryTest's.
+        // term of the margin; the gesture term is CropGeometryTest's.
         setWideContent()
         composeTestRule.onNodeWithContentDescription("Crop").performClick()
         composeTestRule.waitForIdle()
 
         val area = composeTestRule.onNodeWithContentDescription("Crop frame").getBoundsInRoot()
         val photo = composeTestRule.onNodeWithContentDescription("Image being adjusted").getBoundsInRoot()
-        val grab = HANDLE_GRAB_DP.toFloat()
+        val margin = HANDLE_GRAB_DP * CropGeometry.MARGIN_FRACTION
 
-        assertTrue("left margin", photo.left.value - area.left.value >= grab - 1f)
-        assertTrue("top margin", photo.top.value - area.top.value >= grab - 1f)
-        assertTrue("right margin", area.right.value - photo.right.value >= grab - 1f)
-        assertTrue("bottom margin", area.bottom.value - photo.bottom.value >= grab - 1f)
+        assertTrue("left margin", photo.left.value - area.left.value >= margin - 1f)
+        assertTrue("top margin", photo.top.value - area.top.value >= margin - 1f)
+        assertTrue("right margin", area.right.value - photo.right.value >= margin - 1f)
+        assertTrue("bottom margin", area.bottom.value - photo.bottom.value >= margin - 1f)
     }
 
     @Test
@@ -565,6 +565,31 @@ class AdjustImageScreenTest {
         val crop = requireNotNull(croppedOp()) { "the two drags produced no crop at all" }
         assertEquals("left edge follows the second drag", 0.40f, crop.left, 0.06f)
         assertEquals("top edge follows the second drag", 0.40f, crop.top, 0.06f)
+    }
+
+    @Test
+    fun `a side grip drag moves only that edge`() {
+        // The side grips reach the same pointerInput the corners do; this is the
+        // wiring half of what CropGeometryTest checks in arithmetic.
+        setContent()
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        val (originX, originY, width, height) = fittedRect()
+        val midY = originY + height / 2f
+
+        composeTestRule.onNodeWithContentDescription("Crop frame").performTouchInput {
+            down(Offset(originX + width, midY))
+            moveTo(Offset(originX + width * 0.94f, midY))
+            moveTo(Offset(originX + width * 0.84f, midY))
+            moveTo(Offset(originX + width * 0.70f, midY))
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        val crop = requireNotNull(croppedOp()) { "the side drag produced no crop at all" }
+        assertEquals("the right edge follows the drag", 0.70f, crop.right, 0.06f)
+        assertEquals("the left edge stays", 0f, crop.left, 0.001f)
+        assertEquals("the top edge stays", 0f, crop.top, 0.001f)
+        assertEquals("the bottom edge stays", 1f, crop.bottom, 0.001f)
     }
 
     @Test

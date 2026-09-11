@@ -42,25 +42,38 @@ class CropGeometryTest {
     private val gestureStrips = EdgeInsetsPx(left = 32f, top = 24f, right = 32f, bottom = 48f)
 
     @Test
-    fun `a canvas that runs to the screen edge clears the back gesture strip and then a whole grab radius`() {
+    fun `a canvas that runs to the screen edge keeps a third of full clearance from the back strip`() {
         // Regression: the photo was fitted edge to edge, so a corner sat on the
         // edge of the glass — half its target off the screen and the rest inside
         // the back-gesture strip, which takes the touch before the app sees it.
+        // Full clearance (strip + grab radius, 56) cost too much photo, so the
+        // margin keeps a third of it.
         val margin = CropGeometry.reachableInsets(portraitCanvas, gestureStrips, grab)
 
-        assertEquals(56f, margin.left, 0.001f)
-        assertEquals(56f, margin.right, 0.001f)
+        assertEquals(56f / 3f, margin.left, 0.001f)
+        assertEquals(56f / 3f, margin.right, 0.001f)
     }
 
     @Test
-    fun `an edge the editor's own bars already hold clear of its strip adds only the grab radius`() {
-        // The top bar and the bottom panel stand between the canvas and the
-        // status and home strips; counting those strips again would shrink the
-        // photo for nothing. The grab radius still has to fit inside the canvas.
+    fun `a third of the clearance still leaves the inner side of a corner's target past the strip`() {
+        // What the reduced margin is allowed to rely on: a finger aimed at or just
+        // inside the bracket must land beyond the gesture strip. If the fraction
+        // is ever lowered past this, the corner is unreachable again.
         val margin = CropGeometry.reachableInsets(portraitCanvas, gestureStrips, grab)
 
-        assertEquals(24f, margin.top, 0.001f)
-        assertEquals(24f, margin.bottom, 0.001f)
+        assertTrue(margin.left + grab > gestureStrips.left)
+        assertTrue(margin.right + grab > gestureStrips.right)
+    }
+
+    @Test
+    fun `an edge the editor's own bars already hold clear of its strip keeps only the grab-radius part`() {
+        // The top bar and the bottom panel stand between the canvas and the
+        // status and home strips; counting those strips again would shrink the
+        // photo for nothing.
+        val margin = CropGeometry.reachableInsets(portraitCanvas, gestureStrips, grab)
+
+        assertEquals(8f, margin.top, 0.001f)
+        assertEquals(8f, margin.bottom, 0.001f)
     }
 
     @Test
@@ -71,8 +84,8 @@ class CropGeometryTest {
             grabRadius = grab,
         )
 
-        assertEquals(46f, margin.left, 0.001f)
-        assertEquals("already clear of the strip", 24f, margin.right, 0.001f)
+        assertEquals(46f / 3f, margin.left, 0.001f)
+        assertEquals("already clear of the strip", 8f, margin.right, 0.001f)
     }
 
     // ── Aspect ratios cross two spaces ────────────────────────────────────────
@@ -176,6 +189,28 @@ class CropGeometryTest {
         assertTrue("the frame must not invert", dragged.bottom > dragged.top)
     }
 
+    @Test
+    fun `a corner dragged well beyond its opposite stays at the minimum instead of growing back`() {
+        // Regression: the drag measured an unsigned distance from the anchor, so a
+        // finger that kept going past the opposite corner grew the frame again,
+        // mirrored back onto the near side of the anchor. The test above drags
+        // exactly onto the anchor, where the mirror is zero, so it never saw it.
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f),
+            handle = CropHandle.TOP_LEFT,
+            x = 0.95f,
+            y = 0.95f,
+            aspect = CropAspect.FREE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(
+            CropRect(0.8f - CropGeometry.MIN_SIDE, 0.8f - CropGeometry.MIN_SIDE, 0.8f, 0.8f),
+            dragged,
+        )
+    }
+
     // ── Aspect-locked drags ───────────────────────────────────────────────────
 
     @Test
@@ -238,6 +273,124 @@ class CropGeometryTest {
         assertEquals(4f / 5f, pixelWidth / pixelHeight, 0.02f)
     }
 
+    // ── Side drags ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a free side drag moves only its own edge`() {
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f),
+            handle = CropHandle.RIGHT,
+            x = 0.6f,
+            // A finger never travels in a straight line; the vertical wobble must
+            // not leak into a grip that owns no vertical edge.
+            y = 0.95f,
+            aspect = CropAspect.FREE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.2f, 0.2f, 0.6f, 0.8f), dragged)
+    }
+
+    @Test
+    fun `a free top drag stops at the edge of the photo`() {
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f),
+            handle = CropHandle.TOP,
+            x = 0.1f,
+            y = -0.4f,
+            aspect = CropAspect.FREE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.2f, 0f, 0.8f, 0.8f), dragged)
+    }
+
+    @Test
+    fun `a side dragged past its opposite collapses to the minimum, not through it`() {
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f),
+            handle = CropHandle.LEFT,
+            x = 0.95f,
+            y = 0.5f,
+            aspect = CropAspect.FREE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.8f - CropGeometry.MIN_SIDE, 0.2f, 0.8f, 0.8f), dragged)
+    }
+
+    @Test
+    fun `an aspect-locked side drag keeps the ratio by resizing the other axis about its centre`() {
+        // 1:1 on a 4:3 photo starts as (0.125, 0, 0.875, 1). Pulling the right
+        // side in to 0.5 leaves 0.375 of width, so 0.5 of height, centred.
+        val dragged = CropGeometry.drag(
+            rect = CropGeometry.centered(CropAspect.SQUARE, landscape.first, landscape.second),
+            handle = CropHandle.RIGHT,
+            x = 0.5f,
+            y = 0.5f,
+            aspect = CropAspect.SQUARE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.125f, 0.25f, 0.5f, 0.75f), dragged)
+    }
+
+    @Test
+    fun `a vertical side drag uses the ratio the other way up`() {
+        // Pulling the top of the same square down to 0.5 leaves 0.5 of height —
+        // 1500 px — so 0.375 of width, centred. Using width-over-height here
+        // unconverted would give a frame 2.25 times too narrow.
+        val dragged = CropGeometry.drag(
+            rect = CropGeometry.centered(CropAspect.SQUARE, landscape.first, landscape.second),
+            handle = CropHandle.TOP,
+            x = 0.5f,
+            y = 0.5f,
+            aspect = CropAspect.SQUARE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.3125f, 0.5f, 0.6875f, 1f), dragged)
+    }
+
+    @Test
+    fun `an aspect-locked frame resting on an edge grows away from it`() {
+        // A square on the bottom edge cannot grow about its centre without
+        // leaving the photo, so it is pushed back up rather than refusing to grow.
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.125f, 0.5f, 0.5f, 1f),
+            handle = CropHandle.LEFT,
+            x = 0f,
+            y = 0.75f,
+            aspect = CropAspect.SQUARE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0f, 1f / 3f, 0.5f, 1f), dragged)
+    }
+
+    @Test
+    fun `an aspect-locked side drag stops where the other axis fills the photo`() {
+        // A square on a 4:3 photo can be no wider than the photo is tall, so a
+        // left side pulled all the way out stops at 0.75 of width.
+        val dragged = CropGeometry.drag(
+            rect = CropRect(0.7f, 0.4f, 0.9f, 0.4f + 800f / 3000f),
+            handle = CropHandle.LEFT,
+            x = -1f,
+            y = 0.5f,
+            aspect = CropAspect.SQUARE,
+            imageWidth = landscape.first,
+            imageHeight = landscape.second,
+        )
+
+        assertRect(CropRect(0.15f, 0f, 0.9f, 1f), dragged)
+    }
+
     // ── Moving the whole frame ────────────────────────────────────────────────
 
     @Test
@@ -269,6 +422,29 @@ class CropGeometryTest {
             CropHandle.BOTTOM_RIGHT,
             CropGeometry.handleAt(rect, 0.79f, 0.78f, toleranceX = 0.06f, toleranceY = 0.06f),
         )
+    }
+
+    @Test
+    fun `a touch at the middle of a side grabs that side`() {
+        val rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f)
+
+        assertEquals(
+            CropHandle.RIGHT,
+            CropGeometry.handleAt(rect, 0.79f, 0.52f, toleranceX = 0.06f, toleranceY = 0.06f),
+        )
+        assertEquals(
+            CropHandle.TOP,
+            CropGeometry.handleAt(rect, 0.48f, 0.21f, toleranceX = 0.06f, toleranceY = 0.06f),
+        )
+    }
+
+    @Test
+    fun `a touch on a side away from its middle is not a grip`() {
+        // The side grips are a fingertip, like the corners, not the whole edge —
+        // the rest of the edge still belongs to moving the frame.
+        val rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f)
+
+        assertNull(CropGeometry.handleAt(rect, 0.8f, 0.35f, toleranceX = 0.06f, toleranceY = 0.06f))
     }
 
     @Test

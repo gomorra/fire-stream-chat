@@ -91,7 +91,9 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   landscape nav bar), and move only the *content* in — keep the gesture layer full-size, or
   the margin becomes a dead strip exactly where the finger lands.
   `Modifier.systemGestureExclusion` is not the fix: it cannot exclude the home strip and is
-  capped at 200 dp per edge. Worked example: `CropGeometry.reachableInsets`.
+  capped at 200 dp per edge. Worked example: `CropGeometry.reachableInsets` — which keeps
+  only a third of full clearance by choice (full clearance cost about a quarter of the
+  photo's width), relying on the grab target reaching past the strip on its inner side.
 
 ## Coroutines / lifecycle
 

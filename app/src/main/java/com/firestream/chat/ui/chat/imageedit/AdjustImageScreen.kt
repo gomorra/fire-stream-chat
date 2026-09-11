@@ -400,8 +400,9 @@ internal fun AdjustImageScreen(
  * ### The crop margin
  *
  * With the crop tool open the photo is fitted inside a margin instead of edge to
- * edge, so every corner's grab target lies wholly on the glass and outside the
- * system gesture strips — [CropGeometry.reachableInsets] says how wide. Only the
+ * edge, so a grip on the photo's edge is not flush with the edge of the glass
+ * where the back gesture takes the touch — [CropGeometry.reachableInsets] says
+ * how wide, and why it is only part of full clearance. Only the
  * *fit* moves in: the canvas, and the gesture layer on it, stay full-size,
  * because a margin the overlay did not cover would be exactly the strip around
  * each corner that a finger reaching for it lands in. The frame is normalized to
@@ -572,7 +573,7 @@ private fun DrawScope.thirdsGrid(
     }
 }
 
-/** The scrim, the thirds grid, the four corner brackets, and the drag that moves them. */
+/** The scrim, the thirds grid, the corner brackets and side bars, and the drag that moves them. */
 @Composable
 private fun CropOverlay(
     mapper: ImageFitMapper,
@@ -710,6 +711,22 @@ private fun CropOverlay(
                     end = Offset(x, y + armPx * dirY),
                     strokeWidth = strokePx,
                 )
+            }
+
+            // A straight bar at the middle of each side: a side grip owns one
+            // edge, so it is drawn along that edge rather than as a bracket, one
+            // bracket arm long so the two kinds of grip read as a single set.
+            val midX = (left + right) / 2f
+            val midY = (top + bottom) / 2f
+            val halfBar = armPx / 2f
+            val bars = listOf(
+                Offset(midX - halfBar, top) to Offset(midX + halfBar, top),
+                Offset(midX - halfBar, bottom) to Offset(midX + halfBar, bottom),
+                Offset(left, midY - halfBar) to Offset(left, midY + halfBar),
+                Offset(right, midY - halfBar) to Offset(right, midY + halfBar),
+            )
+            for ((start, end) in bars) {
+                drawLine(color = Color.White, start = start, end = end, strokeWidth = strokePx)
             }
         }
     }
@@ -993,7 +1010,7 @@ private const val GRID_DIVISIONS = 3
  * the drawing stays the size the photo can spare. Half of the 48 dp minimum
  * target, measured as a radius.
  *
- * Also the grab-radius half of the crop margin (`CropGeometry.reachableInsets`),
+ * Also the grab-radius term of the crop margin (`CropGeometry.reachableInsets`),
  * which is why it is visible to the screen test that measures that margin.
  */
 internal const val HANDLE_GRAB_DP = 24
