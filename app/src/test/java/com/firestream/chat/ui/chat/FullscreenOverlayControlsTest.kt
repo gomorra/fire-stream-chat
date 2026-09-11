@@ -12,8 +12,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The fullscreen viewers' top-right controls: Close always on screen, every
- * other action folded behind a chevron, and each action opt-in per host.
+ * The fullscreen viewers' top-right controls: every granted action is on
+ * screen from the start, side by side with Close, and each action is opt-in
+ * per host. The chevron-folded tray that briefly hid them (`5406ef3c`) is gone
+ * — the first test pins that it stays gone.
  *
  * No image is loaded — a null URL renders the viewer's error state, which is
  * all the controls need underneath them.
@@ -26,40 +28,24 @@ class FullscreenOverlayControlsTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `a viewer with no actions shows close and no chevron`() {
+    fun `there is no chevron to unfold`() {
         composeTestRule.setContent {
-            FullscreenImageViewer(imageUrl = null, onDismiss = {})
+            FullscreenImageViewer(imageUrl = null, onDismiss = {}, onSaveToDownloads = {}, onEdit = {})
         }
 
-        composeTestRule.onNodeWithContentDescription("Close").assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription("More actions").assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Hide actions").assertDoesNotExist()
     }
 
     @Test
-    fun `actions start folded behind the chevron`() {
+    fun `granted actions are displayed immediately, beside close`() {
         composeTestRule.setContent {
             FullscreenImageViewer(imageUrl = null, onDismiss = {}, onSaveToDownloads = {}, onEdit = {})
         }
 
-        composeTestRule.onNodeWithContentDescription("Close").assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription("More actions").assertIsDisplayed()
-        composeTestRule.onNodeWithContentDescription("Edit").assertDoesNotExist()
-        composeTestRule.onNodeWithContentDescription("Save to Downloads").assertDoesNotExist()
-    }
-
-    @Test
-    fun `the chevron opens the tray and closes it again`() {
-        composeTestRule.setContent {
-            FullscreenImageViewer(imageUrl = null, onDismiss = {}, onSaveToDownloads = {}, onEdit = {})
-        }
-
-        composeTestRule.onNodeWithContentDescription("More actions").performClick()
         composeTestRule.onNodeWithContentDescription("Edit").assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription("Save to Downloads").assertIsDisplayed()
-
-        composeTestRule.onNodeWithContentDescription("Hide actions").performClick()
-        composeTestRule.onNodeWithContentDescription("Edit").assertDoesNotExist()
-        composeTestRule.onNodeWithContentDescription("More actions").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Close").assertIsDisplayed()
     }
 
     @Test
@@ -68,9 +54,19 @@ class FullscreenOverlayControlsTest {
             FullscreenImageViewer(imageUrl = null, onDismiss = {}, onSaveToDownloads = {})
         }
 
-        composeTestRule.onNodeWithContentDescription("More actions").performClick()
         composeTestRule.onNodeWithContentDescription("Save to Downloads").assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription("Edit").assertDoesNotExist()
+    }
+
+    @Test
+    fun `a host that grants nothing shows only close`() {
+        composeTestRule.setContent {
+            FullscreenImageViewer(imageUrl = null, onDismiss = {})
+        }
+
+        composeTestRule.onNodeWithContentDescription("Close").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Edit").assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Save to Downloads").assertDoesNotExist()
     }
 
     @Test
@@ -89,7 +85,6 @@ class FullscreenOverlayControlsTest {
             )
         }
 
-        composeTestRule.onNodeWithContentDescription("More actions").performClick()
         composeTestRule.onNodeWithContentDescription("Edit").performClick()
 
         assertEquals("second", edited?.messageId)

@@ -149,6 +149,7 @@ import com.firestream.chat.ui.search.SearchResultList
 import com.firestream.chat.ui.search.SearchResultsSummary
 import com.firestream.chat.ui.search.searchResultsSummary
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
+import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -2294,17 +2295,37 @@ fun ChatScreen(
     }
 
     // "Edit" from any of the viewers above, once the photo is in the edit cache:
-    // the viewer closes and the send preview opens on a one-item batch whose
-    // original is that copy (`.claude/plans/image-editor.md` §2.6). The viewer
-    // closes rather than waiting underneath because the result is a new message,
-    // not a change to the one on screen. Search, if open, stays open — its
-    // results took a query to produce.
+    // the send preview opens on a one-item batch whose original is that copy
+    // (`.claude/plans/image-editor.md` §2.6) and the viewer closes — the result
+    // is a new message, not a change to the one on screen, so backing out of the
+    // preview must land in the chat, not in the viewer. Search, if open, stays
+    // open: its results took a query to produce.
+    //
+    // The viewer closes *once the preview has faded in over it*, not in the same
+    // frame. The preview draws the same photo in the same place, so its fade-in
+    // over the still-open viewer is invisible; closing both at once cross-faded
+    // two copies of the photo over the chat list and the photo visibly dipped
+    // towards it. It also puts closeFullscreenImage's jump to a swiped-to
+    // message under that cover, where the list can move unseen. Saved, so a
+    // rotation mid-fade still closes the viewer.
+    var viewerUnderPreview by rememberSaveable { mutableStateOf(false) }
+    fun closeViewerUnderPreview() {
+        if (!viewerUnderPreview) return
+        viewerUnderPreview = false
+        if (fullscreenImage != null) closeFullscreenImage()
+        searchGalleryIndex = null
+    }
     val viewerEdit = uiState.overlays.viewerEdit
     LaunchedEffect(viewerEdit) {
         if (viewerEdit is ViewerEdit.Ready) {
-            pendingMedia = listOf(PendingMedia(viewerEdit.source, "image/jpeg"))
-            if (fullscreenImage != null) closeFullscreenImage()
-            searchGalleryIndex = null
+            pendingMedia = listOf(
+                PendingMedia(
+                    originalUri = viewerEdit.source,
+                    mimeType = "image/jpeg",
+                    originalMemoryCacheKey = viewerEdit.placeholderKey,
+                )
+            )
+            viewerUnderPreview = fullscreenImage != null || searchGalleryIndex != null
             viewModel.consumeViewerEdit()
         }
     }
@@ -2367,6 +2388,9 @@ fun ChatScreen(
     }
 
     AnimatedVisibility(visible = pendingMedia.isNotEmpty(), enter = fadeIn(), exit = fadeOut()) {
+        // The viewer this preview may have been opened from goes only now, under
+        // an opaque cover — see closeViewerUnderPreview above.
+        OnEnterSettled { closeViewerUnderPreview() }
         if (pendingMedia.isNotEmpty()) {
             ImagePreviewScreen(
                 items = pendingMedia,
@@ -2374,6 +2398,7 @@ fun ChatScreen(
                 defaultIsHd = sendImagesFullQuality,
                 onEmojiUsed = viewModel::addRecentEmoji,
                 onSend = { edited ->
+                    closeViewerUnderPreview()
                     viewModel.sendMediaMessages(edited)
                     // Every step except the one actually being sent — that file
                     // is about to be read by the compressor. The original goes
@@ -2391,6 +2416,7 @@ fun ChatScreen(
                 },
                 onDownload = viewModel::savePendingMediaToDownloads,
                 onDismiss = {
+                    closeViewerUnderPreview()
                     // The preview collects the steps; the originals are only
                     // known here. Same no-op for anything that is not a copy.
                     viewModel.discardEditSteps(pendingMedia.map { it.originalUri.toString() })

@@ -1,12 +1,7 @@
 package com.firestream.chat.ui.chat
 
+import android.content.Context
 import android.util.Log
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +21,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -45,20 +39,19 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import java.io.File
 
@@ -237,56 +230,67 @@ private fun ZoomableImage(
  * local file over the remote URL. The check is synchronous so we never hand Coil
  * the remote URL during a transient "don't know yet" window — that race made
  * cold-restart taps always start a network load before swapping to the local
- * file. canRead() catches MediaStore files written by a previous install of this
- * app — they exist but EACCES on direct open.
+ * file.
  */
 @Composable
 private fun rememberFullscreenImageRequest(imageUrl: String?, localUri: String?): ImageRequest? {
-    val localFile = remember(localUri) {
-        localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
-    }
-    val imageModel: Any? = when {
-        localFile != null -> localFile
-        !imageUrl.isNullOrBlank() -> imageUrl
-        else -> {
-            Log.w(
-                "FullscreenImageViewer",
-                "No model — localUri=$localUri, imageUrl=$imageUrl",
-            )
-            null
+    val imageModel = remember(imageUrl, localUri) {
+        fullscreenImageModel(imageUrl, localUri).also {
+            if (it == null) Log.w("FullscreenImageViewer", "No model — localUri=$localUri, imageUrl=$imageUrl")
         }
     }
     val context = LocalContext.current
-    return remember(imageModel) {
-        imageModel?.let { model ->
-            ImageRequest.Builder(context)
-                .data(model)
-                .crossfade(true)
-                .listener(
-                    onError = { req, result ->
-                        Log.w(
-                            "FullscreenImageViewer",
-                            "Load failed for ${req.data}",
-                            result.throwable,
-                        )
-                    },
-                )
-                .build()
-        }
-    }
+    return remember(imageModel) { imageModel?.let { fullscreenImageRequest(context, it) } }
 }
+
+/**
+ * What a fullscreen viewer shows for a photo: its local file when that is
+ * readable, else the remote URL, else nothing. One function rather than the
+ * choice inlined, because [ChatViewModel.editFromViewer] has to name the bitmap
+ * the viewer is showing (see [fullscreenImageCacheKey]) and a second copy of
+ * the rule would drift from this one. canRead() catches MediaStore files
+ * written by a previous install of this app — they exist but EACCES on open.
+ */
+internal fun fullscreenImageModel(imageUrl: String?, localUri: String?): Any? {
+    val localFile = localUri?.let(::File)?.takeIf { it.isFile && it.canRead() }
+    return localFile ?: imageUrl?.takeIf { it.isNotBlank() }
+}
+
+/**
+ * The memory-cache key a fullscreen viewer files [model]'s bitmap under.
+ * Explicit rather than Coil's default, so the send preview opened from a viewer
+ * can ask for that very bitmap as its placeholder ([previewImageRequest]): the
+ * preview shows a *copy* of the file, which under default keys shares nothing
+ * with what the viewer has just drawn, and its first frame was black until the
+ * copy had decoded. A file's key keeps the modification time Coil's own key
+ * carries, so a file overwritten in place is never served from a stale entry.
+ */
+internal fun fullscreenImageCacheKey(model: Any): String =
+    if (model is File) "fullscreen:${model.path}:${model.lastModified()}" else "fullscreen:$model"
+
+internal fun fullscreenImageRequest(context: Context, model: Any): ImageRequest =
+    ImageRequest.Builder(context)
+        .data(model)
+        .memoryCacheKey(MemoryCache.Key(fullscreenImageCacheKey(model)))
+        .crossfade(true)
+        .listener(
+            onError = { req, result ->
+                Log.w("FullscreenImageViewer", "Load failed for ${req.data}", result.throwable)
+            },
+        )
+        .build()
 
 /**
  * Top-right controls and optional snackbar shared by both viewers.
  *
- * Close is always on screen. Every other action is folded behind a chevron
- * that points the way the tray opens, so a photo is not framed by a row of
- * buttons the viewer mostly does not want — the viewer is for looking. Each
- * action is opt-in per host through its nullable lambda: a null hides the
- * button rather than greying it, and a host with no actions gets no chevron.
+ * Edit, Save and Close sit side by side, always visible. Each action is opt-in
+ * per host through its nullable lambda: a null hides the button rather than
+ * greying it, so the avatar viewers and the share preview show only Close, and
+ * a link-preview thumbnail gets neither Save nor Edit.
  *
- * The tray stays open across page swipes and after a save, so saving several
- * photos in a row is not a tap more each time.
+ * A chevron-folded tray (Close on screen, the rest behind a `<`) shipped in
+ * `5406ef3c` and was reversed the same day at the user's direction: hiding the
+ * actions cost more than the tidier frame bought.
  */
 @Composable
 private fun BoxScope.FullscreenOverlayControls(
@@ -295,13 +299,6 @@ private fun BoxScope.FullscreenOverlayControls(
     onEdit: (() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
 ) {
-    val hasActions = onSaveToDownloads != null || onEdit != null
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    // Half a turn: the "<" that opens the tray becomes the ">" that closes it.
-    val chevronTurn by animateFloatAsState(
-        targetValue = if (expanded) 180f else 0f,
-        label = "fullscreenTrayChevron",
-    )
     Row(
         modifier = Modifier
             .align(Alignment.TopEnd)
@@ -311,27 +308,11 @@ private fun BoxScope.FullscreenOverlayControls(
             .padding(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (hasActions) {
-            AnimatedVisibility(
-                visible = expanded,
-                enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
-                exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
-            ) {
-                Row {
-                    if (onEdit != null) {
-                        OverlayControlButton(Icons.Default.Edit, "Edit", onEdit)
-                    }
-                    if (onSaveToDownloads != null) {
-                        OverlayControlButton(Icons.Default.Download, "Save to Downloads", onSaveToDownloads)
-                    }
-                }
-            }
-            OverlayControlButton(
-                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = if (expanded) "Hide actions" else "More actions",
-                onClick = { expanded = !expanded },
-                iconModifier = Modifier.graphicsLayer { rotationZ = chevronTurn },
-            )
+        if (onEdit != null) {
+            OverlayControlButton(Icons.Default.Edit, "Edit", onEdit)
+        }
+        if (onSaveToDownloads != null) {
+            OverlayControlButton(Icons.Default.Download, "Save to Downloads", onSaveToDownloads)
         }
         OverlayControlButton(Icons.Default.Close, "Close", onDismiss)
     }
@@ -359,7 +340,6 @@ private fun OverlayControlButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: () -> Unit,
-    iconModifier: Modifier = Modifier,
 ) {
     Box(
         modifier = Modifier
@@ -378,7 +358,7 @@ private fun OverlayControlButton(
                 imageVector = icon,
                 contentDescription = contentDescription,
                 tint = Color.White,
-                modifier = iconModifier.size(20.dp),
+                modifier = Modifier.size(20.dp),
             )
         }
     }
