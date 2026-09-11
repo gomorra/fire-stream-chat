@@ -87,6 +87,14 @@ import androidx.compose.ui.unit.dp
  * nothing where it lands, so the field is keyed on the active tab: every switch
  * arrives at that tab's own empty field, asking that tab's own question.
  *
+ * ### …and a tab with nothing to search gets no field
+ *
+ * Text and Shapes have no list a query could shorten, so on those tabs the
+ * search button and the field are both absent rather than present and inert
+ * (`PickerTab.searchHint` is null). The row is then the island and the delete
+ * button alone, which is also 38 dp more for the island on the 390 dp row §4
+ * sizes it against.
+ *
  * @param tabs the island's segments, in order; the first is the one it opens on
  * @param onDelete acts on the host's current selection, or null while there is
  *   nothing selected — the button is then **hidden, not greyed**, because a
@@ -120,7 +128,14 @@ internal fun PickerPanel(
     // the button that would collapse it is never drawn.
     val hasIsland = declared.size > 1
     var searchOpen by rememberSaveable(declared) { mutableStateOf(false) }
-    val fieldExpanded = !hasIsland || searchOpen
+
+    // Text and Shapes have no list a query could shorten, so they get no field
+    // and no button — see PickerTab.searchHint. Derived rather than reset on
+    // switch: the island is hidden while search is open, so a tab change can
+    // only arrive with `searchOpen` already false, and deriving means even a
+    // restored `searchOpen` from process death cannot resurrect a dead field.
+    val canSearch = active.searchHint != null
+    val fieldExpanded = canSearch && (!hasIsland || searchOpen)
 
     // Back closes the search before anything else gets a say. The island slides
     // away when search opens and the field's × is otherwise the only way to
@@ -142,14 +157,14 @@ internal fun PickerPanel(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (hasIsland && !searchOpen) {
+            if (hasIsland && canSearch && !searchOpen) {
                 SearchButton(onClick = { searchOpen = true })
             }
 
             if (fieldExpanded) {
                 SearchField(
                     query = query,
-                    hint = active.searchHint,
+                    hint = active.searchHint.orEmpty(),
                     onQueryChange = { query = it },
                     // Only a collapsible field offers to collapse; the one-tab
                     // hosts keep the plain clear-the-text × they always had.

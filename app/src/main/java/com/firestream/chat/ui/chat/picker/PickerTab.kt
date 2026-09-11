@@ -22,14 +22,27 @@ import com.firestream.chat.domain.util.OverlayContent
 internal enum class PickerTab(
     /** The word on the island's active segment, and the handle a test grabs it by. */
     val label: String,
-    /** What the search field asks for while this tab is the active one. */
-    val searchHint: String,
+    /**
+     * What the search field asks for while this tab is the active one, or
+     * **null when there is nothing on the tab to search** — which is what
+     * [PickerPanel] reads to decide whether to offer a search field at all.
+     *
+     * A tab is searchable only if it has a list a query can shorten: emoji
+     * filter a few thousand names, stickers filter a pack, and a GIF query
+     * would go to a provider. Text and Shapes have no such list — the text tab
+     * is a field you type the overlay into, and the shape tab is five buttons
+     * that all fit on screen. Offering a field there would be worse than
+     * offering nothing: it looks live, it accepts what you type, and it cannot
+     * do anything with it. Same rule as the island a one-tab host does not
+     * draw — nothing ships unreachable, and nothing ships inert.
+     */
+    val searchHint: String?,
 ) {
     EMOJI(label = "Emoji", searchHint = "Search emoji…"),
     STICKER(label = "Stickers", searchHint = "Search stickers…"),
     GIF(label = "GIFs", searchHint = "Search GIFs…"),
-    TEXT(label = "Text", searchHint = "Search fonts…"),
-    SHAPE(label = "Shapes", searchHint = "Search shapes…"),
+    TEXT(label = "Text", searchHint = null),
+    SHAPE(label = "Shapes", searchHint = null),
 }
 
 /**
