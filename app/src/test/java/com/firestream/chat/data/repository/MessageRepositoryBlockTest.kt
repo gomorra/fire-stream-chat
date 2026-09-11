@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
@@ -60,7 +61,7 @@ class MessageRepositoryBlockTest {
     }
 
     private fun stubOptimisticRow() {
-        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+        coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
         coEvery { messageDao.updateMessageStatus(any(), any()) } just Runs
     }
 
@@ -134,12 +135,17 @@ class MessageRepositoryBlockTest {
     @Test
     fun `sendTimerMessage keeps a FAILED row when the block check throws`() = runTest {
         blockCheckThrows()
-        stubOptimisticRow()
+        // A timer is not an outbox row: it is written directly, as a record.
+        val timerRow = slot<MessageRecord>()
+        coEvery { messageDao.upsertRecord(capture(timerRow)) } just Runs
+        coEvery { messageDao.updateMessageStatus(any(), any()) } just Runs
 
         val result = repository.sendTimerMessage("chat1", 30_000L, null, "recipient1")
 
         assertTrue(result.isFailure)
-        assertRowInsertedThenFailed()
+        assertEquals(MessageStatus.SENDING.name, timerRow.captured.status)
+        coVerify(exactly = 1) { messageDao.updateMessageStatus(timerRow.captured.id, MessageStatus.FAILED.name) }
+        verify { messageSource wasNot Called }
     }
 
     // ── sendMessage blocked ─────────────────────────────────────────────────
@@ -159,18 +165,18 @@ class MessageRepositoryBlockTest {
     @Test
     fun `sendMessage succeeds when recipient is not blocked`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns false
-        coEvery { messageDao.insertMessage(any()) } just Runs
+        coEvery { messageDao.insertOutbox(any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "recipient1")
 
         assertTrue(result.isSuccess)
-        coVerify(exactly = 1) { messageDao.insertMessage(any()) }
+        coVerify(exactly = 1) { messageDao.insertOutbox(any()) }
         coVerify(exactly = 1) { outboxSender.send(any(), null) }
     }
 
     @Test
     fun `sendMessage skips block check for empty recipientId (group chats)`() = runTest {
-        coEvery { messageDao.insertMessage(any()) } just Runs
+        coEvery { messageDao.insertOutbox(any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "")
 
@@ -194,7 +200,7 @@ class MessageRepositoryBlockTest {
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
-        coVerify(exactly = 0) { messageDao.insertMessage(any()) }
+        coVerify(exactly = 0) { messageDao.insertOutbox(any()) }
     }
 
     // ── sendVoiceMessage blocked ────────────────────────────────────────────

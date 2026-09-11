@@ -5,6 +5,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -31,8 +32,6 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -52,7 +51,7 @@ class MessageRepositoryLocalUriTest {
 
     private val firestoreFlow = MutableSharedFlow<List<RawMessage>>(extraBufferCapacity = 1)
     private val roomFlow = MutableSharedFlow<List<MessageEntity>>(replay = 1)
-    private val insertSlot = slot<MessageEntity>()
+    private val upsertSlot = slot<MessageRecord>()
 
     private lateinit var repository: MessageRepositoryImpl
 
@@ -63,7 +62,7 @@ class MessageRepositoryLocalUriTest {
         every { messageSource.observeMessages("chat1") } returns firestoreFlow
         every { messageDao.getMessagesByChatId("chat1") } returns roomFlow
         coEvery { signalManager.ensureInitialized() } just Runs
-        coEvery { messageDao.insertMessage(capture(insertSlot)) } just Runs
+        coEvery { messageDao.upsertRecord(capture(upsertSlot)) } just Runs
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns emptyList()
         coEvery { messageDao.updateReactions(any(), any()) } just Runs
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
@@ -85,19 +84,25 @@ class MessageRepositoryLocalUriTest {
         Dispatchers.resetMain()
     }
 
-    // ── localUri preservation ────────────────────────────────────────────────
+    // ── local columns on a re-processed message ──────────────────────────────
+    // An edit echo of a received message is written as a MessageRecord upsert,
+    // which cannot touch localUri or the star (MessageDaoOutboxColumnsTest pins
+    // the DAO side). The repository's part: write the record, and nothing else.
 
     @Test
-    fun `localUri preserved when incoming message is re-processed after edit`() = runTest {
+    fun `an edited incoming message is written as a record upsert, not a whole-row replace`() = runTest {
         val localPath = "/storage/emulated/0/Pictures/FireStream Images/msg1.jpg"
         val existingEntity = MessageEntity(
-            id = "msg1", chatId = "chat1", senderId = "sender1",
-            content = "Hello", type = "IMAGE",
-            mediaUrl = "https://firebasestorage.example/msg1.jpg",
-            mediaThumbnailUrl = null,
+            MessageRecord(
+                id = "msg1", chatId = "chat1", senderId = "sender1",
+                content = "Hello", type = "IMAGE",
+                mediaUrl = "https://firebasestorage.example/msg1.jpg",
+                mediaThumbnailUrl = null,
+                status = "SENT", replyToId = null, timestamp = 1000L,
+                editedAt = null,
+            ),
             localUri = localPath,
-            status = "SENT", replyToId = null, timestamp = 1000L,
-            editedAt = null, isStarred = true
+            isStarred = true,
         )
         coEvery { messageDao.getMessageById("msg1") } returns existingEntity
 
@@ -116,16 +121,19 @@ class MessageRepositoryLocalUriTest {
         firestoreFlow.emit(listOf(raw))
         advanceUntilIdle()
 
-        coVerify { messageDao.insertMessage(any()) }
-        assertEquals(localPath, insertSlot.captured.localUri)
-        assertTrue(insertSlot.captured.isStarred)
-        assertEquals("Hello edited", insertSlot.captured.content)
+        coVerify(exactly = 1) { messageDao.upsertRecord(any()) }
+        coVerify(exactly = 0) { messageDao.insertOutbox(any()) }
+        coVerify(exactly = 0) { messageDao.updateLocalUri(any(), any()) }
+        assertEquals("Hello edited", upsertSlot.captured.content)
+        assertEquals(99999L, upsertSlot.captured.editedAt)
+        // The row already has its file; the edit must not queue a second download.
+        coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
 
         job.cancel()
     }
 
     @Test
-    fun `localUri is null for genuinely new incoming message`() = runTest {
+    fun `a new incoming message is written as a record and downloads its media`() = runTest {
         coEvery { messageDao.getMessageById("msg2") } returns null
 
         val raw = RawMessage(
@@ -143,8 +151,9 @@ class MessageRepositoryLocalUriTest {
         firestoreFlow.emit(listOf(raw))
         advanceUntilIdle()
 
-        coVerify { messageDao.insertMessage(any()) }
-        assertNull(insertSlot.captured.localUri)
+        coVerify { messageDao.upsertRecord(any()) }
+        assertEquals("msg2", upsertSlot.captured.id)
+        assertEquals("https://firebasestorage.example/msg2.jpg", upsertSlot.captured.mediaUrl)
 
         job.cancel()
     }
@@ -155,13 +164,13 @@ class MessageRepositoryLocalUriTest {
     fun `ensureLocalCopiesForChat downloads pending media even when auto-download is NEVER`() = runTest {
         // Preference is NEVER (set in setUp) — the explicit gallery view must
         // still persist local copies, unlike the auto-download path.
-        val pending = MessageEntity(
+        val pending = MessageEntity(MessageRecord(
             id = "msgA", chatId = "chat1", senderId = "sender1",
             content = "", type = "IMAGE",
             mediaUrl = "https://firebasestorage.example/msgA.jpg",
-            mediaThumbnailUrl = null, localUri = null,
+            mediaThumbnailUrl = null,
             status = "SENT", replyToId = null, timestamp = 1000L, editedAt = null,
-        )
+        ))
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(pending)
         val savedFile = java.io.File("/storage/emulated/0/Pictures/FireStream Images/msgA.jpg")
         coEvery {
@@ -178,16 +187,16 @@ class MessageRepositoryLocalUriTest {
 
     @Test
     fun `ensureLocalCopiesForChat continues past a failed download`() = runTest {
-        val failing = MessageEntity(
+        val failing = MessageEntity(MessageRecord(
             id = "bad", chatId = "chat1", senderId = "s", content = "", type = "IMAGE",
             mediaUrl = "https://firebasestorage.example/bad.jpg", mediaThumbnailUrl = null,
-            localUri = null, status = "SENT", replyToId = null, timestamp = 1L, editedAt = null,
-        )
-        val ok = MessageEntity(
+            status = "SENT", replyToId = null, timestamp = 1L, editedAt = null,
+        ))
+        val ok = MessageEntity(MessageRecord(
             id = "good", chatId = "chat1", senderId = "s", content = "", type = "IMAGE",
             mediaUrl = "https://firebasestorage.example/good.jpg", mediaThumbnailUrl = null,
-            localUri = null, status = "SENT", replyToId = null, timestamp = 2L, editedAt = null,
-        )
+            status = "SENT", replyToId = null, timestamp = 2L, editedAt = null,
+        ))
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(failing, ok)
         coEvery {
             mediaFileManager.downloadAndSave("chat1", "bad", any())
@@ -206,12 +215,14 @@ class MessageRepositoryLocalUriTest {
     @Test
     fun `existing incoming message with unchanged editedAt is skipped`() = runTest {
         val existingEntity = MessageEntity(
-            id = "msg3", chatId = "chat1", senderId = "sender1",
-            content = "Hi", type = "TEXT", mediaUrl = null,
-            mediaThumbnailUrl = null,
+            MessageRecord(
+                id = "msg3", chatId = "chat1", senderId = "sender1",
+                content = "Hi", type = "TEXT", mediaUrl = null,
+                mediaThumbnailUrl = null,
+                status = "SENT", replyToId = null, timestamp = 3000L,
+                editedAt = null
+            ),
             localUri = "/storage/emulated/0/Pictures/FireStream Images/msg3.jpg",
-            status = "SENT", replyToId = null, timestamp = 3000L,
-            editedAt = null
         )
         coEvery { messageDao.getMessageById("msg3") } returns existingEntity
 
@@ -230,8 +241,8 @@ class MessageRepositoryLocalUriTest {
         firestoreFlow.emit(listOf(raw))
         advanceUntilIdle()
 
-        // insertMessage should NOT be called for this message
-        coVerify(exactly = 0) { messageDao.insertMessage(any()) }
+        // No write at all for an unchanged message.
+        coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
 
         job.cancel()
     }

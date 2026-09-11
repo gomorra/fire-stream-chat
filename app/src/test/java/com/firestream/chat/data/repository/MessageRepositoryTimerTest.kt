@@ -2,6 +2,7 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.TimerSendResult
@@ -57,10 +58,10 @@ class MessageRepositoryTimerTest {
             messageSource.sendTimerMessage("chat1", "uid1", 30_000L, "Pizza", any())
         } returns TimerSendResult(messageId = "remoteId", startedAtMs = 1_700_000_000_000L)
 
-        val optimisticSlot = slot<MessageEntity>()
-        val replacedSlot = slot<MessageEntity>()
-        coEvery { messageDao.insertMessage(capture(optimisticSlot)) } just Runs
-        coEvery { messageDao.replaceMessage(any(), capture(replacedSlot)) } just Runs
+        val optimisticSlot = slot<MessageRecord>()
+        val replacedSlot = slot<MessageRecord>()
+        coEvery { messageDao.upsertRecord(capture(optimisticSlot)) } just Runs
+        coEvery { messageDao.markSent(any(), capture(replacedSlot), any()) } just Runs
 
         val result = repository.sendTimerMessage("chat1", 30_000L, "Pizza", "recipient1")
 
@@ -117,15 +118,9 @@ class MessageRepositoryTimerTest {
     @Test
     fun `cancelTimer flips state to CANCELLED in remote and local stores`() = runTest {
         coEvery { messageSource.updateTimerState("chat1", "msg1", "CANCELLED") } just Runs
-        val existing = MessageEntity(
-            id = "msg1", chatId = "chat1", senderId = "uid1", content = "",
-            type = MessageType.TIMER.name, mediaUrl = null, mediaThumbnailUrl = null,
-            status = "SENT", replyToId = null, timestamp = 0L, editedAt = null,
-            timerDurationMs = 30_000L, timerStartedAtMs = 0L, timerState = "RUNNING",
-        )
-        coEvery { messageDao.getMessageById("msg1") } returns existing
-        val updated = slot<MessageEntity>()
-        coEvery { messageDao.insertMessage(capture(updated)) } just Runs
+        coEvery { messageDao.getMessageById("msg1") } returns runningTimer()
+        val updated = slot<MessageRecord>()
+        coEvery { messageDao.upsertRecord(capture(updated)) } just Runs
 
         val result = repository.cancelTimer("chat1", "msg1")
 
@@ -142,7 +137,7 @@ class MessageRepositoryTimerTest {
         val result = repository.cancelTimer("chat1", "msg1")
 
         assertTrue(result.isSuccess)
-        coVerify(exactly = 0) { messageDao.insertMessage(any()) }
+        coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
     }
 
     // ── markTimerCompleted ──────────────────────────────────────────────────
@@ -150,15 +145,9 @@ class MessageRepositoryTimerTest {
     @Test
     fun `markTimerCompleted flips state to COMPLETED in remote and local stores`() = runTest {
         coEvery { messageSource.updateTimerState("chat1", "msg1", "COMPLETED") } just Runs
-        val existing = MessageEntity(
-            id = "msg1", chatId = "chat1", senderId = "uid1", content = "",
-            type = MessageType.TIMER.name, mediaUrl = null, mediaThumbnailUrl = null,
-            status = "SENT", replyToId = null, timestamp = 0L, editedAt = null,
-            timerDurationMs = 30_000L, timerStartedAtMs = 0L, timerState = "RUNNING",
-        )
-        coEvery { messageDao.getMessageById("msg1") } returns existing
-        val updated = slot<MessageEntity>()
-        coEvery { messageDao.insertMessage(capture(updated)) } just Runs
+        coEvery { messageDao.getMessageById("msg1") } returns runningTimer()
+        val updated = slot<MessageRecord>()
+        coEvery { messageDao.upsertRecord(capture(updated)) } just Runs
 
         val result = repository.markTimerCompleted("chat1", "msg1")
 
@@ -166,4 +155,13 @@ class MessageRepositoryTimerTest {
         coVerify(exactly = 1) { messageSource.updateTimerState("chat1", "msg1", "COMPLETED") }
         assertEquals("COMPLETED", updated.captured.timerState)
     }
+
+    private fun runningTimer() = MessageEntity(
+        MessageRecord(
+            id = "msg1", chatId = "chat1", senderId = "uid1", content = "",
+            type = MessageType.TIMER.name, mediaUrl = null, mediaThumbnailUrl = null,
+            status = "SENT", replyToId = null, timestamp = 0L, editedAt = null,
+            timerDurationMs = 30_000L, timerStartedAtMs = 0L, timerState = "RUNNING",
+        )
+    )
 }

@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
-import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.domain.model.MessageStatus
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -52,7 +52,7 @@ class MessageDaoOrphanRecoveryTest {
 
     @Test
     fun `failStuckSendingMessages flips SENDING to FAILED and leaves other states untouched`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "sending-1", status = MessageStatus.SENDING),
             msg(id = "sending-2", status = MessageStatus.SENDING),
             msg(id = "sent", status = MessageStatus.SENT),
@@ -74,7 +74,7 @@ class MessageDaoOrphanRecoveryTest {
 
     @Test
     fun `failStuckSendingMessagesForChat only recovers the given chat`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "a-orphan", chatId = "chatA", status = MessageStatus.SENDING),
             msg(id = "b-orphan", chatId = "chatB", status = MessageStatus.SENDING),
         ))
@@ -89,7 +89,7 @@ class MessageDaoOrphanRecoveryTest {
 
     @Test
     fun `getPendingSendingMessage matches a SENDING row`() = runTest {
-        dao.insertMessage(msg(id = "opt", status = MessageStatus.SENDING, timestamp = 5000L))
+        dao.upsertRecord(msg(id = "opt", status = MessageStatus.SENDING, timestamp = 5000L))
 
         val match = dao.getPendingSendingMessage(chatId = "c1", timestamp = 5000L, senderId = "me")
 
@@ -103,7 +103,7 @@ class MessageDaoOrphanRecoveryTest {
         // row was orphaned and then flipped to FAILED by recovery before the
         // remote echo arrived. The echo path must still find it (and skip the
         // duplicate insert) by timestamp + sender.
-        dao.insertMessage(msg(id = "orphan-but-sent", status = MessageStatus.FAILED, timestamp = 7000L))
+        dao.upsertRecord(msg(id = "orphan-but-sent", status = MessageStatus.FAILED, timestamp = 7000L))
 
         val match = dao.getPendingSendingMessage(chatId = "c1", timestamp = 7000L, senderId = "me")
 
@@ -113,7 +113,7 @@ class MessageDaoOrphanRecoveryTest {
 
     @Test
     fun `getPendingSendingMessage ignores a fully SENT row`() = runTest {
-        dao.insertMessage(msg(id = "done", status = MessageStatus.SENT, timestamp = 9000L))
+        dao.upsertRecord(msg(id = "done", status = MessageStatus.SENT, timestamp = 9000L))
 
         val match = dao.getPendingSendingMessage(chatId = "c1", timestamp = 9000L, senderId = "me")
 
@@ -126,7 +126,7 @@ class MessageDaoOrphanRecoveryTest {
         status: MessageStatus,
         timestamp: Long = 1000L,
         senderId: String = "me",
-    ): MessageEntity = MessageEntity(
+    ): MessageRecord = MessageRecord(
         id = id,
         chatId = chatId,
         senderId = senderId,

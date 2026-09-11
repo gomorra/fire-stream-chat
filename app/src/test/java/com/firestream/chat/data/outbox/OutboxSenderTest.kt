@@ -8,6 +8,7 @@ import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.util.ImageCompressor
@@ -92,20 +93,25 @@ class OutboxSenderTest {
         every { Uri.fromFile(any()) } answers { mockk(relaxed = true) }
 
         coEvery { messageDao.getMessageById(any()) } answers { rows[firstArg()] }
-        coEvery { messageDao.replaceMessage(any(), any()) } answers {
-            val row = secondArg<MessageEntity>()
+        coEvery { messageDao.markSent(any(), any(), any()) } answers {
+            val sent = secondArg<MessageRecord>()
             rows.remove(firstArg<String>())
+            // What the DAO transaction does: the record, the kept localUri, the outbox columns cleared.
+            val row = MessageEntity(sent, localUri = thirdArg())
             rows[row.id] = row
             persisted += row
         }
         coEvery { messageDao.updateSendProgress(any(), any(), any(), any(), any(), any(), any()) } answers {
-            val row = rows.getValue(firstArg()).copy(
+            val current = rows.getValue(firstArg())
+            val row = current.copy(
                 localUri = arg(1),
-                mediaWidth = arg(2),
-                mediaHeight = arg(3),
-                duration = arg(4),
-                mediaThumbnailUrl = arg(5),
-                mediaUrl = arg(6),
+                record = current.record.copy(
+                    mediaWidth = arg(2),
+                    mediaHeight = arg(3),
+                    duration = arg(4),
+                    mediaThumbnailUrl = arg(5),
+                    mediaUrl = arg(6),
+                ),
             )
             rows[row.id] = row
             persisted += row

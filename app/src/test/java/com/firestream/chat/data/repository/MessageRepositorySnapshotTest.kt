@@ -72,7 +72,7 @@ class MessageRepositorySnapshotTest {
             delay(daoReadCostMs)
             null
         }
-        coEvery { messageDao.insertMessage(any()) } just Runs
+        coEvery { messageDao.upsertRecord(any()) } just Runs
         repository = messageRepository(
             messageDao = messageDao,
             messageSource = messageSource,
@@ -99,7 +99,7 @@ class MessageRepositorySnapshotTest {
         advanceTimeBy(2.seconds)
 
         // The last message in the snapshot must reach Room, not just the first few.
-        coVerify(atLeast = 1) { messageDao.insertMessage(match { it.id == "m$MESSAGE_COUNT" }) }
+        coVerify(atLeast = 1) { messageDao.upsertRecord(match { it.id == "m$MESSAGE_COUNT" }) }
         job.cancel()
     }
 
@@ -119,7 +119,7 @@ class MessageRepositorySnapshotTest {
 
         (1..MESSAGE_COUNT).forEach { i ->
             coVerify(exactly = 1) { messageDao.getMessageById("m$i") }
-            coVerify(exactly = 1) { messageDao.insertMessage(match { it.id == "m$i" }) }
+            coVerify(exactly = 1) { messageDao.upsertRecord(match { it.id == "m$i" }) }
         }
         job.cancel()
     }
@@ -148,7 +148,7 @@ class MessageRepositorySnapshotTest {
             delay(50)
             emit(listOf(row.copy(outboxAttempts = 1, outboxCiphertext = "cipher-1", outboxSignalType = 3)))
             delay(50)
-            emit(listOf(row.copy(status = MessageStatus.SENT.name)))
+            emit(listOf(row.copy(record = row.record.copy(status = MessageStatus.SENT.name))))
         }
 
         val emitted = repository.getMessages(CHAT).toList()
@@ -207,10 +207,12 @@ class MessageRepositorySnapshotTest {
         val job = launch { repository.getMessages(CHAT).collect { } }
         advanceUntilIdle()
 
+        coVerify(exactly = 0) { messageDao.acknowledge("own1", any()) }
         coVerify(exactly = 0) { messageDao.updateMessageStatus("own1", any()) }
         job.cancel()
     }
 
+    // The heal is the acknowledge transaction: the row leaves the outbox with its status.
     @Test
     fun `an acknowledged echo moves a FAILED row to SENT`() = runTest {
         // A send whose await died (user left the chat) but whose write landed:
@@ -222,7 +224,7 @@ class MessageRepositorySnapshotTest {
         val job = launch { repository.getMessages(CHAT).collect { } }
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { messageDao.updateMessageStatus("own1", MessageStatus.SENT.name) }
+        coVerify(exactly = 1) { messageDao.acknowledge("own1", MessageStatus.SENT.name) }
         job.cancel()
     }
 

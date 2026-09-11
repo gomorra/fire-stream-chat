@@ -11,7 +11,9 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 `AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
 
-**Outbox columns (`messages`, version 27).** Local send bookkeeping for an own row that has not reached `SENT`, written by `OutboxSender` and cleared by its SENT replace:
+**`messages` is two halves (version 28).** `MessageEntity` embeds a `MessageRecord` — every column the backend also holds — and keeps the local-only columns beside it: `localUri`, `isStarred` and the outbox bookkeeping below. `MessageRecord` doubles as Room's partial entity for the table: a snapshot, a sync, an edit echo or a poll vote is `MessageDao.upsertRecord`, which inserts the row when it is new and otherwise overwrites exactly the record's columns, so the local ones survive without being copied across. The local columns change only through column updates, the outbox insert of an own send (`MessageDao.insertOutbox`) and the SENT transaction (`MessageDao.markSent`). `isStarred` and `outboxAttempts` carry `DEFAULT 0` so a partial insert can omit them.
+
+**Outbox columns.** Local send bookkeeping for an own row that has not reached `SENT`, written by the outbox insert and `OutboxSender`'s column updates, and cleared by one statement — `MessageDao.clearOutbox` — inside `markSent` and `acknowledge` (the heal of a row the backend turns out to hold):
 
 | Column | Meaning |
 |---|---|
@@ -20,7 +22,7 @@ The app uses **two Room databases** so that destructive schema migrations on the
 | `outboxPeerIdentity` | The peer identity key that ciphertext was encrypted for; a later attempt reuses the bytes only while the peer still publishes it (`SignalManager.isCurrentIdentity`), and encrypts again after a re-registration |
 | `outboxAttempts` | Pipeline runs started for the row; above 0 an earlier write may have landed, so the next write is create-if-absent |
 
-They are not on the domain `Message`, so any other write to an unsent row must be a column update, never a whole-row replace ([`GOTCHAS.md`](GOTCHAS.md)). Version 27 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
+Version 28 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
 
 ```mermaid
 erDiagram

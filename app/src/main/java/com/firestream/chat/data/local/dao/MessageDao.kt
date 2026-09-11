@@ -2,20 +2,16 @@ package com.firestream.chat.data.local.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Upsert
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface MessageDao {
 
-    @Transaction
-    suspend fun replaceMessage(oldId: String, newMessage: MessageEntity) {
-        deleteMessage(oldId)
-        insertMessage(newMessage)
-    }
     @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
     fun getMessagesByChatId(chatId: String): Flow<List<MessageEntity>>
 
@@ -46,11 +42,68 @@ interface MessageDao {
     @Query("UPDATE messages SET status = 'FAILED' WHERE chatId = :chatId AND status = 'SENDING'")
     suspend fun failStuckSendingMessagesForChat(chatId: String): Int
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessage(message: MessageEntity)
+    // ── Writes ──────────────────────────────────────────────────────────────
+    // Two shapes. A row this device composes is inserted whole, outbox
+    // bookkeeping included (insertOutbox). Everything the backend says about a
+    // message — a snapshot, a sync, an edit echo, a poll vote — is a
+    // MessageRecord upsert, which cannot reach the local columns: localUri,
+    // isStarred and the outbox columns change only through the column updates
+    // below and the SENT transaction.
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertMessages(messages: List<MessageEntity>)
+    /** A row this device composed, with the outbox bookkeeping its send needs. New ids only. */
+    @Insert
+    suspend fun insertOutbox(entity: MessageEntity)
+
+    /**
+     * The backend's columns of a message: inserted when the row is new (the local
+     * columns take their defaults), otherwise written over exactly the columns a
+     * [MessageRecord] carries. Room's partial-entity upsert — a `REPLACE` would
+     * delete and re-insert the row and reset every column the record lacks.
+     */
+    @Upsert(entity = MessageEntity::class)
+    suspend fun upsertRecord(record: MessageRecord)
+
+    @Upsert(entity = MessageEntity::class)
+    suspend fun upsertRecords(records: List<MessageRecord>)
+
+    /**
+     * The one statement that takes a row out of the outbox: its bookkeeping back
+     * to the defaults a row that never queued has. Only [markSent] and
+     * [acknowledge] call it — both mean the backend has the message.
+     */
+    @Query(
+        """
+        UPDATE messages SET outboxRecipientId = NULL, outboxCiphertext = NULL, outboxSignalType = NULL,
+            outboxPeerIdentity = NULL, outboxAttempts = 0
+        WHERE id = :messageId
+        """
+    )
+    suspend fun clearOutbox(messageId: String)
+
+    /**
+     * A send that the backend acknowledged: the row as written, under the id the
+     * backend used (a PocketBase retry swaps it), with the [localUri] the send
+     * decided to keep, and out of the outbox — one transaction, so no reader sees
+     * a SENT row that still carries ciphertext or an attempt count.
+     */
+    @Transaction
+    suspend fun markSent(oldId: String, sent: MessageRecord, localUri: String?) {
+        if (oldId != sent.id) deleteMessage(oldId)
+        upsertRecord(sent)
+        updateLocalUri(sent.id, localUri)
+        clearOutbox(sent.id)
+    }
+
+    /**
+     * The backend's status for an own message it holds — an acknowledged echo or a
+     * sync row. Healing a row a send left SENDING or FAILED also takes it out of
+     * the outbox, the same way [markSent] does.
+     */
+    @Transaction
+    suspend fun acknowledge(messageId: String, status: String) {
+        updateMessageStatus(messageId, status)
+        clearOutbox(messageId)
+    }
 
     @Query("DELETE FROM messages WHERE id = :messageId")
     suspend fun deleteMessage(messageId: String)
@@ -68,8 +121,7 @@ interface MessageDao {
     suspend fun updateMessageStatusBatch(messageIds: List<String>, status: String)
 
     // ── Offline outbox ──────────────────────────────────────────────────────
-    // Column updates, not whole-row replaces: the outbox columns are not on the
-    // domain Message, so a replace built with MessageEntity.fromDomain wipes them.
+    // OutboxSender's resume points, one column update per finished step.
 
     @Query("UPDATE messages SET outboxAttempts = outboxAttempts + 1 WHERE id = :messageId")
     suspend fun incrementOutboxAttempts(messageId: String)

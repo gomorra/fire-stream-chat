@@ -4,6 +4,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
@@ -65,7 +66,7 @@ class MessageRepositorySearchTruncationTest {
     }
 
     private fun rows(count: Int, content: (Int) -> String) = (0 until count).map { i ->
-        MessageEntity(
+        MessageEntity(MessageRecord(
             id = "m$i",
             chatId = "chat1",
             senderId = "sender1",
@@ -77,7 +78,7 @@ class MessageRepositorySearchTruncationTest {
             replyToId = null,
             timestamp = 1000L + i,
             editedAt = null,
-        )
+        ))
     }
 
     private fun stubSearch(returned: List<MessageEntity>) {

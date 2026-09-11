@@ -3,7 +3,7 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.local.dao.MessageDao
-import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.Message
@@ -65,7 +65,7 @@ class PollRepositoryImpl @Inject constructor(
                 timestamp = timestamp,
                 pollData = poll
             )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
+            messageDao.upsertRecord(MessageRecord.fromDomain(message))
             chatDao.updateLastMessage(chatId, remoteId, pollPreview, timestamp)
 
             Result.success(message)
@@ -95,7 +95,7 @@ class PollRepositoryImpl @Inject constructor(
             }
             val updatedPoll = poll.copy(options = updatedOptions)
             val updatedMessage = message.copy(pollData = updatedPoll)
-            messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+            messageDao.upsertRecord(MessageRecord.fromDomain(updatedMessage))
 
             Result.success(Unit)
         } catch (e: Exception) {
@@ -111,7 +111,7 @@ class PollRepositoryImpl @Inject constructor(
             if (entity != null) {
                 val msg = entity.toDomain()
                 val updatedPoll = msg.pollData?.copy(isClosed = true)
-                messageDao.insertMessage(MessageEntity.fromDomain(msg.copy(pollData = updatedPoll)))
+                messageDao.upsertRecord(MessageRecord.fromDomain(msg.copy(pollData = updatedPoll)))
             }
 
             Result.success(Unit)

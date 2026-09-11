@@ -27,6 +27,7 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.util.ImageCompressor
@@ -85,9 +86,9 @@ private class Encoded(val file: File, val width: Int, val height: Int, val durat
  * | message write | — | status SENT, outbox columns cleared |
  *
  * A retry therefore never re-encodes, re-uploads or re-encrypts what an earlier
- * attempt finished. Steps persist with column updates, never a whole-row
- * replace, which would reset the outbox columns. Runs in the caller's
- * coroutine: cancellation leaves the row, still SENDING, as far as it got.
+ * attempt finished. Steps persist with column updates; the outbox columns are
+ * cleared by the SENT transaction alone. Runs in the caller's coroutine:
+ * cancellation leaves the row, still SENDING, as far as it got.
  */
 @Singleton
 class OutboxSender @Inject constructor(
@@ -151,9 +152,9 @@ class OutboxSender @Inject constructor(
             // the SENT row drops it, which lets the media backfill fetch a copy.
             localUri = if (row.type == MessageType.DOCUMENT) null else row.localUri,
         )
-        // fromDomain leaves the outbox columns at their defaults: the stored
+        // One transaction: the row as written, and out of the outbox — the stored
         // ciphertext and the attempt count end with the send.
-        messageDao.replaceMessage(row.id, MessageEntity.fromDomain(sent))
+        messageDao.markSent(row.id, MessageRecord.fromDomain(sent), sent.localUri)
 
         // Newer-only, so a first attempt and a re-attempt update it alike: a send
         // finishing after a later one leaves that one's preview, and a backend-

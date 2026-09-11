@@ -2,7 +2,7 @@ package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.dao.MessageDao
-import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -55,12 +55,12 @@ class MessageRepositorySyncDecryptTest {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageSource.fetchMessages("chat1") } returns listOf(incoming)
         coEvery { messageDao.getMessageById("in1") } returns null
-        val inserted = mutableListOf<MessageEntity>()
+        val inserted = mutableListOf<MessageRecord>()
         // Room's suspend calls run under the caller's job and refuse to start
         // once it is cancelled; the mock checks the same thing.
-        coEvery { messageDao.insertMessage(any()) } coAnswers {
+        coEvery { messageDao.upsertRecord(any()) } coAnswers {
             coroutineContext.ensureActive()
-            inserted += firstArg<MessageEntity>()
+            inserted += firstArg<MessageRecord>()
         }
         lateinit var sync: Job
         coEvery { signalManager.decrypt("peer1", any()) } coAnswers {

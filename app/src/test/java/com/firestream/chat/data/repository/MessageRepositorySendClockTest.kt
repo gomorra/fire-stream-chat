@@ -35,7 +35,7 @@ class MessageRepositorySendClockTest {
     @Before
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
-        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+        coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
         repository = messageRepository(
             messageDao = messageDao,
             authSource = authSource,

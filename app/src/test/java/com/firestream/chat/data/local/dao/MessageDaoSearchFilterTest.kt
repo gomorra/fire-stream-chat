@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
-import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.domain.model.MessageStatus
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -61,7 +61,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `text search matches content substrings within the chat`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "hit", content = "meet me at the harbour"),
             msg(id = "miss", content = "nothing relevant"),
             msg(id = "other-chat", chatId = "c2", content = "harbour again"),
@@ -74,7 +74,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `blank query with no filter returns the whole chat`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "a", content = "one"),
             msg(id = "b", content = ""),
         ))
@@ -84,7 +84,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `photos browse returns images with no content predicate`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "img", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg"),
             msg(id = "vid", type = "VIDEO", content = "", mediaUrl = "https://x/1.mp4"),
             msg(id = "txt", type = "TEXT", content = "hello"),
@@ -100,7 +100,7 @@ class MessageDaoSearchFilterTest {
         // The regression this feature would otherwise introduce: softDeleteMessage
         // blanks `content` but keeps `mediaUrl`, so only `deletedAt IS NULL`
         // keeps the tombstone out of a filter-only browse.
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "live", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg"),
             msg(id = "gone", type = "IMAGE", content = "caption", mediaUrl = "https://x/2.jpg"),
         ))
@@ -113,7 +113,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `text search also excludes a soft-deleted message`() = runTest {
-        dao.insertMessage(msg(id = "gone", content = "harbour"))
+        dao.upsertRecord(msg(id = "gone", content = "harbour"))
         dao.softDeleteMessage("gone", deletedAt = 1L)
 
         assertTrue(search(query = "harbour", limit = 50).isEmpty())
@@ -121,7 +121,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `links filter matches a TEXT row rather than a message type`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "link", type = "TEXT", content = "see https://example.com/x"),
             msg(id = "plain", type = "TEXT", content = "no url here"),
             msg(id = "img", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg"),
@@ -134,7 +134,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `starred filter keeps only starred rows`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "star", content = "important"),
             msg(id = "plain", content = "important too"),
         ))
@@ -145,7 +145,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `date range bounds are inclusive on both ends`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "before", timestamp = 99L),
             msg(id = "lower", timestamp = 100L),
             msg(id = "inside", timestamp = 150L),
@@ -160,7 +160,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `photos plus a date range combine as AND`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "in-range", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg", timestamp = 150L),
             msg(id = "out-of-range", type = "IMAGE", content = "", mediaUrl = "https://x/2.jpg", timestamp = 900L),
             msg(id = "text-in-range", type = "TEXT", content = "hi", timestamp = 150L),
@@ -173,7 +173,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `a text query narrows an active type filter`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "doc-hit", type = "DOCUMENT", content = "quarterly-report.pdf", mediaUrl = "https://x/a.pdf"),
             msg(id = "doc-miss", type = "DOCUMENT", content = "invoice.pdf", mediaUrl = "https://x/b.pdf"),
         ))
@@ -185,7 +185,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `results are newest-first and capped by the limit`() = runTest {
-        dao.insertMessages((1..5).map { msg(id = "m$it", timestamp = it * 100L) })
+        dao.upsertRecords((1..5).map { msg(id = "m$it", timestamp = it * 100L) })
 
         val results = search(limit = 3)
 
@@ -196,7 +196,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `a null chatId searches across every chat`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "here", chatId = "c1", content = "meet at the harbour", timestamp = 100L),
             msg(id = "there", chatId = "c2", content = "harbour again", timestamp = 200L),
             msg(id = "miss", chatId = "c2", content = "nothing relevant", timestamp = 300L),
@@ -212,7 +212,7 @@ class MessageDaoSearchFilterTest {
         // The guard the old unfiltered global query never had: a tombstone
         // keeps its mediaUrl, and a filter-only query has no content predicate
         // to hide it behind.
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "live", chatId = "c1", type = "IMAGE", content = "", mediaUrl = "https://x/1.jpg"),
             msg(id = "gone", chatId = "c2", type = "IMAGE", content = "caption", mediaUrl = "https://x/2.jpg"),
         ))
@@ -225,7 +225,7 @@ class MessageDaoSearchFilterTest {
 
     @Test
     fun `a chat-scoped search still excludes the other chat's hits`() = runTest {
-        dao.insertMessages(listOf(
+        dao.upsertRecords(listOf(
             msg(id = "here", chatId = "c1", content = "harbour"),
             msg(id = "there", chatId = "c2", content = "harbour"),
         ))
@@ -241,7 +241,7 @@ class MessageDaoSearchFilterTest {
         mediaUrl: String? = null,
         timestamp: Long = 1000L,
         senderId: String = "me",
-    ): MessageEntity = MessageEntity(
+    ): MessageRecord = MessageRecord(
         id = id,
         chatId = chatId,
         senderId = senderId,

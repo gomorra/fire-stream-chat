@@ -145,7 +145,7 @@ class MessageRepositoryRetryTest {
     @Test
     fun `first send records the recipient on a fresh optimistic row and hands it to the outbox sender`() = runTest {
         val inserted = slot<MessageEntity>()
-        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+        coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
 
         val result = repository.sendMessage("chat1", "hi", recipientId = "recipient1")
 

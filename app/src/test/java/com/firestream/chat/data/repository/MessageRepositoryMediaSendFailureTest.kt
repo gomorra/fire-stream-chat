@@ -60,7 +60,7 @@ class MessageRepositoryMediaSendFailureTest {
         every { authSource.currentUserId } returns "uid1"
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
 
-        coEvery { messageDao.insertMessage(any()) } answers {
+        coEvery { messageDao.insertOutbox(any()) } answers {
             insertedEntities += firstArg<MessageEntity>()
         }
         coEvery { messageDao.updateMessageStatus(any(), any()) } answers {

@@ -32,6 +32,7 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.outbox.MessageWriter
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.outbox.SendClock
@@ -312,10 +313,11 @@ class MessageRepositoryImpl @Inject constructor(
                 // case also heals a row flipped FAILED by a send whose await
                 // died (user left the chat) but whose write landed anyway.
                 if (raw.hasPendingWrites) return
-                // Update status from remote if it changed (e.g. DELIVERED, READ)
+                // Update status from remote if it changed (e.g. DELIVERED, READ).
+                // acknowledge also takes a healed row out of the outbox.
                 val remoteStatus = parseMessageStatus(raw.status)
                 if (existing.status != remoteStatus.name) {
-                    messageDao.updateMessageStatus(raw.id, remoteStatus.name)
+                    messageDao.acknowledge(raw.id, remoteStatus.name)
                 }
                 return
             }
@@ -359,7 +361,7 @@ class MessageRepositoryImpl @Inject constructor(
                 timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
                 timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
             )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
+            messageDao.upsertRecord(MessageRecord.fromDomain(message))
             return
         }
 
@@ -398,10 +400,6 @@ class MessageRepositoryImpl @Inject constructor(
                 }
             }
 
-            // Preserve local-only fields that are not stored in Firestore
-            val preservedLocalUri = existing?.localUri
-            val preservedIsStarred = existing?.isStarred ?: false
-
             val message = Message(
                 id = raw.id,
                 chatId = raw.chatId,
@@ -410,8 +408,6 @@ class MessageRepositoryImpl @Inject constructor(
                 type = parseMessageType(raw.type),
                 mediaUrl = raw.mediaUrl,
                 mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                localUri = preservedLocalUri,
-                isStarred = preservedIsStarred,
                 status = parseMessageStatus(raw.status),
                 replyToId = raw.replyToId,
                 timestamp = raw.timestamp,
@@ -440,10 +436,12 @@ class MessageRepositoryImpl @Inject constructor(
                 timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
                 timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
             )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
+            // A record upsert: the row's localUri, star and outbox columns are
+            // not the backend's to overwrite, and the partial entity cannot.
+            messageDao.upsertRecord(MessageRecord.fromDomain(message))
 
             // Auto-download media for incoming messages
-            if (message.mediaUrl != null && message.localUri == null &&
+            if (message.mediaUrl != null && existing?.localUri == null &&
                 message.type in AUTO_DOWNLOAD_TYPES
             ) {
                 tryAutoDownload(message)
@@ -513,7 +511,7 @@ class MessageRepositoryImpl @Inject constructor(
             mentions = mentions,
             emojiSizes = emojiSizes
         )
-        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
+        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
@@ -588,7 +586,7 @@ class MessageRepositoryImpl @Inject constructor(
             mediaHeight = null,
             isHd = sendAsHd
         )
-        messageDao.insertMessage(MessageEntity.outbox(placeholder, recipientId))
+        messageDao.insertOutbox(MessageEntity.outbox(placeholder, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
@@ -662,13 +660,13 @@ class MessageRepositoryImpl @Inject constructor(
         // on the next chat entry) can still be retried through OutboxSender. The write
         // below is its first attempt, so that retry writes if-absent, never over a
         // copy that already landed.
-        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId).copy(outboxAttempts = 1))
+        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId).copy(outboxAttempts = 1))
 
         // The row as inserted is what is written, so the recipient's copy matches ours.
         val remoteId = messageWriter.send(optimisticMessage, recipientId)
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
+        messageDao.markSent(tempId, MessageRecord.fromDomain(sentMessage), sentMessage.localUri)
         chatDao.updateLastMessage(targetChatId, remoteId, messageSource.lastContentFor(message.type, message.content), timestamp)
         sentMessage
     }
@@ -689,7 +687,7 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             duration = durationSeconds
         )
-        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
+        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
@@ -847,7 +845,7 @@ class MessageRepositoryImpl @Inject constructor(
             status = MessageStatus.SENT,
             timestamp = timestamp
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(broadcastMessage))
+        messageDao.upsertRecord(MessageRecord.fromDomain(broadcastMessage))
         chatDao.updateLastMessage(broadcastChatId, broadcastRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
 
         // 2. Fan out to each recipient's individual chat
@@ -928,7 +926,7 @@ class MessageRepositoryImpl @Inject constructor(
                         timestamp = timestamp,
                         editedAt = timestamp
                     )
-                    messageDao.insertMessage(MessageEntity.fromDomain(updatedMessage))
+                    messageDao.upsertRecord(MessageRecord.fromDomain(updatedMessage))
                     chatDao.updateLastMessage(chatId, lastMessage.id, messageSource.lastContentFor(MessageType.LIST, content), timestamp)
                     return@resultOf updatedMessage
                 }
@@ -955,7 +953,7 @@ class MessageRepositoryImpl @Inject constructor(
             listId = listId,
             listDiff = listDiff
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(message))
+        messageDao.upsertRecord(MessageRecord.fromDomain(message))
         chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LIST, content), timestamp)
         message
     }
@@ -993,7 +991,7 @@ class MessageRepositoryImpl @Inject constructor(
             latitude = latitude,
             longitude = longitude
         )
-        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
+        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
@@ -1030,7 +1028,7 @@ class MessageRepositoryImpl @Inject constructor(
             timerAlarmStyle = style,
             timerAlarmSound = sound,
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
+        messageDao.upsertRecord(MessageRecord.fromDomain(optimistic))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
@@ -1049,7 +1047,7 @@ class MessageRepositoryImpl @Inject constructor(
                 status = MessageStatus.SENT,
                 timerStartedAtMs = result.startedAtMs,
             )
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sent))
+            messageDao.markSent(tempId, MessageRecord.fromDomain(sent), sent.localUri)
             chatDao.updateLastMessage(
                 chatId,
                 result.messageId,
@@ -1063,14 +1061,14 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun cancelTimer(chatId: String, messageId: String): Result<Unit> = resultOf {
         messageSource.updateTimerState(chatId, messageId, TimerState.CANCELLED.name)
         messageDao.getMessageById(messageId)?.let { existing ->
-            messageDao.insertMessage(existing.copy(timerState = TimerState.CANCELLED.name))
+            messageDao.upsertRecord(existing.record.copy(timerState = TimerState.CANCELLED.name))
         }
     }
 
     override suspend fun markTimerCompleted(chatId: String, messageId: String): Result<Unit> = resultOf {
         messageSource.updateTimerState(chatId, messageId, TimerState.COMPLETED.name)
         messageDao.getMessageById(messageId)?.let { existing ->
-            messageDao.insertMessage(existing.copy(timerState = TimerState.COMPLETED.name))
+            messageDao.upsertRecord(existing.record.copy(timerState = TimerState.COMPLETED.name))
         }
     }
 
@@ -1081,8 +1079,8 @@ class MessageRepositoryImpl @Inject constructor(
     ): Result<Unit> = resultOf {
         messageSource.pauseTimer(chatId, messageId, remainingMs)
         messageDao.getMessageById(messageId)?.let { existing ->
-            messageDao.insertMessage(
-                existing.copy(
+            messageDao.upsertRecord(
+                existing.record.copy(
                     timerState = TimerState.PAUSED.name,
                     timerRemainingMs = remainingMs,
                 )
@@ -1098,8 +1096,8 @@ class MessageRepositoryImpl @Inject constructor(
         val remaining = existing.timerRemainingMs
             ?: throw IllegalStateException("Cannot resume: timerRemainingMs is null for $messageId")
         val newStartedAtMs = messageSource.resumeTimer(chatId, messageId, remaining)
-        messageDao.insertMessage(
-            existing.copy(
+        messageDao.upsertRecord(
+            existing.record.copy(
                 timerState = TimerState.RUNNING.name,
                 timerDurationMs = remaining,
                 timerStartedAtMs = newStartedAtMs,
@@ -1179,7 +1177,7 @@ class MessageRepositoryImpl @Inject constructor(
                 if (existing != null) {
                     val remoteStatus = parseMessageStatus(raw.status)
                     if (existing.status != remoteStatus.name) {
-                        messageDao.updateMessageStatus(raw.id, remoteStatus.name)
+                        messageDao.acknowledge(raw.id, remoteStatus.name)
                     }
                     continue
                 }
@@ -1207,7 +1205,7 @@ class MessageRepositoryImpl @Inject constructor(
                     timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
                     timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
                 )
-                messageDao.insertMessage(MessageEntity.fromDomain(message))
+                messageDao.upsertRecord(MessageRecord.fromDomain(message))
                 continue
             }
 
@@ -1240,15 +1238,11 @@ class MessageRepositoryImpl @Inject constructor(
                     }
                 }
 
-                val preservedLocalUri = existing?.localUri
-                val preservedIsStarred = existing?.isStarred ?: false
-
                 val message = Message(
                     id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
                     content = content,
                     type = parseMessageType(raw.type),
                     mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                    localUri = preservedLocalUri, isStarred = preservedIsStarred,
                     status = parseMessageStatus(raw.status),
                     replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
                     reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
@@ -1267,7 +1261,7 @@ class MessageRepositoryImpl @Inject constructor(
                     timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
                     timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
                 )
-                messageDao.insertMessage(MessageEntity.fromDomain(message))
+                messageDao.upsertRecord(MessageRecord.fromDomain(message))
             }
         }
     }

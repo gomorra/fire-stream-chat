@@ -43,7 +43,7 @@ class MessageRepositoryForwardTest {
     @Before
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
-        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+        coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
         coEvery { messageWriter.send(capture(written), any()) } answers { firstArg<Message>().id }
 
         repository = messageRepository(

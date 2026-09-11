@@ -187,15 +187,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   indicator — fires it) and must not overwrite a newer local value with them. Hit when the chat
   preview became a newer-only transaction: `ChatDao.upsertRemote` keeps a strictly newer local
   preview. Regression: `ChatDaoUpsertRemoteTest.upsertRemote keeps a local preview newer than the snapshot's`.
-- **An unsent message row's outbox columns exist only on `MessageEntity`.**
-  `outboxRecipientId`, `outboxCiphertext`, `outboxSignalType`, `outboxPeerIdentity` and
-  `outboxAttempts` are not on the domain `Message`, so `insertMessage` / `replaceMessage` of a
-  `MessageEntity.fromDomain(row.toDomain().copy(…))` resets them. On a SENDING or FAILED row
-  that loses the peer (`OutboxSender` then refuses the send rather than guess plaintext), the
-  attempt count (a re-attempt would blind-`set()` over a message that already landed) and the
-  ciphertext (the message is encrypted a second time). Change an unsent row with a column
-  `UPDATE` — `updateSendProgress`, `setPinned`, … — and let only `OutboxSender`'s SENT replace
-  clear them. Regression: `MessageDaoOutboxColumnsTest`.
+- **Room's `@Upsert` with a partial entity keeps the columns the object does not carry; a
+  `REPLACE` insert does not.** `OnConflictStrategy.REPLACE` deletes the row and inserts the
+  new one, so every column the new object lacks goes back to its default. `messages` is split
+  for exactly this: the backend's columns are the embedded `MessageRecord`, which is also the
+  partial entity a snapshot or sync upserts (`MessageDao.upsertRecord`), and the local columns
+  — `localUri`, `isStarred`, the outbox bookkeeping — sit beside it on `MessageEntity`, out of
+  the upsert's reach by construction. A partial entity needs every omitted `NOT NULL` column to
+  carry a `@ColumnInfo(defaultValue = …)`, and a default is part of Room's schema hash, so
+  adding one is a version bump. Regression: `MessageDaoOutboxColumnsTest`.
 
 ## Testing
 

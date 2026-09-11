@@ -268,7 +268,7 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncDecryptTest.kt` | The chat-list sync finishes decrypt-and-insert once started, even when cancelled meanwhile |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | The encrypted write holds no `content`, and its chat preview no plaintext |
 | `app/src/test/java/com/firestream/chat/data/outbox/MessageWriterTest.kt` | The encrypt-or-plaintext policy, one test per plaintext reason |
-| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | Column updates keep the outbox columns; the SENT replace clears them |
+| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | A `MessageRecord` upsert cannot touch `localUri`, the star or the outbox columns; `markSent` and `acknowledge` are what clear the outbox |
 | `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
 
 **Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext for the peer's current identity) and then `write` for text / media / voice / location; forward and the broadcast fan-out call `send`, which does both — and `encode` picks plaintext or Signal.

@@ -51,7 +51,7 @@ class MessageEntityAlarmMappingTest {
 
     @Test
     fun `a corrupt row degrades to the defaults instead of crashing`() {
-        val entity = MessageEntity(
+        val entity = MessageRecord(
             id = "msg1",
             chatId = "chat1",
             senderId = "user1",

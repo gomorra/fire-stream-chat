@@ -58,7 +58,7 @@ class MessageEntityTimerMappingTest {
 
     @Test
     fun `unknown timer state string maps to null instead of crashing`() {
-        val entity = MessageEntity(
+        val entity = MessageRecord(
             id = "msg3",
             chatId = "chat1",
             senderId = "user1",
