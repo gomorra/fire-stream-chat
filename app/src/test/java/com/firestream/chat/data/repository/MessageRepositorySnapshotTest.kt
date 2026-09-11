@@ -1,18 +1,11 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
-import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.MediaFileManager
-import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -27,10 +20,12 @@ import io.mockk.mockk
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import kotlin.time.Duration.Companion.seconds
@@ -55,17 +50,10 @@ import kotlin.time.Duration.Companion.seconds
 class MessageRepositorySnapshotTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
-    private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
-    private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val userSource = mockk<UserSource>(relaxed = true)
 
     private lateinit var repository: MessageRepositoryImpl
@@ -85,10 +73,13 @@ class MessageRepositorySnapshotTest {
             null
         }
         coEvery { messageDao.insertMessage(any()) } just Runs
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource
+        repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            userSource = userSource,
         )
     }
 
@@ -131,6 +122,38 @@ class MessageRepositorySnapshotTest {
             coVerify(exactly = 1) { messageDao.insertMessage(match { it.id == "m$i" }) }
         }
         job.cancel()
+    }
+
+    // The outbox columns are not on Message, so a send's attempt-count and
+    // ciphertext writes re-emit an identical list from Room. Passing it on would
+    // re-run the chat's whole message pipeline for nothing.
+    @Test
+    fun `a Room write that changes no field of Message is not emitted again`() = runTest {
+        val row = MessageEntity.fromDomain(
+            Message(
+                id = "own1",
+                chatId = CHAT,
+                senderId = SELF,
+                content = "hi",
+                type = MessageType.TEXT,
+                status = MessageStatus.SENDING,
+                timestamp = 1L,
+            )
+        )
+        every { messageSource.observeMessages(CHAT) } returns flowOf(emptyList())
+        every { messageDao.getMessagesByChatId(CHAT) } returns flow {
+            emit(listOf(row))
+            // Real milliseconds — this runs on Dispatchers.Default, upstream of
+            // flowOn — so conflate() cannot be what drops the middle emission.
+            delay(50)
+            emit(listOf(row.copy(outboxAttempts = 1, outboxCiphertext = "cipher-1", outboxSignalType = 3)))
+            delay(50)
+            emit(listOf(row.copy(status = MessageStatus.SENT.name)))
+        }
+
+        val emitted = repository.getMessages(CHAT).toList()
+
+        assertEquals(listOf(MessageStatus.SENDING, MessageStatus.SENT), emitted.map { it.single().status })
     }
 
     @Test

@@ -179,6 +179,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   server and cannot see a first-attempt write the SDK has persisted but not flushed, so
   without the flush the transaction creates the doc and the replay overwrites it.
   (`FirestoreMessageSource.writeMessage`.)
+- **An unsent message row's outbox columns exist only on `MessageEntity`.**
+  `outboxRecipientId`, `outboxCiphertext`, `outboxSignalType` and `outboxAttempts` are not on
+  the domain `Message`, so `insertMessage` / `replaceMessage` of a
+  `MessageEntity.fromDomain(row.toDomain().copy(…))` resets them. On a SENDING or FAILED row
+  that loses the peer (`OutboxSender` then refuses the send rather than guess plaintext), the
+  attempt count (a re-attempt would blind-`set()` over a message that already landed) and the
+  ciphertext (the message is encrypted a second time). Change an unsent row with a column
+  `UPDATE` — `updateSendProgress`, `setPinned`, … — and let only `OutboxSender`'s SENT replace
+  clear them. Regression: `MessageDaoOutboxColumnsTest`.
 
 ## Testing
 

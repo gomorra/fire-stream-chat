@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.Flow
  * Backend-neutral message boundary. Reads emit [RawMessage] (the
  * encrypted-or-plaintext envelope before decryption); writes accept either a
  * pre-encrypted Signal payload ([sendMessage]) or plaintext ([sendPlainMessage])
- * — the repository decides which path to take based on the encryption gate.
+ * — `MessageWriter` decides which one a message takes.
  *
  * **Message ids are chosen by the caller.** [sendMessage] / [sendPlainMessage]
  * take the Room row's id as `messageId`; a backend that keys documents by

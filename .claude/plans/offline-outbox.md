@@ -235,6 +235,55 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
 - Tests: second attempt reuses stored ciphertext and never calls `encrypt`; concurrent `encrypt`
   calls for one recipient do not interleave; a `PREKEY_TYPE` decrypt releases the lock before
   `publishKeys` is called.
+- **Shipped shape (read before step 5).** `OutboxSender.send(messageId, sourceMimeType = null)`; everything
+  else is on the row. `MessageEntity.outbox(message, recipientId)` records `outboxRecipientId` at insert
+  (`""` = group/broadcast); a row with `null` is refused, never sent as plaintext. `outboxAttempts` is
+  incremented at the **start** of each pipeline run, not just before the write, so `> 0` means exactly what
+  `isRetry` meant — including a run that died before its write — and step 6's "8 executed attempts" can read
+  it directly. The ciphertext is encoded after the media upload and stored before the write; the SENT
+  replace (`fromDomain`) clears all four columns. Pipeline steps persist through the column update
+  `MessageDao.updateSendProgress`, and `pinMessage` became `setPinned`: a whole-row replace resets the
+  entity-only outbox columns (`docs/GOTCHAS.md`, `MessageDaoOutboxColumnsTest`). `MessageWriter`
+  (`data/outbox/`) has `encode` / `write` / `send`; LOCATION is plaintext by type; the build gate is an
+  internal constructor value. `forwardMessage` writes the row it inserts, so a forwarded video, voice note or
+  location now carries thumbnail / duration / coordinates / HD, and the forwarded row drops `mentions`.
+  `SignalManager` fetches the bundle outside the per-peer lock and serialises replenishment on its own
+  `preKeyMutex`. Repository tests build through `messageRepository(...)` (`MessageRepositoryTestFactory.kt`),
+  which closed the TECH_DEBT constructor entry.
+- **(step-4 notes for step 5)** A retry of a row whose first run never started (the block check threw before
+  `send`) has `outboxAttempts == 0`, so it overwrites the chat preview like a first send instead of rebinding.
+  The newer-only `ChatDao` update closes this together with deleting the rebind branch.
+- **(step-4 notes for step 6)** `SENDABLE_TYPES` is private in `OutboxSender` — promote it for `requeueAll`.
+  The worker's authoritative block check reads `outboxRecipientId`. The tombstone path and any other write to
+  a queued row must stay column updates (`softDeleteMessage` already is).
+- **(step-4 /simplify altitude review — do first in step 6)** The outbox columns survive only because every
+  writer to an unsent row remembers to use a column update, and step 6 adds writers to rows queued for days
+  (tombstone, `requeueAll`, retry, the forward re-route). Remove the trap rather than document it, without a
+  new table (§2.1): `fromDomain` returns a partial row without the outbox columns, `insertMessage` becomes
+  `@Upsert(entity = MessageEntity::class)` (Room 2.6 partial entities — an upsert keeps the columns the object
+  does not carry, where REPLACE deletes and re-inserts), `outboxAttempts` gets `@ColumnInfo(defaultValue =
+  "0")`, and only an outbox insert, the column queries and an explicit clear inside the SENT transaction touch
+  them. That also retires reconcile's `preservedLocalUri` / `preservedIsStarred` copying and the GOTCHAS
+  entry. The re-routed forward must insert through the outbox factory (it uses plain `fromDomain` today).
+- **(step-4 /simplify altitude review)** The recipient is a three-state `String?` (null = not recorded, `""` =
+  no peer, else a peer id). When the worker and the re-routed forward become callers, give
+  `MessageWriter.encode` a sealed target (`Peer(id)` / `NoPeer`) mapped to and from the column in one place.
+- **(step-4 /code-review)** A row can reach SENT without `OutboxSender`'s replace — the acknowledged-echo heal
+  in `reconcileRawMessage` and the sync path set status only — and keeps its outbox columns. Harmless (the
+  plaintext is on the same row, and `requeueAll` selects SENDING), but the SENT clear belongs in the same
+  central place as the upsert rework above.
+- **(step-4 /code-review)** `forwardMessage` now inserts through `MessageEntity.outbox(...)` with
+  `outboxAttempts = 1` (its direct write is attempt one), so a stuck forward retries if-absent through
+  `OutboxSender`. It still writes directly and does not keep its ciphertext; the re-route here closes that.
+
+**Before end-to-end encryption is switched on** (not in any step; part of the planned pre-enable check):
+- **(step-4 /code-review, uncertain)** `SignalManager.encrypt` fetches the key bundle outside the session lock.
+  If a peer re-registers while two encrypts to it are in flight, the one holding the older bundle can reset
+  the session the other just built on the newer one, losing one message. It was as unguarded before step 4.
+  Cheap fix: inside the lock, when the stored identity differs from the fetched bundle, re-fetch once before
+  tearing the session down (network under the lock only in that rare case).
+- `SignalManagerTest`'s interleave tests watch a 300 ms window. They were mutation-checked on this host, but
+  on a much slower machine a missing lock could slip through unnoticed; they cannot fail falsely.
 
 ### Step 5 — Parallel-arrival guards (`fix:`)
 §2.6: newer-only `ChatDao` update for send paths, newer-only preview transaction, strictly
@@ -313,6 +362,13 @@ section gains the new repository entry point.
 If half 1 turns out larger than a step should be (the decrypt-on-push path meets the Signal lock
 for the first time), ship half 2 alone, drop checklist item 7 to *Pending* in BACKLOG, and open
 "reconcile on push" as its own plan — do not ship half 2 under this step's title.
+
+**(step-4 /simplify altitude review)** Step 4's per-peer lock serialises two decrypts of one message but does
+not make "decrypt once" hold: `reconcileRawMessage` and `syncChatMessages` each check for the row, decrypt and
+insert outside it, so the chat-list sync and the chat listener can both decrypt one message — the second fails
+on the advanced ratchet and its placeholder can `REPLACE` the good row. Push reconcile would be a third caller.
+Put check → decrypt → insert under one lock (a `SignalManager.withSessionLock(peer)` or a repository lock keyed
+by message id) behind a single receive entry point that all three use.
 
 ## 4. On-device verification (goes into BACKLOG in step 6)
 

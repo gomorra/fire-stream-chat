@@ -1,29 +1,28 @@
 // region: AGENT-NOTE
 // Responsibility: Delivers one own message that is already a Room row to the
-//   backend — compress / transcode, video thumbnail, upload, the encrypted-or-plain
+//   backend — compress / transcode, video thumbnail, upload, encrypt once, the
 //   write, the SENT swap and the chat preview. Reads the row and skips every step
 //   it already records, so a first attempt and a retry run the same code.
 //   Covers TEXT, IMAGE, VIDEO, DOCUMENT, VOICE, LOCATION.
-// Owns: uploadProgress (MessageRepository re-exposes it); the BuildConfig.DEBUG /
-//   e2e opt-out encryption gate (sendEncryptedOrPlain); the if-absent decision
-//   for a re-attempt.
+// Owns: uploadProgress (MessageRepository re-exposes it); the outbox columns on
+//   MessageEntity — the attempt count, the stored ciphertext — and the if-absent
+//   decision the count drives.
 // Collaborators: MessageRepositoryImpl (only caller — send* after the optimistic
-//   insert and block check, retryFailedMessage after the FAILED→SENDING flip;
-//   forwardMessage and the broadcast fan-out borrow sendEncryptedOrPlain),
-//   MessageDao, ChatDao, MessageSource, StorageSource, SignalManager,
+//   insert and block check, retryFailedMessage after the FAILED→SENDING flip),
+//   MessageWriter, MessageDao, ChatDao, MessageSource, StorageSource,
 //   ImageCompressor, VideoTranscoder, MediaFileManager, PreferencesDataStore.
 // Don't put here: validation, the optimistic insert, the block check and FAILED
 //   marking — they stay in MessageRepositoryImpl, whose call site is where a
 //   definite block and an unanswerable block check part ways
-//   (.claude/plans/offline-outbox.md §2.5). No semaphore of its own either —
-//   "MediaProcessingLimiter owns the concurrency bound" (docs/PATTERNS.md).
+//   (.claude/plans/offline-outbox.md §2.5). The encrypt-or-plaintext decision —
+//   MessageWriter. No semaphore of its own either — "MediaProcessingLimiter owns
+//   the concurrency bound" (docs/PATTERNS.md).
 // endregion
 
 package com.firestream.chat.data.outbox
 
 import android.net.Uri
-import com.firestream.chat.BuildConfig
-import com.firestream.chat.data.crypto.SignalManager
+import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
@@ -44,6 +43,12 @@ import kotlinx.coroutines.flow.update
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+
+/** Types [OutboxSender.send] delivers; any other row is refused before any IO. */
+private val SENDABLE_TYPES = setOf(
+    MessageType.TEXT, MessageType.IMAGE, MessageType.VIDEO,
+    MessageType.DOCUMENT, MessageType.VOICE, MessageType.LOCATION,
+)
 
 /** Types the pipeline re-encodes into a media file the app writes itself. */
 private val LOCAL_FILE_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO)
@@ -72,14 +77,17 @@ private class Encoded(val file: File, val width: Int, val height: Int, val durat
  *
  * | Step | Skipped when | Persists |
  * |---|---|---|
+ * | — | — | `outboxAttempts + 1`, before anything else |
  * | compress (IMAGE) / transcode (VIDEO) | `mediaWidth != null` | `localUri`, dimensions, `duration` |
  * | video thumbnail | `mediaThumbnailUrl != null` | `mediaThumbnailUrl` |
  * | upload (media, VOICE) | `mediaUrl != null` | `mediaUrl` |
- * | message write | — | status SENT |
+ * | encrypt (1:1, release) | `outboxCiphertext != null` | `outboxCiphertext`, `outboxSignalType` |
+ * | message write | — | status SENT, outbox columns cleared |
  *
- * A retry therefore never re-encodes or re-uploads what an earlier attempt
- * finished. Runs in the caller's coroutine: cancellation leaves the row, still
- * SENDING, as far as it got.
+ * A retry therefore never re-encodes, re-uploads or re-encrypts what an earlier
+ * attempt finished. Steps persist with column updates, never a whole-row
+ * replace, which would reset the outbox columns. Runs in the caller's
+ * coroutine: cancellation leaves the row, still SENDING, as far as it got.
  */
 @Singleton
 class OutboxSender @Inject constructor(
@@ -87,7 +95,7 @@ class OutboxSender @Inject constructor(
     private val chatDao: ChatDao,
     private val messageSource: MessageSource,
     private val storageSource: StorageSource,
-    private val signalManager: SignalManager,
+    private val messageWriter: MessageWriter,
     private val imageCompressor: ImageCompressor,
     private val videoTranscoder: VideoTranscoder,
     private val mediaFileManager: MediaFileManager,
@@ -101,53 +109,39 @@ class OutboxSender @Inject constructor(
      * Runs the pipeline for the row at [messageId] and returns it SENT. Throws on
      * any failure; marking the row FAILED is the caller's job.
      *
-     * @param recipientId the 1:1 peer to encrypt for; empty for group and
-     *   broadcast chats (see `MessageRepositoryImpl.sendMessage`). Not on the row.
-     * @param isRetry an earlier attempt may already have landed: the write is
-     *   create-if-absent (see [MessageSource]), and the chat preview is only
-     *   rebound when it still points at this message rather than overwritten.
+     * Everything else comes from the row. `outboxRecipientId` is the peer to
+     * encrypt for; a row without one is refused, since guessing would send in
+     * plaintext. `outboxAttempts` above zero means an earlier run may already have
+     * landed its write, so the write is create-if-absent (see [MessageSource]) and
+     * the chat preview is only rebound when it still points at this message.
+     *
      * @param sourceMimeType the picked file's type. Only a DOCUMENT uploads under
      *   it — images and videos are re-encoded to JPEG / MP4. The row does not
      *   store it, so a retry passes null and uploads as `application/octet-stream`.
      */
-    suspend fun send(
-        messageId: String,
-        recipientId: String,
-        isRetry: Boolean = false,
-        sourceMimeType: String? = null,
-    ): Message {
-        val stored = messageDao.getMessageById(messageId)?.toDomain()
+    suspend fun send(messageId: String, sourceMimeType: String? = null): Message {
+        val entity = messageDao.getMessageById(messageId)
             ?: throw IllegalStateException("Cannot send unknown message $messageId")
+        val stored = entity.toDomain()
+        if (stored.type !in SENDABLE_TYPES) {
+            throw IllegalStateException("Send not supported for message type ${stored.type}")
+        }
+        val recipientId = entity.outboxRecipientId
+            ?: throw IllegalStateException("Cannot send message $messageId: no recipient recorded")
+
+        // Counted before any step can fail, so whatever this run gets through,
+        // the next one knows it is a re-attempt.
+        val isReattempt = entity.outboxAttempts > 0
+        messageDao.incrementOutboxAttempts(messageId)
+
         val row = when (stored.type) {
-            MessageType.TEXT, MessageType.LOCATION -> stored
             MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT -> prepareMedia(stored, sourceMimeType)
             MessageType.VOICE -> uploadIfNeeded(stored, VOICE_MIME_TYPE)
-            else -> throw IllegalStateException("Send not supported for message type ${stored.type}")
+            else -> stored
         }
 
-        val remoteId = sendEncryptedOrPlain(
-            chatId = row.chatId,
-            senderId = row.senderId,
-            // LOCATION has always been written in plaintext.
-            recipientId = if (row.type == MessageType.LOCATION) "" else recipientId,
-            messageId = row.id,
-            plaintext = row.content,
-            type = row.type,
-            timestamp = row.timestamp,
-            replyToId = row.replyToId,
-            mentions = row.mentions,
-            emojiSizes = row.emojiSizes,
-            mediaUrl = row.mediaUrl,
-            mediaThumbnailUrl = row.mediaThumbnailUrl,
-            mediaWidth = row.mediaWidth,
-            mediaHeight = row.mediaHeight,
-            duration = row.duration,
-            latitude = row.latitude,
-            longitude = row.longitude,
-            isForwarded = row.isForwarded,
-            isHd = row.isHd,
-            ifAbsent = isRetry,
-        )
+        val encrypted = entity.storedCiphertext() ?: encodeOnce(row, recipientId)
+        val remoteId = messageWriter.write(row, encrypted, ifAbsent = isReattempt)
 
         val sent = row.copy(
             id = remoteId,
@@ -156,10 +150,12 @@ class OutboxSender @Inject constructor(
             // the SENT row drops it, which lets the media backfill fetch a copy.
             localUri = if (row.type == MessageType.DOCUMENT) null else row.localUri,
         )
+        // fromDomain leaves the outbox columns at their defaults: the stored
+        // ciphertext and the attempt count end with the send.
         messageDao.replaceMessage(row.id, MessageEntity.fromDomain(sent))
 
         val preview = messageSource.lastContentFor(row.type, row.content)
-        if (isRetry) {
+        if (isReattempt) {
             rebindLastMessageIfMatches(row.chatId, row.id, remoteId, preview, row.timestamp)
         } else {
             chatDao.updateLastMessage(row.chatId, remoteId, preview, row.timestamp)
@@ -171,6 +167,17 @@ class OutboxSender @Inject constructor(
             sent
         }
     }
+
+    /**
+     * Encrypts the body when [MessageWriter] says so and keeps the ciphertext on
+     * the row before anything is written. A later attempt reuses those bytes
+     * rather than spend another ratchet step and key-bundle fetch on the same
+     * message. `null`: the message travels in plaintext.
+     */
+    private suspend fun encodeOnce(row: Message, recipientId: String): EncryptedMessage? =
+        messageWriter.encode(row, recipientId)?.also {
+            messageDao.storeOutboxCiphertext(row.id, it.ciphertext, it.signalType)
+        }
 
     private suspend fun prepareMedia(stored: Message, sourceMimeType: String?): Message {
         var row = stored
@@ -241,11 +248,18 @@ class OutboxSender @Inject constructor(
         return persist(row.copy(mediaUrl = mediaUrl))
     }
 
-    /** Writes a finished step back to Room, still SENDING, so the next attempt resumes after it. */
+    /** Writes a finished step back to Room so the next attempt resumes after it. */
     private suspend fun persist(row: Message): Message {
-        val sending = row.copy(status = MessageStatus.SENDING)
-        messageDao.replaceMessage(row.id, MessageEntity.fromDomain(sending))
-        return sending
+        messageDao.updateSendProgress(
+            messageId = row.id,
+            localUri = row.localUri,
+            mediaWidth = row.mediaWidth,
+            mediaHeight = row.mediaHeight,
+            duration = row.duration,
+            mediaThumbnailUrl = row.mediaThumbnailUrl,
+            mediaUrl = row.mediaUrl,
+        )
+        return row
     }
 
     /** The row's `localUri` as a [Uri] — a bare path is a file the app wrote, anything else is already a URI. */
@@ -287,95 +301,11 @@ class OutboxSender @Inject constructor(
 
     /** Storage object id for a video's JPEG thumbnail, derived from the media message id. */
     private fun thumbStorageId(messageId: String) = "${messageId}_thumb"
+}
 
-    /**
-     * Routes a write through Signal encryption or the plaintext branch based on
-     * the build flavor and whether a 1:1 recipient is known — the one place the
-     * "encrypt for recipient unless debug/empty-recipient/opted-out" decision is
-     * made. `MessageRepositoryImpl.forwardMessage` and the broadcast fan-out call
-     * it directly: they write without a retryable row.
-     *
-     * [messageId] becomes the remote id on a backend that keys by client id (see
-     * [MessageSource]); [ifAbsent] = true marks a re-attempt, so a write that
-     * landed after its await was cancelled is never duplicated. The returned id
-     * is what the backend actually used — the same id on Firebase, a server id on
-     * PocketBase — which is why callers still swap the row to it.
-     */
-    suspend fun sendEncryptedOrPlain(
-        chatId: String,
-        senderId: String,
-        recipientId: String,
-        messageId: String,
-        plaintext: String,
-        type: MessageType,
-        timestamp: Long,
-        replyToId: String? = null,
-        mentions: List<String> = emptyList(),
-        emojiSizes: Map<Int, Float> = emptyMap(),
-        mediaUrl: String? = null,
-        mediaThumbnailUrl: String? = null,
-        mediaWidth: Int? = null,
-        mediaHeight: Int? = null,
-        duration: Int? = null,
-        latitude: Double? = null,
-        longitude: Double? = null,
-        isForwarded: Boolean = false,
-        isHd: Boolean = false,
-        ifAbsent: Boolean = false,
-    ): String {
-        return if (
-            recipientId.isNotEmpty() &&
-            BuildConfig.SUPPORTS_SIGNAL &&
-            !BuildConfig.DEBUG &&
-            preferencesDataStore.e2eEncryptionEnabledFlow.first()
-        ) {
-            signalManager.ensureInitialized()
-            val encrypted = signalManager.encrypt(recipientId, plaintext)
-            messageSource.sendMessage(
-                chatId = chatId,
-                senderId = senderId,
-                messageId = messageId,
-                ciphertext = encrypted.ciphertext,
-                signalType = encrypted.signalType,
-                type = type,
-                replyToId = replyToId,
-                timestamp = timestamp,
-                mediaUrl = mediaUrl,
-                mediaThumbnailUrl = mediaThumbnailUrl,
-                isForwarded = isForwarded,
-                duration = duration,
-                mentions = mentions,
-                plainContent = plaintext,
-                emojiSizes = emojiSizes,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                latitude = latitude,
-                longitude = longitude,
-                isHd = isHd,
-                ifAbsent = ifAbsent,
-            )
-        } else {
-            messageSource.sendPlainMessage(
-                chatId = chatId,
-                senderId = senderId,
-                messageId = messageId,
-                content = plaintext,
-                type = type,
-                replyToId = replyToId,
-                timestamp = timestamp,
-                mediaUrl = mediaUrl,
-                mediaThumbnailUrl = mediaThumbnailUrl,
-                isForwarded = isForwarded,
-                duration = duration,
-                mentions = mentions,
-                emojiSizes = emojiSizes,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                latitude = latitude,
-                longitude = longitude,
-                isHd = isHd,
-                ifAbsent = ifAbsent,
-            )
-        }
-    }
+/** The ciphertext an earlier attempt encrypted and kept, if any. */
+private fun MessageEntity.storedCiphertext(): EncryptedMessage? {
+    val ciphertext = outboxCiphertext ?: return null
+    val signalType = outboxSignalType ?: return null
+    return EncryptedMessage(ciphertext, signalType)
 }

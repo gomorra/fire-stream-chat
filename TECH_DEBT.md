@@ -205,16 +205,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### Repository tests repeat `MessageRepositoryImpl`'s 13-argument constructor
-
-**The smell.** Ten `MessageRepository*Test.kt` files each declare the same 13 mocks and call the constructor positionally. The 2026-09-11 `OutboxSender` extraction had to edit all ten just to swap two arguments, and positional arguments hide which mock lands in which slot.
-
-**Why we haven't fixed it.** Found by `/simplify` on offline-outbox step 3. The fix — one test factory with named, relaxed-mock defaults, so each test passes only the mocks it stubs — touches ten files that step otherwise leaves alone, and belongs in its own test-only commit.
-
-**When to revisit.** The next constructor change (step 6 of `.claude/plans/offline-outbox.md` adds `OutboxScheduler`), or a new repository test file.
-
----
-
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

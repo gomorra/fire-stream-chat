@@ -1,18 +1,13 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
-import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.remote.source.RawMessage
-import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
@@ -47,18 +42,13 @@ class MessageRepositoryLocalUriTest {
     private val testDispatcher = StandardTestDispatcher()
 
     private val messageDao = mockk<MessageDao>()
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val userSource = mockk<UserSource>(relaxed = true)
 
     private val firestoreFlow = MutableSharedFlow<List<RawMessage>>(extraBufferCapacity = 1)
     private val roomFlow = MutableSharedFlow<List<MessageEntity>>(replay = 1)
@@ -78,10 +68,15 @@ class MessageRepositoryLocalUriTest {
         coEvery { messageDao.updateReactions(any(), any()) } just Runs
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
 
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource
+        repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            signalManager = signalManager,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            mediaFileManager = mediaFileManager,
+            preferencesDataStore = preferencesDataStore,
         )
     }
 

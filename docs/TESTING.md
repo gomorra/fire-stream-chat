@@ -68,4 +68,4 @@ Applies to crypto, auth, permission, and group-encryption work.
 - Key rotation and re-keying scenarios
 - Group encryption: member add/remove and key distribution
 
-Note that **encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `OutboxSender.sendEncryptedOrPlain`), and unit tests run debug-only — so the plaintext branch is what unit tests exercise. Any test asserting real Signal encryption behaviour has to drive `SignalManager` directly rather than going through the send path.
+Note that **encryption is disabled in debug builds** (`BuildConfig.DEBUG` build gate in `MessageWriter`), and unit tests run debug-only. The gate is a `MessageWriter` constructor value, so `MessageWriterTest` and `OutboxSenderTest` build an encrypting writer to exercise the Signal branch of the send path with `SignalManager` mocked. Real libsignal behaviour is driven through `SignalManager` directly: `SignalManagerTest` runs two parties on in-memory `signal.db`s under Robolectric (which supplies `android.util.Base64`; `libsignal-client` ships the host natives).

@@ -1,18 +1,11 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
-import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.TimerSendResult
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.VideoTranscoder
-import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
@@ -33,17 +26,10 @@ import org.junit.Test
 class MessageRepositoryTimerTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
-    private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
-    private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val userSource = mockk<UserSource>(relaxed = true)
 
     private lateinit var repository: MessageRepositoryImpl
@@ -52,10 +38,13 @@ class MessageRepositoryTimerTest {
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
         every { messageSource.lastContentFor(any(), any()) } answers { "preview" }
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource,
+        repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            userSource = userSource,
         )
     }
 

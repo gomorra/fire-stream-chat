@@ -2,13 +2,14 @@
 // Responsibility: Message CRUD across all message types — text / image / voice /
 //   document / poll / location / list / call. A retryable send (text, media,
 //   voice, location) is validate → optimistic insert → block check → OutboxSender,
-//   which uploads, writes encrypted-or-plain and swaps the row to SENT. Also media
+//   which uploads, writes through MessageWriter and swaps the row to SENT. Also media
 //   download with in-flight dedup, per-chat backfill scan, block-state filtering
 //   and Signal decryption on receive.
 // Owns: MessageEntity rows; FAILED marking of a send (failSendOnError).
 //   uploadProgress is OutboxSender's, re-exposed here.
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
-//   OutboxSender (send pipeline + encryption gate), SignalManager (decrypt path),
+//   OutboxSender (send pipeline), MessageWriter (encrypt-or-plain write for forward
+//   and the broadcast fan-out), SignalManager (decrypt path),
 //   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
 //   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check).
 // Don't put here: poll vote/close (PollRepositoryImpl), list mutations
@@ -31,6 +32,7 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.outbox.MessageWriter
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
@@ -75,6 +77,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -114,6 +117,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val authSource: AuthSource,
     private val signalManager: SignalManager,
     private val outboxSender: OutboxSender,
+    private val messageWriter: MessageWriter,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val listRepository: dagger.Lazy<ListRepository>,
     private val mediaFileManager: MediaFileManager,
@@ -258,6 +262,10 @@ class MessageRepositoryImpl @Inject constructor(
             messageDao.getMessagesByChatId(chatId)
                 .conflate()
                 .map { entities -> entities.map { it.toDomain() } }
+                // Room re-emits on every write to the table, including the outbox
+                // columns Message does not carry; an unchanged list stops here
+                // instead of re-running the chat's whole message pipeline.
+                .distinctUntilChanged()
                 // toDomain() re-parses several JSON columns per row, for the whole
                 // chat, on every emission. Collectors run on viewModelScope's main
                 // dispatcher, so without this the mapping janks the frame that a
@@ -475,7 +483,7 @@ class MessageRepositoryImpl @Inject constructor(
      *   block check and Signal encryption. **For GROUP and BROADCAST chats,
      *   callers must pass an empty string** — Signal sessions are 1:1, so
      *   group/broadcast messages must travel through the plaintext branch of
-     *   [OutboxSender.sendEncryptedOrPlain]. Passing an arbitrary group member
+     *   [MessageWriter.encode]. Passing an arbitrary group member
      *   as the recipient will encrypt the message for that single member and
      *   leave every other participant unable to read it.
      */
@@ -503,11 +511,11 @@ class MessageRepositoryImpl @Inject constructor(
             mentions = mentions,
             emojiSizes = emojiSizes
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId, recipientId)
+            outboxSender.send(tempId)
         }
     }
 
@@ -578,11 +586,11 @@ class MessageRepositoryImpl @Inject constructor(
             mediaHeight = null,
             isHd = sendAsHd
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(placeholder))
+        messageDao.insertMessage(MessageEntity.outbox(placeholder, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId, recipientId, sourceMimeType = mimeType)
+            outboxSender.send(tempId, sourceMimeType = mimeType)
         }
     }
 
@@ -594,14 +602,16 @@ class MessageRepositoryImpl @Inject constructor(
         }
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         // Before the flip to SENDING: a throw leaves the row FAILED, nothing is lost.
-        ensureNotBlocked(senderId, recipientId)
+        // Asked about the peer recorded on the row — the one OutboxSender encrypts for.
+        ensureNotBlocked(senderId, entity.outboxRecipientId ?: recipientId)
         // Flip the row back to SENDING so the bubble updates immediately while the
         // pipeline re-runs; failSendOnError reverts it to FAILED if the retry itself
-        // errors. OutboxSender resumes past whatever the failed attempt persisted.
+        // errors. OutboxSender resumes past whatever the failed attempt persisted,
+        // and encrypts for the peer recorded on the row at insert.
         messageDao.updateMessageStatus(messageId, MessageStatus.SENDING.name)
 
         failSendOnError(messageId) {
-            outboxSender.send(messageId, recipientId, isRetry = true)
+            outboxSender.send(messageId)
         }
     }
 
@@ -642,23 +652,18 @@ class MessageRepositoryImpl @Inject constructor(
             timestamp = timestamp,
             isForwarded = true,
             replyToId = null,
-            reactions = emptyMap()
+            reactions = emptyMap(),
+            // Mentions name members of the source chat, not of this one.
+            mentions = emptyList(),
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+        // Recorded like any outbox row, so a forward left SENDING (and flipped FAILED
+        // on the next chat entry) can still be retried through OutboxSender. The write
+        // below is its first attempt, so that retry writes if-absent, never over a
+        // copy that already landed.
+        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId).copy(outboxAttempts = 1))
 
-        val remoteId = outboxSender.sendEncryptedOrPlain(
-            chatId = targetChatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            messageId = tempId,
-            plaintext = message.content,
-            type = message.type,
-            timestamp = timestamp,
-            mediaUrl = message.mediaUrl,
-            mediaWidth = message.mediaWidth,
-            mediaHeight = message.mediaHeight,
-            isForwarded = true,
-        )
+        // The row as inserted is what is written, so the recipient's copy matches ours.
+        val remoteId = messageWriter.send(optimisticMessage, recipientId)
 
         val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
@@ -682,11 +687,11 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             duration = durationSeconds
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId, recipientId)
+            outboxSender.send(tempId)
         }
     }
 
@@ -856,15 +861,16 @@ class MessageRepositoryImpl @Inject constructor(
                         // Send as 1:1 message (encrypted in release, plain in debug).
                         // One fresh id per target chat — the broadcast's own id
                         // must not be reused across collections.
-                        val fanOutRemoteId = outboxSender.sendEncryptedOrPlain(
+                        val fanOut = Message(
+                            id = UUID.randomUUID().toString(),
                             chatId = individualChat.id,
                             senderId = senderId,
-                            recipientId = recipientId,
-                            messageId = UUID.randomUUID().toString(),
-                            plaintext = content,
+                            content = content,
                             type = MessageType.TEXT,
+                            status = MessageStatus.SENDING,
                             timestamp = timestamp,
                         )
+                        val fanOutRemoteId = messageWriter.send(fanOut, recipientId)
                         chatDao.updateLastMessage(individualChat.id, fanOutRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
                     } catch (e: Exception) {
                         e.rethrowIfCancellation()
@@ -958,12 +964,8 @@ class MessageRepositoryImpl @Inject constructor(
         pinned: Boolean
     ): Result<Unit> = resultOf {
         messageSource.pinMessage(chatId, messageId, pinned)
-        // Update local cache
-        val entity = messageDao.getMessageById(messageId)
-        if (entity != null) {
-            val updated = entity.toDomain().copy(isPinned = pinned)
-            messageDao.insertMessage(MessageEntity.fromDomain(updated))
-        }
+        // A column update: a whole-row replace would reset an unsent row's outbox columns.
+        messageDao.setPinned(messageId, pinned)
     }
 
     override suspend fun sendLocationMessage(
@@ -989,11 +991,11 @@ class MessageRepositoryImpl @Inject constructor(
             latitude = latitude,
             longitude = longitude
         )
-        messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
+        messageDao.insertMessage(MessageEntity.outbox(optimisticMessage, recipientId))
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId, recipientId)
+            outboxSender.send(tempId)
         }
     }
 

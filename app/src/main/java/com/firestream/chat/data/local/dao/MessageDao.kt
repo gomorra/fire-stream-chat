@@ -67,6 +67,37 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id IN (:messageIds)")
     suspend fun updateMessageStatusBatch(messageIds: List<String>, status: String)
 
+    // ── Offline outbox ──────────────────────────────────────────────────────
+    // Column updates, not whole-row replaces: the outbox columns are not on the
+    // domain Message, so a replace built with MessageEntity.fromDomain wipes them.
+
+    @Query("UPDATE messages SET outboxAttempts = outboxAttempts + 1 WHERE id = :messageId")
+    suspend fun incrementOutboxAttempts(messageId: String)
+
+    @Query("UPDATE messages SET outboxCiphertext = :ciphertext, outboxSignalType = :signalType WHERE id = :messageId")
+    suspend fun storeOutboxCiphertext(messageId: String, ciphertext: String, signalType: Int)
+
+    /** A finished pipeline step's output — the encoded file, the thumbnail, the upload. */
+    @Query(
+        """
+        UPDATE messages SET localUri = :localUri, mediaWidth = :mediaWidth, mediaHeight = :mediaHeight,
+            duration = :duration, mediaThumbnailUrl = :mediaThumbnailUrl, mediaUrl = :mediaUrl
+        WHERE id = :messageId
+        """
+    )
+    suspend fun updateSendProgress(
+        messageId: String,
+        localUri: String?,
+        mediaWidth: Int?,
+        mediaHeight: Int?,
+        duration: Int?,
+        mediaThumbnailUrl: String?,
+        mediaUrl: String?,
+    )
+
+    @Query("UPDATE messages SET isPinned = :pinned WHERE id = :messageId")
+    suspend fun setPinned(messageId: String, pinned: Boolean)
+
     @Query("UPDATE messages SET content = :content, editedAt = :editedAt, emojiSizes = :emojiSizes WHERE id = :messageId")
     suspend fun editMessage(messageId: String, content: String, editedAt: Long, emojiSizes: Map<Int, Float>)
 

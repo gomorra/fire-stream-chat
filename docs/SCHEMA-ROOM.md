@@ -11,6 +11,16 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 `AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
 
+**Outbox columns (`messages`, version 26).** Local send bookkeeping for an own row that has not reached `SENT`, written by `OutboxSender` and cleared by its SENT replace:
+
+| Column | Meaning |
+|---|---|
+| `outboxRecipientId` | The 1:1 peer to encrypt for, recorded at insert; `""` for group and broadcast chats; `null` = not recorded, and `OutboxSender` refuses the row rather than send it in plaintext |
+| `outboxCiphertext`, `outboxSignalType` | The Signal ciphertext of `content`, encrypted on the first attempt that reaches the write and reused by every later one |
+| `outboxAttempts` | Pipeline runs started for the row; above 0 an earlier write may have landed, so the next write is create-if-absent |
+
+They are not on the domain `Message`, so any other write to an unsent row must be a column update, never a whole-row replace ([`GOTCHAS.md`](GOTCHAS.md)). Version 26 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
+
 ```mermaid
 erDiagram
     users {
@@ -75,6 +85,10 @@ erDiagram
         String emojiSizesJSON
         String listId
         String listDiffJSON
+        String outboxRecipientId
+        String outboxCiphertext
+        Int outboxSignalType
+        Int outboxAttempts
     }
 
     contacts {

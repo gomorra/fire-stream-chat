@@ -1,17 +1,11 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
-import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.MediaFileManager
-import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -40,17 +34,11 @@ import org.junit.Test
 class MessageRepositoryBlockTest {
 
     private val messageDao = mockk<MessageDao>()
-    private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
-    private val signalManager = mockk<SignalManager>(relaxed = true)
     private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
-    private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val userSource = mockk<UserSource>(relaxed = true)
 
     private lateinit var repository: MessageRepositoryImpl
@@ -60,10 +48,14 @@ class MessageRepositoryBlockTest {
     @Before
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource
+        repository = messageRepository(
+            messageDao = messageDao,
+            messageSource = messageSource,
+            authSource = authSource,
+            outboxSender = outboxSender,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            userSource = userSource,
         )
     }
 
@@ -78,7 +70,7 @@ class MessageRepositoryBlockTest {
         coVerify(exactly = 1) {
             messageDao.updateMessageStatus(inserted.captured.id, MessageStatus.FAILED.name)
         }
-        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { outboxSender.send(any(), any()) }
         verify { messageSource wasNot Called }
     }
 
@@ -173,7 +165,7 @@ class MessageRepositoryBlockTest {
 
         assertTrue(result.isSuccess)
         coVerify(exactly = 1) { messageDao.insertMessage(any()) }
-        coVerify(exactly = 1) { outboxSender.send(any(), "recipient1", false, null) }
+        coVerify(exactly = 1) { outboxSender.send(any(), null) }
     }
 
     @Test

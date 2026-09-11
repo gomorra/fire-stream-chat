@@ -21,6 +21,7 @@ import org.signal.libsignal.protocol.state.KyberPreKeyRecord
 import org.signal.libsignal.protocol.state.PreKeyRecord
 import org.signal.libsignal.protocol.state.SignedPreKeyRecord
 import org.signal.libsignal.protocol.util.KeyHelper
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -42,6 +43,17 @@ class SignalManager @Inject constructor(
     private val authSource: AuthSource
 ) {
     private val initMutex = Mutex()
+
+    // One lock per peer, shared by encrypt and decrypt: both load that peer's
+    // session record, advance its ratchet and store it back, so two interleaved
+    // calls would lose one of the updates. Never held across network IO. One
+    // entry per contact ever messaged — small enough never to evict.
+    private val sessionLocks = ConcurrentHashMap<String, Mutex>()
+
+    // Replenishment checks, publishes and stores the one pre-key id; two PREKEY
+    // decrypts from different peers must not publish one key and store another.
+    private val preKeyMutex = Mutex()
+
     private val deviceId = 1
     private val preKeyId = 1
     private val signedPreKeyId = 1
@@ -65,34 +77,36 @@ class SignalManager @Inject constructor(
      */
     suspend fun encrypt(recipientId: String, plaintext: String): EncryptedMessage =
         withContext(Dispatchers.IO) {
-            val address = SignalProtocolAddress(recipientId, deviceId)
-
             // Always fetch the current bundle so we can detect if the remote party re-registered
             // (e.g. after clearing app data or reinstalling). If their identity key changed we
             // must throw away the stale session and establish a fresh one — otherwise we would
             // send WHISPER_TYPE ciphertext that the recipient can no longer decrypt.
+            // Fetched before taking the session lock: it is a network read.
             val bundle = keySource.fetchPreKeyBundle(recipientId)
                 ?: error("No key bundle found for $recipientId — they may not have set up encryption")
 
-            val storedIdentity = store.getIdentity(address)
-            val remoteIdentityChanged = storedIdentity != null && storedIdentity != bundle.identityKey
-            if (remoteIdentityChanged) {
-                // Remote party re-registered: clear stale session and trust record so that
-                // isTrustedIdentity() falls back to TOFU and allows the new identity.
-                store.deleteAllSessions(recipientId)
-                store.deleteTrustedIdentity(recipientId)
-            }
+            sessionLock(recipientId).withLock {
+                val address = SignalProtocolAddress(recipientId, deviceId)
+                val storedIdentity = store.getIdentity(address)
+                val remoteIdentityChanged = storedIdentity != null && storedIdentity != bundle.identityKey
+                if (remoteIdentityChanged) {
+                    // Remote party re-registered: clear stale session and trust record so that
+                    // isTrustedIdentity() falls back to TOFU and allows the new identity.
+                    store.deleteAllSessions(recipientId)
+                    store.deleteTrustedIdentity(recipientId)
+                }
 
-            if (!store.containsSession(address)) {
-                SessionBuilder(store, address).process(bundle)
-            }
+                if (!store.containsSession(address)) {
+                    SessionBuilder(store, address).process(bundle)
+                }
 
-            val cipher = SessionCipher(store, address)
-            val ciphertextMessage = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
-            EncryptedMessage(
-                ciphertext = Base64.encodeToString(ciphertextMessage.serialize(), Base64.NO_WRAP),
-                signalType = ciphertextMessage.type
-            )
+                val cipher = SessionCipher(store, address)
+                val ciphertextMessage = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
+                EncryptedMessage(
+                    ciphertext = Base64.encodeToString(ciphertextMessage.serialize(), Base64.NO_WRAP),
+                    signalType = ciphertextMessage.type
+                )
+            }
         }
 
     /**
@@ -101,36 +115,39 @@ class SignalManager @Inject constructor(
      */
     suspend fun decrypt(senderId: String, message: EncryptedMessage): String =
         withContext(Dispatchers.IO) {
-            val address = SignalProtocolAddress(senderId, deviceId)
-            val cipher = SessionCipher(store, address)
             val bytes = Base64.decode(message.ciphertext, Base64.NO_WRAP)
 
-            val plaintext = when (message.signalType) {
-                CiphertextMessage.PREKEY_TYPE -> {
-                    val result = cipher.decrypt(PreKeySignalMessage(bytes))
-                    // The Signal library consumed our one-time pre-key during decryption.
-                    // Replenish it so the next new contact can establish a fresh session.
-                    // Best-effort: a replenishment failure must not mask the successful decryption.
-                    runCatching { replenishPreKeyIfNeeded() }
-                    result
+            val plaintext = sessionLock(senderId).withLock {
+                val cipher = SessionCipher(store, SignalProtocolAddress(senderId, deviceId))
+                when (message.signalType) {
+                    CiphertextMessage.PREKEY_TYPE -> cipher.decrypt(PreKeySignalMessage(bytes))
+                    CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(bytes))
+                    else -> error("Unknown Signal message type: ${message.signalType}")
                 }
-                CiphertextMessage.WHISPER_TYPE ->
-                    cipher.decrypt(SignalMessage(bytes))
-                else -> error("Unknown Signal message type: ${message.signalType}")
+            }
+            if (message.signalType == CiphertextMessage.PREKEY_TYPE) {
+                // The Signal library consumed our one-time pre-key during decryption.
+                // Replenish it so the next new contact can establish a fresh session.
+                // After the session lock is released: it publishes over the network, and
+                // every send to this peer would otherwise wait on it.
+                // Best-effort: a replenishment failure must not mask the successful decryption.
+                runCatching { replenishPreKeyIfNeeded() }
             }
             String(plaintext, Charsets.UTF_8)
         }
 
     // ── Private ───────────────────────────────────────────────────────────────
 
+    private fun sessionLock(userId: String): Mutex = sessionLocks.computeIfAbsent(userId) { Mutex() }
+
     /**
      * Generates a fresh one-time pre-key and publishes the updated bundle to Firestore.
      * Called after a [PreKeySignalMessage] is successfully decrypted to ensure the next
      * new contact always finds a valid pre-key in our published bundle.
      */
-    private suspend fun replenishPreKeyIfNeeded() {
-        if (store.containsPreKey(preKeyId)) return  // still available, nothing to do
-        val uid = authSource.currentUserId ?: return
+    private suspend fun replenishPreKeyIfNeeded() = preKeyMutex.withLock {
+        if (store.containsPreKey(preKeyId)) return@withLock  // still available, nothing to do
+        val uid = authSource.currentUserId ?: return@withLock
         val identityKeyPair = store.getIdentityKeyPair()
         val newPreKeyPair = ECKeyPair.generate()
         val newPreKeyRecord = PreKeyRecord(preKeyId, newPreKeyPair)

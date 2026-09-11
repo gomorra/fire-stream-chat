@@ -1,17 +1,10 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
-import com.firestream.chat.data.crypto.SignalManager
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.MediaFileManager
-import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -32,25 +25,19 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The repository's half of a retry: the guards, the FAILED → SENDING flip, the
- * hand-off to [OutboxSender] as a re-attempt, and the revert when it fails.
- * What a re-attempt then does — resume past finished steps, write if-absent,
- * rebind the preview — is covered in `OutboxSenderTest`.
+ * The repository's half of a send and a retry: the guards, the recipient
+ * recorded on the optimistic row, the FAILED → SENDING flip, the hand-off to
+ * [OutboxSender] by id, and the revert when it fails. What a re-attempt then
+ * does — read its attempt count off the row, resume past finished steps, write
+ * if-absent, rebind the preview — is covered in `OutboxSenderTest`.
  */
 class MessageRepositoryRetryTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val chatDao = mockk<ChatDao>(relaxed = true)
-    private val messageSource = mockk<MessageSource>(relaxed = true)
     private val authSource = mockk<AuthSource>()
-    private val signalManager = mockk<SignalManager>(relaxed = true)
     private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
-    private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
     private val userSource = mockk<UserSource>(relaxed = true)
 
     private val statusUpdates = mutableListOf<Pair<String, String>>()
@@ -64,10 +51,13 @@ class MessageRepositoryRetryTest {
             statusUpdates += (firstArg<String>() to secondArg())
         }
 
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource
+        repository = messageRepository(
+            messageDao = messageDao,
+            authSource = authSource,
+            outboxSender = outboxSender,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            userSource = userSource,
         )
     }
 
@@ -86,26 +76,40 @@ class MessageRepositoryRetryTest {
     }
 
     @Test
-    fun `retry flips the row to SENDING, then re-runs it through the outbox sender as a retry`() = runTest {
+    fun `retry flips the row to SENDING, then hands the same row back to the outbox sender`() = runTest {
         val original = storedTextMessage()
         stubStored(original)
         val sent = original.copy(status = MessageStatus.SENT)
-        coEvery { outboxSender.send(original.id, "recipient1", true, null) } returns sent
+        coEvery { outboxSender.send(original.id, null) } returns sent
 
         val result = repository.retryFailedMessage(original.id, recipientId = "recipient1")
 
         assertEquals(sent, result.getOrThrow())
         coVerifyOrder {
             messageDao.updateMessageStatus(original.id, MessageStatus.SENDING.name)
-            outboxSender.send(original.id, "recipient1", isRetry = true, sourceMimeType = null)
+            outboxSender.send(original.id)
         }
+    }
+
+    // The row records its peer at insert and OutboxSender encrypts for that peer,
+    // so the block check must ask about the same one, not whatever the screen passes.
+    @Test
+    fun `retry checks the block list against the recipient recorded on the row`() = runTest {
+        val original = storedTextMessage()
+        coEvery { messageDao.getMessageById(original.id) } returns
+            MessageEntity.outbox(original, recipientId = "peer-on-row")
+
+        repository.retryFailedMessage(original.id, recipientId = "peer-from-screen")
+
+        coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "peer-on-row") }
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "peer-from-screen") }
     }
 
     @Test
     fun `retry that fails again reverts row to FAILED`() = runTest {
         val original = storedTextMessage()
         stubStored(original)
-        coEvery { outboxSender.send(any(), any(), any(), any()) } throws RuntimeException("still offline")
+        coEvery { outboxSender.send(any(), any()) } throws RuntimeException("still offline")
 
         val result = repository.retryFailedMessage(original.id, recipientId = "")
 
@@ -124,7 +128,7 @@ class MessageRepositoryRetryTest {
 
         assertTrue(result.isFailure)
         assertTrue(statusUpdates.isEmpty())
-        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { outboxSender.send(any(), any()) }
     }
 
     @Test
@@ -135,20 +139,20 @@ class MessageRepositoryRetryTest {
 
         assertTrue(result.isFailure)
         assertTrue(statusUpdates.isEmpty())
-        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { outboxSender.send(any(), any()) }
     }
 
     @Test
-    fun `first send hands the optimistic row to the outbox sender as a first attempt`() = runTest {
+    fun `first send records the recipient on a fresh optimistic row and hands it to the outbox sender`() = runTest {
         val inserted = slot<MessageEntity>()
         coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
 
-        val result = repository.sendMessage("chat1", "hi", recipientId = "")
+        val result = repository.sendMessage("chat1", "hi", recipientId = "recipient1")
 
         assertTrue("send should succeed: ${result.exceptionOrNull()}", result.isSuccess)
         assertEquals(MessageStatus.SENDING.name, inserted.captured.status)
-        coVerify(exactly = 1) {
-            outboxSender.send(inserted.captured.id, "", isRetry = false, sourceMimeType = null)
-        }
+        assertEquals("recipient1", inserted.captured.outboxRecipientId)
+        assertEquals(0, inserted.captured.outboxAttempts)
+        coVerify(exactly = 1) { outboxSender.send(inserted.captured.id) }
     }
 }

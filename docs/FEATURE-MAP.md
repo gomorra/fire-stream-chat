@@ -74,7 +74,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` (limit guard, optimistic row, block check), `downloadAndSave` (in-flight dedup map), per-chat scan |
-| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | The pipeline behind every retryable send — compress / transcode → thumbnail → upload (owns `uploadProgress`) → write → SENT, persisting after each step and skipping any step the row already records |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | The pipeline behind every retryable send — compress / transcode → thumbnail → upload (owns `uploadProgress`) → encrypt once → write → SENT, persisting each step with a column update and skipping any step the row already records |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Pager over the picked batch — per-item caption, thumbnail strip, remove-before-send, editor rail |
 | `app/src/main/java/com/firestream/chat/ui/chat/PendingMedia.kt` | The queued-but-unsent item (original uri + mime + caption + per-item HD + edit cursor) and its rotation-safe `Saver` |
@@ -252,18 +252,22 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration |
+| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration; one session `Mutex` per peer shared by both, pre-key replenishment after it is released under its own lock |
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalProtocolStoreImpl.kt` | `SignalProtocolStore` backed by `SignalDatabase` |
 | `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` — keys survive `AppDatabase` destructive migrations |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
-| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `sendEncryptedOrPlain` — `BuildConfig.DEBUG` + `e2eEncryptionEnabledFlow` guard around the Signal branch |
+| `app/src/main/java/com/firestream/chat/data/outbox/MessageWriter.kt` | `encode` / `write` / `send` — the build gate (`SUPPORTS_SIGNAL && !DEBUG`, a constructor value so tests can encrypt), `e2eEncryptionEnabledFlow` and the always-plaintext types (LOCATION) around the Signal branch |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Encrypts once per message: keeps `outboxCiphertext` on the row before the write, and a retry reuses it |
 | `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `e2eEncryptionEnabledFlow` (default `true`) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → Encryption toggle (release builds) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsViewModel.kt` | Wires the toggle |
 | `app/src/test/java/com/firestream/chat/data/local/SignalDatabaseSmokeTest.kt` | Dedicated DB smoke |
+| `app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt` | Real libsignal, two parties: per-peer lock for encrypt + encrypt and encrypt + decrypt, lock released before the pre-key publish |
+| `app/src/test/java/com/firestream/chat/data/outbox/MessageWriterTest.kt` | The encrypt-or-plaintext policy, one test per plaintext reason |
+| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | Column updates keep the outbox columns; the SENT replace clears them |
 | `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
 
-**Entry point:** every 1:1 send reaches `OutboxSender.sendEncryptedOrPlain()` — through `OutboxSender.send()` for text / media / voice, directly for forward and the broadcast fan-out — and its guard picks plaintext or Signal.
+**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext) and then `write` for text / media / voice / location; forward and the broadcast fan-out call `send`, which does both — and `encode` picks plaintext or Signal.
 
 ---
 

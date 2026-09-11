@@ -1,17 +1,11 @@
 package com.firestream.chat.data.repository
 
-import android.net.ConnectivityManager
 import android.net.Uri
-import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.data.remote.source.MessageSource
-import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoMetadata
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.AppError
@@ -45,18 +39,12 @@ import org.junit.Test
 class MessageRepositoryMediaSendFailureTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
-    private val chatDao = mockk<ChatDao>(relaxed = true)
-    private val messageSource = mockk<MessageSource>(relaxed = true)
     private val authSource = mockk<AuthSource>()
-    private val signalManager = mockk<SignalManager>(relaxed = true)
     private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
-    private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
     private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
-    private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
-    private val userSource = mockk<UserSource>(relaxed = true)
 
     private val insertedEntities = mutableListOf<MessageEntity>()
     private val statusUpdates = mutableListOf<Pair<String, String>>()
@@ -79,10 +67,14 @@ class MessageRepositoryMediaSendFailureTest {
             statusUpdates += (firstArg<String>() to secondArg())
         }
 
-        repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
-            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
-            userSource
+        repository = messageRepository(
+            messageDao = messageDao,
+            authSource = authSource,
+            outboxSender = outboxSender,
+            chatRepository = chatRepository,
+            listRepository = listRepository,
+            videoTranscoder = videoTranscoder,
+            preferencesDataStore = preferencesDataStore,
         )
     }
 
@@ -95,7 +87,7 @@ class MessageRepositoryMediaSendFailureTest {
     fun `pipeline failure leaves message bubble visible with FAILED status`() = runTest {
         // The OOM symptom: ImageCompressor throws "Cannot decode image" when two
         // large images compress concurrently and one runs out of memory.
-        coEvery { outboxSender.send(any(), any(), any(), any()) } throws
+        coEvery { outboxSender.send(any(), any()) } throws
             IllegalArgumentException("Cannot decode image")
 
         val result = repository.sendMediaMessage(
@@ -122,7 +114,7 @@ class MessageRepositoryMediaSendFailureTest {
 
     @Test
     fun `success hands the placeholder and its picked mime type to the pipeline and never marks FAILED`() = runTest {
-        coEvery { outboxSender.send(any(), any(), any(), any()) } answers {
+        coEvery { outboxSender.send(any(), any()) } answers {
             insertedEntities.single().toDomain().copy(status = MessageStatus.SENT)
         }
 
@@ -137,8 +129,9 @@ class MessageRepositoryMediaSendFailureTest {
         assertEquals(MessageStatus.SENT, result.getOrThrow().status)
         val placeholder = insertedEntities.single()
         assertEquals("DOCUMENT", placeholder.type)
+        assertEquals("", placeholder.outboxRecipientId)
         coVerify(exactly = 1) {
-            outboxSender.send(placeholder.id, "", isRetry = false, sourceMimeType = "application/pdf")
+            outboxSender.send(placeholder.id, sourceMimeType = "application/pdf")
         }
         assertTrue(statusUpdates.isEmpty())
     }
@@ -148,7 +141,7 @@ class MessageRepositoryMediaSendFailureTest {
         // Metadata within limits so the guard passes and the optimistic row is inserted.
         coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
             VideoMetadata(width = 1920, height = 1080, durationMs = 30_000L, rotationDegrees = 0, sizeBytes = 5_000_000L)
-        coEvery { outboxSender.send(any(), any(), any(), any()) } throws RuntimeException("transcode boom")
+        coEvery { outboxSender.send(any(), any()) } throws RuntimeException("transcode boom")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",
@@ -187,7 +180,7 @@ class MessageRepositoryMediaSendFailureTest {
         // No placeholder row was ever written — guard runs before the insert.
         assertTrue(insertedEntities.isEmpty())
         assertTrue(statusUpdates.isEmpty())
-        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { outboxSender.send(any(), any()) }
 
         // The thrown exception is a MediaLimitException that AppError.from maps to Validation.
         val error = result.exceptionOrNull()

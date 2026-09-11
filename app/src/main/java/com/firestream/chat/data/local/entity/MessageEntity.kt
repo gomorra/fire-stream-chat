@@ -62,6 +62,17 @@ data class MessageEntity(
     // fall back from. Legacy resolution belongs at the remote boundary only.
     val timerAlarmStyle: String = TimerAlarmStyle.DEFAULT.name,
     val timerAlarmSound: String = TimerAlarmSound.DEFAULT.name,
+    // Offline outbox bookkeeping for an own row that has not reached SENT. Local
+    // only and absent from the domain Message, so fromDomain() resets all four:
+    // OutboxSender's SENT replace clears them on purpose, and any other write to
+    // an unsent row must be a column UPDATE, never a whole-row replace.
+    /** The 1:1 peer to encrypt for; "" for group and broadcast chats; null = not recorded. */
+    val outboxRecipientId: String? = null,
+    /** Signal ciphertext of `content`, encrypted once and reused by every later attempt. */
+    val outboxCiphertext: String? = null,
+    val outboxSignalType: Int? = null,
+    /** Pipeline runs started for this row; above 0, an earlier write may already have landed. */
+    val outboxAttempts: Int = 0,
 ) {
     fun toDomain() = Message(
         id = id,
@@ -141,6 +152,10 @@ data class MessageEntity(
             timerAlarmStyle = message.timerAlarmStyle.name,
             timerAlarmSound = message.timerAlarmSound.name,
         )
+
+        /** The optimistic row of a send OutboxSender will deliver, with the peer it encrypts for. */
+        fun outbox(message: Message, recipientId: String) =
+            fromDomain(message).copy(outboxRecipientId = recipientId)
 
         private fun pollToJson(poll: Poll): String {
             val obj = JSONObject().apply {

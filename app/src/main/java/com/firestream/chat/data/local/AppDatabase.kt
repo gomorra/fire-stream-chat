@@ -40,7 +40,7 @@ import com.firestream.chat.data.local.entity.UserEntity
         ListEntity::class,
         ReminderEntity::class
     ],
-    version = 25,
+    version = 26,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

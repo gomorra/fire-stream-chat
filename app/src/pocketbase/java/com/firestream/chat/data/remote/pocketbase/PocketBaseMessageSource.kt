@@ -150,7 +150,7 @@ class PocketBaseMessageSource @Inject constructor(
 
     /**
      * Encryption is gated off in the pocketbase flavor (`SUPPORTS_SIGNAL=false`),
-     * so OutboxSender.sendEncryptedOrPlain never picks the ciphertext
+     * so MessageWriter.encode never picks the ciphertext
      * branch. If this method ever fires, something flipped the gate without
      * landing the Signal-on-PB follow-up plan — fail loud.
      */
@@ -177,7 +177,7 @@ class PocketBaseMessageSource @Inject constructor(
         isHd: Boolean,
         ifAbsent: Boolean,
     ): String = throw NotImplementedError(
-        "encryption gated off in pocketbase flavor — MessageRepositoryImpl should not reach here"
+        "encryption gated off in pocketbase flavor — MessageWriter should not reach here"
     )
 
     // ── Per-user delivery/read — out of scope in v0 (single status field) ───
