@@ -319,6 +319,21 @@ newer-only update; repository test for monotonic timestamps in a batch.
 **(step-3 review)** Once send paths use the newer-only update, delete
 `OutboxSender.rebindLastMessageIfMatches` and its retry branch — a first attempt and a retry then
 update the preview the same way.
+- **Shipped shape (read before step 6).** `ChatDao.updateLastMessage` itself became newer-only (`WHERE
+  lastMessageTimestamp IS NULL OR lastMessageTimestamp <= :timestamp`, `timestamp` now non-null) rather than a
+  second send-only query: every caller is a send (outbox, forward, broadcast row and fan-out, list + list merge,
+  timer, poll, call) and none may move a preview backwards. Forward and the fan-out need it as much as the outbox —
+  both finish asynchronously next to other sends into the same chat. Equal timestamps write, so a PocketBase id swap
+  rebinds. `FirestoreMessageSource.writeBackChatPreview` is a fire-and-forget read-then-update transaction for all
+  its callers. **(found in the code, not in §2.6)** A transaction is not latency-compensated, so a chat snapshot
+  arriving before it commits (typing indicator, unread count) carried the older preview and `ChatDao.upsertRemote`
+  copied it over Room's — `upsertRemote` now keeps a strictly newer local preview (`ChatDaoUpsertRemoteTest`).
+  `data/outbox/SendClock` (`max(now, last + 1)`, `@Singleton`) stamps every message the app composes —
+  `MessageRepositoryImpl`'s sends plus `PollRepositoryImpl` and `CallRepositoryImpl` (added after `/code-review`: a
+  poll stamped by the wall clock right after a batch would sort below it). `FirestoreChatSource.mapChat` maps no
+  message id into a snapshot's preview, so a remote preview that wins the merge leaves `lastMessageId = ""` —
+  pre-existing, nothing reads it. `rebindLastMessageIfMatches` is gone; `isReattempt` now drives only `ifAbsent`.
+  No Room bump (query-only).
 
 ### Step 6 — `OutboxWorker` (`feat:`, CHANGELOG *Added*, minor bump)
 - `data/worker/OutboxWorker.kt`, `data/outbox/OutboxScheduler.kt` (`enqueue`, `retryNow`, `requeueAll`),

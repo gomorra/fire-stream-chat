@@ -1,6 +1,7 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ChatDao
+import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.source.AuthSource
@@ -19,7 +20,8 @@ class PollRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val messageSource: MessageSource,
-    private val authSource: AuthSource
+    private val authSource: AuthSource,
+    private val sendClock: SendClock,
 ) : PollRepository {
 
     override suspend fun sendPoll(
@@ -31,7 +33,7 @@ class PollRepositoryImpl @Inject constructor(
     ): Result<Message> {
         return try {
             val senderId = authSource.currentUserId ?: throw Exception("Not authenticated")
-            val timestamp = System.currentTimeMillis()
+            val timestamp = sendClock.next()
 
             val pollOptions = options.mapIndexed { index, text ->
                 PollOption(id = "opt_$index", text = text)

@@ -29,7 +29,7 @@ import org.junit.Test
  * recorded on the optimistic row, the FAILED → SENDING flip, the hand-off to
  * [OutboxSender] by id, and the revert when it fails. What a re-attempt then
  * does — read its attempt count off the row, resume past finished steps, write
- * if-absent, rebind the preview — is covered in `OutboxSenderTest`.
+ * if-absent, update the newer-only preview — is covered in `OutboxSenderTest`.
  */
 class MessageRepositoryRetryTest {
 

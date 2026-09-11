@@ -4,12 +4,14 @@ import com.firestream.chat.domain.model.MessageType
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
+import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Transaction
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -20,11 +22,13 @@ import org.junit.Test
 import java.io.IOException
 
 /**
- * The idempotent-write contract of [FirestoreMessageSource.writeMessage].
+ * The idempotent-write contract of [FirestoreMessageSource.writeMessage], and
+ * the newer-only chat preview written after it.
  *
  * Firestore itself cannot run under Robolectric, so these tests pin the parts
- * a unit test *can* see: which SDK call each attempt makes, and that a
- * re-attempt is bounded when the SDK's flush never completes.
+ * a unit test *can* see: which SDK call each attempt makes, what a transaction
+ * body does against a stubbed document, and that a re-attempt is bounded when
+ * the SDK's flush never completes.
  */
 class FirestoreMessageSourceTest {
 
@@ -32,6 +36,9 @@ class FirestoreMessageSourceTest {
     private val messageRef = mockk<DocumentReference>(relaxed = true)
     private val chatRef = mockk<DocumentReference>(relaxed = true)
     private val setTask = mockk<Task<Void>>(relaxed = true)
+
+    /** Every transaction body handed to the SDK, in order. None has run yet. */
+    private val transactions = mutableListOf<Transaction.Function<Any?>>()
 
     private lateinit var source: FirestoreMessageSource
 
@@ -45,6 +52,7 @@ class FirestoreMessageSourceTest {
         every { messages.document("msg1") } returns messageRef
         completeImmediately(setTask)
         every { messageRef.set(any<Map<String, Any?>>()) } returns setTask
+        every { firestore.runTransaction(capture(transactions)) } returns mockk(relaxed = true)
         source = FirestoreMessageSource(firestore)
     }
 
@@ -58,23 +66,21 @@ class FirestoreMessageSourceTest {
         assertEquals("msg1", id)
         verify(exactly = 1) { messageRef.set(any<Map<String, Any?>>()) }
         verify(exactly = 0) { firestore.waitForPendingWrites() }
-        verify(exactly = 0) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
+        // The one transaction is the chat preview's; the message itself is not written in one.
+        assertEquals(1, transactions.size)
     }
 
     // The chat document is readable by the server like the message document; a
     // preview holding the text would put the plaintext beside the ciphertext.
     @Test
     fun `an encrypted message's chat preview carries its type, never its text`() = runTest {
-        val preview = slot<Map<String, Any>>()
-        every { chatRef.update(capture(preview)) } returns setTask
-
         source.sendMessage(
             chatId = "chat1", senderId = "uid1", messageId = "msg1",
             ciphertext = "cipher-1", signalType = 3,
             type = MessageType.TEXT, replyToId = null, timestamp = 1L,
         )
 
-        assertEquals("Message", preview.captured["lastMessageContent"])
+        assertEquals("Message", previewWrites(storedTimestamp = null).single()["lastMessageContent"])
         val written = slot<Map<String, Any?>>()
         verify { messageRef.set(capture(written)) }
         assertFalse("content" in written.captured)
@@ -83,9 +89,6 @@ class FirestoreMessageSourceTest {
 
     @Test
     fun `an encrypted photo's chat preview drops the caption`() = runTest {
-        val preview = slot<Map<String, Any>>()
-        every { chatRef.update(capture(preview)) } returns setTask
-
         source.sendMessage(
             chatId = "chat1", senderId = "uid1", messageId = "msg1",
             ciphertext = "cipher-1", signalType = 3,
@@ -93,7 +96,33 @@ class FirestoreMessageSourceTest {
             mediaUrl = "https://storage.example/msg1",
         )
 
-        assertEquals("📷 Photo", preview.captured["lastMessageContent"])
+        assertEquals("📷 Photo", previewWrites(storedTimestamp = null).single()["lastMessageContent"])
+    }
+
+    // Regression: the preview was a blind update(), so of two parallel sends the
+    // one whose write finished last took the chat preview, older or not.
+    @Test
+    fun `a chat preview never replaces a newer one`() = runTest {
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "hi", type = MessageType.TEXT, replyToId = null, timestamp = 2_000L,
+        )
+
+        assertTrue(previewWrites(storedTimestamp = 3_000L).isEmpty())
+    }
+
+    @Test
+    fun `a chat preview replaces an older or same-time one`() = runTest {
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "hi", type = MessageType.TEXT, replyToId = null, timestamp = 2_000L,
+        )
+
+        val overOlder = previewWrites(storedTimestamp = 1_000L).single()
+        assertEquals("hi", overOlder["lastMessageContent"])
+        assertEquals(2_000L, overOlder["lastMessageTimestamp"])
+        assertEquals("uid1", overOlder["lastMessageSenderId"])
+        assertEquals(1, previewWrites(storedTimestamp = 2_000L).size)
     }
 
     @Test
@@ -113,7 +142,12 @@ class FirestoreMessageSourceTest {
 
         verify(exactly = 0) { messageRef.set(any<Map<String, Any?>>()) }
         verify(exactly = 1) { firestore.waitForPendingWrites() }
-        verify(exactly = 1) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
+        verifyOrder {
+            firestore.waitForPendingWrites()
+            firestore.runTransaction(any<Transaction.Function<Unit>>())
+        }
+        // Create-if-absent, then the chat preview.
+        verify(exactly = 2) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
     }
 
     @Test
@@ -134,6 +168,22 @@ class FirestoreMessageSourceTest {
         assertEquals(RETRY_ACK_TIMEOUT_MS, testScheduler.currentTime)
         verify(exactly = 0) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
         verify(exactly = 0) { messageRef.set(any<Map<String, Any?>>()) }
+    }
+
+    /**
+     * Runs every captured transaction body against a chat document whose preview
+     * is stamped [storedTimestamp] (`null`: no preview yet) and returns the fields
+     * each one updated it with.
+     */
+    private fun previewWrites(storedTimestamp: Long?): List<Map<String, Any>> {
+        val chatDoc = mockk<DocumentSnapshot>(relaxed = true)
+        every { chatDoc.getLong("lastMessageTimestamp") } returns storedTimestamp
+        val tx = mockk<Transaction>(relaxed = true)
+        every { tx.get(chatRef) } returns chatDoc
+        val updates = mutableListOf<Map<String, Any>>()
+        every { tx.update(chatRef, capture(updates)) } returns tx
+        transactions.forEach { it.apply(tx) }
+        return updates
     }
 
     private fun <T> completeImmediately(task: Task<T>) {

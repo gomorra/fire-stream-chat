@@ -6,7 +6,8 @@
 // Owns: Listener registrations on chats/{chatId}/messages — caller must close
 //   the returned Flow to detach. The idempotent write contract for retryable
 //   sends (writeMessage): client-set doc id, plain set() on the first attempt,
-//   flush-then-create-if-absent on every later one.
+//   flush-then-create-if-absent on every later one. The newer-only chat preview
+//   (writeBackChatPreview — a transaction, never a blind update).
 // Collaborators: MessageRepositoryImpl + OutboxSender (only callers); decrypts via SignalManager
 //   on the way out. Also reachable through the MessageSource interface in
 //   data/remote/source/ so the pocketbase flavor can swap in its own impl.
@@ -75,14 +76,26 @@ class FirestoreMessageSource @Inject constructor(
      * just added or rewritten. Pass `senderId = null` to leave
      * `lastMessageSenderId` untouched (an in-place edit does not change it).
      *
+     * **Newer-only.** A transaction reads the chat and leaves the preview alone
+     * when it already shows a later `lastMessageTimestamp`. Sends run in
+     * parallel and finish in any order, and a blind `update()` let whichever
+     * finished last take the preview, even the older message. Equal timestamps
+     * still write, the same rule as `ChatDao.updateLastMessage`.
+     *
      * Deliberately **not** awaited. Awaiting it put a second sequential
      * round trip between the message reaching the backend and the sender's
      * bubble flipping SENDING → SENT, doubling perceived send latency; it also
      * meant a failing preview write (a missing chat document, say) surfaced as
-     * a send failure and marked an already-delivered message FAILED. Firestore
-     * applies the update to its local cache immediately and retries until it
-     * lands, and `MessageRepositoryImpl` mirrors the same fields into Room, so
-     * the chat list updates without waiting on this either way.
+     * a send failure and marked an already-delivered message FAILED.
+     * `MessageRepositoryImpl` mirrors the same fields into Room, so the chat list
+     * updates without waiting on this.
+     *
+     * Unlike an `update()`, a transaction is neither latency-compensated nor
+     * queued offline. The SDK's cache sees the preview only on commit — until
+     * then `ChatDao.upsertRemote` keeps Room's newer preview over a snapshot's
+     * older one — and without a connection it fails and is only logged. Every
+     * caller gets here after its own write was acknowledged, so that takes the
+     * link dropping in between, and the next message's preview supersedes it.
      */
     private fun writeBackChatPreview(
         chatId: String,
@@ -95,8 +108,12 @@ class FirestoreMessageSource @Inject constructor(
             "lastMessageTimestamp" to timestamp,
         )
         if (senderId != null) fields["lastMessageSenderId"] = senderId
-        firestore.collection("chats").document(chatId).update(fields)
-            .addOnFailureListener { Log.w(TAG, "chat preview writeback failed for chat=$chatId", it) }
+        val chatRef = firestore.collection("chats").document(chatId)
+        firestore.runTransaction { tx ->
+            val storedTimestamp = tx.get(chatRef).getLong("lastMessageTimestamp")
+            if (storedTimestamp == null || storedTimestamp <= timestamp) tx.update(chatRef, fields)
+            null
+        }.addOnFailureListener { Log.w(TAG, "chat preview writeback failed for chat=$chatId", it) }
     }
 
     // MetadataChanges.INCLUDE: with client-set ids our own write is echoed back

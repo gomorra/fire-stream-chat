@@ -31,6 +31,9 @@ import org.robolectric.annotation.Config
  * which holds the writer lock and serialises any concurrent single-statement
  * `setArchived` / `setPinned` / `setMuteUntil` write either entirely before or
  * entirely after.
+ *
+ * Also the newer-only preview merge: a snapshot taken before the backend's preview
+ * transaction commits must not replace the newer preview a send wrote to Room.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
@@ -130,6 +133,47 @@ class ChatDaoUpsertRemoteTest {
             dao.getChatById("A")!!.isArchived
         )
     }
+
+    // Regression: the Firestore preview is a newer-only transaction, which lands in
+    // the SDK's cache only when it commits. A chat snapshot in between (a typing
+    // indicator, an unread count) still carries the previous preview, and the
+    // merge copied it over the newer one the send had just written to Room.
+    @Test
+    fun `upsertRemote keeps a local preview newer than the snapshot's`() = runTest {
+        dao.insertChat(chat(id = "A").withPreview("sent-now", "just sent", 2_000L))
+
+        dao.upsertRemote(listOf(chat(id = "A").withPreview("earlier", "older", 1_000L)))
+
+        val merged = dao.getChatById("A")!!
+        assertEquals("sent-now", merged.lastMessageId)
+        assertEquals("just sent", merged.lastMessageContent)
+        assertEquals(2_000L, merged.lastMessageTimestamp)
+    }
+
+    // Only a strictly newer local preview is kept: newer and same-time snapshots win,
+    // as does any snapshot over a chat with no local preview. (FirestoreChatSource
+    // maps no message id into a snapshot's preview, hence "".)
+    @Test
+    fun `upsertRemote takes a snapshot preview newer than or as new as the local one`() = runTest {
+        dao.insertChats(listOf(
+            chat(id = "A").withPreview("mine", "mine", 1_000L),
+            chat(id = "B").withPreview("mine", "mine", 1_000L),
+            chat(id = "C"),
+        ))
+
+        dao.upsertRemote(listOf(
+            chat(id = "A").withPreview("", "newer", 2_000L),
+            chat(id = "B").withPreview("", "same time", 1_000L),
+            chat(id = "C").withPreview("", "first", 500L),
+        ))
+
+        assertEquals("newer", dao.getChatById("A")!!.lastMessageContent)
+        assertEquals("same time", dao.getChatById("B")!!.lastMessageContent)
+        assertEquals("first", dao.getChatById("C")!!.lastMessageContent)
+    }
+
+    private fun ChatEntity.withPreview(id: String, content: String, timestamp: Long) =
+        copy(lastMessageId = id, lastMessageContent = content, lastMessageTimestamp = timestamp)
 
     private fun chat(
         id: String,

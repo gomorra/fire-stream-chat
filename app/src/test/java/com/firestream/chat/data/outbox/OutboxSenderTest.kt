@@ -7,7 +7,6 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
-import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
@@ -211,21 +210,6 @@ class OutboxSenderTest {
 
     private fun stored(id: String): Message = rows.getValue(id).toDomain()
 
-    private fun chatWithLastMessage(lastMessageId: String) = ChatEntity(
-        id = "chat1",
-        type = "INDIVIDUAL",
-        name = null,
-        avatarUrl = null,
-        participants = listOf("uid1", "uid2"),
-        unreadCount = 0,
-        createdAt = 0L,
-        createdBy = "uid1",
-        admins = emptyList(),
-        lastMessageId = lastMessageId,
-        lastMessageContent = null,
-        lastMessageTimestamp = null,
-    )
-
     // ── the write ───────────────────────────────────────────────────────────
 
     @Test
@@ -263,21 +247,21 @@ class OutboxSenderTest {
         assertEquals(0, rows.getValue("msg1").outboxAttempts)
     }
 
+    // The newer-only rule is ChatDao's (ChatDaoLastMessageTest), so a re-attempt
+    // updates the preview exactly as a first attempt does — including a retry whose
+    // earlier run never reached its write, which used to be treated as a first send.
     @Test
-    fun `a re-attempt rebinds the chat preview only while it still points at the row`() = runTest {
+    fun `a re-attempt points the chat preview at the sent row like a first attempt`() = runTest {
         // A backend that mints its own ids (PocketBase) answers with a different one.
         coEvery { anyPlainWrite() } answers { "server-${arg<String>(2)}" }
-        coEvery { chatDao.getChatById("chat1") } returns chatWithLastMessage("msg1")
         store(sending("msg1", MessageType.TEXT), attempts = 1)
-        store(sending("msg2", MessageType.TEXT), attempts = 1)
 
         sender.send("msg1")
-        sender.send("msg2")
 
         assertFalse("msg1" in rows)
         assertEquals(MessageStatus.SENT, stored("server-msg1").status)
-        coVerify(exactly = 1) { chatDao.updateLastMessage(any(), any(), any(), any()) }
-        coVerify { chatDao.updateLastMessage("chat1", "server-msg1", "preview", 1_000L) }
+        coVerify(exactly = 1) { chatDao.updateLastMessage("chat1", "server-msg1", "preview", 1_000L) }
+        coVerify(exactly = 0) { chatDao.getChatById(any()) }
     }
 
     @Test

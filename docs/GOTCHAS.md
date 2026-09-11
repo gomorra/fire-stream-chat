@@ -179,6 +179,14 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   server and cannot see a first-attempt write the SDK has persisted but not flushed, so
   without the flush the transaction creates the doc and the replay overwrites it.
   (`FirestoreMessageSource.writeMessage`.)
+- **A Firestore transaction is not latency-compensated — an `update()` is.** An `update()`
+  lands in the SDK cache at once, so every snapshot after it already carries the new fields.
+  A transaction's writes reach the cache only on commit, a server round trip later, and
+  without a connection it fails instead of queueing. A listener that mirrors the document into
+  Room therefore sees the *old* fields in between (any unrelated change to the doc — a typing
+  indicator — fires it) and must not overwrite a newer local value with them. Hit when the chat
+  preview became a newer-only transaction: `ChatDao.upsertRemote` keeps a strictly newer local
+  preview. Regression: `ChatDaoUpsertRemoteTest.upsertRemote keeps a local preview newer than the snapshot's`.
 - **An unsent message row's outbox columns exist only on `MessageEntity`.**
   `outboxRecipientId`, `outboxCiphertext`, `outboxSignalType`, `outboxPeerIdentity` and
   `outboxAttempts` are not on the domain `Message`, so `insertMessage` / `replaceMessage` of a

@@ -7,6 +7,7 @@ import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.outbox.MessageWriter
 import com.firestream.chat.data.outbox.OutboxSender
+import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
@@ -36,6 +37,7 @@ internal fun messageRepository(
     preferencesDataStore: PreferencesDataStore = mockk(relaxed = true),
     connectivityManager: ConnectivityManager = mockk(relaxed = true),
     userSource: UserSource = mockk(relaxed = true),
+    sendClock: SendClock = SendClock(),
 ) = MessageRepositoryImpl(
     messageDao = messageDao,
     chatDao = chatDao,
@@ -51,4 +53,5 @@ internal fun messageRepository(
     preferencesDataStore = preferencesDataStore,
     connectivityManager = connectivityManager,
     userSource = userSource,
+    sendClock = sendClock,
 )

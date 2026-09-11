@@ -9,7 +9,7 @@
 //   uploadProgress is OutboxSender's, re-exposed here.
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
 //   OutboxSender (send pipeline), MessageWriter (encrypt-or-plain write for forward
-//   and the broadcast fan-out), SignalManager (decrypt path),
+//   and the broadcast fan-out), SendClock (every send's timestamp), SignalManager (decrypt path),
 //   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
 //   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check).
 // Don't put here: poll vote/close (PollRepositoryImpl), list mutations
@@ -34,6 +34,7 @@ import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.outbox.MessageWriter
 import com.firestream.chat.data.outbox.OutboxSender
+import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -124,7 +125,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val videoTranscoder: VideoTranscoder,
     private val preferencesDataStore: PreferencesDataStore,
     private val connectivityManager: ConnectivityManager,
-    private val userSource: UserSource
+    private val userSource: UserSource,
+    private val sendClock: SendClock,
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -497,7 +499,7 @@ class MessageRepositoryImpl @Inject constructor(
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
 
         val optimisticMessage = Message(
             id = tempId,
@@ -549,7 +551,7 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
         val isImage = mimeType.startsWith("image/")
         val isVideo = mimeType.startsWith("video/")
         val messageType = when {
@@ -642,7 +644,7 @@ class MessageRepositoryImpl @Inject constructor(
         // Before the insert: the source message stays in its chat, so a throw loses nothing.
         ensureNotBlocked(senderId, recipientId)
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
 
         val optimisticMessage = message.copy(
             id = tempId,
@@ -674,7 +676,7 @@ class MessageRepositoryImpl @Inject constructor(
     override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
 
         val optimisticMessage = Message(
             id = tempId,
@@ -824,7 +826,7 @@ class MessageRepositoryImpl @Inject constructor(
         recipientIds: List<String>
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
 
         // 1. Save message to broadcast chat (sender's record)
         val broadcastRemoteId = messageSource.sendPlainMessage(
@@ -893,7 +895,7 @@ class MessageRepositoryImpl @Inject constructor(
         listDiff: ListDiff?
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
         val content = when {
             listDiff?.shared == true -> "\uD83D\uDCCB Shared list: $listTitle"
             listDiff?.unshared == true -> "\uD83D\uDCCB Removed list: $listTitle"
@@ -977,7 +979,7 @@ class MessageRepositoryImpl @Inject constructor(
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
         val content = comment.ifBlank { LOCATION_DEFAULT_CONTENT }
 
         val optimisticMessage = Message(
@@ -1011,7 +1013,7 @@ class MessageRepositoryImpl @Inject constructor(
         require(durationMs > 0L) { "Timer duration must be positive" }
 
         val tempId = UUID.randomUUID().toString()
-        val timestamp = System.currentTimeMillis()
+        val timestamp = sendClock.next()
         val content = caption.orEmpty()
 
         val optimistic = Message(

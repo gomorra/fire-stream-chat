@@ -112,8 +112,9 @@ class OutboxSender @Inject constructor(
      * Everything else comes from the row. `outboxRecipientId` is the peer to
      * encrypt for; a row without one is refused, since guessing would send in
      * plaintext. `outboxAttempts` above zero means an earlier run may already have
-     * landed its write, so the write is create-if-absent (see [MessageSource]) and
-     * the chat preview is only rebound when it still points at this message.
+     * landed its write, so the write is create-if-absent (see [MessageSource]). The
+     * chat preview is updated the same way on every attempt: `ChatDao.updateLastMessage`
+     * is newer-only, so an attempt finishing late never takes it from a later message.
      *
      * @param sourceMimeType the picked file's type. Only a DOCUMENT uploads under
      *   it — images and videos are re-encoded to JPEG / MP4. The row does not
@@ -154,12 +155,11 @@ class OutboxSender @Inject constructor(
         // ciphertext and the attempt count end with the send.
         messageDao.replaceMessage(row.id, MessageEntity.fromDomain(sent))
 
+        // Newer-only, so a first attempt and a re-attempt update it alike: a send
+        // finishing after a later one leaves that one's preview, and a backend-
+        // swapped id (same timestamp) takes over the preview of its own row.
         val preview = messageSource.lastContentFor(row.type, row.content)
-        if (isReattempt) {
-            rebindLastMessageIfMatches(row.chatId, row.id, remoteId, preview, row.timestamp)
-        } else {
-            chatDao.updateLastMessage(row.chatId, remoteId, preview, row.timestamp)
-        }
+        chatDao.updateLastMessage(row.chatId, remoteId, preview, row.timestamp)
 
         return if (remoteId != row.id && row.type in LOCAL_FILE_TYPES) {
             sent.copy(localUri = renameLocalFile(row, remoteId))
@@ -297,22 +297,6 @@ class OutboxSender @Inject constructor(
         if (!current.renameTo(renamed)) return current.absolutePath
         messageDao.updateLocalUri(remoteId, renamed.absolutePath)
         return renamed.absolutePath
-    }
-
-    // After a retry swaps the row's id, the chat's lastMessageId may still point
-    // at the old one. Only rebind it when the chat's lastMessage was this row —
-    // otherwise a newer message exists and we'd downgrade the preview.
-    private suspend fun rebindLastMessageIfMatches(
-        chatId: String,
-        oldMessageId: String,
-        newMessageId: String,
-        previewContent: String,
-        timestamp: Long,
-    ) {
-        val chat = chatDao.getChatById(chatId) ?: return
-        if (chat.lastMessageId == oldMessageId) {
-            chatDao.updateLastMessage(chatId, newMessageId, previewContent, timestamp)
-        }
     }
 
     /** Storage object id for a video's JPEG thumbnail, derived from the media message id. */

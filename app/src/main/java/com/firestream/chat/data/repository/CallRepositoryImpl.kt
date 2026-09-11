@@ -13,6 +13,7 @@
 package com.firestream.chat.data.repository
 
 import com.firestream.chat.data.local.dao.ChatDao
+import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.MessageSource
@@ -30,7 +31,8 @@ class CallRepositoryImpl @Inject constructor(
     private val callSource: CallSignalingSource,
     private val authSource: AuthSource,
     private val messageSource: MessageSource,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    private val sendClock: SendClock,
 ) : CallRepository {
 
     override suspend fun createCall(calleeId: String): Result<String> {
@@ -134,7 +136,7 @@ class CallRepositoryImpl @Inject constructor(
         return try {
             val callerId = authSource.currentUserId
                 ?: return Result.failure(Exception("Not authenticated"))
-            val timestamp = System.currentTimeMillis()
+            val timestamp = sendClock.next()
             val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, timestamp)
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
             Result.success(Unit)

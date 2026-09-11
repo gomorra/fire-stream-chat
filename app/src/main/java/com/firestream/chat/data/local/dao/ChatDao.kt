@@ -36,6 +36,11 @@ interface ChatDao {
      * unarchive it, archive again — the second archive disappears because the next
      * Firestore snapshot rewrites isArchived=false from a stale read.)
      *
+     * The preview (`lastMessage*`) merges newer-only, like [updateLastMessage]: a send
+     * writes Room's preview at once, but the backend's preview reaches the snapshot
+     * only when its transaction commits, so a snapshot in between still carries the
+     * older one. The local preview is kept while it is strictly newer.
+     *
      * Returns the snapshot of pre-merge entities so callers can drive avatar-cache
      * decisions against the same view of state the merge saw.
      */
@@ -45,12 +50,16 @@ interface ChatDao {
         val merged = remote.map { r ->
             val local = existing[r.id]
             if (local != null) {
+                val preview = if (local.hasNewerPreviewThan(r)) local else r
                 r.copy(
                     isPinned = local.isPinned,
                     isArchived = local.isArchived,
                     muteUntil = local.muteUntil,
                     cachedAvatarUrl = local.cachedAvatarUrl,
-                    localAvatarPath = local.localAvatarPath
+                    localAvatarPath = local.localAvatarPath,
+                    lastMessageId = preview.lastMessageId,
+                    lastMessageContent = preview.lastMessageContent,
+                    lastMessageTimestamp = preview.lastMessageTimestamp,
                 )
             } else r
         }
@@ -64,8 +73,22 @@ interface ChatDao {
     @Query("UPDATE chats SET unreadCount = :count WHERE id = :chatId")
     suspend fun updateUnreadCount(chatId: String, count: Int)
 
-    @Query("UPDATE chats SET lastMessageId = :id, lastMessageContent = :content, lastMessageTimestamp = :timestamp WHERE id = :chatId")
-    suspend fun updateLastMessage(chatId: String, id: String?, content: String?, timestamp: Long?)
+    /**
+     * Points the chat's preview at a message — unless it already shows a newer one.
+     *
+     * Newer-only because sends run in parallel and finish in any order: a photo
+     * composed before a text can finish its upload after it, and must not take the
+     * preview back. Equal timestamps still write, so a retry on a backend that swaps
+     * the message id (PocketBase) rebinds the preview to the new id. Every caller is
+     * a send; nothing moves a preview to an older message.
+     */
+    @Query(
+        """
+        UPDATE chats SET lastMessageId = :id, lastMessageContent = :content, lastMessageTimestamp = :timestamp
+        WHERE id = :chatId AND (lastMessageTimestamp IS NULL OR lastMessageTimestamp <= :timestamp)
+        """
+    )
+    suspend fun updateLastMessage(chatId: String, id: String?, content: String?, timestamp: Long)
 
     // Phase 2: chat organisation
     @Query("UPDATE chats SET isPinned = :pinned WHERE id = :chatId")
@@ -79,4 +102,10 @@ interface ChatDao {
 
     @Query("UPDATE chats SET cachedAvatarUrl = :cachedUrl, localAvatarPath = :localPath WHERE id = :chatId")
     suspend fun updateAvatarCache(chatId: String, cachedUrl: String?, localPath: String?)
+}
+
+private fun ChatEntity.hasNewerPreviewThan(other: ChatEntity): Boolean {
+    val mine = lastMessageTimestamp ?: return false
+    val theirs = other.lastMessageTimestamp ?: return true
+    return mine > theirs
 }
