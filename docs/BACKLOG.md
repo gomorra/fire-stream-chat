@@ -83,6 +83,11 @@ image, so a rotation mid-placement is a supported path and an untested one.
   than the photo, grab it near one end and drag it several times in the same direction:
   it must keep travelling, not jump back to where each drag began — which it did until
   the grab offset landed, and only on hardware was it noticed.
+- **The picker rises above the keyboard.** Open the Text tab and tap the field: the field
+  and its Add button must sit just above the keyboard, and the panel must drop back to
+  the navigation bar, not float, once the keyboard closes. Repeat with the emoji search.
+  Check both gesture and three-button navigation, since the panel takes the union of the
+  bar's inset and the keyboard's.
 - **The flattened file matches the preview.** Place a sticker, a text run and a shape,
   press Done, and inspect the **written file** via the preview's *Save to Downloads*
   button — not the preview. Check position, size, angle and the text's vertical centring,

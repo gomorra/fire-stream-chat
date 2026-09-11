@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
@@ -265,7 +267,11 @@ internal fun OverlayImageScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .windowInsetsPadding(WindowInsets.navigationBars),
+                // The keyboard's inset as well as the navigation bar's: the text
+                // tab's field, its Add button and the emoji search all live in this
+                // panel, and the keyboard used to cover every one of them. Their
+                // union, not `imePadding()` on top — that would count the bar twice.
+                .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)),
         ) {
             EditFailureBanner(visible = failed, message = "Couldn't apply what you placed. Try again.")
             // Derived, not tracked: the notice stands while the photo is full
