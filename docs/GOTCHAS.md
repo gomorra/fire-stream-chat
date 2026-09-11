@@ -82,6 +82,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   *raw* insets (consumption only affects the padding-modifier family), hence the
   explicit `− navigationBars` subtraction there. Blanket `imePadding()` stays the rule
   for simple bottom-anchored screens (`ListDetailScreen`, `ImagePreviewScreen`).
+- **A drag sends a target, never a step worked out from `rememberUpdatedState`.** A
+  `pointerInput` block reads composition state through `rememberUpdatedState`, which
+  refreshes only on recomposition, and more than one pointer event can arrive before the
+  next one: every Compose-test `swipe` does it, and so does a phone whose frames have
+  fallen behind the finger. A step computed against that snapshot but applied to the
+  *current* state counts every earlier event again, and the object runs off to its clamp.
+  The overlay editor shipped exactly this (`a56cd055`); send the absolute target (finger
+  position less the grab offset) and let the state holder clamp it. Same family as the
+  crop frame that could be dragged only once (`9169ce31`).
 - **A touch target on the screen edge is unreachable by finger — and the emulator hides it.**
   A handle drawn at the edge (a crop corner on a photo fitted edge to edge) sits in the
   system back-gesture strip, or the home strip at the bottom; the system takes a touch that
