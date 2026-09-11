@@ -895,6 +895,12 @@ left open, **flagged here for sign-off rather than settled**:
    after a save, so saving several photos is not an extra tap each. Each button is
    now a 36 dp circle inside a 48 dp touch target; the outer padding shrank to match,
    so the circles did not move.
+   **Reversed 2026-09-11, after the first hardware pass** (user direction: "just show
+   all three buttons always"). Edit, Save and Close now sit side by side from the
+   start; the chevron, its rotation and the tray's expand/shrink are gone. What
+   stays from the fold: the 36 dp circles in 48 dp targets, and the opt-in per host
+   — a null lambda still hides its button, so the avatar viewers and the share
+   preview show only Close and a link-preview thumbnail gets neither Save nor Edit.
 2. **The copy into the edit cache belongs to `ImageEditRasterizer`, not
    `MediaFileManager`** — `importSource(File): Uri`. The rasterizer already owns
    `cacheDir/edits/` and everything that deletes from it (`discard`, `sweepStale`,

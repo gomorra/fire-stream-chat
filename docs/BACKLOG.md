@@ -21,7 +21,7 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
-### Image editor — edit from the fullscreen viewer, and its folded controls (Phase 6, 2026-09-11)
+### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
 **Nothing in this phase has been on hardware.** Its risk is the whole path, which no
 Robolectric test runs end to end: tap a sent photo, Edit, fetch, copy, preview, edit,
@@ -29,10 +29,10 @@ send. The ViewModel's state machine and the tray are unit-tested; the hand-offs 
 them are not. **On a device holding real conversations, stop at the send button** — the
 path is verified once the preview shows the right photo, not once a message goes out.
 
-- **The tray folds and unfolds.** Open a photo in a chat: only a `<` and × are on
-  screen. Tap `<` and Edit and the download button slide out to its left while it turns
-  to `>`. Tap again and they fold away. Swipe to another photo with the tray open and it
-  stays open. Open a profile picture from the chat list and confirm it shows only ×.
+- **All three buttons are on screen from the start.** Open a photo in a chat: Edit,
+  the download button and × sit side by side top-right, with no `<` to unfold them
+  (the folded tray of `5406ef3c` was reversed on the first hardware pass). Open a
+  profile picture from the chat list and confirm it shows only ×.
 - **Edit on a downloaded photo opens the preview straight away**, on that photo, with
   the viewer gone underneath. Run an adjust and an undo, then confirm Original ⇄ Edited
   still returns to the photo as received. Back out of the preview and confirm you land
