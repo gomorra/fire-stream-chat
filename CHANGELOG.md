@@ -15,7 +15,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **A sticker or a line of text placed on a photo no longer jumps when you start dragging it.** Grabbing an object anywhere but its exact centre snapped that centre under your finger, and did so again at the start of every drag. A line of text wider than the photo could never be dragged across: each swipe slid it back to where the previous one had started, so the same words seemed to scroll past endlessly. The point you grab now stays under your finger for the whole drag, and a quick drag no longer sends the object racing off to the edge of the photo. (`a56cd055`)
-- **The keyboard no longer hides what you are typing onto a photo.** In the photo editor's Text tab the keyboard covered the text field and the button that places the text, so nothing could be placed without closing the keyboard first, and the emoji search in the same editor was covered the same way. The panel now sits above the keyboard while it is open.
+- **The keyboard no longer hides what you are typing onto a photo.** In the photo editor's Text tab the keyboard covered the text field and the button that places the text, so nothing could be placed without closing the keyboard first, and the emoji search in the same editor was covered the same way. The panel now sits above the keyboard while it is open. (`5ca6c5ea`)
 - **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open. (`5406ef3c`)
 
 ## [1.29.0] — 2026-09-11
