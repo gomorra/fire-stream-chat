@@ -103,7 +103,9 @@ image, so a rotation mid-placement is a supported path and an untested one.
 - **The four-segment island plus the search and delete buttons fit a 390 dp row.** The
   island is icon-only except the active segment for exactly this reason. Check on the
   narrowest device to hand, and check that expanding search still slides the island away
-  cleanly and that its × brings it back.
+  cleanly and that its × brings it back. Since `edce7fdc` the Text and Shapes tabs show
+  no search button at all: switch to each and confirm the row is just the island and
+  delete, then switch back to Emoji or Stickers and confirm search returns.
 - **The rotate snap feels right, not sticky.** 15° everywhere, 8° of pull on the
   cardinals. Confirm a deliberate 22° tilt stays at 22° and that "exactly square" is easy
   to hit.
