@@ -13,6 +13,8 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.Density
 import com.firestream.chat.domain.util.ImageOverlay
@@ -22,6 +24,7 @@ import com.firestream.chat.domain.util.ShapeKind
 import com.firestream.chat.domain.util.StickerDesign
 import com.firestream.chat.domain.util.StickerPack
 import com.firestream.chat.domain.util.StickerPart
+import kotlin.math.ceil
 
 /**
  * The Compose half of drawing an overlay — the *preview*, whose only job is to
@@ -39,12 +42,14 @@ import com.firestream.chat.domain.util.StickerPart
  *
  * ### Text is centred by its layout box in both renderers
  *
- * Compose centres a text run by placing its layout box, and `android.graphics`
- * centres it by the midpoint of the font's ascent and descent. Those two land
- * in the same place for a single line with no extra line spacing, which is what
- * both are given — the box's height *is* `descent - ascent`. Stated here
- * because it is a coincidence that has to be maintained rather than an identity:
- * a `lineHeight` set on either side would quietly separate them.
+ * Compose centres a text run by placing its layout box, and the rasterizer
+ * centres a `StaticLayout` the same way — one built without font padding, at
+ * the default line spacing, which is what Compose builds underneath. A text run
+ * wraps at [OverlayGeometry.textWrapWidthPx] on both sides, each line centred
+ * within that box, so the box is the thing that is placed and the lines fall
+ * where they fall inside it. Stated here because it is an agreement that has to
+ * be maintained rather than an identity: a `lineHeight`, an `includePadding`,
+ * or a different wrap width on either side would quietly separate them.
  */
 
 /** Every overlay on the photo, in list order, which is the z-order. */
@@ -77,6 +82,7 @@ internal fun DrawScope.drawOverlay(
                 fontSize = size,
                 color = Color(content.colorArgb),
                 filled = content.filled,
+                wrapWidth = OverlayGeometry.textWrapWidthPx(imageRect.width),
             )
 
             is OverlayContent.Sticker ->
@@ -97,14 +103,17 @@ internal fun DrawScope.drawOverlay(
  */
 internal fun overlayHalfExtents(
     overlay: ImageOverlay,
-    longEdge: Float,
+    imageRect: OverlayRect,
     measurer: TextMeasurer,
     density: Density,
 ): Size {
-    val size = OverlayGeometry.sizePx(overlay.scale, longEdge)
+    val size = OverlayGeometry.sizePx(overlay.scale, imageRect.longEdge)
     return when (val content = overlay.content) {
         is OverlayContent.Emoji -> measuredHalfExtents(measurer, content.emoji, size, density)
-        is OverlayContent.Text -> measuredHalfExtents(measurer, content.text, size, density)
+        is OverlayContent.Text -> measuredHalfExtents(
+            measurer, content.text, size, density,
+            wrapWidth = OverlayGeometry.textWrapWidthPx(imageRect.width),
+        )
         is OverlayContent.Sticker -> Size(size / 2f, size / 2f)
         is OverlayContent.Shape ->
             Size(size / 2f * OverlayGeometry.aspectFor(content.kind), size / 2f)
@@ -116,8 +125,9 @@ private fun measuredHalfExtents(
     text: String,
     fontSize: Float,
     density: Density,
+    wrapWidth: Float? = null,
 ): Size {
-    val layout = measure(measurer, text, fontSize, density)
+    val layout = measure(measurer, text, fontSize, density, wrapWidth)
     return Size(layout.size.width / 2f, layout.size.height / 2f)
 }
 
@@ -128,9 +138,10 @@ private fun DrawScope.drawOverlayText(
     fontSize: Float,
     color: Color,
     filled: Boolean,
+    wrapWidth: Float? = null,
 ) {
     if (text.isEmpty()) return
-    val layout = measure(measurer, text, fontSize, this)
+    val layout = measure(measurer, text, fontSize, this, wrapWidth)
     drawText(
         textLayoutResult = layout,
         color = color,
@@ -272,16 +283,29 @@ internal data class OverlayRect(
 internal fun ImageFitMapper.toOverlayRect(): OverlayRect =
     OverlayRect(offsetX, offsetY, fittedWidth, fittedHeight)
 
+/**
+ * One text run laid out the way both renderers agree on.
+ *
+ * With a [wrapWidth] the run breaks into centred lines no wider than it, and
+ * the result's width is the narrower of the run's own width and the box — so a
+ * short caption's frame hugs the caption and a long one's spans the photo.
+ * Without one (an emoji) it stays on a single unbounded line.
+ */
 private fun measure(
     measurer: TextMeasurer,
     text: String,
     fontSize: Float,
     density: Density,
-): TextLayoutResult = measurer.measure(
-    text = text,
-    style = TextStyle(fontSize = with(density) { fontSize.toSp() }),
-    maxLines = 1,
-)
+    wrapWidth: Float? = null,
+): TextLayoutResult {
+    val style = TextStyle(fontSize = with(density) { fontSize.toSp() }, textAlign = TextAlign.Center)
+    val box = wrapWidth?.let { ceil(it).toInt() }?.takeIf { it > 0 }
+    return if (box == null) {
+        measurer.measure(text = text, style = style, maxLines = 1)
+    } else {
+        measurer.measure(text = text, style = style, constraints = Constraints(maxWidth = box))
+    }
+}
 
 private fun polyline(points: List<Float>, map: (Float, Float) -> Offset, close: Boolean): Path =
     Path().apply {
@@ -292,4 +316,3 @@ private fun polyline(points: List<Float>, map: (Float, Float) -> Offset, close: 
         }
         if (close) close()
     }
-

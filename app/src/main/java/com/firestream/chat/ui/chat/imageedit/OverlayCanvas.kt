@@ -285,7 +285,7 @@ private fun grabAt(
     val current = selected?.let { overlays.getOrNull(it) }
     if (current != null) {
         val center = rect.centerOf(current)
-        val half = overlayHalfExtents(current, rect.longEdge, measurer, density)
+        val half = overlayHalfExtents(current, rect, measurer, density)
         for (handle in OverlayHandle.entries) {
             val at = OverlayGeometry.handleCenter(
                 handle, center.x, center.y, half.width, half.height, current.rotationDegrees,
@@ -327,7 +327,7 @@ private fun containsTouch(
     touchTarget: Float,
 ): Boolean {
     val center = rect.centerOf(overlay)
-    val half = overlayHalfExtents(overlay, rect.longEdge, measurer, density)
+    val half = overlayHalfExtents(overlay, rect, measurer, density)
     // Padded up to a finger-sized target, so a small sticker stays selectable —
     // and therefore deletable by any route other than undo.
     val padX = (touchTarget / 2f - half.width).coerceAtLeast(0f)
@@ -409,7 +409,7 @@ private fun DrawScope.drawSelection(
     val center = rect.centerOf(overlay)
     // `this` is the density: a DrawScope is one, so the gesture code's captured
     // LocalDensity is only threaded where there is no receiver to ask.
-    val half = overlayHalfExtents(overlay, rect.longEdge, measurer, this)
+    val half = overlayHalfExtents(overlay, rect, measurer, this)
     rotate(overlay.rotationDegrees, pivot = center) {
         drawRect(
             color = FireOrange,
@@ -454,7 +454,7 @@ private fun DrawScope.drawReadout(
     handleRadius: Float,
 ) {
     val center = rect.centerOf(overlay)
-    val half = overlayHalfExtents(overlay, rect.longEdge, measurer, this)
+    val half = overlayHalfExtents(overlay, rect, measurer, this)
     val layout = measurer.measure(
         text = text,
         style = TextStyle(fontSize = READOUT_SIZE_DP.dp.toSp()),

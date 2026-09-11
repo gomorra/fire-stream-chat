@@ -124,6 +124,14 @@ image, so a rotation mid-placement is a supported path and an untested one.
   press Done, and inspect the **written file** via the preview's *Save to Downloads*
   button — not the preview. Check position, size, angle and the text's vertical centring,
   which is the one measurement the two renderers compute by different routes.
+- **Long text wraps the same way in the preview and in the file.** Type a sentence long
+  enough to need three or four lines, place it, and confirm it wraps at the photo's width
+  on screen rather than running off both sides. Press Done and inspect the written file:
+  the same line breaks, every line centred, and the block's vertical centre where the
+  preview had it. Then scale it up until a single word no longer fits a line and confirm
+  the preview and the file break that word at the same place. Both renderers lay the
+  text out through the same `StaticLayout` with font padding off; a `lineHeight` or an
+  `includePadding` on either side would separate them, and only a written file shows it.
 - **The layer eye does not change the output.** Place objects, press the eye until they
   vanish, press Done, and confirm they are still in the file (§2.7). Re-open and confirm
   it comes back visible.

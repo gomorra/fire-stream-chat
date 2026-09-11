@@ -22,6 +22,18 @@ class OverlayGeometryTest {
     // ── Size ─────────────────────────────────────────────────────────────────
 
     @Test
+    fun `text wraps at the photo's width, whichever space it is measured in`() {
+        val onPreview = OverlayGeometry.textWrapWidthPx(imageWidthPx = 1080f)
+        val onFile = OverlayGeometry.textWrapWidthPx(imageWidthPx = 3024f)
+
+        // The same fraction of each: a line that broke after "the" on screen
+        // breaks after "the" in the file.
+        assertEquals(onPreview / 1080f, onFile / 3024f, 0.0001f)
+        assertEquals(OverlayGeometry.TEXT_WRAP_WIDTH, onPreview / 1080f, 0.0001f)
+    }
+
+
+    @Test
     fun `size is a fraction of the long edge, so a placement survives the jump to full resolution`() {
         val onPreview = OverlayGeometry.sizePx(scale = 1f, imageLongEdgePx = 1600f)
         val onFile = OverlayGeometry.sizePx(scale = 1f, imageLongEdgePx = 4096f)

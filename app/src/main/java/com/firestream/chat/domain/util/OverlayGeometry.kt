@@ -106,6 +106,26 @@ object OverlayGeometry {
     const val TEXT_OUTLINE_RATIO = 0.055f
 
     /**
+     * How wide a text run may grow before it wraps onto another line, as a
+     * fraction of the image's **width** — not its long edge, because the thing
+     * a line must not run off is the photo's side.
+     *
+     * Text is the one overlay whose width is set by what was typed rather than
+     * by the scale handle, and at [BASE_SIZE] a handful of characters already
+     * span a phone-sized photo. Left on a single line, a caption hung past both
+     * edges, could not be dragged far enough to see either end (the centre is
+     * clamped to the photo — see [movedTo]) and lost both ends in the flatten.
+     * Wrapping at the photo's width keeps every word on the file. The whole
+     * width rather than a margin inside it: a line that wants to be as wide as
+     * the photo is a legitimate caption, and the centre can still be dragged to
+     * tuck it wherever it belongs.
+     */
+    const val TEXT_WRAP_WIDTH = 1f
+
+    /** The width a text run wraps at, in the pixels of a space whose width is [imageWidthPx]. */
+    fun textWrapWidthPx(imageWidthPx: Float): Float = imageWidthPx * TEXT_WRAP_WIDTH
+
+    /**
      * A rounded rectangle's corner radius, as a fraction of the object's size.
      *
      * Here rather than in either renderer for the reason everything else in this

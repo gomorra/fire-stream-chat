@@ -782,6 +782,46 @@ class ImageEditRasterizerTest {
     }
 
     @Test
+    fun `a text run wider than the photo wraps onto more lines instead of running off both edges`() = runTest {
+        val source = flatSource(400, 400, Color.WHITE, "overlay-text-wrap.png")
+
+        val output = decode(
+            rasterizer.rasterize(
+                source,
+                listOf(
+                    RasterOp.Overlays(
+                        listOf(
+                            ImageOverlay(
+                                content = OverlayContent.Text(
+                                    text = "a caption long enough that one line cannot hold it",
+                                    colorArgb = 0xFFFF0000,
+                                    filled = true,
+                                ),
+                                centerX = 0.5f,
+                                centerY = 0.5f,
+                            ),
+                        ),
+                    ),
+                ),
+                emptySet(),
+            ),
+        )
+
+        // At the base size the font is 22% of the long edge — 88 px here — so a
+        // single line of this caption is several photos wide and would be cut
+        // off at both edges of the file. Wrapped at the photo's width it stacks
+        // into lines, and the stack is tall enough to leave ink in the top
+        // quarter, where a single centred line (spanning roughly y ∈ 150..250)
+        // never reaches.
+        fun inkIn(top: Int, bottom: Int): Boolean = (top until bottom).any { y ->
+            (0 until output.width).any { x -> output.getPixel(x, y) != Color.WHITE }
+        }
+        assertTrue("wrapped text should reach the top quarter", inkIn(0, 100))
+        assertTrue("wrapped text should reach the bottom quarter", inkIn(300, 400))
+        output.recycle()
+    }
+
+    @Test
     fun `an overlay repaints pixels without changing the photo's dimensions`() = runTest {
         val source = flatSource(320, 240, Color.WHITE, "overlay-dimensions.png")
 

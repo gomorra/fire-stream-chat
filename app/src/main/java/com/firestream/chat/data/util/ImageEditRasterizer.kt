@@ -14,6 +14,9 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Rect
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import androidx.annotation.VisibleForTesting
 import com.firestream.chat.domain.util.ImageEditGeometry
 import com.firestream.chat.domain.util.ImageOverlay
@@ -42,6 +45,7 @@ import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.roundToInt
+import kotlin.math.ceil
 
 /**
  * Every full-resolution bitmap operation the image editor performs, and the
@@ -528,6 +532,7 @@ class ImageEditRasterizer @Inject constructor(
                     fontSize = size,
                     colorArgb = content.colorArgb,
                     filled = content.filled,
+                    wrapWidth = OverlayGeometry.textWrapWidthPx(output.width.toFloat()),
                 )
 
                 is OverlayContent.Sticker ->
@@ -548,8 +553,14 @@ class ImageEditRasterizer @Inject constructor(
      * [fontSize] is the size, not a bounding box: an emoji and a text run both
      * scale by *type size*, which is the only measure that means the same thing
      * to Compose and to `android.graphics` without either of them measuring
-     * anything. Vertically centred through the font's own metrics rather than
-     * its reported height, so a glyph with descenders sits where its body is.
+     * anything. A text run wraps at [wrapWidth] into centred lines; an emoji
+     * passes none and stays on one line as wide as it is.
+     *
+     * Laid out through a [StaticLayout] rather than `Canvas.drawText`, because
+     * that is what Compose's text measurer builds underneath: the same breaks,
+     * and — with font padding off and the default line spacing — the same box
+     * height, whose midpoint is what both sides put on the placement. See the
+     * "centred by its layout box" note on `OverlayPainter`.
      */
     private fun paintGlyphs(
         canvas: Canvas,
@@ -559,11 +570,11 @@ class ImageEditRasterizer @Inject constructor(
         fontSize: Float,
         colorArgb: Long,
         filled: Boolean,
+        wrapWidth: Float? = null,
     ) {
         if (text.isEmpty()) return
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = fontSize
-            textAlign = Paint.Align.CENTER
             color = colorArgb.toInt()
             if (!filled) {
                 style = Paint.Style.STROKE
@@ -571,9 +582,15 @@ class ImageEditRasterizer @Inject constructor(
                 strokeJoin = Paint.Join.ROUND
             }
         }
-        val metrics = paint.fontMetrics
-        val baseline = centerY - (metrics.ascent + metrics.descent) / 2f
-        canvas.drawText(text, centerX, baseline, paint)
+        val width = (wrapWidth ?: paint.measureText(text)).let { ceil(it).toInt() }.coerceAtLeast(1)
+        val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+            .setIncludePad(false)
+            .build()
+        val saved = canvas.save()
+        canvas.translate(centerX - width / 2f, centerY - layout.height / 2f)
+        layout.draw(canvas)
+        canvas.restoreToCount(saved)
     }
 
     /** One sticker, its `0..1` parts scaled into a [size]-square box around the centre. */
