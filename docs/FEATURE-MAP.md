@@ -73,7 +73,8 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
 | `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage`, `downloadAndSave` (in-flight dedup map), per-chat scan |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` (limit guard, optimistic row, block check), `downloadAndSave` (in-flight dedup map), per-chat scan |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | The pipeline behind every retryable send — compress / transcode → thumbnail → upload (owns `uploadProgress`) → write → SENT, persisting after each step and skipping any step the row already records |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ImagePreviewScreen.kt` | Pager over the picked batch — per-item caption, thumbnail strip, remove-before-send, editor rail |
 | `app/src/main/java/com/firestream/chat/ui/chat/PendingMedia.kt` | The queued-but-unsent item (original uri + mime + caption + per-item HD + edit cursor) and its rotation-safe `Saver` |
@@ -252,14 +253,14 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalProtocolStoreImpl.kt` | `SignalProtocolStore` backed by `SignalDatabase` |
 | `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` — keys survive `AppDatabase` destructive migrations |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `BuildConfig.DEBUG` + `e2eEncryptionEnabledFlow` guard around the Signal branch |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `sendEncryptedOrPlain` — `BuildConfig.DEBUG` + `e2eEncryptionEnabledFlow` guard around the Signal branch |
 | `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `e2eEncryptionEnabledFlow` (default `true`) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → Encryption toggle (release builds) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsViewModel.kt` | Wires the toggle |
 | `app/src/test/java/com/firestream/chat/data/local/SignalDatabaseSmokeTest.kt` | Dedicated DB smoke |
 | `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
 
-**Entry point:** every send via `MessageRepositoryImpl.sendMessage()` — the guard at the top of the function picks plaintext or Signal.
+**Entry point:** every 1:1 send reaches `OutboxSender.sendEncryptedOrPlain()` — through `OutboxSender.send()` for text / media / voice, directly for forward and the broadcast fan-out — and its guard picks plaintext or Signal.
 
 ---
 
@@ -389,10 +390,11 @@ Chats can send video — record with the camera or pick one from the gallery. Vi
 | `app/src/main/java/com/firestream/chat/data/remote/source/MessageSource.kt` | `mediaThumbnailUrl` added to the cross-flavor `sendMessage`/`sendPlainMessage` contract |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `mediaThumbnailUrl` param (firebase flavor) |
 | `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseMessageSource.kt` | `mediaThumbnailUrl` param (pocketbase flavor) |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` — shared image/video path; video branch transcodes, uploads thumbnail, retries without re-transcoding |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` — shared image/video entry; runs the limit guard before the optimistic insert |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Video branch — transcodes, uploads the thumbnail, uploads the mp4; a retry skips whichever of those the row already records |
 | `app/src/main/java/com/firestream/chat/domain/model/AppError.kt` | `MediaLimitException` → `AppError.Validation` mapping |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryMediaSendFailureTest.kt` | Video limit-guard / send-failure coverage |
-| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryRetryTest.kt` | Retry re-uploads without re-transcoding |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxSenderTest.kt` | Video step order and resume — a retry re-uploads without re-transcoding |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `VIDEO` branch — thumbnail, play overlay, duration badge |
 | `app/src/main/java/com/firestream/chat/ui/starred/StarredMessagesScreen.kt` | `VIDEO` branch in the starred list |
 | `app/src/test/java/com/firestream/chat/ui/chat/MessageBubbleSmokeTest.kt` | `VIDEO` bubble render smoke coverage |
@@ -406,7 +408,7 @@ Chats can send video — record with the camera or pick one from the gallery. Vi
 | `app/src/test/java/com/firestream/chat/ui/share/SharePickerViewModelTest.kt` | Gallery video share coverage |
 | `app/src/main/res/values/strings.xml` | `reply_preview_video`, `attachment_record_video` |
 
-**Entry point:** record or pick a video in `ChatScreen.kt`'s composer → `ImagePreviewScreen` (video mode) → `MessageRepositoryImpl.sendMediaMessage()` guards via `VideoTranscoder.ensureWithinLimits`, transcodes, uploads a thumbnail → `MessageBubble` `VIDEO` branch renders it → tap opens `ChatViewModel.showFullscreenVideo()` → `FullscreenVideoPlayer`.
+**Entry point:** record or pick a video in `ChatScreen.kt`'s composer → `ImagePreviewScreen` (video mode) → `MessageRepositoryImpl.sendMediaMessage()` guards via `VideoTranscoder.ensureWithinLimits` → `OutboxSender.send()` transcodes, uploads a thumbnail → `MessageBubble` `VIDEO` branch renders it → tap opens `ChatViewModel.showFullscreenVideo()` → `FullscreenVideoPlayer`.
 
 ---
 

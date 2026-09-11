@@ -5,7 +5,7 @@
 // Owns: Storage path conventions: `avatars/{userId}/profile.jpg`,
 //   `avatars/groups/{chatId}/group.jpg`, message media under `messages/{chatId}/`.
 // Collaborators: ChatRepositoryImpl (group avatars), UserRepositoryImpl
-//   (user avatars), MessageRepositoryImpl (media + uploadProgress flow).
+//   (user avatars), OutboxSender (message media + uploadProgress flow).
 // Don't put here: local media file management (MediaFileManager), image
 //   compression (ImageCompressor), media backfill (MediaBackfillWorker).
 // endregion

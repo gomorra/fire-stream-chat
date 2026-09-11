@@ -7,12 +7,11 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.remote.source.RawMessage
-import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.domain.repository.ChatRepository
@@ -52,10 +51,9 @@ class MessageRepositoryLocalUriTest {
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val storageSource = mockk<StorageSource>()
+    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
@@ -81,8 +79,8 @@ class MessageRepositoryLocalUriTest {
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
 
         repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            listRepository, mediaFileManager, imageCompressor, videoTranscoder, preferencesDataStore, connectivityManager,
+            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
+            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
             userSource
         )
     }

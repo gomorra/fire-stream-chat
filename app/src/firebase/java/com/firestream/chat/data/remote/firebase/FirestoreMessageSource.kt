@@ -7,7 +7,7 @@
 //   the returned Flow to detach. The idempotent write contract for retryable
 //   sends (writeMessage): client-set doc id, plain set() on the first attempt,
 //   flush-then-create-if-absent on every later one.
-// Collaborators: MessageRepositoryImpl (only caller); decrypts via SignalManager
+// Collaborators: MessageRepositoryImpl + OutboxSender (only callers); decrypts via SignalManager
 //   on the way out. Also reachable through the MessageSource interface in
 //   data/remote/source/ so the pocketbase flavor can swap in its own impl.
 // Don't put here: Signal encryption itself (SignalManager), Room caching

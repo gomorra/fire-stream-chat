@@ -124,8 +124,8 @@ class PreferencesDataStore @Inject constructor(
         context.dataStore.edit { prefs -> prefs[screenSecurityKey] = enabled }
     }
 
-    // Debug builds ignore this — the BuildConfig.DEBUG guard in MessageRepositoryImpl
-    // forces plaintext regardless.
+    // Debug builds ignore this — the BuildConfig.DEBUG guard in
+    // OutboxSender.sendEncryptedOrPlain forces plaintext regardless.
     val e2eEncryptionEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[e2eEncryptionKey] ?: false
     }

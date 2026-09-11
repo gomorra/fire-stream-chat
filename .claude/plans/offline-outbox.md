@@ -207,6 +207,12 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
 - Move pipeline tests (`MessageRepositoryRetryTest`, `…MediaSendFailureTest`, `…HdPrecedenceTest`,
   `…LocalUriTest`) to `OutboxSenderTest` where they test the pipeline; keep repository-contract tests.
 - `/simplify` trigger: large + cross-cutting.
+- **Shipped shape (read before step 4).** `send(messageId, recipientId, isRetry = false, sourceMimeType = null)`:
+  the row stores neither the 1:1 recipient nor a document's picked mime type, and `isRetry` drives both
+  `ifAbsent` and preview rebind-vs-overwrite. `sendEncryptedOrPlain` moved into `OutboxSender`;
+  `forwardMessage` and the broadcast fan-out borrow it. LOCATION stays plaintext by passing
+  `recipientId = ""`. The block check stayed in the repository. A first video send reads the
+  container header twice (pre-insert guard + sender) — accepted, a retry has only the row.
 
 ### Step 4 — Encrypt once + Signal session lock (`fix:`, Room 25 → 26)
 - `MessageEntity`: `outboxCiphertext: String?`, `outboxSignalType: Int?`, `outboxAttempts: Int = 0`.
@@ -216,6 +222,16 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
 - `SignalManager`: per-address `Mutex` for `encrypt` and `decrypt`; pre-key replenishment runs
   after the lock is released (§2.4).
 - Injectable encryption policy replacing the inline `BuildConfig.DEBUG` check.
+- **(step-3 review)** Make that policy a `MessageWriter` (encrypt-or-plain decision + write) injected into
+  both `OutboxSender` and the repository: the row-less forward / broadcast callers keep a one-call API
+  while `OutboxSender` splits encrypt from write. The policy takes the message type, replacing
+  LOCATION's `recipientId = ""` trick.
+- **(step-3 review, decide here)** Add `outboxRecipientId: String?` in the same 25 → 26 bump, written at
+  insert. Step 6's worker has only the message id but needs the recipient for encryption and the
+  authoritative block check; `send` then drops its `recipientId` parameter. The alternative — derive it
+  from the `ChatEntity` participants — can disagree with the nav argument when the chat is not cached.
+- **(step-3 review)** Derive `ifAbsent` and the preview rebind-vs-overwrite choice from one
+  `outboxAttempts > 0` value; the `isRetry` parameter goes away.
 - Tests: second attempt reuses stored ciphertext and never calls `encrypt`; concurrent `encrypt`
   calls for one recipient do not interleave; a `PREKEY_TYPE` decrypt releases the lock before
   `publishKeys` is called.
@@ -224,6 +240,9 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
 §2.6: newer-only `ChatDao` update for send paths, newer-only preview transaction, strictly
 increasing timestamps. Tests: DAO test (pattern of `MessageDaoOrphanRecoveryTest`) for the
 newer-only update; repository test for monotonic timestamps in a batch.
+**(step-3 review)** Once send paths use the newer-only update, delete
+`OutboxSender.rebindLastMessageIfMatches` and its retry branch — a first attempt and a retry then
+update the preview the same way.
 
 ### Step 6 — `OutboxWorker` (`feat:`, CHANGELOG *Added*, minor bump)
 - `data/worker/OutboxWorker.kt`, `data/outbox/OutboxScheduler.kt` (`enqueue`, `retryNow`, `requeueAll`),
@@ -238,6 +257,17 @@ newer-only update; repository test for monotonic timestamps in a batch.
   **Remove** the `failStuckSendingMessagesForChat` call in `getMessages` (it would fail live queued rows).
 - `deleteMessage` on a `SENDING` row → the tombstone path in §2.5 (soft-delete, outbox file gone,
   `REPLACE` run). `OutboxSender.send` branches on `deletedAt != null` before anything else.
+- **(step-3 review)** `requeueAll` filters to the types `OutboxSender.send` supports, from one shared set:
+  TIMER rows are row-backed `SENDING` sends too, and `send` throws `IllegalStateException` for them —
+  neither transient nor permanent in the classifier.
+- **(step-3 review)** `forwardMessage` inserts a `SENDING` row but writes directly (no `failSendOnError`),
+  so `requeueAll` would hand a stuck forward to a pipeline it never ran through — a forwarded VIDEO
+  without a thumbnail or local file throws. Route forward through insert → `outboxSender.send(id)`;
+  the `mediaUrl` guard already skips the upload.
+- **(step-3 review)** Decide `localUri` retention at SENT by ownership, not by type. Today DOCUMENT drops
+  it; once §2.7 stages inputs in `filesDir/outbox/` and deletes them on SENT, VOICE would keep a
+  dangling path. Carry a document's mime type in the staged file's extension so its retry stops
+  uploading as `application/octet-stream` (pre-existing since before step 3).
 - `androidx.work:work-testing` is **not** in the catalog — add it. Tests with
   `TestListenableWorkerBuilder`: success → `SENT`; transient → `retry`; ack timeout → `retry`;
   permanent → `FAILED`; give-up after 8 attempts; `requeueAll` enqueues only own `SENDING` rows;

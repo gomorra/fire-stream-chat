@@ -150,7 +150,7 @@ class PocketBaseMessageSource @Inject constructor(
 
     /**
      * Encryption is gated off in the pocketbase flavor (`SUPPORTS_SIGNAL=false`),
-     * so MessageRepositoryImpl.sendEncryptedOrPlain never picks the ciphertext
+     * so OutboxSender.sendEncryptedOrPlain never picks the ciphertext
      * branch. If this method ever fires, something flipped the gate without
      * landing the Signal-on-PB follow-up plan — fail loud.
      */

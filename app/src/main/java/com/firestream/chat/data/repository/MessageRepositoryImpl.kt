@@ -1,19 +1,21 @@
 // region: AGENT-NOTE
 // Responsibility: Message CRUD across all message types — text / image / voice /
-//   document / poll / location / list / call. Routes through Signal encryption
-//   in release builds (with user opt-out from PreferencesDataStore) and plaintext
-//   in debug. Owns the local-first send pipeline (Room first, upload + remoteId
-//   rename second), media download with in-flight dedup, per-chat backfill scan,
-//   block-state filtering on receive.
-// Owns: MessageEntity rows + uploadProgress: StateFlow<Map<String, Float>>.
+//   document / poll / location / list / call. A retryable send (text, media,
+//   voice, location) is validate → optimistic insert → block check → OutboxSender,
+//   which uploads, writes encrypted-or-plain and swaps the row to SENT. Also media
+//   download with in-flight dedup, per-chat backfill scan, block-state filtering
+//   and Signal decryption on receive.
+// Owns: MessageEntity rows; FAILED marking of a send (failSendOnError).
+//   uploadProgress is OutboxSender's, re-exposed here.
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
-//   FirebaseStorageSource, SignalManager (release encrypt/decrypt path),
-//   PreferencesDataStore (encryption opt-out, AutoDownloadOption), MediaFileManager,
-//   ImageCompressor, ConnectivityManager (WiFi-only download check).
+//   OutboxSender (send pipeline + encryption gate), SignalManager (decrypt path),
+//   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
+//   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check).
 // Don't put here: poll vote/close (PollRepositoryImpl), list mutations
-//   (ListRepositoryImpl), call signalling (CallRepositoryImpl). Class is large
-//   (~1100 LOC) — Phase 2 plan adds a section-comment TOC and 1100-LOC ceiling.
-//   See docs/PATTERNS.md for the encryption-guard and AppError-wrap conventions.
+//   (ListRepositoryImpl), call signalling (CallRepositoryImpl), the upload / write
+//   / resume steps of a send (OutboxSender). Class is large
+//   (~1340 LOC) — Phase 2 plan adds a section-comment TOC and 1100-LOC ceiling.
+//   See docs/PATTERNS.md for the AppError-wrap convention.
 // endregion
 
 package com.firestream.chat.data.repository
@@ -29,12 +31,11 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
@@ -71,11 +72,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.channelFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.first
@@ -83,8 +81,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import com.firestream.chat.BuildConfig
-import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -117,11 +113,10 @@ class MessageRepositoryImpl @Inject constructor(
     private val messageSource: MessageSource,
     private val authSource: AuthSource,
     private val signalManager: SignalManager,
-    private val storageSource: StorageSource,
+    private val outboxSender: OutboxSender,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val listRepository: dagger.Lazy<ListRepository>,
     private val mediaFileManager: MediaFileManager,
-    private val imageCompressor: ImageCompressor,
     private val videoTranscoder: VideoTranscoder,
     private val preferencesDataStore: PreferencesDataStore,
     private val connectivityManager: ConnectivityManager,
@@ -130,8 +125,7 @@ class MessageRepositoryImpl @Inject constructor(
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
-    override val uploadProgress: StateFlow<Map<String, Float>> = _uploadProgress.asStateFlow()
+    override val uploadProgress: StateFlow<Map<String, Float>> = outboxSender.uploadProgress
 
     // Block state is read on the two hottest paths in the app — once per backend
     // snapshot on receive, once per send — and each read was a round-trip to the
@@ -455,101 +449,6 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Routes a send through Signal encryption or the plaintext branch based on the
-     * build flavor and whether a 1:1 recipient is known. Encapsulates the
-     * "encrypt for recipient unless debug/empty-recipient" decision that was
-     * previously duplicated at every send site in this class.
-     *
-     * Callers pass all optional fields (mediaUrl, mentions, etc.) — unused ones
-     * fall through to the underlying `FirestoreMessageSource` defaults.
-     *
-     * [messageId] is the Room row's id and becomes the remote id on a backend
-     * that keys by client id (see [MessageSource]); a first send passes the
-     * optimistic row's id, a retry passes the failed row's id with
-     * [ifAbsent] = true so a write that landed after its await was cancelled
-     * is never duplicated. The returned id is what the backend actually used —
-     * the same id on Firebase, a server id on PocketBase — which is why callers
-     * still swap the row to it.
-     */
-    private suspend fun sendEncryptedOrPlain(
-        chatId: String,
-        senderId: String,
-        recipientId: String,
-        messageId: String,
-        plaintext: String,
-        type: MessageType,
-        timestamp: Long,
-        replyToId: String? = null,
-        mentions: List<String> = emptyList(),
-        emojiSizes: Map<Int, Float> = emptyMap(),
-        mediaUrl: String? = null,
-        mediaThumbnailUrl: String? = null,
-        mediaWidth: Int? = null,
-        mediaHeight: Int? = null,
-        duration: Int? = null,
-        latitude: Double? = null,
-        longitude: Double? = null,
-        isForwarded: Boolean = false,
-        isHd: Boolean = false,
-        ifAbsent: Boolean = false,
-    ): String {
-        return if (
-            recipientId.isNotEmpty() &&
-            BuildConfig.SUPPORTS_SIGNAL &&
-            !BuildConfig.DEBUG &&
-            preferencesDataStore.e2eEncryptionEnabledFlow.first()
-        ) {
-            signalManager.ensureInitialized()
-            val encrypted = signalManager.encrypt(recipientId, plaintext)
-            messageSource.sendMessage(
-                chatId = chatId,
-                senderId = senderId,
-                messageId = messageId,
-                ciphertext = encrypted.ciphertext,
-                signalType = encrypted.signalType,
-                type = type,
-                replyToId = replyToId,
-                timestamp = timestamp,
-                mediaUrl = mediaUrl,
-                mediaThumbnailUrl = mediaThumbnailUrl,
-                isForwarded = isForwarded,
-                duration = duration,
-                mentions = mentions,
-                plainContent = plaintext,
-                emojiSizes = emojiSizes,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                latitude = latitude,
-                longitude = longitude,
-                isHd = isHd,
-                ifAbsent = ifAbsent,
-            )
-        } else {
-            messageSource.sendPlainMessage(
-                chatId = chatId,
-                senderId = senderId,
-                messageId = messageId,
-                content = plaintext,
-                type = type,
-                replyToId = replyToId,
-                timestamp = timestamp,
-                mediaUrl = mediaUrl,
-                mediaThumbnailUrl = mediaThumbnailUrl,
-                isForwarded = isForwarded,
-                duration = duration,
-                mentions = mentions,
-                emojiSizes = emojiSizes,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                latitude = latitude,
-                longitude = longitude,
-                isHd = isHd,
-                ifAbsent = ifAbsent,
-            )
-        }
-    }
-
-    /**
      * Wraps a send pipeline so any failure flips the optimistic row at
      * [messageId] to FAILED (restoring the retry affordance) before rethrowing.
      * Cancellation is a control-flow signal — e.g. the user left the chat
@@ -575,10 +474,10 @@ class MessageRepositoryImpl @Inject constructor(
      * @param recipientId The 1:1 peer user id for INDIVIDUAL chats, used by the
      *   block check and Signal encryption. **For GROUP and BROADCAST chats,
      *   callers must pass an empty string** — Signal sessions are 1:1, so
-     *   group/broadcast messages must travel through the plaintext branch
-     *   below. Passing an arbitrary group member as the recipient will encrypt
-     *   the message for that single member and leave every other participant
-     *   unable to read it.
+     *   group/broadcast messages must travel through the plaintext branch of
+     *   [OutboxSender.sendEncryptedOrPlain]. Passing an arbitrary group member
+     *   as the recipient will encrypt the message for that single member and
+     *   leave every other participant unable to read it.
      */
     override suspend fun sendMessage(
         chatId: String,
@@ -608,23 +507,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            val remoteId = sendEncryptedOrPlain(
-                chatId = chatId,
-                senderId = senderId,
-                recipientId = recipientId,
-                messageId = tempId,
-                plaintext = content,
-                type = MessageType.TEXT,
-                timestamp = timestamp,
-                replyToId = replyToId,
-                mentions = mentions,
-                emojiSizes = emojiSizes,
-            )
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
-            sentMessage
+            outboxSender.send(tempId, recipientId)
         }
     }
 
@@ -645,12 +528,6 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.editMessage(messageId, newContent, editedAt, emojiSizes)
     }
 
-    /** Local-file extension for a media message's type — the single owner of the mp4/jpg rule. */
-    private fun localExtFor(type: MessageType) = if (type == MessageType.VIDEO) "mp4" else "jpg"
-
-    /** Storage object id for a video's JPEG thumbnail, derived from the media message id. */
-    private fun thumbStorageId(messageId: String) = "${messageId}_thumb"
-
     /**
      * Send a media (image / video / document) message to a chat.
      *
@@ -663,7 +540,6 @@ class MessageRepositoryImpl @Inject constructor(
      */
     override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        val parsedUri = Uri.parse(uri)
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
         val isImage = mimeType.startsWith("image/")
@@ -673,17 +549,17 @@ class MessageRepositoryImpl @Inject constructor(
             isVideo -> MessageType.VIDEO
             else -> MessageType.DOCUMENT
         }
+        // Resolved onto the row: it renders the HD badge and is what OutboxSender
+        // compresses by, so badge and bytes cannot disagree.
         val sendAsHd = if (isImage) {
             isHd ?: preferencesDataStore.sendImagesFullQualityFlow.first()
         } else {
             false
         }
-        val videoQuality = if (isVideo) preferencesDataStore.videoQualityFlow.first() else null
 
         // Guard BEFORE the optimistic insert: reject over-limit videos so no dead
         // SENDING row is left behind. MediaLimitException maps to AppError.Validation.
-        // The returned metadata feeds transcode() so the container is parsed only once.
-        val videoMetadata = if (isVideo) videoTranscoder.ensureWithinLimits(parsedUri) else null
+        if (isVideo) videoTranscoder.ensureWithinLimits(Uri.parse(uri))
 
         // Insert the optimistic row BEFORE any IO so the bubble appears immediately
         // and survives a downstream failure (e.g. concurrent-compression OOM when
@@ -704,397 +580,28 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(placeholder))
 
-        var tempCompressedFile: File? = null
-        var tempTranscodedFile: File? = null
-        var tempThumbFile: File? = null
-        try {
-            failSendOnError(tempId) {
-                ensureNotBlocked(senderId, recipientId)
-                // For images: compress/process and store locally.
-                // For videos: transcode to H.264/AAC mp4, store locally, then
-                // extract + upload a JPEG thumbnail (populates mediaThumbnailUrl).
-                val localFile: File?
-                val mediaWidth: Int?
-                val mediaHeight: Int?
-                val uploadUri: Uri
-                val uploadMimeType: String
-                var videoDurationSec: Int? = null
-                var thumbnailUrl: String? = null
-
-                when {
-                    isImage -> {
-                        val result = imageCompressor.processImage(parsedUri, sendAsHd)
-                        tempCompressedFile = result.file
-
-                        localFile = mediaFileManager.copyToLocal(
-                            chatId, tempId, Uri.fromFile(result.file), "jpg"
-                        )
-                        mediaWidth = result.width
-                        mediaHeight = result.height
-                        uploadUri = Uri.fromFile(localFile)
-                        uploadMimeType = result.mimeType
-                    }
-                    isVideo -> {
-                        val result = videoTranscoder.transcode(
-                            parsedUri, videoQuality!!.targetHeight, videoMetadata!!
-                        )
-                        tempTranscodedFile = result.file
-
-                        localFile = mediaFileManager.copyToLocal(
-                            chatId, tempId, Uri.fromFile(result.file), localExtFor(messageType)
-                        )
-                        mediaWidth = result.width
-                        mediaHeight = result.height
-                        videoDurationSec = result.durationSec
-                        uploadUri = Uri.fromFile(localFile)
-                        uploadMimeType = result.mimeType
-
-                        // Extract the thumbnail from the LOCAL transcoded file and
-                        // upload it as a second storage object (no progress reporting).
-                        val thumbFile = videoTranscoder.extractThumbnail(Uri.fromFile(localFile))
-                        tempThumbFile = thumbFile
-                        thumbnailUrl = storageSource.uploadMedia(
-                            chatId, thumbStorageId(tempId), Uri.fromFile(thumbFile), "image/jpeg"
-                        )
-                    }
-                    else -> {
-                        localFile = null
-                        mediaWidth = null
-                        mediaHeight = null
-                        uploadUri = parsedUri
-                        uploadMimeType = mimeType
-                    }
-                }
-
-                // Swap placeholder for an entity pointing at the local file, now that
-                // we know the real dimensions (and, for video, duration + thumbnail).
-                val optimisticMessage = placeholder.copy(
-                    localUri = localFile?.absolutePath ?: uri,
-                    mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight,
-                    duration = videoDurationSec,
-                    mediaThumbnailUrl = thumbnailUrl,
-                )
-                messageDao.replaceMessage(tempId, MessageEntity.fromDomain(optimisticMessage))
-
-                val downloadUrl = try {
-                    storageSource.uploadMedia(chatId, tempId, uploadUri, uploadMimeType) { progress ->
-                        _uploadProgress.update { map -> map + (tempId to progress) }
-                    }
-                } finally {
-                    _uploadProgress.update { it - tempId }
-                }
-
-                val remoteId = sendEncryptedOrPlain(
-                    chatId = chatId,
-                    senderId = senderId,
-                    recipientId = recipientId,
-                    messageId = tempId,
-                    plaintext = caption,
-                    type = messageType,
-                    timestamp = timestamp,
-                    mediaUrl = downloadUrl,
-                    mediaThumbnailUrl = thumbnailUrl,
-                    mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight,
-                    duration = videoDurationSec,
-                    isHd = sendAsHd,
-                )
-
-                val sentMessage = optimisticMessage.copy(
-                    id = remoteId,
-                    status = MessageStatus.SENT,
-                    mediaUrl = downloadUrl,
-                    mediaThumbnailUrl = thumbnailUrl,
-                    localUri = localFile?.absolutePath,
-                    mediaWidth = mediaWidth,
-                    mediaHeight = mediaHeight,
-                    duration = videoDurationSec,
-                    isHd = sendAsHd
-                )
-                messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-                chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(messageType, caption), timestamp)
-
-                // Rename local file from tempId to remoteId to prevent orphaned files.
-                val finalLocalUri: String? = if (localFile != null) {
-                    val newFile = mediaFileManager.getLocalFile(chatId, remoteId, localExtFor(messageType))
-                    if (localFile.renameTo(newFile)) {
-                        messageDao.updateLocalUri(remoteId, newFile.absolutePath)
-                        newFile.absolutePath
-                    } else {
-                        localFile.absolutePath
-                    }
-                } else null
-
-                sentMessage.copy(localUri = finalLocalUri)
-            }
-        } finally {
-            // Clean up temp files from cacheDir (compressed image / transcoded video / thumb).
-            tempCompressedFile?.let { if (it.exists()) it.delete() }
-            tempTranscodedFile?.let { if (it.exists()) it.delete() }
-            tempThumbFile?.let { if (it.exists()) it.delete() }
+        failSendOnError(tempId) {
+            ensureNotBlocked(senderId, recipientId)
+            outboxSender.send(tempId, recipientId, sourceMimeType = mimeType)
         }
     }
 
     override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> = resultOf {
         val entity = messageDao.getMessageById(messageId)
             ?: throw IllegalStateException("Cannot retry unknown message $messageId")
-        val message = entity.toDomain()
-        if (message.status != MessageStatus.FAILED) {
-            throw IllegalStateException("Cannot retry message in state ${message.status}")
+        if (entity.status != MessageStatus.FAILED.name) {
+            throw IllegalStateException("Cannot retry message in state ${entity.status}")
         }
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         // Before the flip to SENDING: a throw leaves the row FAILED, nothing is lost.
         ensureNotBlocked(senderId, recipientId)
-        val chatId = message.chatId
-        // Flip the row back to SENDING so the bubble updates immediately while
-        // we re-run the pipeline. We revert to FAILED in the catch block if the
-        // retry itself errors.
+        // Flip the row back to SENDING so the bubble updates immediately while the
+        // pipeline re-runs; failSendOnError reverts it to FAILED if the retry itself
+        // errors. OutboxSender resumes past whatever the failed attempt persisted.
         messageDao.updateMessageStatus(messageId, MessageStatus.SENDING.name)
 
         failSendOnError(messageId) {
-            when (message.type) {
-                MessageType.TEXT -> retrySendTextLike(message, senderId, recipientId)
-                MessageType.IMAGE, MessageType.DOCUMENT, MessageType.VIDEO -> retrySendMedia(message, senderId, recipientId)
-                MessageType.VOICE -> retrySendVoice(message, senderId, recipientId)
-                MessageType.LOCATION -> retrySendLocation(message, senderId)
-                else -> throw IllegalStateException("Retry not supported for message type ${message.type}")
-            }
-        }
-    }
-
-    private suspend fun retrySendTextLike(
-        message: Message,
-        senderId: String,
-        recipientId: String,
-    ): Message {
-        val remoteId = sendEncryptedOrPlain(
-            chatId = message.chatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            messageId = message.id,
-            plaintext = message.content,
-            type = MessageType.TEXT,
-            timestamp = message.timestamp,
-            replyToId = message.replyToId,
-            mentions = message.mentions,
-            emojiSizes = message.emojiSizes,
-            ifAbsent = true,
-        )
-        val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
-        rebindLastMessageRefIfMatches(
-            chatId = message.chatId,
-            oldMessageId = message.id,
-            newMessageId = remoteId,
-            previewContent = messageSource.lastContentFor(MessageType.TEXT, message.content),
-            timestamp = message.timestamp,
-        )
-        return sent
-    }
-
-    private suspend fun retrySendMedia(
-        message: Message,
-        senderId: String,
-        recipientId: String,
-    ): Message {
-        val source = message.localUri
-            ?: throw IllegalStateException("Cannot retry media message ${message.id}: local file is missing")
-        val isImage = message.type == MessageType.IMAGE
-        val isVideo = message.type == MessageType.VIDEO
-        var tempCompressedFile: File? = null
-        return try {
-            val uploadUri: Uri
-            val uploadMimeType: String
-            val mediaWidth: Int?
-            val mediaHeight: Int?
-            // Tracks the on-disk path of the local media file as we move through
-            // the pipeline. After a fresh image compression this points at the new
-            // file in Pictures/FireStream; otherwise it stays at the original
-            // failed-attempt path. Used to rename to the remote id after a
-            // successful send. Video is never re-transcoded on retry — the local
-            // mp4 (if the first pipeline produced one) is re-uploaded as-is; if
-            // localUri is still the original content:// URI, we upload the original
-            // as video/mp4, an acceptable degradation over re-running the encoder.
-            var localFilePath: String? = if (isImage || isVideo) source else null
-
-            if (isImage && message.mediaWidth == null) {
-                val result = imageCompressor.processImage(Uri.parse(source), message.isHd)
-                tempCompressedFile = result.file
-                val localFile = mediaFileManager.copyToLocal(
-                    message.chatId, message.id, Uri.fromFile(result.file), "jpg"
-                )
-                mediaWidth = result.width
-                mediaHeight = result.height
-                uploadUri = Uri.fromFile(localFile)
-                uploadMimeType = result.mimeType
-                localFilePath = localFile.absolutePath
-                messageDao.replaceMessage(
-                    message.id,
-                    MessageEntity.fromDomain(
-                        message.copy(
-                            status = MessageStatus.SENDING,
-                            localUri = localFilePath,
-                            mediaWidth = mediaWidth,
-                            mediaHeight = mediaHeight,
-                        )
-                    )
-                )
-            } else {
-                mediaWidth = message.mediaWidth
-                mediaHeight = message.mediaHeight
-                val parsed = Uri.parse(source)
-                val asFile = if (parsed.scheme == null) File(source) else null
-                uploadUri = if (asFile != null) Uri.fromFile(asFile) else parsed
-                uploadMimeType = when {
-                    isImage -> "image/jpeg"
-                    isVideo -> "video/mp4"
-                    else -> "application/octet-stream"
-                }
-            }
-
-            val downloadUrl = try {
-                storageSource.uploadMedia(message.chatId, message.id, uploadUri, uploadMimeType) { progress ->
-                    _uploadProgress.update { it + (message.id to progress) }
-                }
-            } finally {
-                _uploadProgress.update { it - message.id }
-            }
-
-            val remoteId = sendEncryptedOrPlain(
-                chatId = message.chatId,
-                senderId = senderId,
-                recipientId = recipientId,
-                messageId = message.id,
-                plaintext = message.content,
-                type = message.type,
-                timestamp = message.timestamp,
-                mediaUrl = downloadUrl,
-                // Re-send the persisted thumbnail + duration. If the thumbnail was
-                // never uploaded (null — first pipeline died before that step),
-                // retry sends without one; acceptable degradation.
-                mediaThumbnailUrl = message.mediaThumbnailUrl,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                duration = message.duration,
-                isHd = message.isHd,
-                ifAbsent = true,
-            )
-
-            val sent = message.copy(
-                id = remoteId,
-                status = MessageStatus.SENT,
-                mediaUrl = downloadUrl,
-                mediaWidth = mediaWidth,
-                mediaHeight = mediaHeight,
-                localUri = localFilePath,
-            )
-            messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
-            rebindLastMessageRefIfMatches(
-                chatId = message.chatId,
-                oldMessageId = message.id,
-                newMessageId = remoteId,
-                previewContent = messageSource.lastContentFor(message.type, message.content),
-                timestamp = message.timestamp,
-            )
-
-            val finalLocalUri: String? = if (isImage || isVideo) {
-                val currentFile = localFilePath?.let { File(it) }
-                if (currentFile != null && currentFile.exists()) {
-                    val newFile = mediaFileManager.getLocalFile(message.chatId, remoteId, localExtFor(message.type))
-                    if (currentFile.absolutePath == newFile.absolutePath) {
-                        currentFile.absolutePath
-                    } else if (currentFile.renameTo(newFile)) {
-                        messageDao.updateLocalUri(remoteId, newFile.absolutePath)
-                        newFile.absolutePath
-                    } else {
-                        currentFile.absolutePath
-                    }
-                } else null
-            } else null
-            sent.copy(localUri = finalLocalUri)
-        } finally {
-            tempCompressedFile?.let { if (it.exists()) it.delete() }
-        }
-    }
-
-    private suspend fun retrySendVoice(
-        message: Message,
-        senderId: String,
-        recipientId: String,
-    ): Message {
-        val source = message.localUri
-            ?: throw IllegalStateException("Cannot retry voice message ${message.id}: local file is missing")
-        val parsed = Uri.parse(source)
-        val uploadUri = if (parsed.scheme == null) Uri.fromFile(File(source)) else parsed
-        val downloadUrl = storageSource.uploadMedia(message.chatId, message.id, uploadUri, "audio/aac")
-
-        val remoteId = sendEncryptedOrPlain(
-            chatId = message.chatId,
-            senderId = senderId,
-            recipientId = recipientId,
-            messageId = message.id,
-            plaintext = VOICE_MESSAGE_CONTENT,
-            type = MessageType.VOICE,
-            timestamp = message.timestamp,
-            mediaUrl = downloadUrl,
-            duration = message.duration,
-            ifAbsent = true,
-        )
-        val sent = message.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
-        rebindLastMessageRefIfMatches(
-            chatId = message.chatId,
-            oldMessageId = message.id,
-            newMessageId = remoteId,
-            previewContent = messageSource.lastContentFor(MessageType.VOICE),
-            timestamp = message.timestamp,
-        )
-        return sent
-    }
-
-    private suspend fun retrySendLocation(
-        message: Message,
-        senderId: String,
-    ): Message {
-        val remoteId = messageSource.sendPlainMessage(
-            chatId = message.chatId,
-            senderId = senderId,
-            messageId = message.id,
-            content = message.content,
-            type = MessageType.LOCATION,
-            replyToId = null,
-            timestamp = message.timestamp,
-            latitude = message.latitude,
-            longitude = message.longitude,
-            ifAbsent = true,
-        )
-        val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
-        rebindLastMessageRefIfMatches(
-            chatId = message.chatId,
-            oldMessageId = message.id,
-            newMessageId = remoteId,
-            previewContent = messageSource.lastContentFor(MessageType.LOCATION),
-            timestamp = message.timestamp,
-        )
-        return sent
-    }
-
-    // After a retry replaces the row at [oldMessageId] with a new [newMessageId],
-    // the chat's lastMessageId may still point at the deleted id. Only rebind it
-    // when the chat's lastMessage was this row — otherwise a newer message
-    // exists and we'd downgrade the preview.
-    private suspend fun rebindLastMessageRefIfMatches(
-        chatId: String,
-        oldMessageId: String,
-        newMessageId: String,
-        previewContent: String?,
-        timestamp: Long,
-    ) {
-        val chat = chatDao.getChatById(chatId) ?: return
-        if (chat.lastMessageId == oldMessageId) {
-            chatDao.updateLastMessage(chatId, newMessageId, previewContent, timestamp)
+            outboxSender.send(messageId, recipientId, isRetry = true)
         }
     }
 
@@ -1139,7 +646,7 @@ class MessageRepositoryImpl @Inject constructor(
         )
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
-        val remoteId = sendEncryptedOrPlain(
+        val remoteId = outboxSender.sendEncryptedOrPlain(
             chatId = targetChatId,
             senderId = senderId,
             recipientId = recipientId,
@@ -1161,7 +668,6 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        val parsedUri = Uri.parse(uri)
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
 
@@ -1180,24 +686,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
-
-            val remoteId = sendEncryptedOrPlain(
-                chatId = chatId,
-                senderId = senderId,
-                recipientId = recipientId,
-                messageId = tempId,
-                plaintext = VOICE_MESSAGE_CONTENT,
-                type = MessageType.VOICE,
-                timestamp = timestamp,
-                mediaUrl = downloadUrl,
-                duration = durationSeconds,
-            )
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.VOICE), timestamp)
-            sentMessage
+            outboxSender.send(tempId, recipientId)
         }
     }
 
@@ -1367,7 +856,7 @@ class MessageRepositoryImpl @Inject constructor(
                         // Send as 1:1 message (encrypted in release, plain in debug).
                         // One fresh id per target chat — the broadcast's own id
                         // must not be reused across collections.
-                        val fanOutRemoteId = sendEncryptedOrPlain(
+                        val fanOutRemoteId = outboxSender.sendEncryptedOrPlain(
                             chatId = individualChat.id,
                             senderId = senderId,
                             recipientId = recipientId,
@@ -1504,22 +993,7 @@ class MessageRepositoryImpl @Inject constructor(
 
         failSendOnError(tempId) {
             ensureNotBlocked(senderId, recipientId)
-            val remoteId = messageSource.sendPlainMessage(
-                chatId = chatId,
-                senderId = senderId,
-                messageId = tempId,
-                content = content,
-                type = MessageType.LOCATION,
-                replyToId = null,
-                timestamp = timestamp,
-                latitude = latitude,
-                longitude = longitude
-            )
-
-            val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-            messageDao.replaceMessage(tempId, MessageEntity.fromDomain(sentMessage))
-            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.LOCATION), timestamp)
-            sentMessage
+            outboxSender.send(tempId, recipientId)
         }
     }
 

@@ -68,4 +68,4 @@ Applies to crypto, auth, permission, and group-encryption work.
 - Key rotation and re-keying scenarios
 - Group encryption: member add/remove and key distribution
 
-Note that **encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `MessageRepositoryImpl`), and unit tests run debug-only — so the plaintext branch is what unit tests exercise. Any test asserting real Signal encryption behaviour has to drive `SignalManager` directly rather than going through the send path.
+Note that **encryption is disabled in debug builds** (`BuildConfig.DEBUG` guard in `OutboxSender.sendEncryptedOrPlain`), and unit tests run debug-only — so the plaintext branch is what unit tests exercise. Any test asserting real Signal encryption behaviour has to drive `SignalManager` directly rather than going through the send path.

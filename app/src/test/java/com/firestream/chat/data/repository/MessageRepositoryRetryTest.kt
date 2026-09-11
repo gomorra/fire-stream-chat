@@ -1,18 +1,15 @@
 package com.firestream.chat.data.repository
 
 import android.net.ConnectivityManager
-import android.net.Uri
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
-import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
-import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
@@ -23,349 +20,111 @@ import com.firestream.chat.domain.repository.ListRepository
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import io.mockk.slot
-import io.mockk.unmockkStatic
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.StandardTestDispatcher
-import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.test.setMain
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-@OptIn(ExperimentalCoroutinesApi::class)
+/**
+ * The repository's half of a retry: the guards, the FAILED → SENDING flip, the
+ * hand-off to [OutboxSender] as a re-attempt, and the revert when it fails.
+ * What a re-attempt then does — resume past finished steps, write if-absent,
+ * rebind the preview — is covered in `OutboxSenderTest`.
+ */
 class MessageRepositoryRetryTest {
-
-    private val testDispatcher = StandardTestDispatcher()
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
     private val chatDao = mockk<ChatDao>(relaxed = true)
     private val messageSource = mockk<MessageSource>(relaxed = true)
     private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val storageSource = mockk<StorageSource>(relaxed = true)
+    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
+    private val listRepository = mockk<dagger.Lazy<ListRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val imageCompressor = mockk<ImageCompressor>()
     private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
-    private val listRepository = mockk<dagger.Lazy<ListRepository>>()
     private val userSource = mockk<UserSource>(relaxed = true)
 
-    private val replaceArgs = mutableListOf<Pair<String, MessageEntity>>()
     private val statusUpdates = mutableListOf<Pair<String, String>>()
 
     private lateinit var repository: MessageRepositoryImpl
 
     @Before
     fun setUp() {
-        Dispatchers.setMain(testDispatcher)
-
-        mockkStatic(Uri::class)
-        every { Uri.parse(any()) } answers { mockk(relaxed = true) }
-        every { Uri.fromFile(any()) } answers { mockk(relaxed = true) }
-
         every { authSource.currentUserId } returns "uid1"
-        every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
-        every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(false)
-
-        coEvery { messageDao.replaceMessage(any(), any()) } answers {
-            replaceArgs += (firstArg<String>() to secondArg())
-        }
         coEvery { messageDao.updateMessageStatus(any(), any()) } answers {
             statusUpdates += (firstArg<String>() to secondArg())
         }
-        coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
 
         repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            listRepository, mediaFileManager, imageCompressor, videoTranscoder, preferencesDataStore, connectivityManager,
+            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
+            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
             userSource
         )
     }
 
-    @After
-    fun tearDown() {
-        Dispatchers.resetMain()
-        unmockkStatic(Uri::class)
-    }
-
-    private fun failedTextMessage(): Message = Message(
+    private fun storedTextMessage(status: MessageStatus = MessageStatus.FAILED): Message = Message(
         id = "failed-msg-1",
         chatId = "chat1",
         senderId = "uid1",
         content = "hi there",
         type = MessageType.TEXT,
-        status = MessageStatus.FAILED,
+        status = status,
         timestamp = 1_000L,
     )
 
-    private fun stubExistingFailed(message: Message) {
+    private fun stubStored(message: Message) {
         coEvery { messageDao.getMessageById(message.id) } returns MessageEntity.fromDomain(message)
     }
 
-    private fun stubChatLastMessageId(chatId: String, lastId: String?) {
-        val chatEntity = ChatEntity(
-            id = chatId,
-            type = "INDIVIDUAL",
-            name = null,
-            avatarUrl = null,
-            participants = listOf("uid1", "uid2"),
-            unreadCount = 0,
-            createdAt = 0L,
-            createdBy = "uid1",
-            admins = emptyList(),
-            lastMessageId = lastId,
-            lastMessageContent = null,
-            lastMessageTimestamp = null,
-        )
-        coEvery { chatDao.getChatById(chatId) } returns chatEntity
-    }
-
     @Test
-    fun `text retry succeeds and replaces row in place with SENT`() = runTest {
-        val original = failedTextMessage()
-        stubExistingFailed(original)
-        stubChatLastMessageId(original.chatId, original.id)
-        coEvery {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        } returns "remote-id-after-retry"
+    fun `retry flips the row to SENDING, then re-runs it through the outbox sender as a retry`() = runTest {
+        val original = storedTextMessage()
+        stubStored(original)
+        val sent = original.copy(status = MessageStatus.SENT)
+        coEvery { outboxSender.send(original.id, "recipient1", true, null) } returns sent
 
-        val result = repository.retryFailedMessage(original.id, recipientId = "")
+        val result = repository.retryFailedMessage(original.id, recipientId = "recipient1")
 
-        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        assertEquals("remote-id-after-retry", result.getOrThrow().id)
-        assertEquals(MessageStatus.SENT, result.getOrThrow().status)
-
-        // Row was flipped to SENDING first, then replaced with the SENT remote-id row.
-        assertEquals(MessageStatus.SENDING.name, statusUpdates.first().second)
-        val (oldId, replacement) = replaceArgs.single()
-        assertEquals(original.id, oldId)
-        assertEquals("remote-id-after-retry", replacement.id)
-        assertEquals(MessageStatus.SENT.name, replacement.status)
-
-        // Chat preview was rebound from the deleted old id to the new remote id.
-        coVerify {
-            chatDao.updateLastMessage(original.chatId, "remote-id-after-retry", any(), original.timestamp)
+        assertEquals(sent, result.getOrThrow())
+        coVerifyOrder {
+            messageDao.updateMessageStatus(original.id, MessageStatus.SENDING.name)
+            outboxSender.send(original.id, "recipient1", isRetry = true, sourceMimeType = null)
         }
     }
 
     @Test
     fun `retry that fails again reverts row to FAILED`() = runTest {
-        val original = failedTextMessage()
-        stubExistingFailed(original)
-        stubChatLastMessageId(original.chatId, lastId = null)
-        coEvery {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        } throws RuntimeException("still offline")
+        val original = storedTextMessage()
+        stubStored(original)
+        coEvery { outboxSender.send(any(), any(), any(), any()) } throws RuntimeException("still offline")
 
         val result = repository.retryFailedMessage(original.id, recipientId = "")
 
         assertTrue(result.isFailure)
-        // Two updateMessageStatus calls: SENDING (start) then FAILED (revert).
-        assertEquals(MessageStatus.SENDING.name, statusUpdates[0].second)
-        assertEquals(MessageStatus.FAILED.name, statusUpdates[1].second)
-        assertEquals(original.id, statusUpdates[1].first)
-        assertTrue(replaceArgs.isEmpty())
+        assertEquals(
+            listOf(original.id to MessageStatus.SENDING.name, original.id to MessageStatus.FAILED.name),
+            statusUpdates,
+        )
     }
 
     @Test
     fun `retry of non-FAILED message returns failure without IO`() = runTest {
-        val notFailed = failedTextMessage().copy(status = MessageStatus.SENT)
-        stubExistingFailed(notFailed)
+        stubStored(storedTextMessage(status = MessageStatus.SENT))
 
-        val result = repository.retryFailedMessage(notFailed.id, recipientId = "")
+        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "")
 
         assertTrue(result.isFailure)
-        // No status flip, no replace, no remote send.
         assertTrue(statusUpdates.isEmpty())
-        assertTrue(replaceArgs.isEmpty())
-        coVerify(exactly = 0) {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        }
-    }
-
-    @Test
-    fun `image retry skips re-compression when dimensions are already known`() = runTest {
-        val failed = Message(
-            id = "failed-img-1",
-            chatId = "chat1",
-            senderId = "uid1",
-            content = "look",
-            type = MessageType.IMAGE,
-            status = MessageStatus.FAILED,
-            timestamp = 1_000L,
-            localUri = "/storage/local/failed-img-1.jpg",
-            mediaWidth = 1024,
-            mediaHeight = 768,
-        )
-        stubExistingFailed(failed)
-        stubChatLastMessageId(failed.chatId, lastId = null)
-        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } returns
-            "https://example/firebase/img.jpg"
-        coEvery {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        } returns "remote-img-id"
-
-        val result = repository.retryFailedMessage(failed.id, recipientId = "")
-
-        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        // imageCompressor.processImage must NOT have been called — saving us a round
-        // of quality loss when compression already succeeded on the first attempt.
-        coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
-    }
-
-    @Test
-    fun `video retry dispatches to the media path and re-uploads as video mp4`() = runTest {
-        val failed = Message(
-            id = "failed-vid-1",
-            chatId = "chat1",
-            senderId = "uid1",
-            content = "clip",
-            type = MessageType.VIDEO,
-            status = MessageStatus.FAILED,
-            timestamp = 1_000L,
-            localUri = "/storage/local/failed-vid-1.mp4",
-            mediaWidth = 1280,
-            mediaHeight = 720,
-            duration = 12,
-            mediaThumbnailUrl = "https://example/firebase/vid_thumb.jpg",
-        )
-        stubExistingFailed(failed)
-        stubChatLastMessageId(failed.chatId, lastId = null)
-        coEvery {
-            storageSource.uploadMedia(any(), any(), any(), any(), any())
-        } returns "https://example/firebase/vid.mp4"
-        coEvery {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(),
-                mentions = any(), emojiSizes = any(), mediaWidth = any(),
-                mediaHeight = any(), latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        } returns "remote-vid-id"
-
-        val result = repository.retryFailedMessage(failed.id, recipientId = "")
-
-        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        assertEquals("remote-vid-id", result.getOrThrow().id)
-        // Routed through the media path, not re-transcoded — uploaded as video/mp4,
-        // and videoTranscoder.transcode was never invoked.
-        coVerify { storageSource.uploadMedia(any(), any(), any(), "video/mp4", any()) }
-        coVerify(exactly = 0) { videoTranscoder.transcode(any(), any(), any()) }
-        // The persisted thumbnail + duration are re-sent through the source.
-        coVerify {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(),
-                type = MessageType.VIDEO, replyToId = any(), timestamp = any(),
-                mediaUrl = any(), mediaThumbnailUrl = "https://example/firebase/vid_thumb.jpg",
-                isForwarded = any(), duration = 12, mentions = any(), emojiSizes = any(),
-                mediaWidth = any(), mediaHeight = any(), latitude = any(),
-                longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        }
-    }
-
-    // ── Idempotent ids ──────────────────────────────────────────────────────
-    //
-    // Regression for the duplicate-on-retry bug: the first attempt used to
-    // `add()` with a backend auto-id, and a retry `add()`ed again with a *new*
-    // auto-id. A first write that had actually landed (the await was cancelled
-    // when the user left the chat) plus a retry meant the recipient got the
-    // message twice. The row's own id is now the remote id on every attempt,
-    // and a retry asks the source to create only if the document is absent.
-
-    private fun stubPlainSendEchoingId() {
-        coEvery {
-            messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
-            )
-        } answers { thirdArg() }
-    }
-
-    @Test
-    fun `retry re-sends under the original message id and only if absent`() = runTest {
-        val original = failedTextMessage()
-        stubExistingFailed(original)
-        stubChatLastMessageId(original.chatId, original.id)
-        stubPlainSendEchoingId()
-
-        val result = repository.retryFailedMessage(original.id, recipientId = "")
-
-        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        assertEquals(original.id, result.getOrThrow().id)
-        coVerify(exactly = 1) {
-            messageSource.sendPlainMessage(
-                chatId = original.chatId, senderId = "uid1", messageId = original.id,
-                content = original.content, type = MessageType.TEXT,
-                replyToId = any(), timestamp = original.timestamp, mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = true
-            )
-        }
-    }
-
-    @Test
-    fun `first send writes under the optimistic row id without the if-absent guard`() = runTest {
-        val inserted = slot<MessageEntity>()
-        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
-        stubPlainSendEchoingId()
-
-        val result = repository.sendMessage("chat1", "hi", recipientId = "")
-
-        assertTrue("send should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        val rowId = inserted.captured.id
-        assertEquals(rowId, result.getOrThrow().id)
-        coVerify(exactly = 1) {
-            messageSource.sendPlainMessage(
-                chatId = "chat1", senderId = "uid1", messageId = rowId,
-                content = "hi", type = MessageType.TEXT,
-                replyToId = any(), timestamp = any(), mediaUrl = any(),
-                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
-                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any(), ifAbsent = false
-            )
-        }
+        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
     }
 
     @Test
@@ -376,6 +135,20 @@ class MessageRepositoryRetryTest {
 
         assertTrue(result.isFailure)
         assertTrue(statusUpdates.isEmpty())
-        assertTrue(replaceArgs.isEmpty())
+        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `first send hands the optimistic row to the outbox sender as a first attempt`() = runTest {
+        val inserted = slot<MessageEntity>()
+        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+
+        val result = repository.sendMessage("chat1", "hi", recipientId = "")
+
+        assertTrue("send should succeed: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(MessageStatus.SENDING.name, inserted.captured.status)
+        coVerify(exactly = 1) {
+            outboxSender.send(inserted.captured.id, "", isRetry = false, sourceMimeType = null)
+        }
     }
 }

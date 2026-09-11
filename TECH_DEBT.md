@@ -69,16 +69,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `MessageRepositoryBlockTest › sendMessage succeeds when recipient is not blocked` — release-only failure
-
-**The smell.** `MessageRepositoryBlockTest.kt:81` fails in `testReleaseUnitTest` only. The test stubs `messageSource.sendPlainMessage(...)` and asserts `result.isSuccess`, but release builds route through the Signal-encrypted send path instead of `sendPlainMessage` — the unmocked encrypted branch returns `Result.failure`, so the assertion trips.
-
-**Why we haven't fixed it.** Root cause is the `BuildConfig.DEBUG` guard in `MessageRepositoryImpl` (documented in `CLAUDE.md`: encryption disabled in debug to avoid key-loss during development). The test was written against the debug path. A proper fix either (a) mocks both paths and runs the assertion against whichever matches `BuildConfig.DEBUG`, or (b) injects the Signal path behind a test-only seam, or (c) since the 2026-04-26 release-mode E2E opt-out shipped, stubs `preferencesDataStore.e2eEncryptionEnabledFlow` to return `false` so the release build also hits `sendPlainMessage`. None is a drive-by change, and the test provides no signal the debug suite doesn't already.
-
-**When to revisit.** Same trigger as the Robolectric item above: when `testReleaseUnitTest` becomes a CI gate. Until then, keep running the debug suite as the default.
-
----
-
 ### Sync-path regression coverage — Firebase emulator tests + per-list-mutex tripwire
 
 **The smell.** Two related list-sync bugs shipped in 2026-04-23/24 — `e3c2c9c` (new items colliding on `order` after deletes) and `eed7519` (receiver's live updates clobbered by a race between `observeList`'s metadata listener, its items listener, and `ensureListSyncRunning`'s `observeMyLists` sync). Both were caught by dogfooding, not by tests. The race-condition class in particular can't be reliably reproduced in `runTest` with mocked DAOs: I tried adding a unit test for `eed7519`, found it passed even with the mutex reverted (false negative), and pulled it. The per-list mutex fix is logically correct but has no executable regression guard.
@@ -212,6 +202,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 **Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `.claude/plans/image-editor.md` §2.1 weighed and rejected for this feature.
 
 **When to revisit.** If generational quality loss or the ceiling turns out to be visible in practice — the trigger §5 of the plan records for reopening the accumulated-`ImageEdit` decision. Revisit the two together, never separately: raising the ceiling without changing the model just moves the OOM. Landed with Phase 2 of the image editor (2026-09-09).
+
+---
+
+### Repository tests repeat `MessageRepositoryImpl`'s 13-argument constructor
+
+**The smell.** Ten `MessageRepository*Test.kt` files each declare the same 13 mocks and call the constructor positionally. The 2026-09-11 `OutboxSender` extraction had to edit all ten just to swap two arguments, and positional arguments hide which mock lands in which slot.
+
+**Why we haven't fixed it.** Found by `/simplify` on offline-outbox step 3. The fix — one test factory with named, relaxed-mock defaults, so each test passes only the mocks it stubs — touches ten files that step otherwise leaves alone, and belongs in its own test-only commit.
+
+**When to revisit.** The next constructor change (step 6 of `.claude/plans/offline-outbox.md` adds `OutboxScheduler`), or a new repository test file.
 
 ---
 

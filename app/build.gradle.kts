@@ -249,11 +249,10 @@ androidComponents {
     // Unit tests target the *debug* variant only. The Compose UI tests
     // (MessageBubbleSmokeTest, ChatListItemUiTest, …) launch an Activity via
     // Robolectric and depend on the ui-test-manifest's ComponentActivity, which
-    // is wired in as `debugImplementation`. The send-path tests
-    // (MessageRepositoryBlockTest) assume the BuildConfig.DEBUG plaintext branch.
+    // is wired in as `debugImplementation`.
     // Release unit tests run the same JVM classes (no R8 minification at the unit
-    // test level) with encryption flipped on, so they add no real coverage while
-    // breaking `./gradlew test`. Disable the release unit-test component outright.
+    // test level), so they add no real coverage while breaking `./gradlew test`.
+    // Disable the release unit-test component outright.
     beforeVariants(selector().withBuildType("release")) { variantBuilder ->
         (variantBuilder as com.android.build.api.variant.HasUnitTestBuilder)
             .enableUnitTest = false

@@ -1,39 +1,42 @@
 package com.firestream.chat.data.repository
 
 import android.net.ConnectivityManager
-import android.net.Uri
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
+import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.remote.source.AuthSource
-import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
-import com.firestream.chat.data.util.ImageCompressor
-import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.VideoTranscoder
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
+import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
+import io.mockk.Called
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
-import io.mockk.mockkStatic
 import io.mockk.slot
-import io.mockk.unmockkStatic
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * The block check stays in the repository, between the optimistic insert and
+ * the hand-off to [OutboxSender]: the offline outbox plan later splits "definite
+ * block fails" from "fetch error enqueues" at exactly this call site.
+ */
 class MessageRepositoryBlockTest {
 
     private val messageDao = mockk<MessageDao>()
@@ -41,11 +44,10 @@ class MessageRepositoryBlockTest {
     private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
     private val signalManager = mockk<SignalManager>(relaxed = true)
-    private val storageSource = mockk<StorageSource>()
+    private val outboxSender = mockk<OutboxSender>(relaxed = true)
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
     private val mediaFileManager = mockk<MediaFileManager>(relaxed = true)
-    private val imageCompressor = mockk<ImageCompressor>(relaxed = true)
     private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val connectivityManager = mockk<ConnectivityManager>(relaxed = true)
@@ -57,21 +59,12 @@ class MessageRepositoryBlockTest {
 
     @Before
     fun setUp() {
-        // Uri.parse is an Android stub; voice and media sends now reach it before the block check.
-        mockkStatic(Uri::class)
-        every { Uri.parse(any()) } answers { mockk<Uri>(relaxed = true) }
         every { authSource.currentUserId } returns "uid1"
-        every { messageSource.lastContentFor(any(), any()) } answers { secondArg() }
         repository = MessageRepositoryImpl(
-            messageDao, chatDao, messageSource, authSource, signalManager, storageSource, chatRepository,
-            listRepository, mediaFileManager, imageCompressor, videoTranscoder, preferencesDataStore, connectivityManager,
+            messageDao, chatDao, messageSource, authSource, signalManager, outboxSender, chatRepository,
+            listRepository, mediaFileManager, videoTranscoder, preferencesDataStore, connectivityManager,
             userSource
         )
-    }
-
-    @After
-    fun tearDown() {
-        unmockkStatic(Uri::class)
     }
 
     private fun stubOptimisticRow() {
@@ -79,14 +72,14 @@ class MessageRepositoryBlockTest {
         coEvery { messageDao.updateMessageStatus(any(), any()) } just Runs
     }
 
-    /** The send left a visible, retryable bubble and wrote nothing remotely. */
+    /** The send left a visible, retryable bubble and nothing reached the pipeline or the backend. */
     private fun assertRowInsertedThenFailed() {
         assertEquals(MessageStatus.SENDING.name, inserted.captured.status)
         coVerify(exactly = 1) {
             messageDao.updateMessageStatus(inserted.captured.id, MessageStatus.FAILED.name)
         }
-        verify { messageSource wasNot io.mockk.Called }
-        verify { storageSource wasNot io.mockk.Called }
+        coVerify(exactly = 0) { outboxSender.send(any(), any(), any(), any()) }
+        verify { messageSource wasNot Called }
     }
 
     // ── block check cannot be answered (offline cache miss) ─────────────────
@@ -175,20 +168,17 @@ class MessageRepositoryBlockTest {
     fun `sendMessage succeeds when recipient is not blocked`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns false
         coEvery { messageDao.insertMessage(any()) } just Runs
-        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
-        coEvery { messageDao.replaceMessage(any(), any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "recipient1")
 
         assertTrue(result.isSuccess)
         coVerify(exactly = 1) { messageDao.insertMessage(any()) }
+        coVerify(exactly = 1) { outboxSender.send(any(), "recipient1", false, null) }
     }
 
     @Test
     fun `sendMessage skips block check for empty recipientId (group chats)`() = runTest {
         coEvery { messageDao.insertMessage(any()) } just Runs
-        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
-        coEvery { messageDao.replaceMessage(any(), any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "")
 
@@ -202,10 +192,10 @@ class MessageRepositoryBlockTest {
     fun `forwardMessage fails when recipient is blocked by sender`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
 
-        val message = com.firestream.chat.domain.model.Message(
+        val message = Message(
             id = "m1", chatId = "chat1", senderId = "uid1", content = "hi",
-            type = com.firestream.chat.domain.model.MessageType.TEXT,
-            status = com.firestream.chat.domain.model.MessageStatus.SENT,
+            type = MessageType.TEXT,
+            status = MessageStatus.SENT,
             timestamp = 1000L
         )
         val result = repository.forwardMessage(message, "chat2", "recipient1")
