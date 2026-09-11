@@ -93,7 +93,11 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `Modifier.systemGestureExclusion` is not the fix: it cannot exclude the home strip and is
   capped at 200 dp per edge. Worked example: `CropGeometry.reachableInsets` — which keeps
   only a third of full clearance by choice (full clearance cost about a quarter of the
-  photo's width), relying on the grab target reaching past the strip on its inner side.
+  photo's width), relying instead on each grip's invisible grab area reaching 48 dp *into*
+  the frame, well past the strip. An inward-only hit area needs the drag to keep the
+  finger-to-grip gap, measured at touch-*down*: `detectDragGestures` calls back only after
+  touch slop, so record the down position yourself (a non-consuming `Initial`-pass
+  `awaitFirstDown`). Accumulating `dragAmount` instead loses the slop, and the grip lags.
 
 ## Coroutines / lifecycle
 

@@ -448,6 +448,66 @@ class CropGeometryTest {
     }
 
     @Test
+    fun `a grip reaches further into the frame than out of it`() {
+        // Regression: a corner answered only within its tolerance, and on a phone
+        // the outer half of that sits in the back-gesture strip. The inward reach
+        // is what lets a finger take it from inside the frame instead.
+        val rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f)
+
+        assertNull(
+            "without an inward reach this touch is too far in",
+            CropGeometry.handleAt(rect, 0.33f, 0.32f, toleranceX = 0.06f, toleranceY = 0.06f),
+        )
+        assertEquals(
+            CropHandle.TOP_LEFT,
+            CropGeometry.handleAt(
+                rect, 0.33f, 0.32f, toleranceX = 0.06f, toleranceY = 0.06f, reachX = 0.16f, reachY = 0.16f,
+            ),
+        )
+        assertEquals(
+            "a side grip reaches inward across its side",
+            CropHandle.RIGHT,
+            CropGeometry.handleAt(
+                rect, 0.68f, 0.5f, toleranceX = 0.06f, toleranceY = 0.06f, reachX = 0.16f, reachY = 0.16f,
+            ),
+        )
+    }
+
+    @Test
+    fun `outside the frame a grip reaches no further than its tolerance`() {
+        val rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f)
+
+        assertNull(
+            CropGeometry.handleAt(
+                rect, 0.12f, 0.2f, toleranceX = 0.06f, toleranceY = 0.06f, reachX = 0.16f, reachY = 0.16f,
+            ),
+        )
+    }
+
+    @Test
+    fun `a small frame caps the inward reach so its middle still moves the frame`() {
+        // Uncapped, the 0.16 reach of the top grip would cover the centre of this
+        // 0.2 frame, and the frame could never be dragged bodily again.
+        val small = CropRect(0.4f, 0.4f, 0.6f, 0.6f)
+
+        assertNull(
+            CropGeometry.handleAt(
+                small, 0.5f, 0.5f, toleranceX = 0.06f, toleranceY = 0.06f, reachX = 0.16f, reachY = 0.16f,
+            ),
+        )
+        assertTrue(CropGeometry.contains(small, 0.5f, 0.5f))
+    }
+
+    @Test
+    fun `a side grip's drag starts from the middle of its side`() {
+        val rect = CropRect(0.2f, 0.2f, 0.8f, 0.6f)
+
+        assertEquals(FitPoint(0.8f, 0.4f), CropGeometry.gripPoint(rect, CropHandle.RIGHT))
+        assertEquals(FitPoint(0.5f, 0.6f), CropGeometry.gripPoint(rect, CropHandle.BOTTOM))
+        assertEquals(FitPoint(0.2f, 0.2f), CropGeometry.gripPoint(rect, CropHandle.TOP_LEFT))
+    }
+
+    @Test
     fun `a touch in the middle grabs no corner but is inside the frame`() {
         val rect = CropRect(0.2f, 0.2f, 0.8f, 0.8f)
 

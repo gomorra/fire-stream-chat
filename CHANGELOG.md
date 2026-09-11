@@ -11,6 +11,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **The crop corners can be reached with a finger.** A photo as wide as the phone was fitted edge to edge, so its crop corners sat on the very edge of the screen: half of each grab area was off the glass and the rest sat inside the strip Android reserves for the back swipe, so reaching for a corner closed the editor instead. With the crop tool open the photo now shrinks into a narrow margin that brings every corner in off the edge, and grows back when the tool closes. The photo also no longer runs under the top bar and the bottom panel on phones with a status or navigation bar. (`56c2533d`, `fb3cdcb7`)
+- **Crop corners and side grips can be grabbed from inside the frame.** Even with the margin, a finger aimed at a corner on the left or right of the photo often landed in the strip Android reserves for the back swipe, so the editor closed instead. Each grip now also answers a touch up to about a finger's width inside the frame, with nothing new drawn, and a grip grabbed that way moves with the finger rather than jumping under it.
 - **A crop corner dragged past the opposite corner no longer grows the frame back out.** The frame shrank to its minimum as the corner reached the opposite one, then started growing again as the finger kept going. It now stays at the minimum. (`fb3cdcb7`)
 
 ## [1.28.0] — 2026-09-10

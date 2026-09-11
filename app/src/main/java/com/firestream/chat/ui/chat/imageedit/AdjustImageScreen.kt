@@ -12,6 +12,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -585,6 +587,7 @@ private fun CropOverlay(
 ) {
     val density = LocalDensity.current
     val grabPx = with(density) { HANDLE_GRAB_DP.dp.toPx() }
+    val reachPx = with(density) { HANDLE_REACH_DP.dp.toPx() }
     val armPx = with(density) { HANDLE_ARM_DP.dp.toPx() }
     val strokePx = with(density) { HANDLE_STROKE_DP.dp.toPx() }
 
@@ -592,9 +595,22 @@ private fun CropOverlay(
     // wide one, so it is converted per axis rather than shared.
     val toleranceX = if (mapper.fittedWidth > 0f) grabPx / mapper.fittedWidth else 1f
     val toleranceY = if (mapper.fittedHeight > 0f) grabPx / mapper.fittedHeight else 1f
+    val reachX = if (mapper.fittedWidth > 0f) reachPx / mapper.fittedWidth else 1f
+    val reachY = if (mapper.fittedHeight > 0f) reachPx / mapper.fittedHeight else 1f
 
     var handle by remember { mutableStateOf<CropHandle?>(null) }
     var moving by remember { mutableStateOf(false) }
+    // Where the finger went down, recorded before the drag detector sees the
+    // gesture. `detectDragGestures` calls back only once touch slop is crossed;
+    // recording the down here means the hit test and the grab gap are measured
+    // from where the finger actually landed, whatever position that later
+    // callback reports.
+    var downPosition by remember { mutableStateOf(Offset.Zero) }
+    // The finger's distance from the grip it took, in normalized units, kept for
+    // the whole drag: a grip grabbed from inside the frame follows the finger at
+    // that gap instead of jumping under it — the only reason its grab area can
+    // reach inward, away from the back-gesture strip, at all.
+    var grabOffset by remember { mutableStateOf(FitPoint(0f, 0f)) }
 
     // The frame as it is *now*, not as it was when the gesture coroutine
     // started. `pointerInput` restarts only when one of its keys changes, and
@@ -616,14 +632,31 @@ private fun CropOverlay(
         modifier = Modifier
             .fillMaxSize()
             .semantics { contentDescription = "Crop frame" }
+            .pointerInput(Unit) {
+                // Observes only — nothing is consumed, so the drag detector
+                // below still sees every event.
+                awaitEachGesture {
+                    downPosition = awaitFirstDown(
+                        requireUnconsumed = false,
+                        pass = PointerEventPass.Initial,
+                    ).position
+                }
+            }
             .pointerInput(mapper, aspect, imageWidth, imageHeight) {
                 detectDragGestures(
-                    onDragStart = { position ->
-                        val point = mapper.screenToNormalized(FitPoint(position.x, position.y))
-                        handle = CropGeometry.handleAt(
-                            currentRect, point.x, point.y, toleranceX, toleranceY,
+                    onDragStart = {
+                        val point = mapper.screenToNormalized(FitPoint(downPosition.x, downPosition.y))
+                        val grabbed = CropGeometry.handleAt(
+                            currentRect, point.x, point.y, toleranceX, toleranceY, reachX, reachY,
                         )
-                        moving = handle == null &&
+                        handle = grabbed
+                        grabOffset = if (grabbed == null) {
+                            FitPoint(0f, 0f)
+                        } else {
+                            val grip = CropGeometry.gripPoint(currentRect, grabbed)
+                            FitPoint(point.x - grip.x, point.y - grip.y)
+                        }
+                        moving = grabbed == null &&
                             CropGeometry.contains(currentRect, point.x, point.y)
                     },
                     onDragEnd = { handle = null; moving = false },
@@ -632,6 +665,10 @@ private fun CropOverlay(
                         change.consume()
                         val grabbed = handle
                         if (grabbed != null) {
+                            // Absolute, less the gap the grip was grabbed at: it
+                            // tracks the finger exactly, slop included, and a
+                            // finger that runs past the photo and comes back
+                            // finds the grip where it left it.
                             val point = mapper.screenToNormalized(
                                 FitPoint(change.position.x, change.position.y),
                             )
@@ -639,8 +676,8 @@ private fun CropOverlay(
                                 CropGeometry.drag(
                                     rect = currentRect,
                                     handle = grabbed,
-                                    x = point.x,
-                                    y = point.y,
+                                    x = point.x - grabOffset.x,
+                                    y = point.y - grabOffset.y,
                                     aspect = aspect,
                                     imageWidth = imageWidth,
                                     imageHeight = imageHeight,
@@ -1014,6 +1051,19 @@ private const val GRID_DIVISIONS = 3
  * which is why it is visible to the screen test that measures that margin.
  */
 internal const val HANDLE_GRAB_DP = 24
+
+/**
+ * How far *into* the frame a touch still counts as grabbing a grip.
+ *
+ * Twice [HANDLE_GRAB_DP], and inward only: on a photo as wide as the phone the
+ * outer half of every left or right grip lies in the back-gesture strip, where
+ * the system takes the touch before the app sees it, so the dependable way to
+ * take a corner is from inside it. Nothing is drawn for it — the brackets stay
+ * the size the photo can spare. It works only because a grip drag keeps the gap
+ * it was grabbed at (`grabOffset` in [CropOverlay]); a drag that put the grip
+ * under the finger would snap the frame smaller on the first move.
+ */
+private const val HANDLE_REACH_DP = 48
 
 /** Length of each arm of a corner bracket. */
 private const val HANDLE_ARM_DP = 22

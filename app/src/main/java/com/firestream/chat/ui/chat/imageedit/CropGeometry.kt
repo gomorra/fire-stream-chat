@@ -357,9 +357,19 @@ internal object CropGeometry {
      * one shared number would make the corners of a portrait shot harder to
      * grab than the corners of a landscape one.
      *
+     * [reachX] and [reachY] are how far *into* the frame a grip still answers,
+     * and may be larger than the tolerances, which then only apply outwards and
+     * along a side. On a photo as wide as the phone the outer half of every left
+     * or right grip lies inside the back-gesture strip, where the system takes
+     * the touch before the app sees it, so the dependable way to take a corner is
+     * from inside the frame. The inward reach never extends past a third of the
+     * frame, so a small frame keeps a middle that moves it rather than one that
+     * belongs to whichever grip is nearest — and it is never less than the
+     * tolerance, which is what the grips answered to before it existed.
+     *
      * Ties go to the nearest grip. A touch inside a small frame can be within
-     * tolerance of several at once, and picking by distance is the only answer
-     * that matches which one the user is looking at.
+     * reach of several at once, and picking by distance is the only answer that
+     * matches which one the user is looking at.
      */
     fun handleAt(
         rect: CropRect,
@@ -367,30 +377,63 @@ internal object CropGeometry {
         y: Float,
         toleranceX: Float,
         toleranceY: Float,
+        reachX: Float = toleranceX,
+        reachY: Float = toleranceY,
     ): CropHandle? {
+        val innerX = maxOf(toleranceX, minOf(reachX, rect.width / 3f))
+        val innerY = maxOf(toleranceY, minOf(reachY, rect.height / 3f))
         var best: CropHandle? = null
         var bestDistance = Float.MAX_VALUE
         for (handle in CropHandle.entries) {
-            // A side grip sits at the middle of its side.
-            val gripX = when (handle.onLeft) {
-                true -> rect.left
-                false -> rect.right
-                null -> rect.centerX
-            }
-            val gripY = when (handle.onTop) {
-                true -> rect.top
-                false -> rect.bottom
-                null -> rect.centerY
-            }
-            val dx = (x - gripX) / toleranceX.coerceAtLeast(MIN_TOLERANCE)
-            val dy = (y - gripY) / toleranceY.coerceAtLeast(MIN_TOLERANCE)
+            val grip = gripPoint(rect, handle)
+            val offsetX = x - grip.x
+            val offsetY = y - grip.y
+            if (!withinReach(offsetX, handle.onLeft, toleranceX, innerX)) continue
+            if (!withinReach(offsetY, handle.onTop, toleranceY, innerY)) continue
+            // Ranked in tolerance units — the same fixed dp on both axes — so
+            // "nearest" means nearest on the glass, not in normalized space.
+            val dx = offsetX / toleranceX.coerceAtLeast(MIN_TOLERANCE)
+            val dy = offsetY / toleranceY.coerceAtLeast(MIN_TOLERANCE)
             val distance = dx * dx + dy * dy
-            if (distance <= 1f && distance < bestDistance) {
+            if (distance < bestDistance) {
                 best = handle
                 bestDistance = distance
             }
         }
         return best
+    }
+
+    /**
+     * Where [handle] sits on [rect]: a corner at its corner, a side grip at the
+     * middle of its side. The point a drag of that grip starts from.
+     */
+    fun gripPoint(rect: CropRect, handle: CropHandle): FitPoint = FitPoint(
+        x = when (handle.onLeft) {
+            true -> rect.left
+            false -> rect.right
+            null -> rect.centerX
+        },
+        y = when (handle.onTop) {
+            true -> rect.top
+            false -> rect.bottom
+            null -> rect.centerY
+        },
+    )
+
+    /**
+     * Whether an [offset] from a grip along one axis is close enough to take it.
+     *
+     * [ownsStart] is which edge the grip owns on this axis — true for left or
+     * top — or null when it owns none there, as a side grip does along its own
+     * side. Only an offset pointing into the frame gets the [inner] reach.
+     */
+    private fun withinReach(offset: Float, ownsStart: Boolean?, tolerance: Float, inner: Float): Boolean {
+        val inward = when (ownsStart) {
+            true -> offset > 0f
+            false -> offset < 0f
+            null -> false
+        }
+        return kotlin.math.abs(offset) <= if (inward) inner else tolerance
     }
 
     /**

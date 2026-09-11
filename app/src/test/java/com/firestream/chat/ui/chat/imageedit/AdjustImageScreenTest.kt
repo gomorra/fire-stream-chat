@@ -568,6 +568,37 @@ class AdjustImageScreenTest {
     }
 
     @Test
+    fun `a corner grabbed from inside the frame keeps its distance from the finger`() {
+        // Regression: a corner could only be grabbed within 24 dp of its bracket,
+        // and on a phone that bracket sits inside the back-gesture strip, so the
+        // swipe won. A grab from further inside has to take the corner — and the
+        // corner must not then jump under the finger, but keep the gap it was
+        // grabbed at, moving by the finger's travel.
+        setContent()
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        val (originX, originY, width, height) = fittedRect()
+        val inside = with(composeTestRule.density) { 36.dp.toPx() }
+        // Just past touch slop, so the result does not depend on whether the
+        // detector reports where the finger went down or where slop was crossed.
+        val pastSlop = with(composeTestRule.density) { 9.dp.toPx() }
+        val startX = originX + inside
+        val startY = originY + inside
+
+        composeTestRule.onNodeWithContentDescription("Crop frame").performTouchInput {
+            down(Offset(startX, startY))
+            moveTo(Offset(startX + pastSlop, startY + pastSlop))
+            moveTo(Offset(startX + width * 0.12f, startY + height * 0.12f))
+            moveTo(Offset(startX + width * 0.20f, startY + height * 0.20f))
+            up()
+        }
+        composeTestRule.waitForIdle()
+
+        val crop = requireNotNull(croppedOp()) { "a grab 36 dp inside the corner produced no crop at all" }
+        assertEquals("the corner moves by the finger's travel, not to the finger", 0.20f, crop.left, 0.04f)
+        assertEquals("the corner moves by the finger's travel, not to the finger", 0.20f, crop.top, 0.04f)
+    }
+
+    @Test
     fun `a side grip drag moves only that edge`() {
         // The side grips reach the same pointerInput the corners do; this is the
         // wiring half of what CropGeometryTest checks in arithmetic.

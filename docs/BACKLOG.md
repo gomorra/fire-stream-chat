@@ -130,7 +130,9 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 - **Every crop grip is reachable by thumb (margin fix + side grips, 2026-09-11).** With
   gesture navigation on, open Crop on a portrait photo and grab all four corners and all
   four side grips of the full frame, in portrait and in landscape: each should move, and
-  back should never fire when the finger lands on or just inside the bracket. The margin is
+  back should never fire when the finger lands just inside the bracket. Each grip also takes
+  a touch up to 48 dp inside the frame, with nothing drawn there — grab from there too and
+  confirm the grip moves with the finger rather than jumping under it. The margin is
   a third of full clearance by choice, so repeat with back sensitivity at its **highest** —
   that is where the reachable band is thinnest, and the case that would argue for raising
   `CropGeometry.MARGIN_FRACTION`. Under 1:1 and 16:9, a side drag should resize the other
