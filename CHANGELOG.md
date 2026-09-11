@@ -6,15 +6,15 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **A photo in a chat can be edited and sent again straight from the fullscreen viewer.** Edit sits beside Save to Downloads and opens the photo in the send preview, where the adjust, draw and sticker tools and a caption all work as they do for a new pick. The result goes out as a new message, and the original stays exactly as it was, both for you and for everyone who received it. A photo that has not been downloaded to this device yet is fetched first behind a spinner, and pressing back during the fetch cancels it. Edit works from the chat's photo gallery and from the photos in search results, but not on link-preview images or profile pictures.
+- **A photo in a chat can be edited and sent again straight from the fullscreen viewer.** Edit sits beside Save to Downloads and opens the photo in the send preview, where the adjust, draw and sticker tools and a caption all work as they do for a new pick. The result goes out as a new message, and the original stays exactly as it was, both for you and for everyone who received it. A photo that has not been downloaded to this device yet is fetched first behind a spinner, and pressing back during the fetch cancels it. Edit works from the chat's photo gallery and from the photos in search results, but not on link-preview images or profile pictures. (`5406ef3c`)
 
 ### Changed
 
-- **The fullscreen viewer keeps its buttons tucked away.** Only Close is on screen now. Save, and the new Edit, sit behind an arrow next to it that points the way they open, so a photo is not framed by a row of buttons. Screens with nothing to offer, such as profile pictures, show only Close.
+- **The fullscreen viewer keeps its buttons tucked away.** Only Close is on screen now. Save, and the new Edit, sit behind an arrow next to it that points the way they open, so a photo is not framed by a row of buttons. Screens with nothing to offer, such as profile pictures, show only Close. (`5406ef3c`)
 
 ### Fixed
 
-- **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open.
+- **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open. (`5406ef3c`)
 
 ## [1.29.0] — 2026-09-11
 
