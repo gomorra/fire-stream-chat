@@ -239,15 +239,54 @@ class ImageEditRasterizer @Inject constructor(
         }
 
     /**
+     * Copies [source] — a photo that has already been sent — into the edit
+     * cache and returns the copy's URI, to be the untouched original of a new
+     * batch (`.claude/plans/image-editor.md` §2.6: editing a sent photo sends a
+     * new one).
+     *
+     * A copy rather than [source] itself, because `PendingMedia.originalUri` is
+     * the one URI revert falls back to and is treated as the pick: the sent
+     * photo's own file is also what its message bubble and the gallery read,
+     * and nothing in the editor should hold a path it could one day write or
+     * [discard].
+     *
+     * A byte copy, not a decode: nothing here needs pixels, so it takes no
+     * [MediaProcessingLimiter] permit. EXIF comes along, but a received photo
+     * has been through `ImageCompressor` already and carries none.
+     *
+     * Written to `cacheDir/edits/sources/` rather than `edits/` itself, because
+     * the byte budget evicts `edits/` oldest-first and only spares each item's
+     * *current* step. An imported original is the oldest file of its batch by
+     * construction and stops being anyone's current step as soon as the first
+     * edit lands — so in `edits/` the budget would eventually take the one file
+     * revert and the missing-step fallback both end at. One original per batch
+     * item is bounded without a budget. [discard] and [sweepStale] still reach
+     * it, so it is collected like any step.
+     */
+    suspend fun importSource(source: File): Uri = withContext(Dispatchers.IO) {
+        val dir = File(editsDir, SOURCES_DIR).apply { mkdirs() }
+        val extension = source.extension.lowercase().ifBlank { "jpg" }
+        val output = File(dir, "source_${System.currentTimeMillis()}_${sequence.incrementAndGet()}.$extension")
+        try {
+            source.inputStream().use { input -> output.outputStream().use { input.copyTo(it) } }
+        } catch (e: Exception) {
+            // A half-written original would open as a broken preview.
+            output.delete()
+            throw e
+        }
+        Uri.fromFile(output)
+    }
+
+    /**
      * Deletes rasterized steps the history no longer reaches — the tail
      * abandoned when a new edit lands on top of an undo, or a whole item's
-     * chain when its batch is dismissed.
+     * chain when its batch is dismissed — and originals [importSource] copied in.
      *
-     * Ignores anything that is not a file inside `cacheDir/edits/`. The caller
-     * passes URIs straight out of an item's history, and that list also contains
-     * the pick's own `content://` URI in every other code path; deleting the
-     * user's gallery original because a list got mixed up is not a mistake worth
-     * leaving available.
+     * Ignores anything that is not a file inside `cacheDir/edits/` or its
+     * `sources/`. The caller passes URIs straight out of an item's history, and
+     * that list also contains the pick's own `content://` URI in every other
+     * code path; deleting the user's gallery original because a list got mixed
+     * up is not a mistake worth leaving available.
      */
     fun discard(uris: Collection<Uri>) {
         // Deliberately not the `editsDir` accessor: that one creates the
@@ -278,14 +317,22 @@ class ImageEditRasterizer @Inject constructor(
      */
     fun sweepStale() {
         val cutoff = System.currentTimeMillis() - MAX_AGE_MILLIS
-        editFiles().forEach { file ->
+        (editFiles() + sourceFiles()).forEach { file ->
             if (file.lastModified() < cutoff) runCatching { file.delete() }
         }
     }
 
-    /** Everything currently in `cacheDir/edits/`, without creating it. */
+    /**
+     * Every step currently in `cacheDir/edits/`, without creating it. Files
+     * only, so the `sources/` subdirectory — and the originals in it — is
+     * outside the budget's reach (see [importSource]).
+     */
     private fun editFiles(): List<File> =
         File(context.cacheDir, EDITS_DIR).listFiles()?.filter { it.isFile }.orEmpty()
+
+    /** Every original [importSource] has written, without creating the directory. */
+    private fun sourceFiles(): List<File> =
+        File(File(context.cacheDir, EDITS_DIR), SOURCES_DIR).listFiles()?.filter { it.isFile }.orEmpty()
 
     /** [liveSteps] as files, dropping any URI that is not a local path. */
     private fun editFiles(liveSteps: Set<Uri>): Set<File> =
@@ -804,17 +851,24 @@ class ImageEditRasterizer @Inject constructor(
         0L
     }
 
-    /** A file inside `cacheDir/edits/`, or null for anything [discard] must not touch. */
+    /**
+     * A file inside `cacheDir/edits/` or its `sources/`, or null for anything
+     * [discard] must not touch.
+     */
     private fun editFile(uri: Uri, dir: File): File? {
         if (uri.scheme != "file") return null
         val path = uri.path ?: return null
         val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
-        return if (file.parentFile == dir) file else null
+        val parent = file.parentFile
+        return if (parent == dir || parent == File(dir, SOURCES_DIR)) file else null
     }
 
     companion object {
         /** Subdirectory of `cacheDir` holding every rasterized step. */
         internal const val EDITS_DIR = "edits"
+
+        /** Subdirectory of [EDITS_DIR] holding originals copied in by [importSource]. */
+        internal const val SOURCES_DIR = "sources"
 
         /** Quality for intermediate steps; only the send re-encodes at q80/q100. */
         private const val INTERMEDIATE_QUALITY = 95

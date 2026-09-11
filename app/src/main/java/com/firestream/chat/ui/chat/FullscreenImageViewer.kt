@@ -1,6 +1,12 @@
 package com.firestream.chat.ui.chat
 
 import android.util.Log
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,15 +21,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.BrokenImage
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -38,12 +45,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
@@ -76,6 +88,7 @@ internal fun FullscreenImageViewer(
     onDismiss: () -> Unit,
     onSaveToDownloads: (() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -93,6 +106,7 @@ internal fun FullscreenImageViewer(
         FullscreenOverlayControls(
             onDismiss = onDismiss,
             onSaveToDownloads = onSaveToDownloads,
+            onEdit = onEdit,
             snackbarHostState = snackbarHostState,
         )
     }
@@ -110,7 +124,7 @@ internal fun FullscreenImageViewer(
  *
  * [onPageChanged] reports the settled page so a host can follow along (the chat
  * screen uses it to scroll to the swiped-to message on close). [onSaveToDownloads]
- * is handed the item currently on screen, not a fixed one.
+ * and [onEdit] are handed the item currently on screen, not a fixed one.
  */
 @Composable
 internal fun FullscreenImagePager(
@@ -120,6 +134,7 @@ internal fun FullscreenImagePager(
     snackbarHostState: SnackbarHostState? = null,
     onPageChanged: ((Int) -> Unit)? = null,
     onSaveToDownloads: ((FullscreenMediaItem) -> Unit)? = null,
+    onEdit: ((FullscreenMediaItem) -> Unit)? = null,
 ) {
     if (items.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
@@ -164,6 +179,9 @@ internal fun FullscreenImagePager(
             onDismiss = onDismiss,
             onSaveToDownloads = onSaveToDownloads?.let { save ->
                 { items.getOrNull(pagerState.currentPage)?.let(save) }
+            },
+            onEdit = onEdit?.let { edit ->
+                { items.getOrNull(pagerState.currentPage)?.let(edit) }
             },
             snackbarHostState = snackbarHostState,
         )
@@ -258,50 +276,64 @@ private fun rememberFullscreenImageRequest(imageUrl: String?, localUri: String?)
     }
 }
 
-/** Top-right Save/Close controls and optional snackbar shared by both viewers. */
+/**
+ * Top-right controls and optional snackbar shared by both viewers.
+ *
+ * Close is always on screen. Every other action is folded behind a chevron
+ * that points the way the tray opens, so a photo is not framed by a row of
+ * buttons the viewer mostly does not want — the viewer is for looking. Each
+ * action is opt-in per host through its nullable lambda: a null hides the
+ * button rather than greying it, and a host with no actions gets no chevron.
+ *
+ * The tray stays open across page swipes and after a save, so saving several
+ * photos in a row is not a tap more each time.
+ */
 @Composable
 private fun BoxScope.FullscreenOverlayControls(
     onDismiss: () -> Unit,
     onSaveToDownloads: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
     snackbarHostState: SnackbarHostState? = null,
 ) {
+    val hasActions = onSaveToDownloads != null || onEdit != null
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    // Half a turn: the "<" that opens the tray becomes the ">" that closes it.
+    val chevronTurn by animateFloatAsState(
+        targetValue = if (expanded) 180f else 0f,
+        label = "fullscreenTrayChevron",
+    )
     Row(
         modifier = Modifier
             .align(Alignment.TopEnd)
             .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(12.dp)
+            // 6 dp plus each button's own 6 dp inset keeps the circles where the
+            // 12 dp padding used to put them.
+            .padding(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (onSaveToDownloads != null) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                    .clickable(onClick = onSaveToDownloads),
-                contentAlignment = Alignment.Center
+        if (hasActions) {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = expandHorizontally(expandFrom = Alignment.End) + fadeIn(),
+                exit = shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(),
             ) {
-                Icon(
-                    imageVector = Icons.Default.Download,
-                    contentDescription = "Save to Downloads",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+                Row {
+                    if (onEdit != null) {
+                        OverlayControlButton(Icons.Default.Edit, "Edit", onEdit)
+                    }
+                    if (onSaveToDownloads != null) {
+                        OverlayControlButton(Icons.Default.Download, "Save to Downloads", onSaveToDownloads)
+                    }
+                }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-        }
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
-                .clickable(onClick = onDismiss),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Close",
-                tint = Color.White,
-                modifier = Modifier.size(20.dp)
+            OverlayControlButton(
+                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = if (expanded) "Hide actions" else "More actions",
+                onClick = { expanded = !expanded },
+                iconModifier = Modifier.graphicsLayer { rotationZ = chevronTurn },
             )
         }
+        OverlayControlButton(Icons.Default.Close, "Close", onDismiss)
     }
     if (snackbarHostState != null) {
         SnackbarHost(
@@ -315,6 +347,40 @@ private fun BoxScope.FullscreenOverlayControls(
                 )
             }
         )
+    }
+}
+
+/**
+ * A 36 dp translucent circle, drawn inside a 48 dp touch target so the smaller
+ * visual still gets a finger-sized hit area.
+ */
+@Composable
+private fun OverlayControlButton(
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    iconModifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick, role = Role.Button),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = Color.White,
+                modifier = iconModifier.size(20.dp),
+            )
+        }
     }
 }
 

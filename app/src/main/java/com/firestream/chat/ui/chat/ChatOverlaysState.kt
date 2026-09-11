@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import android.net.Uri
 import androidx.compose.runtime.Immutable
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.ListData
@@ -36,6 +37,24 @@ internal data class FullscreenVideo(
     val source: String,
 )
 
+// Where "Edit" from a fullscreen viewer has got to (`.claude/plans/image-editor.md`
+// §2.6). A sent photo is immutable, so editing one means sending a new one: the
+// displayed image is fetched if it has no local file yet, copied into the edit
+// cache, and handed to the send preview as a one-item batch.
+//
+// One field rather than a flag plus a URI, so "preparing" and "ready" cannot both
+// be true. Lives here rather than in the screen for the reason fullscreenImage
+// does: a rotation mid-download must neither lose the spinner nor drop the result.
+// The send preview's batch is ChatScreen-local state, so the screen consumes
+// [Ready] and clears it — the same hand-off consumeReactionCue uses.
+@Immutable
+internal sealed interface ViewerEdit {
+    data object Preparing : ViewerEdit
+
+    /** [source] is the edit-cache copy — the new batch's untouched original. */
+    data class Ready(val source: Uri) : ViewerEdit
+}
+
 internal data class OverlaysState(
     val searchQuery: String = "",
     // The prefilter chips under the search box. An active filter with a blank
@@ -58,4 +77,5 @@ internal data class OverlaysState(
     val recentEmojis: List<String> = emptyList(),
     val fullscreenImage: FullscreenImage? = null,
     val fullscreenVideo: FullscreenVideo? = null,
+    val viewerEdit: ViewerEdit? = null,
 )

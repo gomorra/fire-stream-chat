@@ -138,7 +138,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextRange
 import com.firestream.chat.ui.search.SearchEmptyState
 import com.firestream.chat.ui.search.SearchFilterChipRow
@@ -656,7 +658,10 @@ fun ChatScreen(
             // CURRENT visibility, not its state when the effect launched.
             val host = when {
                 pendingMedia.isNotEmpty() -> previewSnackbarHostState
-                uiState.overlays.fullscreenImage != null -> fullscreenSnackbarHostState
+                // The search gallery draws the same host, so a save or an edit
+                // failing there has to land on it rather than under the gallery.
+                uiState.overlays.fullscreenImage != null || searchGalleryIndex != null ->
+                    fullscreenSnackbarHostState
                 else -> snackbarHostState
             }
             val result = host.showSnackbar(
@@ -2232,6 +2237,7 @@ fun ChatScreen(
                         onSaveToDownloads = { item ->
                             viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
                         },
+                        onEdit = viewModel::editFromViewer,
                     )
                 }
             } else {
@@ -2246,6 +2252,15 @@ fun ChatScreen(
                         { viewModel.saveImageToDownloads(req.localUri, req.imageUrl) }
                     } else null,
                     snackbarHostState = fullscreenSnackbarHostState,
+                    // The same gate as save: a message's photo, never a
+                    // link-preview thumbnail off somebody else's web page.
+                    onEdit = if (req.canSaveToDownloads) {
+                        {
+                            viewModel.editFromViewer(
+                                FullscreenMediaItem(req.imageUrl, req.localUri, req.messageId)
+                            )
+                        }
+                    } else null,
                 )
             }
         }
@@ -2270,7 +2285,50 @@ fun ChatScreen(
                 onSaveToDownloads = { item ->
                     viewModel.saveImageToDownloads(item.localUri, item.imageUrl)
                 },
+                // Offered here too: a Photos browse is how an older photo is
+                // found at all, so without it Edit would reach only what is
+                // still near the bottom of the conversation.
+                onEdit = viewModel::editFromViewer,
             )
+        }
+    }
+
+    // "Edit" from any of the viewers above, once the photo is in the edit cache:
+    // the viewer closes and the send preview opens on a one-item batch whose
+    // original is that copy (`.claude/plans/image-editor.md` §2.6). The viewer
+    // closes rather than waiting underneath because the result is a new message,
+    // not a change to the one on screen. Search, if open, stays open — its
+    // results took a query to produce.
+    val viewerEdit = uiState.overlays.viewerEdit
+    LaunchedEffect(viewerEdit) {
+        if (viewerEdit is ViewerEdit.Ready) {
+            pendingMedia = listOf(PendingMedia(viewerEdit.source, "image/jpeg"))
+            if (fullscreenImage != null) closeFullscreenImage()
+            searchGalleryIndex = null
+            viewModel.consumeViewerEdit()
+        }
+    }
+
+    // Registered after both viewers' handlers so it wins while the photo is
+    // being fetched: back abandons the fetch and leaves the viewer where it was.
+    val preparingViewerEdit = viewerEdit == ViewerEdit.Preparing
+    BackHandler(enabled = preparingViewerEdit) { viewModel.cancelViewerEdit() }
+
+    AnimatedVisibility(visible = preparingViewerEdit, enter = fadeIn(), exit = fadeOut()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.5f))
+                // Swallows every touch, so the pager cannot be swiped to another
+                // photo — or Edit tapped again — while this one is on its way.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        while (true) awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(color = Color.White)
         }
     }
 
@@ -2318,16 +2376,26 @@ fun ChatScreen(
                 onSend = { edited ->
                     viewModel.sendMediaMessages(edited)
                     // Every step except the one actually being sent — that file
-                    // is about to be read by the compressor.
+                    // is about to be read by the compressor. The original goes
+                    // too once an edit has replaced it: discard ignores anything
+                    // outside the edit cache, so for a gallery or camera pick
+                    // that is a no-op, and for a photo copied in from a viewer
+                    // it is the copy.
                     viewModel.discardEditSteps(
                         edited.flatMap { item ->
-                            item.editHistory.filterNot { it == item.uri.toString() }
+                            (item.editHistory + item.originalUri.toString())
+                                .filterNot { it == item.uri.toString() }
                         }
                     )
                     pendingMedia = emptyList()
                 },
                 onDownload = viewModel::savePendingMediaToDownloads,
-                onDismiss = { pendingMedia = emptyList() },
+                onDismiss = {
+                    // The preview collects the steps; the originals are only
+                    // known here. Same no-op for anything that is not a copy.
+                    viewModel.discardEditSteps(pendingMedia.map { it.originalUri.toString() })
+                    pendingMedia = emptyList()
+                },
                 edit = imageEditServices,
                 snackbarHostState = previewSnackbarHostState,
             )

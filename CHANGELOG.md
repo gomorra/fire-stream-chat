@@ -2,6 +2,20 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.30.0] — 2026-09-11
+
+### Added
+
+- **A photo in a chat can be edited and sent again straight from the fullscreen viewer.** Edit sits beside Save to Downloads and opens the photo in the send preview, where the adjust, draw and sticker tools and a caption all work as they do for a new pick. The result goes out as a new message, and the original stays exactly as it was, both for you and for everyone who received it. A photo that has not been downloaded to this device yet is fetched first behind a spinner, and pressing back during the fetch cancels it. Edit works from the chat's photo gallery and from the photos in search results, but not on link-preview images or profile pictures.
+
+### Changed
+
+- **The fullscreen viewer keeps its buttons tucked away.** Only Close is on screen now. Save, and the new Edit, sit behind an arrow next to it that points the way they open, so a photo is not framed by a row of buttons. Screens with nothing to offer, such as profile pictures, show only Close.
+
+### Fixed
+
+- **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open.
+
 ## [1.29.0] — 2026-09-11
 
 ### Added

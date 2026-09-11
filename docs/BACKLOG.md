@@ -21,6 +21,40 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Image editor — edit from the fullscreen viewer, and its folded controls (Phase 6, 2026-09-11)
+
+**Nothing in this phase has been on hardware.** Its risk is the whole path, which no
+Robolectric test runs end to end: tap a sent photo, Edit, fetch, copy, preview, edit,
+send. The ViewModel's state machine and the tray are unit-tested; the hand-offs between
+them are not. **On a device holding real conversations, stop at the send button** — the
+path is verified once the preview shows the right photo, not once a message goes out.
+
+- **The tray folds and unfolds.** Open a photo in a chat: only a `<` and × are on
+  screen. Tap `<` and Edit and the download button slide out to its left while it turns
+  to `>`. Tap again and they fold away. Swipe to another photo with the tray open and it
+  stays open. Open a profile picture from the chat list and confirm it shows only ×.
+- **Edit on a downloaded photo opens the preview straight away**, on that photo, with
+  the viewer gone underneath. Run an adjust and an undo, then confirm Original ⇄ Edited
+  still returns to the photo as received. Back out of the preview and confirm you land
+  in the chat, not back in the viewer.
+- **Edit on a photo not yet on this device shows a spinner, then the preview.** Use a
+  photo received with auto-download off. While the spinner is up, confirm the photo
+  cannot be swiped. Press back mid-fetch and confirm you stay in the viewer and no
+  preview appears when the download would have finished.
+- **Rotate the phone mid-fetch.** The spinner should survive and the preview should
+  still open.
+- **Offline fails visibly.** In airplane mode, Edit an undownloaded photo and confirm
+  the "Couldn't open the photo for editing" snackbar shows *over* the viewer.
+- **Search results.** Search → Photos → open one → Edit. The preview should open, and
+  backing out of it should land in the search grid. Also confirm a save from this
+  gallery now shows its "saved to Downloads" snackbar with a working Open.
+- **No duplicate in the gallery app.** After editing an undownloaded photo, Google
+  Photos should show one copy of it under *FireStream Images*, named by message id — not
+  a second `download_…` file.
+- **The HD pill is honest.** Open the HD sheet on a photo edited this way and judge
+  whether its HD row reads as promising more than the received photo has; the plan
+  (Phase 6, item 10) left the pill in place on that bet.
+
 ### Image editor — the overlay screen and the sticker/text/shape tabs (Phase 5b, 2026-09-10)
 
 **Nothing in this phase has been on hardware.** More of it is machine-checkable than
@@ -445,6 +479,7 @@ Less-specified than the items above — kept because the thinking is worth not r
 - **Compact/comfortable density toggle** — spacious vs. compact chat layouts
 - **Animated transitions** — shared element transitions between chat list and chat detail
 - **Haptic feedback** — subtle vibrations on message send, reactions, and gestures
+- **Save from the profile's shared-media gallery** — it shows the same chat photos as the chat's own gallery, which has Save to Downloads, but offers no save. Needs `MediaFileManager` and a snackbar channel in `ProfileViewModel`; found in the image editor's Phase 6 download-button audit and deliberately left out of that commit (`.claude/plans/image-editor.md`, Phase 6)
 
 ### AI-powered features
 - **Smart replies** — contextual quick responses based on incoming messages

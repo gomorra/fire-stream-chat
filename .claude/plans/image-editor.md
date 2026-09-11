@@ -1,12 +1,13 @@
 # Image editing for the send-preview and the fullscreen viewer
 
-Status: **Phases 1–5 shipped; Phase 6 planned, not implemented.** Phase 1 (the
-toolbar shell, per-image HD and download), Phase 2 (the rasterizer, the fit mapper
-and the live preview-level history) and Phase 3 (the adjust screen) landed on
-2026-09-09; Phase 4 (the draw screen) on 2026-09-10. The rest is still the agreed
-design awaiting its implementation sessions. **Phases 3 and 4 are build- and
-test-verified only — nothing in either has been on hardware**, and every unchecked
-item is listed in `docs/BACKLOG.md` §*Pending on-device verification*.
+Status: **All six phases shipped.** Phase 1 (the toolbar shell, per-image HD and
+download), Phase 2 (the rasterizer, the fit mapper and the live preview-level
+history) and Phase 3 (the adjust screen) landed on 2026-09-09; Phase 4 (the draw
+screen) and Phase 5 (the picker shell and the overlay screen) on 2026-09-10; Phase 6
+(edit from the fullscreen viewer) on 2026-09-11. **Phases 3 to 6 are build- and
+test-verified only — nothing in them has been on hardware**, and every unchecked
+item is listed in `docs/BACKLOG.md` §*Pending on-device verification*. Once those
+passes are run the plan is a candidate for `.claude/plans/done/`.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
@@ -879,7 +880,117 @@ settled**:
   typed on one tab does not survive a tab switch; `sessionRecents` still freezes for
   the panel's lifetime; rotation snaps to the nearest 15° and to the cardinals.
 
-### Phase 6 — Edit from the fullscreen viewer
+### Phase 6 — Edit from the fullscreen viewer  ✅ shipped 2026-09-11
+
+Delivered, **except the on-device pass**, which nobody has run — see
+`docs/BACKLOG.md` §*Pending on-device verification*. One change came from the user
+while it was being built, and the rest are departures or decisions the bullets below
+left open, **flagged here for sign-off rather than settled**:
+
+1. **The viewer's actions fold behind a chevron** (user direction, 2026-09-11). Adding
+   Edit beside Save and Close made the viewer cluttered, so Close stays on screen
+   and every other action sits behind a `<` that points the way the tray opens and
+   turns into `>` while it is open. A host with no actions (the three avatar viewers,
+   the share preview) gets no chevron at all. The tray stays open across swipes and
+   after a save, so saving several photos is not an extra tap each. Each button is
+   now a 36 dp circle inside a 48 dp touch target; the outer padding shrank to match,
+   so the circles did not move.
+2. **The copy into the edit cache belongs to `ImageEditRasterizer`, not
+   `MediaFileManager`** — `importSource(File): Uri`. The rasterizer already owns
+   `cacheDir/edits/` and everything that deletes from it (`discard`, `sweepStale`,
+   the budget); `MediaFileManager` owns shared storage. Putting the copy there would
+   have meant two classes knowing the edit cache's layout, and a copy `discard`
+   refused to collect.
+3. **The copy lives in `cacheDir/edits/sources/`, not `edits/` itself.** The budget
+   evicts `edits/` oldest-first, sparing only each item's *current* step, and an
+   imported original is the oldest file of its batch and nobody's current step from
+   the first edit on. In `edits/` the budget would eventually take the one file revert
+   and the missing-step fallback both end at — the only URI §4 promises is never a
+   cache file the app itself deletes. One original per batch item needs no budget.
+   `discard` accepts both directories and `sweepStale` sweeps both. What remains is
+   the OS reclaiming `cacheDir`, which §4 already accepts for history steps.
+4. **A byte copy, not a decode.** It holds no bitmap, so it takes no limiter permit,
+   and a received photo has already been through `ImageCompressor` and carries no
+   EXIF to strip.
+5. **The download is keyed on the message id**, where `saveImageToDownloads` uses a
+   throwaway `download_<time>` name. Keyed that way it is the file the media backfill
+   would have written, so an in-flight backfill is joined rather than duplicated and
+   Pictures does not collect a second copy. A previous install's unreadable file under
+   that name is fetched again under a fresh one (`docs/GOTCHAS.md`, `canRead()`); that
+   rare path does leave a duplicate in Pictures, which beats failing. The local-or-
+   download lookup is shared with `saveImageToDownloads`, which thereby gains the
+   `canRead()` check it lacked. The copy is labelled `image/jpeg` whatever its
+   extension, as the camera path does: sent photos leave `ImageCompressor` as JPEG.
+6. **Edit is offered in the search-results gallery too.** A Photos browse is how an
+   older photo is found at all; without it Edit would reach only what is still near
+   the bottom of the conversation.
+7. **The single-image branch gates Edit on `canSaveToDownloads`**, with no new flag:
+   that flag already means "a message's photo, not a link-preview thumbnail", which is
+   exactly the audience.
+8. **The viewer closes when the preview opens; search stays open.** The result is a
+   new message, not a change to the photo on screen, so backing out of the preview
+   lands in the chat (or the search grid) rather than resurfacing the photo it came
+   from. Search results took a query to produce and are kept, as elsewhere.
+9. **The fetch is state, not an event.** `OverlaysState.viewerEdit` is a sealed
+   `Preparing` / `Ready(uri)` — one field, so the two cannot both be true — and survives
+   a rotation mid-download the way `fullscreenImage` does. `ChatScreen` consumes
+   `Ready` into its local `pendingMedia` and clears it. The spinner is a scrim over
+   the viewer that swallows touches, so the pager cannot move or Edit be tapped again
+   while a photo is on its way; back cancels the fetch and leaves the viewer open. A
+   second tap while fetching is ignored, and a `finally` guarded by a generation
+   counter takes the spinner down if a callee throws `CancellationException` itself.
+   Two narrow edges are accepted, not fixed. A back press that lands after the copy
+   finishes but before the coroutine resumes orphans the copy until `sweepStale`
+   collects it 24 h later. A back press in the single frame between `Ready` and the
+   screen consuming it closes the viewer, and the preview still opens.
+10. **The preview's HD pill is left as it is.** §2.6 rules out an HD control in the
+    *viewer*, and there is none. The preview's pill governs the new send, which is a
+    real choice: re-encoding at q80 or q100, and whether to downscale. It cannot
+    over-promise, because the sheet's sizes come from the copy's own dimensions, so a
+    photo that arrived compressed is labelled at the resolution it actually has. It
+    does follow the global preference rather than the received message's `isHd`.
+11. **Originals are discarded by `ChatScreen`, not the preview.** On dismiss the batch's
+    originals go to `discard`, and on send each item's original goes too once an edit
+    has replaced it. `discard` ignores anything outside the edit cache, so for gallery
+    and camera picks (`content://`) this does nothing. The preview never learns where
+    an original came from.
+12. **A pre-existing snackbar bug is fixed with it.** The search gallery draws the
+    fullscreen snackbar host, but the router sent snackbars to the Scaffold's host
+    whenever `fullscreenImage` was null. So a save from the search gallery reported
+    itself underneath the gallery, and an edit failure there would have too. It has no
+    regression test: the routing is inline in `ChatScreen`'s composition, which no test
+    constructs.
+13. **No callback bundle.** The viewer went to 6 parameters, the pager to 7 and the
+    controls to 4, far under the ceiling that justified `MessageBubbleCallbacks`.
+    Measured from the debug APK's dex against ART's 256-register ceiling:
+    `FullscreenImagePager` 66, `FullscreenImageViewer` 52, `FullscreenOverlayControls`
+    57, `OverlayControlButton` 69, and `ChatScreen` 142 after gaining the edit hand-off
+    and scrim. `MessageBubble` is still the app's tightest at 252.
+
+**The download-button audit.** Save is on the chat gallery, the chat's single-image
+fallback (message photos only) and the search gallery. Where it is absent, it is
+absent on purpose:
+
+- **Link-preview thumbnails** — an image from somebody else's web page, not media sent
+  in the chat. Unchanged.
+- **All three avatar viewers** (chat list, profile, group settings) — an avatar is
+  someone's identity picture, not media sent to you. The group avatar the bullet below
+  singles out was already consistent with the other two, so "absent from avatars" is
+  the decision, now written down.
+- **The share preview** — the image is on its way *in* from another app that already
+  holds it, so a Downloads copy would only duplicate it.
+- **The profile's shared-media gallery is the real inconsistency**: the same chat
+  photos the chat's own gallery lets you save, with no save button. Not wired here.
+  It needs a `MediaFileManager` dependency and a snackbar channel in `ProfileViewModel`,
+  which is a profile-screen change outside the editor — the same reasoning §5 applies
+  to avatar cropping. Logged in `docs/BACKLOG.md` §*UX improvements*.
+
+`FullscreenOverlayControlsTest` pins the tray (hidden by default, the chevron opens
+and closes it, opt-in per host, the gallery hands over the photo on screen).
+`ChatViewModelViewerEditTest` pins the state machine: local file, download,
+unreadable-file refetch, spinner lifetime, failure, cancel, double tap, consume.
+`ImageEditRasterizerTest` gains the import, its discard, its immunity to the budget,
+and its sweep.
 
 - **Edit** action in `FullscreenOverlayControls`, opt-in per host via a nullable
   `onEdit` exactly like `onSaveToDownloads`, so the avatar and link-preview viewers

@@ -42,8 +42,10 @@ import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.domain.util.SourceImage
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -459,6 +461,106 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    // ── Edit from the fullscreen viewer ──
+
+    private var viewerEditJob: Job? = null
+
+    /**
+     * Bumped by every start and every cancel, so a fetch can tell whether the
+     * spinner on screen is still its own. Not a comparison against
+     * [viewerEditJob]: on the immediate main dispatcher a fetch that fails at
+     * once finishes before `launch` has even returned the job to assign.
+     */
+    private var viewerEditGeneration = 0
+
+    /**
+     * "Edit" on a photo in a fullscreen viewer: fetches it if it has no readable
+     * local file yet, copies it into the edit cache, and publishes the copy as
+     * [ViewerEdit.Ready] for the screen to open the send preview on.
+     *
+     * The result is a *new* message (`.claude/plans/image-editor.md` §2.6) — the
+     * sent one is immutable — which is why the copy, not the message's own file,
+     * becomes the batch's original: see [ImageEditRasterizer.importSource].
+     *
+     * On viewModelScope, unlike the saves above that outlive the screen: an edit
+     * nobody is left to see open is not worth finishing. A second tap while one
+     * is in flight is ignored rather than racing it.
+     */
+    internal fun editFromViewer(item: FullscreenMediaItem) {
+        if (viewerEditJob?.isActive == true) return
+        val generation = ++viewerEditGeneration
+        setViewerEdit(ViewerEdit.Preparing)
+        viewerEditJob = viewModelScope.launch {
+            try {
+                val file = readableSentImage(item.localUri, item.imageUrl, downloadId = item.messageId)
+                setViewerEdit(ViewerEdit.Ready(imageEditRasterizer.importSource(file)))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                setViewerEdit(null)
+                _snackbarEvent.emit(SnackbarEvent("Couldn't open the photo for editing"))
+            } finally {
+                // A CancellationException that is not a back press — thrown by a
+                // callee on its own — would otherwise leave the touch-blocking
+                // scrim up with only back to escape it. Guarded by generation so
+                // a cancelled fetch finishing late never takes down the spinner
+                // of the one that replaced it.
+                if (generation == viewerEditGeneration &&
+                    _uiState.value.overlays.viewerEdit == ViewerEdit.Preparing
+                ) {
+                    setViewerEdit(null)
+                }
+            }
+        }
+    }
+
+    /** Back pressed over the spinner: abandon the fetch and stay in the viewer. */
+    internal fun cancelViewerEdit() {
+        viewerEditGeneration++
+        viewerEditJob?.cancel()
+        viewerEditJob = null
+        setViewerEdit(null)
+    }
+
+    /** The screen has opened the send preview on a [ViewerEdit.Ready]; forget it. */
+    internal fun consumeViewerEdit() {
+        _uiState.update { state ->
+            if (state.overlays.viewerEdit is ViewerEdit.Ready) {
+                state.copy(overlays = state.overlays.copy(viewerEdit = null))
+            } else {
+                state
+            }
+        }
+    }
+
+    private fun setViewerEdit(edit: ViewerEdit?) {
+        _uiState.update { it.copy(overlays = it.overlays.copy(viewerEdit = edit)) }
+    }
+
+    /**
+     * A readable file holding a sent image's bytes: its local copy when there is
+     * one, else a download — shared by Edit and Save to Downloads.
+     *
+     * Edit passes the message's id as [downloadId], so the download is the file
+     * the media backfill would have written: an in-flight backfill of the same
+     * message is joined rather than duplicated, and the user's Pictures folder
+     * does not collect a second copy. A null id downloads under a fresh name.
+     *
+     * `canRead()`, not just `exists()`: a previous install's MediaStore file can
+     * exist and still EACCES on open (docs/GOTCHAS.md). `downloadAndSave` hands
+     * such a file back rather than overwriting it, so it is fetched once more
+     * under a fresh name.
+     */
+    private suspend fun readableSentImage(localUri: String?, mediaUrl: String?, downloadId: String?): File {
+        localUri?.let(::File)?.takeIf { it.isFile && it.canRead() }?.let { return it }
+        val url = mediaUrl ?: throw IllegalStateException("No image source available")
+        val downloaded = mediaFileManager.downloadAndSave(chatId, downloadId ?: freshDownloadId(), url)
+        if (downloaded.canRead()) return downloaded
+        return mediaFileManager.downloadAndSave(chatId, freshDownloadId(), url)
+    }
+
+    private fun freshDownloadId() = "download_${System.currentTimeMillis()}"
+
     // ── Save to downloads ──
 
     /**
@@ -483,11 +585,7 @@ class ChatViewModel @Inject constructor(
 
     fun saveImageToDownloads(localUri: String?, mediaUrl: String?, mimeType: String = "image/jpeg") {
         saveToDownloads("Image") {
-            val file = when {
-                localUri != null && File(localUri).exists() -> File(localUri)
-                mediaUrl != null -> mediaFileManager.downloadAndSave(chatId, "download_${System.currentTimeMillis()}", mediaUrl)
-                else -> throw Exception("No image source available")
-            }
+            val file = readableSentImage(localUri, mediaUrl, downloadId = null)
             mediaFileManager.saveToDownloads(file, mimeType)
         }
     }

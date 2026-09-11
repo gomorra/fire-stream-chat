@@ -271,6 +271,65 @@ class ImageEditRasterizerTest {
         assertFalse(editsDir.exists())
     }
 
+    // ── Originals copied in from the fullscreen viewer (Phase 6) ──
+
+    private fun sentPhoto(bytes: ByteArray = byteArrayOf(1, 2, 3, 4)): File =
+        File(context.cacheDir, "sent.jpg").apply { writeBytes(bytes) }
+
+    @Test
+    fun `importing a sent photo copies it and leaves the photo itself alone`() = runTest {
+        val sent = sentPhoto()
+
+        val imported = rasterizer.importSource(sent)
+
+        val copy = File(requireNotNull(imported.path))
+        assertNotEquals(sent.canonicalPath, copy.canonicalPath)
+        assertEquals(
+            File(editsDir, ImageEditRasterizer.SOURCES_DIR).canonicalPath,
+            copy.parentFile?.canonicalPath,
+        )
+        assertTrue(copy.readBytes().contentEquals(sent.readBytes()))
+        assertEquals("jpg", copy.extension)
+    }
+
+    @Test
+    fun `discard collects an imported original but never the photo it was copied from`() = runTest {
+        val sent = sentPhoto()
+        val imported = rasterizer.importSource(sent)
+
+        rasterizer.discard(listOf(imported, Uri.fromFile(sent)))
+
+        assertFalse(File(requireNotNull(imported.path)).exists())
+        assertTrue(sent.exists())
+    }
+
+    @Test
+    fun `the budget never evicts an imported original`() = runTest {
+        // The original is the oldest file of its batch and stops being anyone's
+        // current step as soon as the first edit lands, so an eviction that could
+        // see it would take the one file revert falls back to.
+        val imported = rasterizer.importSource(sentPhoto())
+        val original = File(requireNotNull(imported.path))
+        original.setLastModified(System.currentTimeMillis() - 60_000)
+        File(editsDir, "edit_step.jpg").writeBytes(ByteArray(1_000))
+
+        rasterizer.enforceBudget(budget = 0, keep = emptySet())
+
+        assertTrue(original.exists())
+    }
+
+    @Test
+    fun `the app-start sweep collects a stale imported original`() = runTest {
+        val stale = File(requireNotNull(rasterizer.importSource(sentPhoto()).path))
+        stale.setLastModified(System.currentTimeMillis() - java.util.concurrent.TimeUnit.HOURS.toMillis(30))
+        val recent = File(requireNotNull(rasterizer.importSource(sentPhoto()).path))
+
+        rasterizer.sweepStale()
+
+        assertFalse(stale.exists())
+        assertTrue(recent.exists())
+    }
+
     @Test
     fun `estimateSize caps a standard send and keeps an HD one at source size`() = runTest {
         val source = sourceImage(4000, 2000, "estimate.jpg")
