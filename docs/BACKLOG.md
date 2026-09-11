@@ -36,6 +36,9 @@ over an existing install, with a second device as recipient:
    recipient added beforehand must survive the retry.
 4. Airplane mode → tap retry on a failed message → it must land back at failed within
    30 s, not stay on the clock.
+5. (Step 2, `97baf879`) Clear app data or pick a contact never messaged since launch, go
+   offline, send a photo → the bubble must stay, marked failed with retry, instead of a
+   snackbar and nothing. Reconnect, retry → one copy arrives.
 The rest of the outbox checklist lives in `.claude/plans/offline-outbox.md` §4 and moves
 here when step 6 ships.
 
