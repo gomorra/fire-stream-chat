@@ -42,6 +42,26 @@ over an existing install, with a second device as recipient:
 The rest of the outbox checklist lives in `.claude/plans/offline-outbox.md` §4 and moves
 here when step 6 ships.
 
+### Encrypt once and the per-contact Signal lock (offline outbox step 4, 2026-09-11)
+
+Shipped in `bcd4426c`; nothing has been on hardware. Upgrade over an existing install:
+1. The one-time reset (Room 25 → 26) breaks nothing else: every chat reloads its full history
+   on open, already-downloaded photos show without a download spinner, and only unsent or
+   failed messages, stars and reminders are gone.
+2. Forward a video, a voice note and a location to a second device → thumbnail, duration and
+   map point arrive, and the forwarded copy carries no mentions.
+
+**Before end-to-end encryption is switched on for the phones** (planned, not yet enabled —
+these belong to that double-check). `SignalManagerTest` runs real libsignal only on the JVM,
+and the encrypted send path is tested with `SignalManager` mocked. On a **release** build
+(debug never encrypts) with Settings → Privacy → Encryption on, two devices:
+3. Pick a contact never messaged since the upgrade, send four photos at once plus a text →
+   all five decrypt on the recipient.
+4. Airplane mode → send a text (fails) → airplane off → retry → the recipient reads it once.
+Two open questions from the step-4 review also belong to that check: the stale-bundle race
+when a peer re-registers, and the lock tests' 300 ms window
+(`.claude/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
+
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
 **Nothing in this phase has been on hardware.** Its risk is the whole path, which no
@@ -348,7 +368,8 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 ### Signal database split — remove the debug-encryption guards (2026-04-26)
 - The split moved Signal tables into `signal.db`, which was the reason the debug guards
   existed. Both are still in place **by design**, pending verification across a few schema
-  iterations: `!BuildConfig.DEBUG` in `MessageRepositoryImpl.kt` and the
+  iterations: `!BuildConfig.DEBUG` in `MessageWriter`'s injected constructor
+  (`data/outbox/MessageWriter.kt`) and the
   `libsignal_jni.so` debug-variant exclusion in `app/build.gradle.kts`.
 - Removing them is the follow-up; until then, debug builds still send plaintext.
 

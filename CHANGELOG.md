@@ -18,6 +18,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open. (`5406ef3c`)
 - **Long text placed on a photo now wraps instead of running off both sides.** A caption of more than a few words was drawn on one line wider than the photo, could not be dragged far enough to see either end, and lost both ends when the photo was sent. Text now wraps at the photo's width into centred lines, in the editor and in the sent photo alike. (`a39940fe`)
 - **The photo editor's Text and Shapes tabs no longer show a search field that does nothing.** Both tabs offered a search box that accepted typing but had nothing to search: the Text tab is where you type the words themselves, and every shape already fits on screen. Search now appears only on the tabs with a list to filter, Emoji and Stickers. (`edce7fdc`)
+- **Forwarding a video, voice note or location now sends all of it.** Forwarding copied only a message's text, media link and size, so a forwarded video arrived without its preview image or length, a forwarded voice note without its length, and a forwarded location without its map point. A forward now carries the message as it appears in your own chat — minus mentions, which named people in the chat it came from. (`bcd4426c`)
+
+### Changed
+
+- **The app rebuilds its local copy of your messages once, on this update.** Messages gained the bookkeeping a retry needs to resume without encrypting a message twice, and the app resets its local message store whenever that layout changes. Every chat reloads its full history from the server the first time you open it, and photos, videos, documents and voice notes all stay available — files already on the phone are picked up without downloading again. What does not come back: messages that were still unsent or marked failed, starred marks, and scheduled message reminders. The encryption side changes nothing you can see yet, because end-to-end encryption is not switched on: once it is, several messages sent to one person at once can no longer garble each other, and a retried message goes out as the same encrypted copy. (`bcd4426c`)
 
 ## [1.29.0] — 2026-09-11
 
