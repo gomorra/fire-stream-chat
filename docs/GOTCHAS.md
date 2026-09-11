@@ -82,6 +82,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   *raw* insets (consumption only affects the padding-modifier family), hence the
   explicit `− navigationBars` subtraction there. Blanket `imePadding()` stays the rule
   for simple bottom-anchored screens (`ListDetailScreen`, `ImagePreviewScreen`).
+- **A touch target on the screen edge is unreachable by finger — and the emulator hides it.**
+  A handle drawn at the edge (a crop corner on a photo fitted edge to edge) sits in the
+  system back-gesture strip, or the home strip at the bottom; the system takes a touch that
+  *starts* there before the app sees it, and half the target is past the glass anyway. A
+  mouse in the emulator never triggers a gesture, so everything works there. Keep the whole
+  target clear of `WindowInsets.systemGestures` (union `safeDrawing`, for cutouts and a
+  landscape nav bar), and move only the *content* in — keep the gesture layer full-size, or
+  the margin becomes a dead strip exactly where the finger lands.
+  `Modifier.systemGestureExclusion` is not the fix: it cannot exclude the home strip and is
+  capped at 200 dp per edge. Worked example: `CropGeometry.reachableInsets`.
 
 ## Coroutines / lifecycle
 

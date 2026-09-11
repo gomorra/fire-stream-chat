@@ -52,10 +52,6 @@ class AdjustImageScreenTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    /** The preview bitmap every test here renders — 4:3, matching setContent. */
-    private val previewWidth = 400f
-    private val previewHeight = 300f
-
     private val source = Uri.parse("file:///edits/source.jpg")
     private val flattened = Uri.parse("file:///edits/flattened.jpg")
 
@@ -432,6 +428,75 @@ class AdjustImageScreenTest {
         assertTrue("the photo must not overflow the area it is fitted into", photoWidth <= area.right.value - area.left.value + 1f)
     }
 
+    /**
+     * A 4:1 photo in a 300 dp square: wide enough to fill the width edge to edge.
+     * Not 400 — Robolectric's default screen is 320 dp wide, so a larger box is
+     * quietly clamped and a "full width" assertion measures the screen instead.
+     */
+    private val wideContentDp = 300f
+
+    private fun setWideContent() {
+        composeTestRule.setContent {
+            MaterialTheme {
+                Box(modifier = Modifier.size(wideContentDp.dp)) {
+                    AdjustImageScreen(
+                        source = source,
+                        onDone = {},
+                        onCancel = {},
+                        services = ImageEditServices(
+                            renderPreview = { _, _, _ ->
+                                Bitmap.createBitmap(400, 100, Bitmap.Config.ARGB_8888)
+                            },
+                        ),
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+    }
+
+    @Test
+    fun `with the crop tool open the photo keeps a full grab radius clear of every edge`() {
+        // Regression: the photo was fitted edge to edge, so on a photo as wide as
+        // the phone the crop corners sat on the physical edge of the glass — half
+        // of each grab target off the screen and the other half inside the back
+        // gesture strip, which takes the touch before the app ever sees it.
+        // Robolectric reports no gesture insets, so this pins the grab-radius
+        // half of the margin; the gesture half is CropGeometryTest's.
+        setWideContent()
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        composeTestRule.waitForIdle()
+
+        val area = composeTestRule.onNodeWithContentDescription("Crop frame").getBoundsInRoot()
+        val photo = composeTestRule.onNodeWithContentDescription("Image being adjusted").getBoundsInRoot()
+        val grab = HANDLE_GRAB_DP.toFloat()
+
+        assertTrue("left margin", photo.left.value - area.left.value >= grab - 1f)
+        assertTrue("top margin", photo.top.value - area.top.value >= grab - 1f)
+        assertTrue("right margin", area.right.value - photo.right.value >= grab - 1f)
+        assertTrue("bottom margin", area.bottom.value - photo.bottom.value >= grab - 1f)
+    }
+
+    @Test
+    fun `the margin is the crop tool's alone, so every other tool keeps the photo full width`() {
+        // Only the crop frame has handles to reach; shrinking the photo for
+        // rotate, straighten and resize would cost size and buy nothing.
+        setWideContent()
+        val fullWidth = wideContentDp
+
+        fun photoWidth(): Float {
+            composeTestRule.waitForIdle()
+            val photo = composeTestRule.onNodeWithContentDescription("Image being adjusted").getBoundsInRoot()
+            return photo.right.value - photo.left.value
+        }
+
+        assertEquals(fullWidth, photoWidth(), 1f)
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        assertTrue("crop insets the photo", photoWidth() < fullWidth - 1f)
+        composeTestRule.onNodeWithContentDescription("Crop").performClick()
+        assertEquals("closing crop gives the width back", fullWidth, photoWidth(), 1f)
+    }
+
     // ── Dragging the crop frame ───────────────────────────────────────────────
     //
     // Nothing above this point ever moves a pointer across the screen, which is
@@ -443,18 +508,22 @@ class AdjustImageScreenTest {
     /** The fitted photo rect inside the crop overlay, in the overlay's own pixels. */
     private data class Fitted(val x: Float, val y: Float, val width: Float, val height: Float)
 
+    /**
+     * Read off the laid-out photo rather than recomputed from the overlay's size:
+     * in crop mode the photo is fitted inside a margin that keeps the handles
+     * clear of the screen edge, and a helper that re-derived the fit would have
+     * to copy that margin arithmetic too — the thing under test, duplicated.
+     */
     private fun fittedRect(): Fitted {
-        val node = composeTestRule.onNodeWithContentDescription("Crop frame").fetchSemanticsNode()
-        val canvasWidth = node.size.width.toFloat()
-        val canvasHeight = node.size.height.toFloat()
-        val scale = minOf(canvasWidth / previewWidth, canvasHeight / previewHeight)
-        val fittedWidth = previewWidth * scale
-        val fittedHeight = previewHeight * scale
+        val area = composeTestRule.onNodeWithContentDescription("Crop frame")
+            .fetchSemanticsNode().boundsInRoot
+        val photo = composeTestRule.onNodeWithContentDescription("Image being adjusted")
+            .fetchSemanticsNode().boundsInRoot
         return Fitted(
-            x = (canvasWidth - fittedWidth) / 2f,
-            y = (canvasHeight - fittedHeight) / 2f,
-            width = fittedWidth,
-            height = fittedHeight,
+            x = photo.left - area.left,
+            y = photo.top - area.top,
+            width = photo.width,
+            height = photo.height,
         )
     }
 

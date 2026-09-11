@@ -46,6 +46,17 @@ internal data class ImageFitMapper(
     val canvasHeight: Float,
     val imageWidth: Int,
     val imageHeight: Int,
+    /**
+     * Where the [canvasWidth] × [canvasHeight] area the image is fitted into
+     * starts, in screen pixels.
+     *
+     * Zero for a fit that fills the composable. The crop tool fits the photo
+     * inside a margin while its gesture layer keeps the whole canvas, so screen
+     * coordinates still start at the canvas corner — the origin is part of every
+     * mapping here rather than something a caller adds to some of them.
+     */
+    val originX: Float = 0f,
+    val originY: Float = 0f,
 ) {
     /** Uniform bitmap-pixel → screen-pixel factor; `0` for a degenerate input. */
     val scale: Float = if (canvasWidth <= 0f || canvasHeight <= 0f || imageWidth <= 0 || imageHeight <= 0) {
@@ -60,11 +71,11 @@ internal data class ImageFitMapper(
     /** Height of the image as drawn, in screen pixels. */
     val fittedHeight: Float = imageHeight * scale
 
-    /** Screen x of the image's left edge — half the pillarbox. */
-    val offsetX: Float = (canvasWidth - fittedWidth) / 2f
+    /** Screen x of the image's left edge — half the pillarbox, past [originX]. */
+    val offsetX: Float = originX + (canvasWidth - fittedWidth) / 2f
 
-    /** Screen y of the image's top edge — half the letterbox. */
-    val offsetY: Float = (canvasHeight - fittedHeight) / 2f
+    /** Screen y of the image's top edge — half the letterbox, past [originY]. */
+    val offsetY: Float = originY + (canvasHeight - fittedHeight) / 2f
 
     /** True when a screen point falls on the image rather than on a bar. */
     fun containsScreen(point: FitPoint): Boolean =

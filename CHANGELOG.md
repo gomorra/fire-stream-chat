@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.28.1] — 2026-09-11
+
+### Fixed
+
+- **The crop corners can be reached with a finger.** A photo as wide as the phone was fitted edge to edge, so its crop corners sat on the very edge of the screen: half of each grab area was off the glass and the rest sat inside the strip Android reserves for the back swipe, so reaching for a corner closed the editor instead. With the crop tool open the photo now shrinks slightly into a margin that keeps every corner clear of the screen edge and the system gesture areas, and grows back when the tool closes. The photo also no longer runs under the top bar and the bottom panel on phones with a status or navigation bar.
+
 ## [1.28.0] — 2026-09-10
 
 ### Added

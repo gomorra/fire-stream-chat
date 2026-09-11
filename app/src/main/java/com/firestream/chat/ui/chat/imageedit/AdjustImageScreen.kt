@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -19,14 +20,19 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemGestures
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyRow
@@ -76,8 +82,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -331,6 +340,14 @@ internal fun AdjustImageScreen(
             onCrop = callbacks.onCrop,
             modifier = Modifier
                 .fillMaxSize()
+                // The bars' insets as well as their heights: the top bar and the
+                // bottom panel are each pushed in by a system bar, and a canvas
+                // that knew only their heights ran a status bar's depth under the
+                // one and a navigation bar's under the other.
+                .windowInsetsPadding(
+                    WindowInsets.statusBars.only(WindowInsetsSides.Top)
+                        .union(WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)),
+                )
                 .padding(top = EditorChrome.TOP_BAR_HEIGHT_DP.dp, bottom = BOTTOM_PANEL_HEIGHT_DP.dp),
         )
 
@@ -379,6 +396,16 @@ internal fun AdjustImageScreen(
  * instead of stopping dead at the letterbox — and so every screen coordinate
  * goes through [ImageFitMapper] rather than being divided by a width that
  * happens to be the image's.
+ *
+ * ### The crop margin
+ *
+ * With the crop tool open the photo is fitted inside a margin instead of edge to
+ * edge, so every corner's grab target lies wholly on the glass and outside the
+ * system gesture strips — [CropGeometry.reachableInsets] says how wide. Only the
+ * *fit* moves in: the canvas, and the gesture layer on it, stay full-size,
+ * because a margin the overlay did not cover would be exactly the strip around
+ * each corner that a finger reaching for it lands in. The frame is normalized to
+ * the image, so the photo changing size underneath it costs nothing.
  */
 @Composable
 private fun AdjustPhoto(
@@ -391,9 +418,44 @@ private fun AdjustPhoto(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
     var canvas by remember { mutableStateOf(IntSize.Zero) }
+    // How far each canvas edge is from the window edge — the edge the gesture
+    // insets are measured from.
+    var canvasEdges by remember { mutableStateOf(EdgeInsetsPx.Zero) }
 
-    Box(modifier = modifier.onSizeChanged { canvas = it }, contentAlignment = Alignment.Center) {
+    // Cutouts and a landscape navigation bar count too: a handle under either
+    // is no more reachable than one under a gesture strip.
+    val blocked = WindowInsets.systemGestures.union(WindowInsets.safeDrawing)
+    val marginFraction by animateFloatAsState(
+        targetValue = if (tool == AdjustTool.CROP) 1f else 0f,
+        label = "crop margin",
+    )
+    val margin = CropGeometry.reachableInsets(
+        canvas = canvasEdges,
+        gestures = EdgeInsetsPx(
+            left = blocked.getLeft(density, layoutDirection).toFloat(),
+            top = blocked.getTop(density).toFloat(),
+            right = blocked.getRight(density, layoutDirection).toFloat(),
+            bottom = blocked.getBottom(density).toFloat(),
+        ),
+        grabRadius = with(density) { HANDLE_GRAB_DP.dp.toPx() },
+    ).scaled(marginFraction)
+
+    Box(
+        modifier = modifier.onGloballyPositioned { coordinates ->
+            canvas = coordinates.size
+            val bounds = coordinates.boundsInRoot()
+            val root = coordinates.findRootCoordinates().size
+            canvasEdges = EdgeInsetsPx(
+                left = bounds.left,
+                top = bounds.top,
+                right = root.width - bounds.right,
+                bottom = root.height - bounds.bottom,
+            )
+        },
+        contentAlignment = Alignment.Center,
+    ) {
         val bitmap = preview
         if (bitmap == null) {
             CircularProgressIndicator(color = FsTextMute)
@@ -401,10 +463,12 @@ private fun AdjustPhoto(
         }
 
         val mapper = ImageFitMapper(
-            canvasWidth = canvas.width.toFloat(),
-            canvasHeight = canvas.height.toFloat(),
+            canvasWidth = canvas.width - margin.left - margin.right,
+            canvasHeight = canvas.height - margin.top - margin.bottom,
             imageWidth = bitmap.width,
             imageHeight = bitmap.height,
+            originX = margin.left,
+            originY = margin.top,
         )
         if (mapper.scale <= 0f) return@Box
 
@@ -928,8 +992,11 @@ private const val GRID_DIVISIONS = 3
  * it is reaching for, so the target has to be the size of the fingertip while
  * the drawing stays the size the photo can spare. Half of the 48 dp minimum
  * target, measured as a radius.
+ *
+ * Also the grab-radius half of the crop margin (`CropGeometry.reachableInsets`),
+ * which is why it is visible to the screen test that measures that margin.
  */
-private const val HANDLE_GRAB_DP = 24
+internal const val HANDLE_GRAB_DP = 24
 
 /** Length of each arm of a corner bracket. */
 private const val HANDLE_ARM_DP = 22

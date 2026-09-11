@@ -33,6 +33,48 @@ class CropGeometryTest {
         assertEquals("bottom", expected.bottom, actual.bottom, tolerance)
     }
 
+    // ── Keeping the handles reachable ─────────────────────────────────────────
+
+    private val grab = 24f
+
+    /** A phone in portrait: canvas full-width, under a top bar and above a bottom panel. */
+    private val portraitCanvas = EdgeInsetsPx(left = 0f, top = 80f, right = 0f, bottom = 180f)
+    private val gestureStrips = EdgeInsetsPx(left = 32f, top = 24f, right = 32f, bottom = 48f)
+
+    @Test
+    fun `a canvas that runs to the screen edge clears the back gesture strip and then a whole grab radius`() {
+        // Regression: the photo was fitted edge to edge, so a corner sat on the
+        // edge of the glass — half its target off the screen and the rest inside
+        // the back-gesture strip, which takes the touch before the app sees it.
+        val margin = CropGeometry.reachableInsets(portraitCanvas, gestureStrips, grab)
+
+        assertEquals(56f, margin.left, 0.001f)
+        assertEquals(56f, margin.right, 0.001f)
+    }
+
+    @Test
+    fun `an edge the editor's own bars already hold clear of its strip adds only the grab radius`() {
+        // The top bar and the bottom panel stand between the canvas and the
+        // status and home strips; counting those strips again would shrink the
+        // photo for nothing. The grab radius still has to fit inside the canvas.
+        val margin = CropGeometry.reachableInsets(portraitCanvas, gestureStrips, grab)
+
+        assertEquals(24f, margin.top, 0.001f)
+        assertEquals(24f, margin.bottom, 0.001f)
+    }
+
+    @Test
+    fun `a canvas partway into a gesture strip clears only the rest of it`() {
+        val margin = CropGeometry.reachableInsets(
+            canvas = EdgeInsetsPx(left = 10f, top = 0f, right = 40f, bottom = 0f),
+            gestures = EdgeInsetsPx(left = 32f, top = 0f, right = 32f, bottom = 0f),
+            grabRadius = grab,
+        )
+
+        assertEquals(46f, margin.left, 0.001f)
+        assertEquals("already clear of the strip", 24f, margin.right, 0.001f)
+    }
+
     // ── Aspect ratios cross two spaces ────────────────────────────────────────
 
     @Test

@@ -49,6 +49,30 @@ class ImageFitMapperTest {
     }
 
     @Test
+    fun `an origin moves the fit area without changing the fit`() {
+        // The crop tool fits the photo inside a margin but keeps its gesture
+        // layer on the whole canvas, so every mapping has to carry the origin —
+        // a handle drawn at the shifted place and hit-tested at the unshifted one
+        // would be a margin's width from the finger.
+        val inset = ImageFitMapper(
+            canvasWidth = 400f,
+            canvasHeight = 200f,
+            imageWidth = 100,
+            imageHeight = 100,
+            originX = 30f,
+            originY = 10f,
+        )
+
+        assertEquals(2f, inset.scale, tolerance)
+        assertEquals(130f, inset.offsetX, tolerance)
+        assertEquals(10f, inset.offsetY, tolerance)
+        assertPoint(0f, 0f, inset.screenToNormalized(FitPoint(130f, 10f)))
+        assertPoint(330f, 210f, inset.normalizedToScreen(FitPoint(1f, 1f)))
+        assertTrue(inset.containsScreen(FitPoint(130f, 10f)))
+        assertFalse(inset.containsScreen(FitPoint(129f, 10f)))
+    }
+
+    @Test
     fun `a screen point maps onto the bitmap through the pillarbox`() {
         // 50 px into the 200 px-wide image, at 2x, is bitmap pixel 25.
         assertPoint(0.25f, 0.25f, pillarbox.screenToNormalized(FitPoint(150f, 50f)))

@@ -59,6 +59,27 @@ internal data class CropRect(
     }
 }
 
+/**
+ * A distance in from each physical edge, in pixels — left and right, never
+ * start and end, because the screen edges a system gesture strip hugs do not
+ * swap sides in a right-to-left layout.
+ */
+@Immutable
+internal data class EdgeInsetsPx(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float,
+) {
+    /** Every edge multiplied by [fraction] — how the crop margin animates in and out. */
+    fun scaled(fraction: Float): EdgeInsetsPx =
+        EdgeInsetsPx(left * fraction, top * fraction, right * fraction, bottom * fraction)
+
+    companion object {
+        val Zero = EdgeInsetsPx(0f, 0f, 0f, 0f)
+    }
+}
+
 /** Which corner of the crop frame a drag has hold of. */
 internal enum class CropHandle(val onLeft: Boolean, val onTop: Boolean) {
     TOP_LEFT(onLeft = true, onTop = true),
@@ -257,6 +278,32 @@ internal object CropGeometry {
         }
         return best
     }
+
+    /**
+     * How far inside its canvas the photo is fitted while the crop tool is
+     * open, so that the whole grab target around every corner can be touched.
+     *
+     * [canvas] is how far each edge of the canvas already sits from the window
+     * edge (the system bars plus the editor's own bars); [gestures] is how far
+     * the system gesture strips reach in from those same window edges. A target
+     * that reaches into a strip is not a target: the system takes a touch that
+     * lands there — back on the sides, home at the bottom — before the app sees
+     * it. A mouse in the emulator never triggers a gesture, which is how corners
+     * on the edge of the glass looked fine until a finger tried them.
+     *
+     * So each edge first clears whatever part of its strip the canvas does not
+     * already clear, then adds a whole [grabRadius], so a corner on the photo's
+     * edge has its entire target inside the canvas rather than half of it past
+     * the edge of the screen. Pure because Robolectric reports no gesture insets
+     * and could never see the half of this that matters on a phone.
+     */
+    fun reachableInsets(canvas: EdgeInsetsPx, gestures: EdgeInsetsPx, grabRadius: Float): EdgeInsetsPx =
+        EdgeInsetsPx(
+            left = (gestures.left - canvas.left).coerceAtLeast(0f) + grabRadius,
+            top = (gestures.top - canvas.top).coerceAtLeast(0f) + grabRadius,
+            right = (gestures.right - canvas.right).coerceAtLeast(0f) + grabRadius,
+            bottom = (gestures.bottom - canvas.bottom).coerceAtLeast(0f) + grabRadius,
+        )
 
     /** True when ([x], [y]) falls inside the frame — the grab area for a move. */
     fun contains(rect: CropRect, x: Float, y: Float): Boolean =

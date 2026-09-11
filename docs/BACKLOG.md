@@ -127,6 +127,11 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
   its bracket and confirm the one that moves is the one under the finger, that the
   opposite corner does not drift, and that a drag running off the photo stops at the edge
   rather than cropping black in from outside it. Also drag the frame's interior to move it.
+- **Every crop corner is reachable by thumb (margin fix, 2026-09-11).** With gesture
+  navigation on and back sensitivity at its highest, open Crop on a portrait photo and grab
+  all four corners of the full frame, in portrait and in landscape: each should move, and
+  back should never fire. Opening and closing Crop animates the photo into and out of its
+  margin — confirm nothing jumps and that the frame stays on the same part of the photo.
 - **A straighten leaves the image genuinely axis-aligned.** Photograph something with a
   hard horizontal (a windowsill, a table edge), straighten it against the thirds grid, press
   Done, and check the *written file* — not the preview — is level. A degree of drift between
