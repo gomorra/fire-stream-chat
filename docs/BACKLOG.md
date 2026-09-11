@@ -21,6 +21,24 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Client-set message ids and the if-absent retry (offline outbox step 1, 2026-09-11)
+
+Shipped in `68a53e75`; nothing has been on hardware. Firestore's transaction, its
+`waitForPendingWrites()` flush and `MetadataChanges.INCLUDE` cannot run under Robolectric,
+so the unit tests pin only which SDK call each attempt makes. Check on a device, upgrading
+over an existing install, with a second device as recipient:
+1. Send a text online → the tick must appear no later than before (the ack now arrives as a
+   metadata-only event; if it looks slower, `MetadataChanges.INCLUDE` is not reaching the
+   listener).
+2. Send, kill the app the instant it goes online, reopen the chat → the row must heal to
+   sent on its own (acknowledged echo), no retry needed, and the recipient has exactly one copy.
+3. Same, but tap retry before the heal → still one copy, and a reaction plus a read tick the
+   recipient added beforehand must survive the retry.
+4. Airplane mode → tap retry on a failed message → it must land back at failed within
+   30 s, not stay on the clock.
+The rest of the outbox checklist lives in `.claude/plans/offline-outbox.md` §4 and moves
+here when step 6 ships.
+
 ### Image editor — edit from the fullscreen viewer, and its folded controls (Phase 6, 2026-09-11)
 
 **Nothing in this phase has been on hardware.** Its risk is the whole path, which no
