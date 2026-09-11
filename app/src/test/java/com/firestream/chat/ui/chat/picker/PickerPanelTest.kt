@@ -155,17 +155,17 @@ class PickerPanelTest {
         // Icon-only except the active segment (§4: four segments plus the search
         // and delete buttons do not fit a 390 dp row with every label showing).
         composeTestRule.onNodeWithText("Emoji").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Shapes").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Stickers").assertDoesNotExist()
     }
 
     @Test
     fun `tapping a segment switches which tab is showing`() {
         setUpTwoTabs()
 
-        composeTestRule.onNodeWithContentDescription("Shapes").performClick()
+        composeTestRule.onNodeWithContentDescription("Stickers").performClick()
 
-        composeTestRule.onNodeWithText("shape content query=").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Shapes").assertIsDisplayed()
+        composeTestRule.onNodeWithText("sticker content query=").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Stickers").assertIsDisplayed()
     }
 
     @Test
@@ -177,11 +177,48 @@ class PickerPanelTest {
         composeTestRule.waitForIdle()
         // Collapsing brings the island back so the other tab is reachable.
         composeTestRule.onNodeWithContentDescription("Close search").performClick()
-        composeTestRule.onNodeWithContentDescription("Shapes").performClick()
+        composeTestRule.onNodeWithContentDescription("Stickers").performClick()
         openSearch()
 
-        composeTestRule.onNodeWithText("Search shapes…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Search stickers…").assertIsDisplayed()
+        composeTestRule.onNodeWithText("sticker content query=").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a tab with nothing to search offers no search button and no field`() {
+        // 5b shipped Text and Shapes with a search hint each, so the shell drew
+        // them a live field that accepted a query neither tab has any list to
+        // apply it to — two of the editor's four tabs offering a control that
+        // did nothing. A tab is searchable now only if it says what it would
+        // search (PickerTab.searchHint), and Shapes says nothing.
+        composeTestRule.setContent {
+            MaterialTheme {
+                PickerPanel(
+                    tabs = listOf(PickerTab.EMOJI, PickerTab.SHAPE),
+                    modifier = Modifier.height(320.dp),
+                ) { tab, query ->
+                    Text(
+                        when (tab) {
+                            PickerTab.EMOJI -> "emoji content"
+                            else -> "shape content"
+                        } + " query=$query",
+                    )
+                }
+            }
+        }
+
+        // Emoji still has one.
+        composeTestRule.onNodeWithContentDescription("Search").assertIsDisplayed()
+
+        composeTestRule.onNodeWithContentDescription("Shapes").performClick()
+        composeTestRule.waitForIdle()
+
         composeTestRule.onNodeWithText("shape content query=").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Search").assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription("Search field").assertDoesNotExist()
+        // The island is still reachable — losing the field must not cost the
+        // way back to the other tabs.
+        composeTestRule.onNodeWithContentDescription("Picker tabs").assertIsDisplayed()
     }
 
     @Test
@@ -218,17 +255,23 @@ class PickerPanelTest {
         assertEquals(1, deletes)
     }
 
+    /**
+     * Two tabs that can *both* be searched, which is what the chrome tests
+     * below are about. Shapes would not do here: it has no list a query could
+     * shorten and therefore deliberately renders no field at all — see
+     * `a tab with nothing to search offers no search button and no field`.
+     */
     private fun setUpTwoTabs() {
         composeTestRule.setContent {
             MaterialTheme {
                 PickerPanel(
-                    tabs = listOf(PickerTab.EMOJI, PickerTab.SHAPE),
+                    tabs = listOf(PickerTab.EMOJI, PickerTab.STICKER),
                     modifier = Modifier.height(320.dp),
                 ) { tab, query ->
                     Text(
                         when (tab) {
                             PickerTab.EMOJI -> "emoji content"
-                            else -> "shape content"
+                            else -> "sticker content"
                         } + " query=$query",
                     )
                 }

@@ -9,7 +9,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -29,10 +28,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Redo
-import androidx.compose.material.icons.automirrored.filled.Undo
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -77,7 +72,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -242,14 +236,18 @@ internal fun DrawImageScreen(
             onStroke = callbacks.onStroke,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = TOP_BAR_HEIGHT_DP.dp, bottom = BOTTOM_PANEL_HEIGHT_DP.dp),
+                .padding(top = EditorChrome.TOP_BAR_HEIGHT_DP.dp, bottom = BOTTOM_PANEL_HEIGHT_DP.dp),
         )
 
-        DrawTopBar(
+        EditTopBar(
+            labels = DrawTopBarLabels,
             canUndo = stack.canUndo,
             canRedo = stack.canRedo,
             enabled = !flattening,
-            callbacks = callbacks,
+            onCancel = callbacks.onCancel,
+            onUndo = callbacks.onUndo,
+            onRedo = callbacks.onRedo,
+            onDone = callbacks.onDone,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .windowInsetsPadding(WindowInsets.statusBars),
@@ -509,54 +507,18 @@ private fun DrawScope.drawOneStroke(
     )
 }
 
-/** Cancel and Done at the ends, undo and redo beside the cancel. */
-@Composable
-private fun DrawTopBar(
-    canUndo: Boolean,
-    canRedo: Boolean,
-    enabled: Boolean,
-    callbacks: DrawCallbacks,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(TOP_BAR_HEIGHT_DP.dp)
-            .padding(horizontal = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        IconButton(onClick = callbacks.onCancel, enabled = enabled) {
-            Icon(Icons.Default.Close, contentDescription = "Cancel drawing", tint = FsText)
-        }
+/**
+ * The words this screen puts on the shared [EditTopBar]. The bar itself lives
+ * in `EditorChrome` and is the same one the adjust and overlay screens use —
+ * only the nouns differ, because only the nouns can.
+ */
+private val DrawTopBarLabels = EditTopBarLabels(
+    cancel = "Cancel drawing",
+    undo = "Undo stroke",
+    redo = "Redo stroke",
+    done = "Apply drawing",
+)
 
-        Spacer(modifier = Modifier.width(4.dp))
-
-        IconButton(onClick = callbacks.onUndo, enabled = enabled && canUndo) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Undo,
-                contentDescription = "Undo stroke",
-                tint = if (enabled && canUndo) FsText else FsTextMute,
-            )
-        }
-        IconButton(onClick = callbacks.onRedo, enabled = enabled && canRedo) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.Redo,
-                contentDescription = "Redo stroke",
-                tint = if (enabled && canRedo) FsText else FsTextMute,
-            )
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
-        IconButton(onClick = callbacks.onDone, enabled = enabled) {
-            Icon(
-                imageVector = Icons.Default.Check,
-                contentDescription = "Apply drawing",
-                tint = if (enabled) FireOrange else FsTextMute,
-            )
-        }
-    }
-}
 
 /**
  * The colour swatches — or, for blur, a line saying what blur does instead.
@@ -656,7 +618,7 @@ private fun DrawToolRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(TOOL_ROW_HEIGHT_DP.dp)
+            .height(EditorChrome.TOOL_ROW_HEIGHT_DP.dp)
             .padding(end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -665,19 +627,30 @@ private fun DrawToolRow(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            DrawToolButton(Icons.Default.Edit, "Pen", tool == StrokeTool.PEN, enabled) {
-                callbacks.onSelectTool(StrokeTool.PEN)
-            }
-            DrawToolButton(
+            EditToolButton(
+                icon = Icons.Default.Edit,
+                label = "Pen",
+                selected = tool == StrokeTool.PEN,
+                enabled = enabled,
+                onClick = { callbacks.onSelectTool(StrokeTool.PEN) },
+                width = DRAW_TOOL_WIDTH_DP.dp,
+            )
+            EditToolButton(
                 icon = Icons.Outlined.Brush,
                 label = "Highlighter",
                 selected = tool == StrokeTool.HIGHLIGHTER,
                 enabled = enabled,
                 onClick = { callbacks.onSelectTool(StrokeTool.HIGHLIGHTER) },
+                width = DRAW_TOOL_WIDTH_DP.dp,
             )
-            DrawToolButton(Icons.Outlined.BlurOn, "Blur", tool == StrokeTool.BLUR, enabled) {
-                callbacks.onSelectTool(StrokeTool.BLUR)
-            }
+            EditToolButton(
+                icon = Icons.Outlined.BlurOn,
+                label = "Blur",
+                selected = tool == StrokeTool.BLUR,
+                enabled = enabled,
+                onClick = { callbacks.onSelectTool(StrokeTool.BLUR) },
+                width = DRAW_TOOL_WIDTH_DP.dp,
+            )
         }
 
         IconButton(
@@ -699,38 +672,6 @@ private fun DrawToolRow(
     }
 }
 
-@Composable
-private fun DrawToolButton(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    selected: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val tint = when {
-        !enabled -> FsTextMute
-        selected -> FireOrange
-        else -> FsText
-    }
-    Column(
-        modifier = Modifier
-            .size(width = 76.dp, height = TOOL_ROW_HEIGHT_DP.dp)
-            .semantics { contentDescription = label }
-            .clickable(enabled = enabled, onClick = onClick),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(22.dp))
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = tint,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        )
-    }
-}
-
 /** A screen point as a fraction of the image, which is how a stroke is stored. */
 private fun ImageFitMapper.normalizedPoint(position: Offset): StrokePoint {
     val normalized = screenToNormalized(FitPoint(position.x, position.y))
@@ -747,11 +688,16 @@ private fun StrokePoint.toFit(): FitPoint = FitPoint(x, y)
  */
 private const val PREVIEW_MAX_PX = 1600
 
-private const val TOP_BAR_HEIGHT_DP = 56
 private const val WIDTH_ROW_HEIGHT_DP = 48
-private const val TOOL_ROW_HEIGHT_DP = 68
+
+/**
+ * Wider than [EditToolButton]'s 64 dp default, because "Highlighter" does not
+ * fit in that: three tools share this row where the adjust screen fits five.
+ */
+private const val DRAW_TOOL_WIDTH_DP = 76
+
 private const val BOTTOM_PANEL_HEIGHT_DP =
-    EditorChrome.COLOUR_ROW_HEIGHT_DP + WIDTH_ROW_HEIGHT_DP + TOOL_ROW_HEIGHT_DP
+    EditorChrome.COLOUR_ROW_HEIGHT_DP + WIDTH_ROW_HEIGHT_DP + EditorChrome.TOOL_ROW_HEIGHT_DP
 
 private const val WIDTH_PREVIEW_BOX_DP = 34
 private const val WIDTH_PREVIEW_MIN_DP = 4f
