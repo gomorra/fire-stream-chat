@@ -485,15 +485,30 @@ class ChatViewModel @Inject constructor(
      * On viewModelScope, unlike the saves above that outlive the screen: an edit
      * nobody is left to see open is not worth finishing. A second tap while one
      * is in flight is ignored rather than racing it.
+     *
+     * Only a download earns the [ViewerEdit.Preparing] scrim. A photo already on
+     * this device is copied in milliseconds, too short for a spinner to do
+     * anything but flash over the photo, which the first hardware pass saw as a
+     * glitch. That leaves one narrow edge: a back press inside those
+     * milliseconds closes the viewer, and the preview opens over the chat anyway.
      */
     internal fun editFromViewer(item: FullscreenMediaItem) {
         if (viewerEditJob?.isActive == true) return
         val generation = ++viewerEditGeneration
-        setViewerEdit(ViewerEdit.Preparing)
+        // What the viewer has on screen — so the preview can draw the same bitmap
+        // on its first frame instead of black while its own copy decodes.
+        val shown = fullscreenImageModel(item.imageUrl, item.localUri)
+        if (shown !is File) setViewerEdit(ViewerEdit.Preparing)
         viewerEditJob = viewModelScope.launch {
             try {
-                val file = readableSentImage(item.localUri, item.imageUrl, downloadId = item.messageId)
-                setViewerEdit(ViewerEdit.Ready(imageEditRasterizer.importSource(file)))
+                val file = shown as? File
+                    ?: readableSentImage(item.localUri, item.imageUrl, downloadId = item.messageId)
+                setViewerEdit(
+                    ViewerEdit.Ready(
+                        source = imageEditRasterizer.importSource(file),
+                        placeholderKey = shown?.let(::fullscreenImageCacheKey),
+                    )
+                )
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

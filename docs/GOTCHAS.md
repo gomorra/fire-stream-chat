@@ -98,6 +98,25 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   finger-to-grip gap, measured at touch-*down*: `detectDragGestures` calls back only after
   touch slop, so record the down position yourself (a non-consuming `Initial`-pass
   `awaitFirstDown`). Accumulating `dragAmount` instead loses the slop, and the grip lags.
+- **Two overlays showing the same content must not cross-fade over a third.**
+  Closing the fullscreen viewer in the same frame as opening the send preview over
+  it — both black, both drawing the photo at `Fit` — looked like it should be
+  seamless. It is not: with the viewer at alpha 1−t and the preview at t, the chat
+  list beneath both shows through at t(1−t), a quarter at the midpoint, so the photo
+  visibly dips and comes back. Keep the lower overlay composed until the upper one
+  has *settled* (`ui/components/OnEnterSettled.kt` watches
+  `AnimatedVisibilityScope.transition.currentState`), then close it under an opaque
+  cover. The same hand-off had two more traps stacked on it. **A new Coil model is
+  a new cache key, so its first frame is blank:** the preview rendered a
+  byte-identical *copy* of the viewer's file, which shares nothing with it under
+  Coil's default `path:lastModified` key. Give the source request an explicit
+  `memoryCacheKey` and the destination request a `placeholderMemoryCacheKey` naming
+  it — Coil draws the cached bitmap from frame one and fades the fresh decode in over
+  it, keeping the placeholder opaque because it came from the cache. And **a
+  progress scrim published before a fast operation flashes:** gate `Preparing` on
+  the slow path (a download), not on the operation as a whole. Bit us as Phase 6's
+  "pops away and comes back" (`.claude/plans/image-editor.md`, Phase 6 items 8, 9,
+  14).
 
 ## Coroutines / lifecycle
 
@@ -150,6 +169,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   Use a root scope sharing the test dispatcher —
   `CoroutineScope(coroutineContext + SupervisorJob())` — and cancel it in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
+- **A paused `mainClock` never sees a bare state write.** With
+  `composeTestRule.mainClock.autoAdvance = false`, setting a `mutableStateOf` from the
+  test thread and then calling `advanceTimeBy` / `advanceTimeByFrame` runs frames the
+  recomposer does nothing in: the write's apply notification is only sent by
+  `waitForIdle()`, and `waitForIdle()` on a paused clock sends it but yields no frame
+  to recompose in. Each half on its own composes nothing, so an assertion that
+  something has *not* happened yet passes for the wrong reason. The order is write →
+  `waitForIdle()` → advance the clock (`runOnIdle { … }` alone is not enough), and an
+  `AnimatedVisibility` must be composed hidden and *then* shown — one composed visible
+  from the start skips its enter animation. See `ui/components/OnEnterSettledTest.kt`.
 
 ## Platform / dependencies
 

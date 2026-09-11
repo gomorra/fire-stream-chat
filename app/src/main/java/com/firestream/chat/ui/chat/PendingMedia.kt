@@ -43,6 +43,15 @@ internal data class PendingMedia(
     val editHistory: List<String> = emptyList(),
     /** `0` = [originalUri]; `n` = `editHistory[n - 1]`. */
     val editCursor: Int = 0,
+    /**
+     * A Coil memory-cache key under which [originalUri]'s pixels are already
+     * decoded — set for a photo opened from a fullscreen viewer, which has just
+     * drawn them — so the preview's first frame is the photo rather than black
+     * while the edit-cache copy decodes. Presentation state, not part of the
+     * pick: it is not saved across recreation (the copy is cached by then), and
+     * `previewImageRequest` ignores it once an edit has replaced the original.
+     */
+    val originalMemoryCacheKey: String? = null,
 ) {
     val isVideo: Boolean get() = mimeType.startsWith("video/")
 

@@ -51,8 +51,13 @@ internal data class FullscreenVideo(
 internal sealed interface ViewerEdit {
     data object Preparing : ViewerEdit
 
-    /** [source] is the edit-cache copy — the new batch's untouched original. */
-    data class Ready(val source: Uri) : ViewerEdit
+    /**
+     * [source] is the edit-cache copy — the new batch's untouched original.
+     * [placeholderKey] is the memory-cache key the viewer filed the photo on
+     * screen under (`fullscreenImageCacheKey`), for the preview to draw from on
+     * its first frame; null when the viewer had nothing to show.
+     */
+    data class Ready(val source: Uri, val placeholderKey: String? = null) : ViewerEdit
 }
 
 internal data class OverlaysState(

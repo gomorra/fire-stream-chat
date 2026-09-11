@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,6 +51,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
+import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import java.io.File
 
@@ -228,44 +230,55 @@ private fun ZoomableImage(
  * local file over the remote URL. The check is synchronous so we never hand Coil
  * the remote URL during a transient "don't know yet" window — that race made
  * cold-restart taps always start a network load before swapping to the local
- * file. canRead() catches MediaStore files written by a previous install of this
- * app — they exist but EACCES on direct open.
+ * file.
  */
 @Composable
 private fun rememberFullscreenImageRequest(imageUrl: String?, localUri: String?): ImageRequest? {
-    val localFile = remember(localUri) {
-        localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
-    }
-    val imageModel: Any? = when {
-        localFile != null -> localFile
-        !imageUrl.isNullOrBlank() -> imageUrl
-        else -> {
-            Log.w(
-                "FullscreenImageViewer",
-                "No model — localUri=$localUri, imageUrl=$imageUrl",
-            )
-            null
+    val imageModel = remember(imageUrl, localUri) {
+        fullscreenImageModel(imageUrl, localUri).also {
+            if (it == null) Log.w("FullscreenImageViewer", "No model — localUri=$localUri, imageUrl=$imageUrl")
         }
     }
     val context = LocalContext.current
-    return remember(imageModel) {
-        imageModel?.let { model ->
-            ImageRequest.Builder(context)
-                .data(model)
-                .crossfade(true)
-                .listener(
-                    onError = { req, result ->
-                        Log.w(
-                            "FullscreenImageViewer",
-                            "Load failed for ${req.data}",
-                            result.throwable,
-                        )
-                    },
-                )
-                .build()
-        }
-    }
+    return remember(imageModel) { imageModel?.let { fullscreenImageRequest(context, it) } }
 }
+
+/**
+ * What a fullscreen viewer shows for a photo: its local file when that is
+ * readable, else the remote URL, else nothing. One function rather than the
+ * choice inlined, because [ChatViewModel.editFromViewer] has to name the bitmap
+ * the viewer is showing (see [fullscreenImageCacheKey]) and a second copy of
+ * the rule would drift from this one. canRead() catches MediaStore files
+ * written by a previous install of this app — they exist but EACCES on open.
+ */
+internal fun fullscreenImageModel(imageUrl: String?, localUri: String?): Any? {
+    val localFile = localUri?.let(::File)?.takeIf { it.isFile && it.canRead() }
+    return localFile ?: imageUrl?.takeIf { it.isNotBlank() }
+}
+
+/**
+ * The memory-cache key a fullscreen viewer files [model]'s bitmap under.
+ * Explicit rather than Coil's default, so the send preview opened from a viewer
+ * can ask for that very bitmap as its placeholder ([previewImageRequest]): the
+ * preview shows a *copy* of the file, which under default keys shares nothing
+ * with what the viewer has just drawn, and its first frame was black until the
+ * copy had decoded. A file's key keeps the modification time Coil's own key
+ * carries, so a file overwritten in place is never served from a stale entry.
+ */
+internal fun fullscreenImageCacheKey(model: Any): String =
+    if (model is File) "fullscreen:${model.path}:${model.lastModified()}" else "fullscreen:$model"
+
+internal fun fullscreenImageRequest(context: Context, model: Any): ImageRequest =
+    ImageRequest.Builder(context)
+        .data(model)
+        .memoryCacheKey(MemoryCache.Key(fullscreenImageCacheKey(model)))
+        .crossfade(true)
+        .listener(
+            onError = { req, result ->
+                Log.w("FullscreenImageViewer", "Load failed for ${req.data}", result.throwable)
+            },
+        )
+        .build()
 
 /**
  * Top-right controls and optional snackbar shared by both viewers.

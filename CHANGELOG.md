@@ -10,6 +10,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
+- **Editing a photo from the fullscreen viewer no longer makes it blink.** Tapping Edit put the photo in the same place in the send preview, but it vanished and came back on the way there: the viewer faded out while the preview faded in over the chat underneath, the preview drew nothing until it had decoded its own copy of the photo, and the fetch spinner flashed even for a photo already on the device. The preview now starts from the very bitmap the viewer was showing, fades in over the still-open viewer and closes it only once fully in, and the spinner appears only when a download is actually needed.
 - **Saving a photo from the search results now confirms it.** The "saved to Downloads" message was shown underneath the fullscreen photo, where nobody could see it or tap Open. (`5406ef3c`)
 
 ## [1.29.0] — 2026-09-11

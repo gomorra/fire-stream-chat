@@ -937,6 +937,18 @@ left open, **flagged here for sign-off rather than settled**:
    new message, not a change to the photo on screen, so backing out of the preview
    lands in the chat (or the search grid) rather than resurfacing the photo it came
    from. Search results took a query to produce and are kept, as elsewhere.
+   **Amended 2026-09-11, after the first hardware pass:** the viewer closes once the
+   preview has *faded in over it*, not in the same frame. Closing both at once
+   cross-faded two copies of the photo over the chat list, and the photo visibly
+   dipped and came back — the user reported it as popping away. `OnEnterSettled`
+   (`ui/components`) runs the close when the preview's enter transition has landed,
+   and the preview's dismiss and send run it too, so an open cut short still lands
+   in the chat. The viewer's `BackHandler` ordering is untouched: the preview's own
+   handler is composed later and wins for as long as both are up. The jump
+   `closeFullscreenImage` makes to a swiped-to message (lead 4 of the diagnosis)
+   was never the pop itself, but it ran during the fade; it now runs under the
+   opaque preview. The flag that drives all this is inline `ChatScreen` state with
+   no test seam, like item 12's snackbar routing; the device pass covers it.
 9. **The fetch is state, not an event.** `OverlaysState.viewerEdit` is a sealed
    `Preparing` / `Ready(uri)` — one field, so the two cannot both be true — and survives
    a rotation mid-download the way `fullscreenImage` does. `ChatScreen` consumes
@@ -949,6 +961,11 @@ left open, **flagged here for sign-off rather than settled**:
    finishes but before the coroutine resumes orphans the copy until `sweepStale`
    collects it 24 h later. A back press in the single frame between `Ready` and the
    screen consuming it closes the viewer, and the preview still opens.
+   **Amended 2026-09-11:** `Preparing` is published only when a download is needed.
+   For a photo already on the device the copy takes milliseconds, and the scrim's
+   fade-in-then-out over the photo was the second half of the same pop. The bare
+   copy widens the second edge above from one frame to a few milliseconds; still
+   accepted. The scrim's touch-swallowing and its back handler are unchanged.
 10. **The preview's HD pill is left as it is.** §2.6 rules out an HD control in the
     *viewer*, and there is none. The preview's pill governs the new send, which is a
     real choice: re-encoding at q80 or q100, and whether to downscale. It cannot
@@ -972,6 +989,22 @@ left open, **flagged here for sign-off rather than settled**:
     `FullscreenImagePager` 66, `FullscreenImageViewer` 52, `FullscreenOverlayControls`
     57, `OverlayControlButton` 69, and `ChatScreen` 142 after gaining the edit hand-off
     and scrim. `MessageBubble` is still the app's tightest at 252.
+14. **The preview's first frame is the viewer's bitmap** (2026-09-11, same pass). The
+    preview renders the edit-cache *copy*, a different file from the viewer's, so
+    under Coil's default keys nothing was cached for it and the page was black until
+    the copy had decoded — the third contributor to the pop. The viewer now files its
+    bitmap under an explicit key (`fullscreenImageCacheKey`), `ViewerEdit.Ready`
+    carries that key, `PendingMedia.originalMemoryCacheKey` hands it to the preview,
+    and `previewImageRequest` names it as `placeholderMemoryCacheKey` while the
+    original is on show — never for an edited step, which must not surface the
+    untouched photo underneath itself. Not persisted across recreation: by then the
+    copy itself is cached. `FullscreenImageRequestTest` pins the two sides agreeing on
+    the key, `OnEnterSettledTest` pins the close timing, and the ViewModel test pins
+    the absent spinner. What no test reaches is the hand-off's feel, which lives
+    inline in `ChatScreen`; it is on the device pass.
+    Registers after the change, from the debug dex: `ChatScreen` 142 (unchanged),
+    `ImagePreviewScreen` 121, `FullscreenOverlayControls` 39 (down from 57 with the
+    tray gone), `OnEnterSettled` 15; `MessageBubble` still 252.
 
 **The download-button audit.** Save is on the chat gallery, the chat's single-image
 fallback (message photos only) and the search gallery. Where it is absent, it is

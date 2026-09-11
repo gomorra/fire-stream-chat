@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -67,11 +68,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.memory.MemoryCache
+import coil.request.ImageRequest
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.AdjustImageScreen
 import com.firestream.chat.ui.chat.imageedit.DrawImageScreen
@@ -322,8 +326,11 @@ internal fun ImagePreviewScreen(
                     isActive = isActive,
                     onZoomChange = { zoomed -> if (isActive) currentPageZoomed = zoomed },
                 ) { transform ->
+                    val context = LocalContext.current
                     AsyncImage(
-                        model = item.uri,
+                        model = remember(item.uri, item.originalMemoryCacheKey) {
+                            previewImageRequest(context, item)
+                        },
                         contentDescription = "Image preview",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -735,6 +742,24 @@ private fun ThumbnailStrip(
         }
     }
 }
+
+/**
+ * The request for one page of the preview. A photo opened from a fullscreen
+ * viewer names the viewer's cached bitmap as its placeholder
+ * ([PendingMedia.originalMemoryCacheKey]), so the page's first frame is the
+ * photo and not black while the copy decodes; Coil then fades the decode in
+ * over the placeholder, which is the same pixels, so nothing visibly changes.
+ * Only while the original is what is on show: an edited step must not surface
+ * the untouched photo underneath itself, however briefly.
+ */
+internal fun previewImageRequest(context: Context, item: PendingMedia): ImageRequest =
+    ImageRequest.Builder(context)
+        .data(item.uri)
+        .apply {
+            val cached = item.originalMemoryCacheKey?.takeIf { item.uri == item.originalUri }
+            if (cached != null) placeholderMemoryCacheKey(MemoryCache.Key(cached))
+        }
+        .build()
 
 /** Which of the editor screens an [EditTarget] is open on. */
 private enum class Editor { ADJUST, DRAW, OVERLAY }

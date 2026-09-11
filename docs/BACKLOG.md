@@ -37,6 +37,15 @@ path is verified once the preview shows the right photo, not once a message goes
   the viewer gone underneath. Run an adjust and an undo, then confirm Original ⇄ Edited
   still returns to the photo as received. Back out of the preview and confirm you land
   in the chat, not back in the viewer.
+- **No blink on the way into the preview.** Open a downloaded photo, tap Edit and watch
+  the photo itself: it must stay put at full brightness, with no dip towards the chat
+  behind it, no flash to black and no spinner scrim (the first hardware pass saw all
+  three; fixed after it). A slow-motion screen recording settles it if the eye cannot.
+  Then swipe to a second photo before tapping Edit and confirm the chat has landed on
+  that photo once you back out of the preview. Also press back within the first
+  half-second of the preview fading in and confirm you land in the chat, not back in
+  the viewer. This timing is the one part of the fix no Robolectric test reaches: the
+  hand-off lives inline in `ChatScreen`.
 - **Edit on a photo not yet on this device shows a spinner, then the preview.** Use a
   photo received with auto-download off. While the spinner is up, confirm the photo
   cannot be swiped. Press back mid-fetch and confirm you stay in the viewer and no

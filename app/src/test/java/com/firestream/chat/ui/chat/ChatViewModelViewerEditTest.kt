@@ -29,7 +29,9 @@ import io.mockk.mockkStatic
 import io.mockk.unmockkAll
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
@@ -77,6 +79,9 @@ class ChatViewModelViewerEditTest {
 
     private val imported = mockk<Uri>()
     private val remoteUrl = "https://example.com/photo.jpg"
+
+    /** What a viewer with no readable local file shows, and files its bitmap under. */
+    private val remoteKey = fullscreenImageCacheKey(remoteUrl)
 
     @Before
     fun setUp() {
@@ -142,9 +147,27 @@ class ChatViewModelViewerEditTest {
 
         viewModel.editFromViewer(FullscreenMediaItem(remoteUrl, local.path, "m1"))
 
-        assertEquals(ViewerEdit.Ready(imported), viewModel.viewerEdit())
+        // Ready names the bitmap the viewer is showing — the local file's, not
+        // the URL's — for the preview's first frame.
+        assertEquals(ViewerEdit.Ready(imported, fullscreenImageCacheKey(local)), viewModel.viewerEdit())
         coVerify(exactly = 1) { imageEditRasterizer.importSource(local) }
         coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
+    }
+
+    @Test
+    fun `a photo already on this device opens without a spinner`() = runTest {
+        // The copy takes milliseconds; a scrim that fades in and straight back
+        // out over the photo reads as a glitch, not as progress.
+        val local = tmp.newFile("m1.jpg").apply { writeText("jpeg") }
+        val viewModel = buildViewModel()
+        val seen = mutableListOf<ViewerEdit?>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.uiState.map { it.overlays.viewerEdit }.distinctUntilChanged().toList(seen)
+        }
+
+        viewModel.editFromViewer(FullscreenMediaItem(remoteUrl, local.path, "m1"))
+
+        assertEquals(listOf(null, ViewerEdit.Ready(imported, fullscreenImageCacheKey(local))), seen)
     }
 
     @Test
@@ -155,7 +178,7 @@ class ChatViewModelViewerEditTest {
 
         viewModel.editFromViewer(remoteOnly)
 
-        assertEquals(ViewerEdit.Ready(imported), viewModel.viewerEdit())
+        assertEquals(ViewerEdit.Ready(imported, remoteKey), viewModel.viewerEdit())
         coVerify(exactly = 1) { imageEditRasterizer.importSource(downloaded) }
     }
 
@@ -173,7 +196,7 @@ class ChatViewModelViewerEditTest {
 
         viewModel.editFromViewer(remoteOnly)
 
-        assertEquals(ViewerEdit.Ready(imported), viewModel.viewerEdit())
+        assertEquals(ViewerEdit.Ready(imported, remoteKey), viewModel.viewerEdit())
         coVerify(exactly = 1) { imageEditRasterizer.importSource(fresh) }
     }
 
@@ -188,7 +211,7 @@ class ChatViewModelViewerEditTest {
 
         download.complete(tmp.newFile("m1.jpg"))
 
-        assertEquals(ViewerEdit.Ready(imported), viewModel.viewerEdit())
+        assertEquals(ViewerEdit.Ready(imported, remoteKey), viewModel.viewerEdit())
     }
 
     @Test
