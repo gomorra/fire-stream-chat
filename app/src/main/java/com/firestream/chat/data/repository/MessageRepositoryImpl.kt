@@ -178,6 +178,10 @@ class MessageRepositoryImpl @Inject constructor(
      * [BLOCK_CACHE_TTL_MS]. Unlike [blockedUserIds] this does *not* fail open —
      * a fetch error propagates, so a send is refused rather than delivered to
      * someone who may have blocked the sender.
+     *
+     * Send paths call it inside [failSendOnError], *after* the optimistic
+     * insert: offline, a cache miss throws, and running it first dropped the
+     * message with no bubble and nothing to retry. Now the row lands FAILED.
      */
     private suspend fun isBlocked(senderId: String, recipientId: String): Boolean {
         val key = "$senderId|$recipientId"
@@ -189,6 +193,13 @@ class MessageRepositoryImpl @Inject constructor(
             return userSource.isUserBlocked(senderId, recipientId).also {
                 blockedPairCache[key] = it to System.currentTimeMillis()
             }
+        }
+    }
+
+    /** Throws [ERR_USER_BLOCKED] for a blocked 1:1 peer; group sends pass an empty [recipientId]. */
+    private suspend fun ensureNotBlocked(senderId: String, recipientId: String) {
+        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
+            throw Exception(ERR_USER_BLOCKED)
         }
     }
 
@@ -578,9 +589,6 @@ class MessageRepositoryImpl @Inject constructor(
         emojiSizes: Map<Int, Float>
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
 
@@ -599,6 +607,7 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
         failSendOnError(tempId) {
+            ensureNotBlocked(senderId, recipientId)
             val remoteId = sendEncryptedOrPlain(
                 chatId = chatId,
                 senderId = senderId,
@@ -654,9 +663,6 @@ class MessageRepositoryImpl @Inject constructor(
      */
     override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
         val parsedUri = Uri.parse(uri)
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
@@ -703,6 +709,7 @@ class MessageRepositoryImpl @Inject constructor(
         var tempThumbFile: File? = null
         try {
             failSendOnError(tempId) {
+                ensureNotBlocked(senderId, recipientId)
                 // For images: compress/process and store locally.
                 // For videos: transcode to H.264/AAC mp4, store locally, then
                 // extract + upload a JPEG thumbnail (populates mediaThumbnailUrl).
@@ -837,9 +844,8 @@ class MessageRepositoryImpl @Inject constructor(
             throw IllegalStateException("Cannot retry message in state ${message.status}")
         }
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
+        // Before the flip to SENDING: a throw leaves the row FAILED, nothing is lost.
+        ensureNotBlocked(senderId, recipientId)
         val chatId = message.chatId
         // Flip the row back to SENDING so the bubble updates immediately while
         // we re-run the pipeline. We revert to FAILED in the catch block if the
@@ -1116,9 +1122,8 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
+        // Before the insert: the source message stays in its chat, so a throw loses nothing.
+        ensureNotBlocked(senderId, recipientId)
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
 
@@ -1156,9 +1161,6 @@ class MessageRepositoryImpl @Inject constructor(
 
     override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
         val parsedUri = Uri.parse(uri)
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
@@ -1177,6 +1179,7 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
         failSendOnError(tempId) {
+            ensureNotBlocked(senderId, recipientId)
             val downloadUrl = storageSource.uploadMedia(chatId, tempId, parsedUri, "audio/aac")
 
             val remoteId = sendEncryptedOrPlain(
@@ -1482,9 +1485,6 @@ class MessageRepositoryImpl @Inject constructor(
         comment: String
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
         val tempId = UUID.randomUUID().toString()
         val timestamp = System.currentTimeMillis()
         val content = comment.ifBlank { LOCATION_DEFAULT_CONTENT }
@@ -1503,6 +1503,7 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.insertMessage(MessageEntity.fromDomain(optimisticMessage))
 
         failSendOnError(tempId) {
+            ensureNotBlocked(senderId, recipientId)
             val remoteId = messageSource.sendPlainMessage(
                 chatId = chatId,
                 senderId = senderId,
@@ -1531,9 +1532,6 @@ class MessageRepositoryImpl @Inject constructor(
         sound: TimerAlarmSound,
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
-        }
         require(durationMs > 0L) { "Timer duration must be positive" }
 
         val tempId = UUID.randomUUID().toString()
@@ -1557,6 +1555,7 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.insertMessage(MessageEntity.fromDomain(optimistic))
 
         failSendOnError(tempId) {
+            ensureNotBlocked(senderId, recipientId)
             val result = messageSource.sendTimerMessage(
                 chatId = chatId,
                 senderId = senderId,
