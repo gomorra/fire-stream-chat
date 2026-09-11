@@ -203,12 +203,27 @@ class OverlayGeometryTest {
     fun `an object may hang off the edge but its centre may not leave the photo`() {
         val overlay = ImageOverlay(OverlayContent.Emoji("🎉"), centerX = 0.9f, centerY = 0.5f)
 
-        val moved = OverlayGeometry.moved(overlay, dx = 0.4f, dy = -0.9f)
+        val moved = OverlayGeometry.movedTo(overlay, centerX = 1.3f, centerY = -0.4f)
 
         // Clamped, because a centre outside the image is an object nothing on
         // screen can be tapped to get back.
         assertEquals(1f, moved.centerX, 0.001f)
         assertEquals(0f, moved.centerY, 0.001f)
+    }
+
+    @Test
+    fun `a move is a target, so applying the same drag event twice lands in the same place`() {
+        val overlay = ImageOverlay(OverlayContent.Emoji("🎉"), centerX = 0.5f, centerY = 0.5f)
+
+        // The drag reads the object as last drawn, and when two pointer events
+        // land before the next frame both are applied to the newest state. A step
+        // would count the first event again; a target cannot.
+        val once = OverlayGeometry.movedTo(overlay, centerX = 0.6f, centerY = 0.45f)
+        val twice = OverlayGeometry.movedTo(once, centerX = 0.6f, centerY = 0.45f)
+
+        assertEquals(once, twice)
+        assertEquals(0.6f, twice.centerX, 0.001f)
+        assertEquals(0.45f, twice.centerY, 0.001f)
     }
 
     // ── Readouts ─────────────────────────────────────────────────────────────

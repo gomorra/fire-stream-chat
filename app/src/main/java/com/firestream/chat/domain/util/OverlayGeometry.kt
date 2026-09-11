@@ -328,17 +328,23 @@ object OverlayGeometry {
         hypot(point.x - centerX, point.y - centerY)
 
     /**
-     * A placement moved by a drag expressed in fractions of the image, clamped
-     * so the object's centre can never leave the photo.
+     * A placement with its centre put at [centerX], [centerY] — fractions of the
+     * image — clamped so that centre can never leave the photo.
+     *
+     * A target rather than a step. The drag reads the object as it was last
+     * drawn, and a step worked out against that position but added to the
+     * current one counts every pointer event since that frame again: two events
+     * between frames, which is every Robolectric swipe and a phone whose drawing
+     * has fallen behind the finger, ran the object into the edge of the photo.
      *
      * The *centre*, not the whole object: dragging a sticker half off the edge
      * is a thing people do deliberately, and forbidding it would be the wrong
      * rule. What must not happen is an object whose centre is outside the image,
      * because then nothing on screen can be tapped to get it back.
      */
-    fun moved(overlay: ImageOverlay, dx: Float, dy: Float): ImageOverlay = overlay.copy(
-        centerX = (overlay.centerX + dx).coerceIn(0f, 1f),
-        centerY = (overlay.centerY + dy).coerceIn(0f, 1f),
+    fun movedTo(overlay: ImageOverlay, centerX: Float, centerY: Float): ImageOverlay = overlay.copy(
+        centerX = centerX.coerceIn(0f, 1f),
+        centerY = centerY.coerceIn(0f, 1f),
     )
 
     /** The readout the scale handle shows — `1.4×`, to one decimal. */

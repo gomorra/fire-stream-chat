@@ -70,8 +70,8 @@ internal data class OverlayCallbacks(
     /** A tap: the index under the finger, or null for a tap on bare photo. */
     val onSelect: (Int?) -> Unit,
     val onPlace: (OverlayContent) -> Unit,
-    /** A drag on the selected object, in fractions of the image. */
-    val onMove: (dx: Float, dy: Float) -> Unit,
+    /** A drag on the selected object: where its centre goes, in fractions of the image. */
+    val onMove: (centerX: Float, centerY: Float) -> Unit,
     val onScale: (Float) -> Unit,
     val onRotate: (Float) -> Unit,
     val onDelete: () -> Unit,
@@ -182,8 +182,8 @@ internal fun OverlayImageScreen(
                 selectedIndex = placed.overlays.lastIndex
             }
         },
-        onMove = { dx, dy ->
-            selected?.let { index -> stack = stack.adjust(index) { OverlayGeometry.moved(it, dx, dy) } }
+        onMove = { x, y ->
+            selected?.let { index -> stack = stack.adjust(index) { OverlayGeometry.movedTo(it, x, y) } }
         },
         onScale = { scale ->
             selected?.let { index -> stack = stack.adjust(index) { it.copy(scale = scale) } }

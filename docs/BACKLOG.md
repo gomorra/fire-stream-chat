@@ -79,7 +79,10 @@ image, so a rotation mid-placement is a supported path and an untested one.
   to hit.
 - **A drag keeps up with the finger.** Place several objects on a full-resolution photo
   and drag the topmost. Also confirm a second finger landing mid-drag does not tug the
-  object to it, and that tapping bare photo deselects.
+  object to it, and that tapping bare photo deselects. Then place a line of text wider
+  than the photo, grab it near one end and drag it several times in the same direction:
+  it must keep travelling, not jump back to where each drag began — which it did until
+  the grab offset landed, and only on hardware was it noticed.
 - **The flattened file matches the preview.** Place a sticker, a text run and a shape,
   press Done, and inspect the **written file** via the preview's *Save to Downloads*
   button — not the preview. Check position, size, angle and the text's vertical centring,

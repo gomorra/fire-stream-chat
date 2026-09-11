@@ -3,6 +3,7 @@ package com.firestream.chat.ui.chat.imageedit
 import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -10,6 +11,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import com.firestream.chat.domain.util.OverlayContent
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.ShapeKind
@@ -197,6 +200,40 @@ class OverlayImageScreenTest {
         composeTestRule.onNodeWithContentDescription("Overlay text").performTextInput("hi")
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithContentDescription("Place text").assertIsEnabled()
+    }
+
+    // ── Moving ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a drag moves an object by how far the finger travelled, not to where it landed`() {
+        setContent()
+
+        // A line of text wider than a finger is far from its own centre, so it is
+        // grabbed off-centre — the case that snapped its centre under the finger
+        // at the start of every drag, and back again at the start of the next.
+        tab("Text")
+        composeTestRule.onNodeWithContentDescription("Overlay text").performTextInput("hello, hello, hello")
+        composeTestRule.waitForIdle()
+        tap("Place text")
+
+        val canvas = composeTestRule.onNodeWithContentDescription("Overlay canvas")
+        val size = canvas.fetchSemanticsNode().size
+        val fittedWidth = ImageFitMapper(size.width.toFloat(), size.height.toFloat(), 400, 300).fittedWidth
+        val grabOffset = size.width * 0.1f
+        val travel = size.width * 0.1f
+        canvas.performTouchInput {
+            swipe(
+                start = Offset(centerX + grabOffset, centerY),
+                end = Offset(centerX + grabOffset + travel, centerY),
+                durationMillis = 200,
+            )
+        }
+        composeTestRule.waitForIdle()
+        pressDone()
+
+        val moved = requireNotNull(placedOverlays()).single()
+        assertEquals(0.5f + travel / fittedWidth, moved.centerX, 0.02f)
+        assertEquals(0.5f, moved.centerY, 0.02f)
     }
 
     // ── Selection and delete ─────────────────────────────────────────────────

@@ -242,8 +242,15 @@ private sealed interface Grab {
     /** Nothing draggable: the tap changes the selection and the drag does nothing. */
     data class Select(val index: Int?) : Grab
 
-    /** The body of the selected object: a one-finger move. */
-    data object Move : Grab
+    /**
+     * The body of the selected object: a one-finger move.
+     *
+     * [offsetX]/[offsetY] are how far from the object's centre the finger
+     * landed, in fractions of the image, kept for the whole drag so the point
+     * that was grabbed stays under the finger — the same gap the crop grips keep
+     * (`grabOffset` in `CropOverlay`).
+     */
+    data class Move(val offsetX: Float, val offsetY: Float) : Grab
 
     /** One of the two corner handles, with where the drag started. */
     data class Handle(
@@ -297,7 +304,10 @@ private fun grabAt(
                 )
             }
         }
-        if (containsTouch(current, touch, rect, measurer, density, touchTarget)) return Grab.Move
+        if (containsTouch(current, touch, rect, measurer, density, touchTarget)) {
+            val grabbed = rect.normalize(point)
+            return Grab.Move(grabbed.x - current.centerX, grabbed.y - current.centerY)
+        }
     }
 
     for (index in overlays.indices.reversed()) {
@@ -351,12 +361,17 @@ private fun applyDrag(
     return when (grab) {
         is Grab.Select -> null
 
-        Grab.Move -> {
-            // The object's centre is put where the finger is, rather than
-            // accumulating deltas: a ratio-free absolute placement cannot drift
-            // over a long drag, and the finger stays on what it grabbed.
-            val target = rect.normalize(position)
-            callbacks.onMove(target.x - current.centerX, target.y - current.centerY)
+        is Grab.Move -> {
+            // Absolute rather than accumulated deltas, so a long drag cannot
+            // drift — but less the gap the finger landed at. Putting the *centre*
+            // under the finger snapped anything grabbed off-centre at the start of
+            // every drag, and a line of text wider than the photo, which can only
+            // be grabbed off-centre, slid back to where each drag began.
+            // The target centre, never a step from `current`: that is the
+            // object as last drawn, and more than one pointer event can land
+            // before the next frame — see OverlayGeometry.movedTo.
+            val finger = rect.normalize(position)
+            callbacks.onMove(finger.x - grab.offsetX, finger.y - grab.offsetY)
             null
         }
 
