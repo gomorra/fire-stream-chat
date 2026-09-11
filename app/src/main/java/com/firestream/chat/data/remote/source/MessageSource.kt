@@ -48,7 +48,6 @@ interface MessageSource {
         isForwarded: Boolean = false,
         duration: Int? = null,
         mentions: List<String> = emptyList(),
-        plainContent: String = "",
         emojiSizes: Map<Int, Float> = emptyMap(),
         mediaWidth: Int? = null,
         mediaHeight: Int? = null,

@@ -8,9 +8,11 @@ import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Transaction
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
@@ -57,6 +59,41 @@ class FirestoreMessageSourceTest {
         verify(exactly = 1) { messageRef.set(any<Map<String, Any?>>()) }
         verify(exactly = 0) { firestore.waitForPendingWrites() }
         verify(exactly = 0) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
+    }
+
+    // The chat document is readable by the server like the message document; a
+    // preview holding the text would put the plaintext beside the ciphertext.
+    @Test
+    fun `an encrypted message's chat preview carries its type, never its text`() = runTest {
+        val preview = slot<Map<String, Any>>()
+        every { chatRef.update(capture(preview)) } returns setTask
+
+        source.sendMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            ciphertext = "cipher-1", signalType = 3,
+            type = MessageType.TEXT, replyToId = null, timestamp = 1L,
+        )
+
+        assertEquals("Message", preview.captured["lastMessageContent"])
+        val written = slot<Map<String, Any?>>()
+        verify { messageRef.set(capture(written)) }
+        assertFalse("content" in written.captured)
+        assertEquals("cipher-1", written.captured["ciphertext"])
+    }
+
+    @Test
+    fun `an encrypted photo's chat preview drops the caption`() = runTest {
+        val preview = slot<Map<String, Any>>()
+        every { chatRef.update(capture(preview)) } returns setTask
+
+        source.sendMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            ciphertext = "cipher-1", signalType = 3,
+            type = MessageType.IMAGE, replyToId = null, timestamp = 1L,
+            mediaUrl = "https://storage.example/msg1",
+        )
+
+        assertEquals("📷 Photo", preview.captured["lastMessageContent"])
     }
 
     @Test

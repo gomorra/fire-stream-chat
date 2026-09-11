@@ -168,7 +168,6 @@ class PocketBaseMessageSource @Inject constructor(
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,
-        plainContent: String,
         emojiSizes: Map<Int, Float>,
         mediaWidth: Int?,
         mediaHeight: Int?,

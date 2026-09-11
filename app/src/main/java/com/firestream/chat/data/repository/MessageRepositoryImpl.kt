@@ -1216,50 +1216,57 @@ class MessageRepositoryImpl @Inject constructor(
                     && !(raw.editedAt != null && raw.content != null)
             if (raw.deletedAt == null && !needsDecryption && raw.content == null) continue
 
-            val content = when {
-                raw.deletedAt != null -> ""
-                else -> try {
-                    when {
-                        raw.editedAt != null && raw.content != null -> raw.content
-                        needsDecryption -> signalManager.decrypt(
-                            raw.senderId, EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
-                        )
-                        else -> raw.content!!
+            // NonCancellable for the same reason as in reconcileRawMessage: the
+            // decrypt advances the ratchet, so a cancellation between it and the
+            // insert — withContext discards its result when the job was cancelled
+            // while the block ran — would lose a plaintext no second decrypt can
+            // recover.
+            withContext(NonCancellable) {
+                val content = when {
+                    raw.deletedAt != null -> ""
+                    else -> try {
+                        when {
+                            raw.editedAt != null && raw.content != null -> raw.content
+                            needsDecryption -> signalManager.decrypt(
+                                raw.senderId, EncryptedMessage(raw.ciphertext!!, raw.signalType!!)
+                            )
+                            else -> raw.content!!
+                        }
+                    } catch (t: Throwable) {
+                        Log.e(TAG, "syncChatMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
+                        "[Encrypted message — unable to decrypt]"
                     }
-                } catch (t: Throwable) {
-                    Log.e(TAG, "syncChatMessages: decrypt failed for msg=${raw.id} sender=${raw.senderId} chat=$chatId", t)
-                    "[Encrypted message — unable to decrypt]"
                 }
+
+                val preservedLocalUri = existing?.localUri
+                val preservedIsStarred = existing?.isStarred ?: false
+
+                val message = Message(
+                    id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
+                    content = content,
+                    type = parseMessageType(raw.type),
+                    mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
+                    localUri = preservedLocalUri, isStarred = preservedIsStarred,
+                    status = parseMessageStatus(raw.status),
+                    replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
+                    reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
+                    readBy = raw.readBy, deliveredTo = raw.deliveredTo,
+                    pollData = raw.pollData?.let { parsePollFromFirestore(it) },
+                    mentions = raw.mentions, deletedAt = raw.deletedAt,
+                    emojiSizes = raw.emojiSizes, listId = raw.listId,
+                    listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
+                    isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
+                    latitude = raw.latitude, longitude = raw.longitude,
+                    isHd = raw.isHd,
+                    timerDurationMs = raw.timerDurationMs,
+                    timerStartedAtMs = raw.timerStartedAtMs,
+                    timerState = raw.timerState?.let { parseTimerState(it) },
+                    timerRemainingMs = raw.timerRemainingMs,
+                    timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
+                    timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
+                )
+                messageDao.insertMessage(MessageEntity.fromDomain(message))
             }
-
-            val preservedLocalUri = existing?.localUri
-            val preservedIsStarred = existing?.isStarred ?: false
-
-            val message = Message(
-                id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
-                content = content,
-                type = parseMessageType(raw.type),
-                mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                localUri = preservedLocalUri, isStarred = preservedIsStarred,
-                status = parseMessageStatus(raw.status),
-                replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
-                reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
-                readBy = raw.readBy, deliveredTo = raw.deliveredTo,
-                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                mentions = raw.mentions, deletedAt = raw.deletedAt,
-                emojiSizes = raw.emojiSizes, listId = raw.listId,
-                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
-                latitude = raw.latitude, longitude = raw.longitude,
-                isHd = raw.isHd,
-                timerDurationMs = raw.timerDurationMs,
-                timerStartedAtMs = raw.timerStartedAtMs,
-                timerState = raw.timerState?.let { parseTimerState(it) },
-                timerRemainingMs = raw.timerRemainingMs,
-                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-            )
-            messageDao.insertMessage(MessageEntity.fromDomain(message))
         }
     }
 

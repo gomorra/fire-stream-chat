@@ -115,9 +115,11 @@ class OutboxSenderTest {
             val id = firstArg<String>()
             rows[id] = rows.getValue(id).let { it.copy(outboxAttempts = it.outboxAttempts + 1) }
         }
-        coEvery { messageDao.storeOutboxCiphertext(any(), any(), any()) } answers {
+        coEvery { messageDao.storeOutboxCiphertext(any(), any(), any(), any()) } answers {
             val id = firstArg<String>()
-            rows[id] = rows.getValue(id).copy(outboxCiphertext = secondArg(), outboxSignalType = thirdArg())
+            rows[id] = rows.getValue(id).copy(
+                outboxCiphertext = secondArg(), outboxSignalType = thirdArg(), outboxPeerIdentity = arg(3),
+            )
         }
         coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } answers {
             val storageId = secondArg<String>()
@@ -129,6 +131,8 @@ class OutboxSenderTest {
         every { messageSource.lastContentFor(any(), any()) } returns "preview"
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
         every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
+        // The peer keeps its identity unless a test re-registers it.
+        coEvery { signalManager.isCurrentIdentity(any(), any()) } returns true
 
         sender = newSender(buildEncrypts = false)
     }
@@ -169,7 +173,7 @@ class OutboxSenderTest {
                 mediaUrl = arg(8),
                 mediaThumbnailUrl = arg(9),
                 duration = arg(11),
-                ifAbsent = arg(20),
+                ifAbsent = arg(19),
                 ciphertext = arg(3),
                 ciphertextOnRow = rows[id]?.outboxCiphertext,
             )
@@ -186,7 +190,7 @@ class OutboxSenderTest {
     /** Any encrypted write, positional in `MessageSource.sendMessage` order. */
     private suspend fun MockKMatcherScope.anyEncryptedWrite() = messageSource.sendMessage(
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Inserts [message] as the repository does, recording its peer — and, for a re-attempt, earlier runs. */
@@ -312,7 +316,7 @@ class OutboxSenderTest {
 
     @Test
     fun `an encrypted first attempt keeps the ciphertext on the row before writing it`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3)
+        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
         store(sending("msg1", MessageType.TEXT).copy(content = "hello"), recipientId = "peer1")
 
         newSender(buildEncrypts = true).send("msg1")
@@ -324,27 +328,62 @@ class OutboxSenderTest {
         val sent = rows.getValue("msg1")
         assertEquals(MessageStatus.SENT.name, sent.status)
         assertNull("the SENT row sheds the ciphertext", sent.outboxCiphertext)
+        assertNull(sent.outboxPeerIdentity)
         assertNull(sent.outboxRecipientId)
     }
 
     @Test
     fun `a second attempt reuses the stored ciphertext and never encrypts again`() = runTest {
-        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3)
+        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
         coEvery { anyEncryptedWrite() } throws IOException("ack timed out")
         store(sending("msg1", MessageType.TEXT).copy(content = "hello"), recipientId = "peer1")
         val encrypting = newSender(buildEncrypts = true)
 
         assertTrue(runCatching { encrypting.send("msg1") }.exceptionOrNull() is IOException)
         assertEquals("cipher-1", rows.getValue("msg1").outboxCiphertext)
+        assertEquals("id-1", rows.getValue("msg1").outboxPeerIdentity)
 
         recordEncryptedWrites()
         encrypting.send("msg1")
 
         coVerify(exactly = 1) { signalManager.encrypt(any(), any()) }
+        coVerify(exactly = 1) { signalManager.isCurrentIdentity("peer1", "id-1") }
         assertEquals(
             listOf(Write("msg1", MessageType.TEXT, null, null, null, ifAbsent = true, "cipher-1", ciphertextOnRow = "cipher-1")),
             writes,
         )
+    }
+
+    // A ciphertext belongs to the session it was encrypted under. A peer who
+    // reinstalled between the attempts has a new identity and no such session,
+    // so writing the stored bytes would land a message they can never read while
+    // this side shows it SENT.
+    @Test
+    fun `a stored ciphertext is encrypted again once the peer has re-registered`() = runTest {
+        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
+        coEvery { signalManager.isCurrentIdentity("peer1", "id-1") } returns false
+        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), "peer1")
+            .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxPeerIdentity = "id-1", outboxAttempts = 1)
+
+        newSender(buildEncrypts = true).send("msg1")
+
+        coVerify(exactly = 1) { signalManager.encrypt("peer1", "hello") }
+        assertEquals(
+            listOf(Write("msg1", MessageType.TEXT, null, null, null, ifAbsent = true, "cipher-2", ciphertextOnRow = "cipher-2")),
+            writes,
+        )
+    }
+
+    @Test
+    fun `a stored ciphertext without a recorded peer identity is not reused`() = runTest {
+        coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
+        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), "peer1")
+            .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxAttempts = 1)
+
+        newSender(buildEncrypts = true).send("msg1")
+
+        coVerify(exactly = 0) { signalManager.isCurrentIdentity(any(), any()) }
+        assertEquals("cipher-2", writes.single().ciphertext)
     }
 
     @Test
@@ -423,6 +462,43 @@ class OutboxSenderTest {
 
         coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
         assertEquals(listOf(Upload("img1", "image/jpeg", reportsProgress = true)), uploads)
+    }
+
+    // A forwarded photo carries the source message's upload, and may carry none
+    // of its dimensions or local file (a photo received from an older client).
+    // Its retry must not try to compress a file it does not have.
+    @Test
+    fun `a forwarded image whose media is already uploaded skips every media step on retry`() = runTest {
+        store(
+            sending("fwd1", MessageType.IMAGE, localUri = null)
+                .copy(mediaUrl = "https://storage.example/source", isForwarded = true),
+            attempts = 1,
+        )
+
+        sender.send("fwd1")
+
+        coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
+        assertTrue(uploads.isEmpty())
+        assertEquals("https://storage.example/source", writes.single().mediaUrl)
+        assertEquals(MessageStatus.SENT, stored("fwd1").status)
+    }
+
+    @Test
+    fun `a forwarded video without a thumbnail is written as it is rather than re-thumbnailed`() = runTest {
+        store(
+            sending("fwd1", MessageType.VIDEO, localUri = null)
+                .copy(mediaUrl = "https://storage.example/source", duration = 12, isForwarded = true),
+            attempts = 1,
+        )
+
+        sender.send("fwd1")
+
+        coVerify(exactly = 0) { videoTranscoder.extractThumbnail(any()) }
+        coVerify(exactly = 0) { videoTranscoder.transcode(any(), any(), any()) }
+        assertEquals(
+            Write("fwd1", MessageType.VIDEO, "https://storage.example/source", null, 12, ifAbsent = true),
+            writes.single(),
+        )
     }
 
     @Test

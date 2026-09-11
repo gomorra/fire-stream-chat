@@ -72,7 +72,7 @@ class MessageDaoOutboxColumnsTest {
             mediaThumbnailUrl = null,
             mediaUrl = "https://storage.example/msg1",
         )
-        dao.storeOutboxCiphertext("msg1", "cipher-1", signalType = 3)
+        dao.storeOutboxCiphertext("msg1", "cipher-1", signalType = 3, peerIdentity = "id-1")
         dao.setPinned("msg1", pinned = true)
 
         val row = dao.getMessageById("msg1")!!
@@ -80,6 +80,7 @@ class MessageDaoOutboxColumnsTest {
         assertEquals(2, row.outboxAttempts)
         assertEquals("cipher-1", row.outboxCiphertext)
         assertEquals(3, row.outboxSignalType)
+        assertEquals("id-1", row.outboxPeerIdentity)
         assertEquals("/media/msg1.jpg", row.localUri)
         assertEquals(800, row.mediaWidth)
         assertEquals("https://storage.example/msg1", row.mediaUrl)
@@ -91,7 +92,7 @@ class MessageDaoOutboxColumnsTest {
     fun `the SENT replace clears the outbox columns`() = runTest {
         dao.insertMessage(
             MessageEntity.outbox(unsent, recipientId = "peer1")
-                .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxAttempts = 1)
+                .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxPeerIdentity = "id-1", outboxAttempts = 1)
         )
 
         dao.replaceMessage("msg1", MessageEntity.fromDomain(unsent.copy(status = MessageStatus.SENT)))
@@ -100,6 +101,7 @@ class MessageDaoOutboxColumnsTest {
         assertNull(row.outboxRecipientId)
         assertNull(row.outboxCiphertext)
         assertNull(row.outboxSignalType)
+        assertNull(row.outboxPeerIdentity)
         assertEquals(0, row.outboxAttempts)
     }
 }

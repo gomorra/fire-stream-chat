@@ -252,22 +252,25 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration; one session `Mutex` per peer shared by both, pre-key replenishment after it is released under its own lock |
+| `app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt` | Encrypt / decrypt orchestration; one session `Mutex` per peer shared by both, pre-key replenishment after it is released under its own lock; `isCurrentIdentity` says whether a stored ciphertext's peer identity is still the published one |
 | `app/src/main/java/com/firestream/chat/data/crypto/SignalProtocolStoreImpl.kt` | `SignalProtocolStore` backed by `SignalDatabase` |
 | `app/src/main/java/com/firestream/chat/data/local/SignalDatabase.kt` | Dedicated `signal.db` — keys survive `AppDatabase` destructive migrations |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseKeySource.kt` | `keyBundles/{userId}` pre-key bundle exchange |
 | `app/src/main/java/com/firestream/chat/data/outbox/MessageWriter.kt` | `encode` / `write` / `send` — the build gate (`SUPPORTS_SIGNAL && !DEBUG`, a constructor value so tests can encrypt), `e2eEncryptionEnabledFlow` and the always-plaintext types (LOCATION) around the Signal branch |
-| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Encrypts once per message: keeps `outboxCiphertext` on the row before the write, and a retry reuses it |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | Encrypts once per message: keeps `outboxCiphertext` and the peer identity on the row before the write, and a retry reuses it while that identity is still current |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `sendMessage` writes ciphertext only; the chat preview of an encrypted message carries the type, never the text or caption |
 | `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `e2eEncryptionEnabledFlow` (default `true`) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | Privacy → Encryption toggle (release builds) |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsViewModel.kt` | Wires the toggle |
 | `app/src/test/java/com/firestream/chat/data/local/SignalDatabaseSmokeTest.kt` | Dedicated DB smoke |
-| `app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt` | Real libsignal, two parties: per-peer lock for encrypt + encrypt and encrypt + decrypt, lock released before the pre-key publish |
+| `app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt` | Real libsignal, two parties: per-peer lock for encrypt + encrypt and encrypt + decrypt, lock released before the pre-key publish, a peer identity stops being current on re-registration |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySyncDecryptTest.kt` | The chat-list sync finishes decrypt-and-insert once started, even when cancelled meanwhile |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | The encrypted write holds no `content`, and its chat preview no plaintext |
 | `app/src/test/java/com/firestream/chat/data/outbox/MessageWriterTest.kt` | The encrypt-or-plaintext policy, one test per plaintext reason |
 | `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | Column updates keep the outbox columns; the SENT replace clears them |
 | `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
 
-**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext) and then `write` for text / media / voice / location; forward and the broadcast fan-out call `send`, which does both — and `encode` picks plaintext or Signal.
+**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext for the peer's current identity) and then `write` for text / media / voice / location; forward and the broadcast fan-out call `send`, which does both — and `encode` picks plaintext or Signal.
 
 ---
 

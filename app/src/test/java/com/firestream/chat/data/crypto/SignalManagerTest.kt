@@ -115,6 +115,33 @@ class SignalManagerTest {
         assertEquals("reply", alice.manager.decrypt(BOB, result.getOrThrow()))
     }
 
+    // A stored ciphertext is bound to the identity it was encrypted for: once
+    // the peer re-registers, the check says so and a fresh encrypt reaches them.
+    @Test
+    fun `a ciphertext's peer identity stops being current when the peer re-registers`() = runTest {
+        val (alice, _) = registeredPair()
+        val stored = alice.manager.encrypt(BOB, "before")
+        assertNotNull(stored.peerIdentity)
+        assertTrue(alice.manager.isCurrentIdentity(BOB, stored.peerIdentity!!))
+
+        // Bob reinstalls: a fresh store and a new identity under the same uid.
+        val bobAgain = party(BOB)
+        bobAgain.manager.ensureInitialized()
+
+        assertFalse(alice.manager.isCurrentIdentity(BOB, stored.peerIdentity!!))
+        val fresh = alice.manager.encrypt(BOB, "after")
+        assertTrue(alice.manager.isCurrentIdentity(BOB, fresh.peerIdentity!!))
+        assertEquals("after", bobAgain.manager.decrypt(ALICE, fresh))
+    }
+
+    @Test
+    fun `a peer without a published bundle has no current identity`() = runTest {
+        val alice = party(ALICE)
+        alice.manager.ensureInitialized()
+
+        assertFalse(alice.manager.isCurrentIdentity(BOB, "anything"))
+    }
+
     // ── harness ─────────────────────────────────────────────────────────────
 
     private class Party(val manager: SignalManager, val dao: ObservedSignalDao)

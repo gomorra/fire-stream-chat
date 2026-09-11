@@ -15,7 +15,9 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -83,12 +85,12 @@ class MessageWriterTest {
     }
 
     @Test
-    fun `send encrypts and writes the ciphertext under the message id, keeping the plaintext for the preview`() = runTest {
+    fun `send encrypts and writes the ciphertext under the message id`() = runTest {
         coEvery {
             messageSource.sendMessage(
                 chatId = any(), senderId = any(), messageId = any(), ciphertext = any(), signalType = any(),
                 type = any(), replyToId = any(), timestamp = any(), mediaUrl = any(), mediaThumbnailUrl = any(),
-                isForwarded = any(), duration = any(), mentions = any(), plainContent = any(), emojiSizes = any(),
+                isForwarded = any(), duration = any(), mentions = any(), emojiSizes = any(),
                 mediaWidth = any(), mediaHeight = any(), latitude = any(), longitude = any(), isHd = any(),
                 ifAbsent = any(),
             )
@@ -102,7 +104,7 @@ class MessageWriterTest {
                 chatId = "chat1", senderId = "uid1", messageId = "msg1", ciphertext = "cipher-1", signalType = 3,
                 type = MessageType.TEXT, replyToId = null, timestamp = 1_000L, mediaUrl = null,
                 mediaThumbnailUrl = null, isForwarded = false, duration = null, mentions = emptyList(),
-                plainContent = "hello", emojiSizes = emptyMap(), mediaWidth = null, mediaHeight = null,
+                emojiSizes = emptyMap(), mediaWidth = null, mediaHeight = null,
                 latitude = null, longitude = null, isHd = false, ifAbsent = false,
             )
         }
@@ -134,6 +136,17 @@ class MessageWriterTest {
                 ifAbsent = true,
             )
         }
+    }
+
+    @Test
+    fun `a stored ciphertext is reusable only while the peer publishes the identity it was encrypted for`() = runTest {
+        coEvery { signalManager.isCurrentIdentity("peer1", "id-1") } returns true
+        coEvery { signalManager.isCurrentIdentity("peer1", "id-0") } returns false
+        val writer = writer()
+
+        assertTrue(writer.isReusable("peer1", EncryptedMessage("c", 3, peerIdentity = "id-1")))
+        assertFalse(writer.isReusable("peer1", EncryptedMessage("c", 3, peerIdentity = "id-0")))
+        assertFalse("no recorded identity: nothing to compare", writer.isReusable("peer1", EncryptedMessage("c", 3)))
     }
 
     private fun assertPlain(encrypted: EncryptedMessage?) {

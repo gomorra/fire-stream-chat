@@ -276,7 +276,34 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
   `outboxAttempts = 1` (its direct write is attempt one), so a stuck forward retries if-absent through
   `OutboxSender`. It still writes directly and does not keep its ciphertext; the re-route here closes that.
 
+- **(step-4 Fable review, fixed in the follow-up `fix:` commit, Room 26 → 27)** Four findings closed before
+  step 5: (a) a stored ciphertext outlived the peer's identity — a retry reused it after the peer re-registered
+  and landed a message they could never read while this side showed SENT; `outboxPeerIdentity` now records the
+  identity it was encrypted for and a re-attempt reuses the bytes only while `SignalManager.isCurrentIdentity`
+  says the peer still publishes it (one bundle read, outside the session lock). (b) `FirestoreMessageSource.
+  sendMessage` wrote the plaintext preview of an encrypted message to `chats/{id}.lastMessageContent`; the
+  encrypted preview now carries only the type (`"Message"`, `"📷 Photo"`, …) and `plainContent` is gone from
+  `MessageSource`. The recipient's chat list therefore shows the type for an encrypted last message; a client-side
+  preview derived from the decrypted Room row is the follow-up if that is wanted. (c) `syncChatMessages` decrypted
+  outside `NonCancellable`, so a cancellation during a decrypt discarded a plaintext no second decrypt can recover.
+  (d) A forward retry re-ran the media steps against the source message's file; `prepareMedia` now returns as soon
+  as the row has a `mediaUrl`.
+
 **Before end-to-end encryption is switched on** (not in any step; part of the planned pre-enable check):
+- **(step-4 Fable review, blocks enabling)** One one-time pre-key with a fixed id, replenished only after a
+  *successful* `PREKEY_TYPE` decrypt (`SignalManager.replenishPreKeyIfNeeded`). libsignal removes the pre-key
+  during that decrypt, so (i) one failed publish leaves the store without it and the bundle still advertising it —
+  every later first contact's pre-key message fails to decrypt, the replenish call is never reached again, and
+  this device can never receive a first message from a new contact until reinstall; (ii) two new contacts who
+  fetch the bundle before the replacement is published strand the second one's whole session. Needs a batch of
+  pre-keys with rotating ids, replenish on app start and below a threshold, and a publish that cannot leave store
+  and bundle disagreeing. Its own plan, not a fix commit.
+- **(step-4 Fable review, blocks enabling; pulled forward from the step-8 note)** The chat-list sync and the open
+  chat's listener both check → decrypt → insert one message outside any lock; the per-peer lock makes the second
+  decrypt fail on the advanced ratchet and its placeholder can `REPLACE` the good row. The common path is a cold
+  start from a notification tap, racing on exactly the message the notification was for. The single receive
+  entry point under one lock (step 8 note) is the fix; it must land before encryption is enabled, whether or not
+  step 8 has shipped.
 - **(step-4 /code-review, uncertain)** `SignalManager.encrypt` fetches the key bundle outside the session lock.
   If a peer re-registers while two encrypts to it are in flight, the one holding the older bundle can reset
   the session the other just built on the newer one, losing one message. It was as unguarded before step 4.

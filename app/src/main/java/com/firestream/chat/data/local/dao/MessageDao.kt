@@ -74,8 +74,14 @@ interface MessageDao {
     @Query("UPDATE messages SET outboxAttempts = outboxAttempts + 1 WHERE id = :messageId")
     suspend fun incrementOutboxAttempts(messageId: String)
 
-    @Query("UPDATE messages SET outboxCiphertext = :ciphertext, outboxSignalType = :signalType WHERE id = :messageId")
-    suspend fun storeOutboxCiphertext(messageId: String, ciphertext: String, signalType: Int)
+    @Query(
+        """
+        UPDATE messages SET outboxCiphertext = :ciphertext, outboxSignalType = :signalType,
+            outboxPeerIdentity = :peerIdentity
+        WHERE id = :messageId
+        """
+    )
+    suspend fun storeOutboxCiphertext(messageId: String, ciphertext: String, signalType: Int, peerIdentity: String?)
 
     /** A finished pipeline step's output — the encoded file, the thumbnail, the upload. */
     @Query(

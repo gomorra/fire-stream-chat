@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.SessionBuilder
 import org.signal.libsignal.protocol.SessionCipher
@@ -27,7 +28,14 @@ import javax.inject.Singleton
 
 data class EncryptedMessage(
     val ciphertext: String,  // Base64-encoded Signal ciphertext
-    val signalType: Int      // CiphertextMessage.WHISPER_TYPE or PREKEY_TYPE
+    val signalType: Int,     // CiphertextMessage.WHISPER_TYPE or PREKEY_TYPE
+    /**
+     * Base64 identity key of the peer this was encrypted for — set by [SignalManager.encrypt],
+     * absent on a received message. A stored ciphertext is only reusable while the peer still
+     * publishes this identity ([SignalManager.isCurrentIdentity]): after a re-registration the
+     * session it was encrypted under no longer exists on their side.
+     */
+    val peerIdentity: String? = null,
 )
 
 /**
@@ -104,9 +112,24 @@ class SignalManager @Inject constructor(
                 val ciphertextMessage = cipher.encrypt(plaintext.toByteArray(Charsets.UTF_8))
                 EncryptedMessage(
                     ciphertext = Base64.encodeToString(ciphertextMessage.serialize(), Base64.NO_WRAP),
-                    signalType = ciphertextMessage.type
+                    signalType = ciphertextMessage.type,
+                    peerIdentity = encodeIdentity(bundle.identityKey),
                 )
             }
+        }
+
+    /**
+     * Whether [recipientId] still publishes [peerIdentity], the identity a stored
+     * ciphertext was encrypted for. `false` once they re-registered (or never set up
+     * encryption): that ciphertext belongs to a session they no longer have, and
+     * the caller must encrypt again — [encrypt] rebuilds the session on the new
+     * identity. A network read, taken outside the session lock like the fetch in
+     * [encrypt].
+     */
+    suspend fun isCurrentIdentity(recipientId: String, peerIdentity: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val bundle = keySource.fetchPreKeyBundle(recipientId) ?: return@withContext false
+            encodeIdentity(bundle.identityKey) == peerIdentity
         }
 
     /**
@@ -139,6 +162,9 @@ class SignalManager @Inject constructor(
     // ── Private ───────────────────────────────────────────────────────────────
 
     private fun sessionLock(userId: String): Mutex = sessionLocks.computeIfAbsent(userId) { Mutex() }
+
+    private fun encodeIdentity(identityKey: IdentityKey): String =
+        Base64.encodeToString(identityKey.serialize(), Base64.NO_WRAP)
 
     /**
      * Generates a fresh one-time pre-key and publishes the updated bundle to Firestore.

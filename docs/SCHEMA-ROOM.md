@@ -11,15 +11,16 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 `AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
 
-**Outbox columns (`messages`, version 26).** Local send bookkeeping for an own row that has not reached `SENT`, written by `OutboxSender` and cleared by its SENT replace:
+**Outbox columns (`messages`, version 27).** Local send bookkeeping for an own row that has not reached `SENT`, written by `OutboxSender` and cleared by its SENT replace:
 
 | Column | Meaning |
 |---|---|
 | `outboxRecipientId` | The 1:1 peer to encrypt for, recorded at insert; `""` for group and broadcast chats; `null` = not recorded, and `OutboxSender` refuses the row rather than send it in plaintext |
 | `outboxCiphertext`, `outboxSignalType` | The Signal ciphertext of `content`, encrypted on the first attempt that reaches the write and reused by every later one |
+| `outboxPeerIdentity` | The peer identity key that ciphertext was encrypted for; a later attempt reuses the bytes only while the peer still publishes it (`SignalManager.isCurrentIdentity`), and encrypts again after a re-registration |
 | `outboxAttempts` | Pipeline runs started for the row; above 0 an earlier write may have landed, so the next write is create-if-absent |
 
-They are not on the domain `Message`, so any other write to an unsent row must be a column update, never a whole-row replace ([`GOTCHAS.md`](GOTCHAS.md)). Version 26 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
+They are not on the domain `Message`, so any other write to an unsent row must be a column update, never a whole-row replace ([`GOTCHAS.md`](GOTCHAS.md)). Version 27 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
 
 ```mermaid
 erDiagram
@@ -88,6 +89,7 @@ erDiagram
         String outboxRecipientId
         String outboxCiphertext
         Int outboxSignalType
+        String outboxPeerIdentity
         Int outboxAttempts
     }
 

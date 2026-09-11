@@ -195,7 +195,6 @@ class FirestoreMessageSource @Inject constructor(
         isForwarded: Boolean,
         duration: Int?,
         mentions: List<String>,
-        plainContent: String,
         emojiSizes: Map<Int, Float>,
         mediaWidth: Int?,
         mediaHeight: Int?,
@@ -227,7 +226,10 @@ class FirestoreMessageSource @Inject constructor(
         if (isHd) data["isHd"] = true
         writeMessage(chatId, messageId, data, ifAbsent)
 
-        writeBackChatPreview(chatId, lastContentFor(type, plainContent), timestamp, senderId)
+        // The chat document is readable by the server like any other, so an
+        // encrypted message's preview carries only its type — never the text or
+        // a caption, which would put the plaintext beside the ciphertext.
+        writeBackChatPreview(chatId, lastContentFor(type, ""), timestamp, senderId)
 
         return messageId
     }

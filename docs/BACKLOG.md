@@ -45,21 +45,29 @@ here when step 6 ships.
 ### Encrypt once and the per-contact Signal lock (offline outbox step 4, 2026-09-11)
 
 Shipped in `bcd4426c`; nothing has been on hardware. Upgrade over an existing install:
-1. The one-time reset (Room 25 → 26) breaks nothing else: every chat reloads its full history
+1. The one-time reset (Room 25 → 27) breaks nothing else: every chat reloads its full history
    on open, already-downloaded photos show without a download spinner, and only unsent or
    failed messages, stars and reminders are gone.
 2. Forward a video, a voice note and a location to a second device → thumbnail, duration and
    map point arrive, and the forwarded copy carries no mentions.
+3. Airplane mode → forward a photo → leave and reopen the chat (it shows failed) → airplane
+   off → retry → it arrives once, without the app trying to re-compress anything.
 
 **Before end-to-end encryption is switched on for the phones** (planned, not yet enabled —
 these belong to that double-check). `SignalManagerTest` runs real libsignal only on the JVM,
 and the encrypted send path is tested with `SignalManager` mocked. On a **release** build
 (debug never encrypts) with Settings → Privacy → Encryption on, two devices:
-3. Pick a contact never messaged since the upgrade, send four photos at once plus a text →
+4. Pick a contact never messaged since the upgrade, send four photos at once plus a text →
    all five decrypt on the recipient.
-4. Airplane mode → send a text (fails) → airplane off → retry → the recipient reads it once.
-Two open questions from the step-4 review also belong to that check: the stale-bundle race
-when a peer re-registers, and the lock tests' 300 ms window
+5. Airplane mode → send a text (fails) → airplane off → retry → the recipient reads it once.
+6. Retry after the recipient reinstalled: send a text, kill the sender the instant it goes
+   online (the write is lost), reinstall on the recipient, retry → the recipient reads it.
+7. The recipient's chat list shows "Message" (or "📷 Photo") for an encrypted last message,
+   never its text or caption; the sender's own list still shows the text.
+Four open items from the step-4 reviews also belong to that check, two of them blocking:
+pre-key replenishment (one fixed-id pre-key, replenished only after a successful decrypt),
+the double decrypt between the chat-list sync and the open chat, the stale-bundle race when
+a peer re-registers, and the lock tests' 300 ms window
 (`.claude/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
 
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)

@@ -81,7 +81,7 @@ private class Encoded(val file: File, val width: Int, val height: Int, val durat
  * | compress (IMAGE) / transcode (VIDEO) | `mediaWidth != null` | `localUri`, dimensions, `duration` |
  * | video thumbnail | `mediaThumbnailUrl != null` | `mediaThumbnailUrl` |
  * | upload (media, VOICE) | `mediaUrl != null` | `mediaUrl` |
- * | encrypt (1:1, release) | `outboxCiphertext != null` | `outboxCiphertext`, `outboxSignalType` |
+ * | encrypt (1:1, release) | `outboxCiphertext != null` and the peer's identity is unchanged | `outboxCiphertext`, `outboxSignalType`, `outboxPeerIdentity` |
  * | message write | — | status SENT, outbox columns cleared |
  *
  * A retry therefore never re-encodes, re-uploads or re-encrypts what an earlier
@@ -140,7 +140,7 @@ class OutboxSender @Inject constructor(
             else -> stored
         }
 
-        val encrypted = entity.storedCiphertext() ?: encodeOnce(row, recipientId)
+        val encrypted = reusableCiphertext(entity, recipientId) ?: encodeOnce(row, recipientId)
         val remoteId = messageWriter.write(row, encrypted, ifAbsent = isReattempt)
 
         val sent = row.copy(
@@ -171,15 +171,31 @@ class OutboxSender @Inject constructor(
     /**
      * Encrypts the body when [MessageWriter] says so and keeps the ciphertext on
      * the row before anything is written. A later attempt reuses those bytes
-     * rather than spend another ratchet step and key-bundle fetch on the same
-     * message. `null`: the message travels in plaintext.
+     * rather than spend another ratchet step on the same message. `null`: the
+     * message travels in plaintext.
      */
     private suspend fun encodeOnce(row: Message, recipientId: String): EncryptedMessage? =
         messageWriter.encode(row, recipientId)?.also {
-            messageDao.storeOutboxCiphertext(row.id, it.ciphertext, it.signalType)
+            messageDao.storeOutboxCiphertext(row.id, it.ciphertext, it.signalType, it.peerIdentity)
         }
 
+    /**
+     * The ciphertext an earlier attempt kept on the row, if the peer can still
+     * decrypt it. A peer who re-registered in between has a new identity and no
+     * session for these bytes; writing them would land a message they can never
+     * read while this side shows it SENT. Then `null`, and [encodeOnce] runs again
+     * for the new identity.
+     */
+    private suspend fun reusableCiphertext(entity: MessageEntity, recipientId: String): EncryptedMessage? {
+        val stored = entity.storedCiphertext() ?: return null
+        return stored.takeIf { messageWriter.isReusable(recipientId, it) }
+    }
+
     private suspend fun prepareMedia(stored: Message, sourceMimeType: String?): Message {
+        // Already uploaded — a resumed row past its upload, or a forward, whose
+        // media is the source message's. Nothing here applies: re-encoding would
+        // want a local file the row may not have.
+        if (stored.mediaUrl != null) return stored
         var row = stored
         if (row.type in LOCAL_FILE_TYPES && row.mediaWidth == null) {
             row = persist(encodeToLocalFile(row))
@@ -307,5 +323,5 @@ class OutboxSender @Inject constructor(
 private fun MessageEntity.storedCiphertext(): EncryptedMessage? {
     val ciphertext = outboxCiphertext ?: return null
     val signalType = outboxSignalType ?: return null
-    return EncryptedMessage(ciphertext, signalType)
+    return EncryptedMessage(ciphertext, signalType, outboxPeerIdentity)
 }

@@ -71,6 +71,17 @@ class MessageWriter internal constructor(
     }
 
     /**
+     * Whether [stored], encrypted by an earlier attempt, can still be written as
+     * is: only while the peer publishes the identity it was encrypted for. After
+     * a re-registration the session behind it is gone on their side, so the
+     * caller drops the bytes and [encode]s again, which rebuilds the session.
+     */
+    suspend fun isReusable(recipientId: String, stored: EncryptedMessage): Boolean {
+        val peerIdentity = stored.peerIdentity ?: return false
+        return signalManager.isCurrentIdentity(recipientId, peerIdentity)
+    }
+
+    /**
      * Writes [message] under its own id — with [encrypted] in place of its
      * content, or in plaintext when that is `null`.
      *
@@ -95,7 +106,6 @@ class MessageWriter internal constructor(
                 isForwarded = message.isForwarded,
                 duration = message.duration,
                 mentions = message.mentions,
-                plainContent = message.content,
                 emojiSizes = message.emojiSizes,
                 mediaWidth = message.mediaWidth,
                 mediaHeight = message.mediaHeight,

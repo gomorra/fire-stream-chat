@@ -63,7 +63,7 @@ data class MessageEntity(
     val timerAlarmStyle: String = TimerAlarmStyle.DEFAULT.name,
     val timerAlarmSound: String = TimerAlarmSound.DEFAULT.name,
     // Offline outbox bookkeeping for an own row that has not reached SENT. Local
-    // only and absent from the domain Message, so fromDomain() resets all four:
+    // only and absent from the domain Message, so fromDomain() resets all five:
     // OutboxSender's SENT replace clears them on purpose, and any other write to
     // an unsent row must be a column UPDATE, never a whole-row replace.
     /** The 1:1 peer to encrypt for; "" for group and broadcast chats; null = not recorded. */
@@ -71,6 +71,8 @@ data class MessageEntity(
     /** Signal ciphertext of `content`, encrypted once and reused by every later attempt. */
     val outboxCiphertext: String? = null,
     val outboxSignalType: Int? = null,
+    /** The peer identity `outboxCiphertext` was encrypted for; a retry reuses the bytes only while the peer still publishes it. */
+    val outboxPeerIdentity: String? = null,
     /** Pipeline runs started for this row; above 0, an earlier write may already have landed. */
     val outboxAttempts: Int = 0,
 ) {
