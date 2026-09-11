@@ -4,7 +4,9 @@
 //   pre-encrypted payloads. Per-key map updates for readBy / deliveredTo /
 //   reactions via FieldValue dot-notation.
 // Owns: Listener registrations on chats/{chatId}/messages — caller must close
-//   the returned Flow to detach.
+//   the returned Flow to detach. The idempotent write contract for retryable
+//   sends (writeMessage): client-set doc id, plain set() on the first attempt,
+//   flush-then-create-if-absent on every later one.
 // Collaborators: MessageRepositoryImpl (only caller); decrypts via SignalManager
 //   on the way out. Also reachable through the MessageSource interface in
 //   data/remote/source/ so the pocketbase flavor can swap in its own impl.
@@ -24,11 +26,14 @@ import com.firestream.chat.domain.model.MessageType
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,6 +42,9 @@ private const val LIST_CONTENT = "📋 List"
 private const val CALL_CONTENT = "📞 Voice call"
 private const val TIMER_CONTENT = "⏱ Timer"
 private const val TAG = "FirestoreMessageSource"
+
+/** Upper bound on a re-attempt (flush + create-if-absent); see [FirestoreMessageSource.writeMessage]. */
+internal const val RETRY_ACK_TIMEOUT_MS = 30_000L
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
@@ -91,18 +99,22 @@ class FirestoreMessageSource @Inject constructor(
             .addOnFailureListener { Log.w(TAG, "chat preview writeback failed for chat=$chatId", it) }
     }
 
+    // MetadataChanges.INCLUDE: with client-set ids our own write is echoed back
+    // under the row's id while it is still pending. The ack changes no field,
+    // only metadata — without INCLUDE that event never fires and the row would
+    // stay SENDING until some later content change. See RawMessage.hasPendingWrites.
     override fun observeMessages(chatId: String): Flow<List<RawMessage>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection("chats").document(chatId)
             .collection("messages")
             .orderBy("timestamp", Query.Direction.ASCENDING)
-            .addSnapshotListener { snapshot, error ->
+            .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                 if (error != null) {
                     close(error)
                     return@addSnapshotListener
                 }
                 val messages = snapshot?.documents?.mapNotNull { doc ->
-                    doc.data?.let { mapToRaw(doc.id, chatId, it) }
+                    doc.data?.let { mapToRaw(doc.id, chatId, it, doc.metadata.hasPendingWrites()) }
                 } ?: emptyList()
                 trySend(messages)
             }
@@ -117,13 +129,62 @@ class FirestoreMessageSource @Inject constructor(
             .get()
             .await()
         return snapshot.documents.mapNotNull { doc ->
-            doc.data?.let { mapToRaw(doc.id, chatId, it) }
+            doc.data?.let { mapToRaw(doc.id, chatId, it, doc.metadata.hasPendingWrites()) }
         }
+    }
+
+    /**
+     * Writes [data] at `chats/{chatId}/messages/{messageId}` — the row's own id,
+     * so every attempt for one message addresses one document and a lost ack
+     * can never produce a second copy.
+     *
+     * First attempt (`ifAbsent = false`): a plain `set()`. Latency-compensated,
+     * and queued by the SDK's persistent cache if we are offline.
+     *
+     * Any later attempt (`ifAbsent = true`): create only if the document does
+     * not exist, and treat an existing one as success. `firestore.rules` lets any
+     * participant `update` a message, so a blind `set()` over a document that
+     * has already landed would wipe the recipient's `readBy` / `deliveredTo` /
+     * `reactions` — and if they had already read it, nothing would ever write
+     * them back. Transaction reads go to the server and do **not** see a
+     * first-attempt `set()` the SDK has persisted but not yet flushed; the
+     * transaction would create the doc and the replay would then overwrite it.
+     * `waitForPendingWrites()` lands that replay first, so the transaction finds
+     * the document. Both calls need the network — but neither *fails* without
+     * it: the flush simply waits for an ack that is not coming, and that is
+     * exactly the state a retry is in. The re-attempt is therefore bounded by
+     * [RETRY_ACK_TIMEOUT_MS] and surfaces as an [IOException] (→
+     * `AppError.Network`), so a retry while offline lands back at FAILED instead
+     * of parking the caller's coroutine.
+     */
+    private suspend fun writeMessage(
+        chatId: String,
+        messageId: String,
+        data: Map<String, Any?>,
+        ifAbsent: Boolean,
+    ) {
+        val ref = firestore
+            .collection("chats").document(chatId)
+            .collection("messages").document(messageId)
+        if (!ifAbsent) {
+            ref.set(data).await()
+            return
+        }
+        withTimeoutOrNull(RETRY_ACK_TIMEOUT_MS) {
+            firestore.waitForPendingWrites().await()
+            firestore.runTransaction { tx ->
+                if (!tx.get(ref).exists()) tx.set(ref, data)
+            }.await()
+            true
+        } ?: throw IOException(
+            "Retry of message $messageId not acknowledged within ${RETRY_ACK_TIMEOUT_MS} ms — offline?"
+        )
     }
 
     override suspend fun sendMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         ciphertext: String,
         signalType: Int,
         type: MessageType,
@@ -140,7 +201,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaHeight: Int?,
         latitude: Double?,
         longitude: Double?,
-        isHd: Boolean
+        isHd: Boolean,
+        ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -163,20 +225,17 @@ class FirestoreMessageSource @Inject constructor(
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
-        val docRef = firestore
-            .collection("chats").document(chatId)
-            .collection("messages")
-            .add(data)
-            .await()
+        writeMessage(chatId, messageId, data, ifAbsent)
 
         writeBackChatPreview(chatId, lastContentFor(type, plainContent), timestamp, senderId)
 
-        return docRef.id
+        return messageId
     }
 
     override suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         content: String,
         type: MessageType,
         replyToId: String?,
@@ -191,7 +250,8 @@ class FirestoreMessageSource @Inject constructor(
         mediaHeight: Int?,
         latitude: Double?,
         longitude: Double?,
-        isHd: Boolean
+        isHd: Boolean,
+        ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
             "senderId" to senderId,
@@ -213,15 +273,11 @@ class FirestoreMessageSource @Inject constructor(
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
-        val docRef = firestore
-            .collection("chats").document(chatId)
-            .collection("messages")
-            .add(data)
-            .await()
+        writeMessage(chatId, messageId, data, ifAbsent)
 
         writeBackChatPreview(chatId, lastContentFor(type, content), timestamp, senderId)
 
-        return docRef.id
+        return messageId
     }
 
     override suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float>) {
@@ -531,7 +587,12 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     @Suppress("UNCHECKED_CAST")
-    private fun mapToRaw(id: String, chatId: String, data: Map<String, Any?>): RawMessage {
+    private fun mapToRaw(
+        id: String,
+        chatId: String,
+        data: Map<String, Any?>,
+        hasPendingWrites: Boolean,
+    ): RawMessage {
         val rawReactions = (data["reactions"] as? Map<*, *>)
             ?.entries
             ?.mapNotNull { (k, v) ->
@@ -580,6 +641,7 @@ class FirestoreMessageSource @Inject constructor(
             timerSilent = data["timerSilent"] as? Boolean ?: false,
             timerAlarmStyle = data["timerAlarmStyle"] as? String,
             timerAlarmSound = data["timerAlarmSound"] as? String,
+            hasPendingWrites = hasPendingWrites,
         )
     }
 

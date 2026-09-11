@@ -11,6 +11,16 @@ import kotlinx.coroutines.flow.Flow
  * pre-encrypted Signal payload ([sendMessage]) or plaintext ([sendPlainMessage])
  * — the repository decides which path to take based on the encryption gate.
  *
+ * **Message ids are chosen by the caller.** [sendMessage] / [sendPlainMessage]
+ * take the Room row's id as `messageId`; a backend that keys documents by
+ * client id (Firebase) writes under it and returns it unchanged, so every
+ * attempt for one row addresses one document. A backend that mints its own
+ * ids (PocketBase) ignores it and returns the server id — the repository's
+ * row swap handles both. `ifAbsent = true` marks a re-attempt: the backend
+ * must create the document only if it does not exist yet and treat an
+ * existing one as success, never overwrite it (receipts and reactions written
+ * by the other party live on the same document).
+ *
  * The PocketBase impl in v0 only honours the walking-skeleton subset:
  * [observeMessages], [sendPlainMessage], [lastContentFor], [markDelivered],
  * [markRead], [getUndeliveredMessageIds], [fetchMessages]. The other methods
@@ -27,6 +37,7 @@ interface MessageSource {
     suspend fun sendMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         ciphertext: String,
         signalType: Int,
         type: MessageType,
@@ -43,12 +54,14 @@ interface MessageSource {
         mediaHeight: Int? = null,
         latitude: Double? = null,
         longitude: Double? = null,
-        isHd: Boolean = false
+        isHd: Boolean = false,
+        ifAbsent: Boolean = false,
     ): String
 
     suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         content: String,
         type: MessageType,
         replyToId: String?,
@@ -63,7 +76,8 @@ interface MessageSource {
         mediaHeight: Int? = null,
         latitude: Double? = null,
         longitude: Double? = null,
-        isHd: Boolean = false
+        isHd: Boolean = false,
+        ifAbsent: Boolean = false,
     ): String
 
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float> = emptyMap())

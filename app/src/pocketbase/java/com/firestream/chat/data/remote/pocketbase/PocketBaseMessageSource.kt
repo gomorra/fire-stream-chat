@@ -99,6 +99,7 @@ class PocketBaseMessageSource @Inject constructor(
     override suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         content: String,
         type: MessageType,
         replyToId: String?,
@@ -113,10 +114,14 @@ class PocketBaseMessageSource @Inject constructor(
         mediaHeight: Int?,
         latitude: Double?,
         longitude: Double?,
-        isHd: Boolean
+        isHd: Boolean,
+        ifAbsent: Boolean,
     ): String {
         // v0 pb_schema.json has no media_thumbnail field; the param is accepted
         // for contract parity and intentionally ignored until the follow-up lands.
+        // Same for messageId / ifAbsent: PocketBase mints its own record ids, so
+        // the client id is ignored and a retry is a plain re-POST (the offline
+        // outbox plan keeps this flavor compiling only).
         val body = JSONObject().apply {
             put("chat_id", chatId)
             put("sender_id", senderId)
@@ -152,6 +157,7 @@ class PocketBaseMessageSource @Inject constructor(
     override suspend fun sendMessage(
         chatId: String,
         senderId: String,
+        messageId: String,
         ciphertext: String,
         signalType: Int,
         type: MessageType,
@@ -168,7 +174,8 @@ class PocketBaseMessageSource @Inject constructor(
         mediaHeight: Int?,
         latitude: Double?,
         longitude: Double?,
-        isHd: Boolean
+        isHd: Boolean,
+        ifAbsent: Boolean,
     ): String = throw NotImplementedError(
         "encryption gated off in pocketbase flavor — MessageRepositoryImpl should not reach here"
     )

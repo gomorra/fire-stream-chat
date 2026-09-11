@@ -67,7 +67,7 @@ class MessageRepositoryBlockTest {
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
-        coVerify(exactly = 0) { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { messageDao.insertMessage(any()) }
     }
 
@@ -75,7 +75,7 @@ class MessageRepositoryBlockTest {
     fun `sendMessage succeeds when recipient is not blocked`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns false
         coEvery { messageDao.insertMessage(any()) } just Runs
-        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
+        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
         coEvery { messageDao.replaceMessage(any(), any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "recipient1")
@@ -87,7 +87,7 @@ class MessageRepositoryBlockTest {
     @Test
     fun `sendMessage skips block check for empty recipientId (group chats)`() = runTest {
         coEvery { messageDao.insertMessage(any()) } just Runs
-        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
+        coEvery { messageSource.sendPlainMessage(any(), any(), any(), any(), any(), any(), any(), any(), any()) } returns "remoteId1"
         coEvery { messageDao.replaceMessage(any(), any()) } just Runs
 
         val result = repository.sendMessage("chat1", "hello", "")

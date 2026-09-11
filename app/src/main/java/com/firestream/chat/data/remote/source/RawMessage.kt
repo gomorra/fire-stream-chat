@@ -13,6 +13,14 @@ package com.firestream.chat.data.remote.source
  * - PocketBase: `messages` collection records (always plaintext in v0; the
  *   `ciphertext`/`signalType` fields stay null because `BuildConfig.SUPPORTS_SIGNAL`
  *   is false in the pocketbase flavor).
+ *
+ * [hasPendingWrites] is true while this row is a latency-compensated echo of a
+ * write from *this* client that the backend has not acknowledged yet. Because
+ * message ids are client-set, such an echo carries the local row's id and the
+ * payload's `status = SENT` before anything reached the server; the repository
+ * must not let it move an own message's status. Backends without local echo
+ * leave it `false`. It is a constructor property on purpose: the ack flips
+ * equality, so the reconcile loop's unchanged-skip re-reads the row.
  */
 data class RawMessage(
     val id: String,
@@ -52,4 +60,5 @@ data class RawMessage(
     val timerSilent: Boolean = false,
     val timerAlarmStyle: String? = null,
     val timerAlarmSound: String? = null,
+    val hasPendingWrites: Boolean = false,
 )

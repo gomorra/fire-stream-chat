@@ -5,6 +5,7 @@ import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -13,6 +14,7 @@ import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
+import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.repository.ChatRepository
@@ -167,6 +169,56 @@ class MessageRepositorySnapshotTest {
         coVerify(exactly = 1) { userSource.getBlockedUserIds(SELF) }
         job.cancel()
     }
+
+    // ── Own-message echoes ──────────────────────────────────────────────────
+    //
+    // The message id is set by the client, so Firestore's latency-compensated
+    // echo of our own write carries the row's id — and the payload's
+    // `status = SENT` — before anything has reached the server. Only an
+    // acknowledged snapshot may move the local status.
+
+    @Test
+    fun `a pending echo of our own write leaves the local SENDING row alone`() = runTest {
+        coEvery { messageDao.getMessageById("own1") } returns ownRow("own1", MessageStatus.SENDING)
+        every { messageSource.observeMessages(CHAT) } returns
+            flowOf(listOf(ownEcho("own1", hasPendingWrites = true)))
+
+        val job = launch { repository.getMessages(CHAT).collect { } }
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { messageDao.updateMessageStatus("own1", any()) }
+        job.cancel()
+    }
+
+    @Test
+    fun `an acknowledged echo moves a FAILED row to SENT`() = runTest {
+        // A send whose await died (user left the chat) but whose write landed:
+        // the row was flipped FAILED locally, yet the message *is* on the server.
+        coEvery { messageDao.getMessageById("own1") } returns ownRow("own1", MessageStatus.FAILED)
+        every { messageSource.observeMessages(CHAT) } returns
+            flowOf(listOf(ownEcho("own1", hasPendingWrites = false)))
+
+        val job = launch { repository.getMessages(CHAT).collect { } }
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { messageDao.updateMessageStatus("own1", MessageStatus.SENT.name) }
+        job.cancel()
+    }
+
+    private fun ownRow(id: String, status: MessageStatus) = MessageEntity.fromDomain(
+        Message(
+            id = id,
+            chatId = CHAT,
+            senderId = SELF,
+            content = "hi",
+            type = MessageType.TEXT,
+            status = status,
+            timestamp = 1L,
+        )
+    )
+
+    private fun ownEcho(id: String, hasPendingWrites: Boolean) =
+        incoming(id, timestamp = 1L).copy(senderId = SELF, hasPendingWrites = hasPendingWrites)
 
     private fun incoming(id: String, timestamp: Long) = RawMessage(
         id = id,

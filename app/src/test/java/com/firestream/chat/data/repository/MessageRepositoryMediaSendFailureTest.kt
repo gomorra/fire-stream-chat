@@ -169,11 +169,11 @@ class MessageRepositoryMediaSendFailureTest {
             } returns "https://example/firebase/img.jpg"
             coEvery {
                 messageSource.sendPlainMessage(
-                    chatId = any(), senderId = any(), content = any(), type = any(),
+                    chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                     replyToId = any(), timestamp = any(), mediaUrl = any(),
                     mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                     emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                    latitude = any(), longitude = any(), isHd = any()
+                    latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
                 )
             } returns "remote-id-1"
             every { messageSource.lastContentFor(any(), any()) } returns "📷 Photo"

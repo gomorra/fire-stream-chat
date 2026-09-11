@@ -144,6 +144,22 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **Shared-storage files: `exists()` is not enough.** MediaStore files from a prior
   install can pass `File.exists()` yet throw `EACCES` on open. Gate with
   `exists() && isFile && canRead()`.
+- **Firestore echoes your own write under its client-set id before the server has it.**
+  Message ids are Room row ids, so `document(id).set()` fires the snapshot listener at once
+  with that id and the payload's `status = SENT` while `metadata.hasPendingWrites()` is still
+  true. A reconcile that trusts it flips SENDING → SENT with nothing on the backend. The
+  acknowledgement changes no field, only metadata, so listen with `MetadataChanges.INCLUDE`
+  or it never arrives; then gate own-message status on `!hasPendingWrites`
+  (`RawMessage.hasPendingWrites`, checked in `MessageRepositoryImpl.reconcileRawMessage`).
+  Regression: `MessageRepositorySnapshotTest.a pending echo of our own write leaves the
+  local SENDING row alone`.
+- **A retried Firestore write must not `set()` over a document that may already exist.**
+  `firestore.rules` lets any participant `update` a message, so a blind re-`set()` wipes the
+  recipient's `readBy` / `deliveredTo` / `reactions`. Retry with `waitForPendingWrites()`
+  followed by a create-if-absent transaction — in that order: transaction reads go to the
+  server and cannot see a first-attempt write the SDK has persisted but not flushed, so
+  without the flush the transaction creates the doc and the replay overwrites it.
+  (`FirestoreMessageSource.writeMessage`.)
 
 ## Testing
 

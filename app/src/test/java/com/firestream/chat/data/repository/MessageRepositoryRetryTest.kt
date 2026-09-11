@@ -27,6 +27,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.mockkStatic
+import io.mockk.slot
 import io.mockk.unmockkStatic
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -138,11 +139,11 @@ class MessageRepositoryRetryTest {
         stubChatLastMessageId(original.chatId, original.id)
         coEvery {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(), type = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
                 mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any()
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
             )
         } returns "remote-id-after-retry"
 
@@ -172,11 +173,11 @@ class MessageRepositoryRetryTest {
         stubChatLastMessageId(original.chatId, lastId = null)
         coEvery {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(), type = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
                 mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any()
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
             )
         } throws RuntimeException("still offline")
 
@@ -203,11 +204,11 @@ class MessageRepositoryRetryTest {
         assertTrue(replaceArgs.isEmpty())
         coVerify(exactly = 0) {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(), type = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
                 mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any()
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
             )
         }
     }
@@ -232,11 +233,11 @@ class MessageRepositoryRetryTest {
             "https://example/firebase/img.jpg"
         coEvery {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(), type = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
                 mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
                 emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
-                latitude = any(), longitude = any(), isHd = any()
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
             )
         } returns "remote-img-id"
 
@@ -271,11 +272,11 @@ class MessageRepositoryRetryTest {
         } returns "https://example/firebase/vid.mp4"
         coEvery {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(), type = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
                 replyToId = any(), timestamp = any(), mediaUrl = any(),
                 mediaThumbnailUrl = any(), isForwarded = any(), duration = any(),
                 mentions = any(), emojiSizes = any(), mediaWidth = any(),
-                mediaHeight = any(), latitude = any(), longitude = any(), isHd = any()
+                mediaHeight = any(), latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
             )
         } returns "remote-vid-id"
 
@@ -290,12 +291,79 @@ class MessageRepositoryRetryTest {
         // The persisted thumbnail + duration are re-sent through the source.
         coVerify {
             messageSource.sendPlainMessage(
-                chatId = any(), senderId = any(), content = any(),
+                chatId = any(), senderId = any(), messageId = any(), content = any(),
                 type = MessageType.VIDEO, replyToId = any(), timestamp = any(),
                 mediaUrl = any(), mediaThumbnailUrl = "https://example/firebase/vid_thumb.jpg",
                 isForwarded = any(), duration = 12, mentions = any(), emojiSizes = any(),
                 mediaWidth = any(), mediaHeight = any(), latitude = any(),
-                longitude = any(), isHd = any()
+                longitude = any(), isHd = any(), ifAbsent = any()
+            )
+        }
+    }
+
+    // ── Idempotent ids ──────────────────────────────────────────────────────
+    //
+    // Regression for the duplicate-on-retry bug: the first attempt used to
+    // `add()` with a backend auto-id, and a retry `add()`ed again with a *new*
+    // auto-id. A first write that had actually landed (the await was cancelled
+    // when the user left the chat) plus a retry meant the recipient got the
+    // message twice. The row's own id is now the remote id on every attempt,
+    // and a retry asks the source to create only if the document is absent.
+
+    private fun stubPlainSendEchoingId() {
+        coEvery {
+            messageSource.sendPlainMessage(
+                chatId = any(), senderId = any(), messageId = any(), content = any(), type = any(),
+                replyToId = any(), timestamp = any(), mediaUrl = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
+                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = any()
+            )
+        } answers { thirdArg() }
+    }
+
+    @Test
+    fun `retry re-sends under the original message id and only if absent`() = runTest {
+        val original = failedTextMessage()
+        stubExistingFailed(original)
+        stubChatLastMessageId(original.chatId, original.id)
+        stubPlainSendEchoingId()
+
+        val result = repository.retryFailedMessage(original.id, recipientId = "")
+
+        assertTrue("retry should succeed: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(original.id, result.getOrThrow().id)
+        coVerify(exactly = 1) {
+            messageSource.sendPlainMessage(
+                chatId = original.chatId, senderId = "uid1", messageId = original.id,
+                content = original.content, type = MessageType.TEXT,
+                replyToId = any(), timestamp = original.timestamp, mediaUrl = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
+                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = true
+            )
+        }
+    }
+
+    @Test
+    fun `first send writes under the optimistic row id without the if-absent guard`() = runTest {
+        val inserted = slot<MessageEntity>()
+        coEvery { messageDao.insertMessage(capture(inserted)) } just Runs
+        stubPlainSendEchoingId()
+
+        val result = repository.sendMessage("chat1", "hi", recipientId = "")
+
+        assertTrue("send should succeed: ${result.exceptionOrNull()}", result.isSuccess)
+        val rowId = inserted.captured.id
+        assertEquals(rowId, result.getOrThrow().id)
+        coVerify(exactly = 1) {
+            messageSource.sendPlainMessage(
+                chatId = "chat1", senderId = "uid1", messageId = rowId,
+                content = "hi", type = MessageType.TEXT,
+                replyToId = any(), timestamp = any(), mediaUrl = any(),
+                mediaThumbnailUrl = any(), isForwarded = any(), duration = any(), mentions = any(),
+                emojiSizes = any(), mediaWidth = any(), mediaHeight = any(),
+                latitude = any(), longitude = any(), isHd = any(), ifAbsent = false
             )
         }
     }

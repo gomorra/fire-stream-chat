@@ -32,7 +32,8 @@ chats/{chatId}
 ├── permissions                                 # embedded GroupPermissions object
 │   ├── sendMessages, editGroupInfo, addMembers, createPolls
 │   └── isAnnouncementMode
-└── messages/{messageId}                        # subcollection
+└── messages/{messageId}                        # subcollection; id = client UUID (the Room row id)
+    │                                           # for retryable sends, Firestore auto-id for poll/list/call/timer
     ├── senderId, content, type, status, timestamp
     ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
     ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight

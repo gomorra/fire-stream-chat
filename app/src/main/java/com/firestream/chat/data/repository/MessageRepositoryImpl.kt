@@ -290,6 +290,13 @@ class MessageRepositoryImpl @Inject constructor(
 
         if (raw.senderId == currentUid) {
             if (existing != null) {
+                // Ids are client-set, so Firestore's latency-compensated echo of
+                // our own write arrives under this row's id with the payload's
+                // status=SENT while nothing has reached the server yet. Only an
+                // acknowledged snapshot may move the status. The acknowledged
+                // case also heals a row flipped FAILED by a send whose await
+                // died (user left the chat) but whose write landed anyway.
+                if (raw.hasPendingWrites) return
                 // Update status from remote if it changed (e.g. DELIVERED, READ)
                 val remoteStatus = parseMessageStatus(raw.status)
                 if (existing.status != remoteStatus.name) {
@@ -444,11 +451,20 @@ class MessageRepositoryImpl @Inject constructor(
      *
      * Callers pass all optional fields (mediaUrl, mentions, etc.) — unused ones
      * fall through to the underlying `FirestoreMessageSource` defaults.
+     *
+     * [messageId] is the Room row's id and becomes the remote id on a backend
+     * that keys by client id (see [MessageSource]); a first send passes the
+     * optimistic row's id, a retry passes the failed row's id with
+     * [ifAbsent] = true so a write that landed after its await was cancelled
+     * is never duplicated. The returned id is what the backend actually used —
+     * the same id on Firebase, a server id on PocketBase — which is why callers
+     * still swap the row to it.
      */
     private suspend fun sendEncryptedOrPlain(
         chatId: String,
         senderId: String,
         recipientId: String,
+        messageId: String,
         plaintext: String,
         type: MessageType,
         timestamp: Long,
@@ -464,6 +480,7 @@ class MessageRepositoryImpl @Inject constructor(
         longitude: Double? = null,
         isForwarded: Boolean = false,
         isHd: Boolean = false,
+        ifAbsent: Boolean = false,
     ): String {
         return if (
             recipientId.isNotEmpty() &&
@@ -476,6 +493,7 @@ class MessageRepositoryImpl @Inject constructor(
             messageSource.sendMessage(
                 chatId = chatId,
                 senderId = senderId,
+                messageId = messageId,
                 ciphertext = encrypted.ciphertext,
                 signalType = encrypted.signalType,
                 type = type,
@@ -493,11 +511,13 @@ class MessageRepositoryImpl @Inject constructor(
                 latitude = latitude,
                 longitude = longitude,
                 isHd = isHd,
+                ifAbsent = ifAbsent,
             )
         } else {
             messageSource.sendPlainMessage(
                 chatId = chatId,
                 senderId = senderId,
+                messageId = messageId,
                 content = plaintext,
                 type = type,
                 replyToId = replyToId,
@@ -513,6 +533,7 @@ class MessageRepositoryImpl @Inject constructor(
                 latitude = latitude,
                 longitude = longitude,
                 isHd = isHd,
+                ifAbsent = ifAbsent,
             )
         }
     }
@@ -582,6 +603,7 @@ class MessageRepositoryImpl @Inject constructor(
                 chatId = chatId,
                 senderId = senderId,
                 recipientId = recipientId,
+                messageId = tempId,
                 plaintext = content,
                 type = MessageType.TEXT,
                 timestamp = timestamp,
@@ -760,6 +782,7 @@ class MessageRepositoryImpl @Inject constructor(
                     chatId = chatId,
                     senderId = senderId,
                     recipientId = recipientId,
+                    messageId = tempId,
                     plaintext = caption,
                     type = messageType,
                     timestamp = timestamp,
@@ -843,12 +866,14 @@ class MessageRepositoryImpl @Inject constructor(
             chatId = message.chatId,
             senderId = senderId,
             recipientId = recipientId,
+            messageId = message.id,
             plaintext = message.content,
             type = MessageType.TEXT,
             timestamp = message.timestamp,
             replyToId = message.replyToId,
             mentions = message.mentions,
             emojiSizes = message.emojiSizes,
+            ifAbsent = true,
         )
         val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
@@ -934,6 +959,7 @@ class MessageRepositoryImpl @Inject constructor(
                 chatId = message.chatId,
                 senderId = senderId,
                 recipientId = recipientId,
+                messageId = message.id,
                 plaintext = message.content,
                 type = message.type,
                 timestamp = message.timestamp,
@@ -946,6 +972,7 @@ class MessageRepositoryImpl @Inject constructor(
                 mediaHeight = mediaHeight,
                 duration = message.duration,
                 isHd = message.isHd,
+                ifAbsent = true,
             )
 
             val sent = message.copy(
@@ -1000,11 +1027,13 @@ class MessageRepositoryImpl @Inject constructor(
             chatId = message.chatId,
             senderId = senderId,
             recipientId = recipientId,
+            messageId = message.id,
             plaintext = VOICE_MESSAGE_CONTENT,
             type = MessageType.VOICE,
             timestamp = message.timestamp,
             mediaUrl = downloadUrl,
             duration = message.duration,
+            ifAbsent = true,
         )
         val sent = message.copy(id = remoteId, status = MessageStatus.SENT, mediaUrl = downloadUrl)
         messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
@@ -1025,12 +1054,14 @@ class MessageRepositoryImpl @Inject constructor(
         val remoteId = messageSource.sendPlainMessage(
             chatId = message.chatId,
             senderId = senderId,
+            messageId = message.id,
             content = message.content,
             type = MessageType.LOCATION,
             replyToId = null,
             timestamp = message.timestamp,
             latitude = message.latitude,
             longitude = message.longitude,
+            ifAbsent = true,
         )
         val sent = message.copy(id = remoteId, status = MessageStatus.SENT)
         messageDao.replaceMessage(message.id, MessageEntity.fromDomain(sent))
@@ -1107,6 +1138,7 @@ class MessageRepositoryImpl @Inject constructor(
             chatId = targetChatId,
             senderId = senderId,
             recipientId = recipientId,
+            messageId = tempId,
             plaintext = message.content,
             type = message.type,
             timestamp = timestamp,
@@ -1151,6 +1183,7 @@ class MessageRepositoryImpl @Inject constructor(
                 chatId = chatId,
                 senderId = senderId,
                 recipientId = recipientId,
+                messageId = tempId,
                 plaintext = VOICE_MESSAGE_CONTENT,
                 type = MessageType.VOICE,
                 timestamp = timestamp,
@@ -1300,6 +1333,7 @@ class MessageRepositoryImpl @Inject constructor(
         val broadcastRemoteId = messageSource.sendPlainMessage(
             chatId = broadcastChatId,
             senderId = senderId,
+            messageId = UUID.randomUUID().toString(),
             content = content,
             type = MessageType.TEXT,
             replyToId = null,
@@ -1327,11 +1361,14 @@ class MessageRepositoryImpl @Inject constructor(
                         // Get or create the 1:1 chat with each recipient
                         val chatResult = chatRepository.get().getOrCreateChat(recipientId)
                         val individualChat = chatResult.getOrThrow()
-                        // Send as 1:1 message (encrypted in release, plain in debug)
+                        // Send as 1:1 message (encrypted in release, plain in debug).
+                        // One fresh id per target chat — the broadcast's own id
+                        // must not be reused across collections.
                         val fanOutRemoteId = sendEncryptedOrPlain(
                             chatId = individualChat.id,
                             senderId = senderId,
                             recipientId = recipientId,
+                            messageId = UUID.randomUUID().toString(),
                             plaintext = content,
                             type = MessageType.TEXT,
                             timestamp = timestamp,
@@ -1469,6 +1506,7 @@ class MessageRepositoryImpl @Inject constructor(
             val remoteId = messageSource.sendPlainMessage(
                 chatId = chatId,
                 senderId = senderId,
+                messageId = tempId,
                 content = content,
                 type = MessageType.LOCATION,
                 replyToId = null,
