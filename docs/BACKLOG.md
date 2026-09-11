@@ -70,6 +70,17 @@ the double decrypt between the chat-list sync and the open chat, the stale-bundl
 a peer re-registers, and the lock tests' 300 ms window
 (`.claude/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
 
+### Newer-only chat preview and send timestamps (offline outbox step 5, 2026-09-11)
+
+Shipped in `40023dbc`; nothing has been on hardware. The Firestore preview is now a
+transaction, which Robolectric cannot run, so only its body is unit-tested. Two devices:
+1. Pick four photos plus a text and send them together → on both phones the chat list shows
+   the text, not a photo, and the photos keep the order they were picked in.
+2. Right after sending, have the other person start typing → the sender's chat list never
+   flicks back to the previous message while the preview write is in flight.
+3. Airplane mode → send a text (fails) → send another after reconnecting → retry the first →
+   the chat list keeps showing the second.
+
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
 **Nothing in this phase has been on hardware.** Its risk is the whole path, which no
