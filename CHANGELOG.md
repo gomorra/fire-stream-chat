@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **The crop corners can be reached with a finger.** A photo as wide as the phone was fitted edge to edge, so its crop corners sat on the very edge of the screen: half of each grab area was off the glass and the rest sat inside the strip Android reserves for the back swipe, so reaching for a corner closed the editor instead. With the crop tool open the photo now shrinks slightly into a margin that keeps every corner clear of the screen edge and the system gesture areas, and grows back when the tool closes. The photo also no longer runs under the top bar and the bottom panel on phones with a status or navigation bar.
+- **The crop corners can be reached with a finger.** A photo as wide as the phone was fitted edge to edge, so its crop corners sat on the very edge of the screen: half of each grab area was off the glass and the rest sat inside the strip Android reserves for the back swipe, so reaching for a corner closed the editor instead. With the crop tool open the photo now shrinks slightly into a margin that keeps every corner clear of the screen edge and the system gesture areas, and grows back when the tool closes. The photo also no longer runs under the top bar and the bottom panel on phones with a status or navigation bar. (`56c2533d`)
 
 ## [1.28.0] — 2026-09-10
 
