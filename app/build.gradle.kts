@@ -234,8 +234,12 @@ android {
         // both intermittently crash (SIGSEGV in IndexSetIterator / StackMapFrame)
         // on this CachyOS/JBR host. Mirror the daemon's stability flags onto the
         // test worker so `./gradlew test` is reliable. See gradle.properties.
+        // C1-only defaults the code cache to 48 MB, which ~1440 tests with the
+        // Robolectric Compose screens fill; the JVM then disables the compiler
+        // and a Compose class init can fail with NoClassDefFoundError in whatever
+        // test runs next (docs/GOTCHAS.md). 256 MB is the C2 default.
         unitTests.all { test ->
-            test.jvmArgs("-Xshare:off", "-XX:TieredStopAtLevel=1")
+            test.jvmArgs("-Xshare:off", "-XX:TieredStopAtLevel=1", "-XX:ReservedCodeCacheSize=256m")
         }
     }
 }

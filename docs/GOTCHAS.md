@@ -231,6 +231,17 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   capabilities with `ShadowNetworkCapabilities.newInstance()` +
   `shadowOf(caps).addCapability(…)`, which is also the only way to express a captive
   portal (INTERNET without VALIDATED). See `AndroidConnectivityObserverTest`.
+- **The test JVM's code cache is 48 MB under C1-only, and the whole suite fills it.**
+  `-XX:TieredStopAtLevel=1` (kept for the host-crash reasons in `app/build.gradle.kts`)
+  drops the default `ReservedCodeCacheSize` from 240 MB to 48 MB. Around 1 440 tests
+  including the Robolectric Compose screens, the worker logs `CodeCache is full. Compiler
+  has been disabled` and whatever test runs next dies with
+  `VirtualMachineError: Out of space in CodeCache for adapters` or a
+  `NoClassDefFoundError: Could not initialize class …LazyListStateKt` — 1 to 35 failures
+  in image-editor screen tests that pass alone, and that pass in a run of the four classes
+  by themselves. Not a test bug: the fix is `-XX:ReservedCodeCacheSize=256m` on the unit-test
+  worker, which is set. If the symptom returns at a larger suite, raise it again rather
+  than bisecting tests. Seen 2026-09-12 (offline outbox step 8, two consecutive full runs).
 
 ## Platform / dependencies
 
