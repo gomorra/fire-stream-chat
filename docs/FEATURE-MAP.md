@@ -71,9 +71,10 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/domain/util/StrokeGeometry.kt` | The draw screen's arithmetic — stroke width against the long edge, the smoothed path via `PathSink`, the blur/painted layer split, mosaic block size. The one copy, because Compose and `android.graphics` both render strokes and must not disagree |
 | `app/src/main/java/com/firestream/chat/data/util/ImageEditRasterizer.kt` | The platform half: `ImageDecoder` decode, JPEG encode, stroke flattening, the pixelate mosaic, limiter permit, `cacheDir/edits/` lifecycle and byte budget |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `Android/media/com.firestream.chat/{chatId}/{messageId}.{ext}` storage + gallery export |
-| `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi |
+| `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillWorker.kt` | WorkManager job — daily (24h) periodic backfill, respects `AutoDownloadOption` + WiFi; also the one-time run a failed download queues |
+| `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillScheduler.kt` | `retryDownloads` — the failed-download retry (`media-download-retry`, KEEP, network constraint from the preference); the periodic run is scheduled in `FireStreamApp`, the manual one in `SettingsViewModel` |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStorageSource.kt` | Upload with `addOnProgressListener` → `uploadProgress` flow |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` (limit guard, optimistic row, block check), `downloadAndSave` (in-flight dedup map), per-chat scan |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` (limit guard, optimistic row, block check), `downloadAndSave` (in-flight dedup map), per-chat scan; a failed auto-download or scan row hands off to `MediaBackfillScheduler.retryDownloads` |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | The pipeline behind every retryable send — compress / transcode → thumbnail → upload (owns `uploadProgress`) → encrypt once → write → SENT, persisting each step with a column update and skipping any step the row already records |
 | `app/src/main/java/com/firestream/chat/data/outbox/SendClock.kt` | Send timestamps, strictly increasing within the process (`max(now, last + 1)`), so a multi-photo batch keeps a fixed order and the newer-only chat preview (`ChatDao.updateLastMessage`, `ChatDao.upsertRemote`, `FirestoreMessageSource.writeBackChatPreview`) has no ties within it — tests `MessageRepositorySendClockTest`, `ChatDaoLastMessageTest` |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | IMAGE branch — aspect ratio from `mediaWidth/mediaHeight`, prefers `localUri` |
@@ -335,14 +336,22 @@ FCM-driven message + call wake-ups. Per-user unread counts in Firestore.
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | `FirebaseMessagingService` — extracts payload, marks delivered, suppresses for active chat |
-| `app/src/main/java/com/firestream/chat/data/remote/fcm/ActiveChatTracker.kt` | `@Singleton` — tracks the foreground chatId for suppression |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | `FirebaseMessagingService` — extracts payload, hands the named message to `reconcileFromPush`, marks delivered, suppresses for active chat |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/ActiveChatTracker.kt` | `@Singleton` — tracks the foreground chatId for suppression, and for the push reconcile's yield to the open chat's listener |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `reconcileFromPush(chatId, messageId)` — the one message a push names, through the listener's `reconcileRawMessage` (own-echo guard, decrypt, auto-download); a thrown read is retried three times over the reconnect instant; skipped for the active chat; never throws |
+| `app/src/main/java/com/firestream/chat/data/remote/source/MessageSource.kt` | `fetchMessage` — one document by id, `null` when the backend does not hold it |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `fetchMessage` — a single `get()` under the client id |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseMessageSource.kt` | `fetchMessage` — v0 stub, answers `null` (no FCM in that flavor) |
+| `app/src/main/java/com/firestream/chat/data/worker/MediaBackfillScheduler.kt` | `retryDownloads` — a failed auto-download queues one unique `MediaBackfillWorker` run (`media-download-retry`, KEEP; UNMETERED for "Wi-Fi only", nothing for "never") |
 | `app/src/main/java/com/firestream/chat/MainActivity.kt` | Reads `chatId` / `senderId` extras → deep link |
 | `functions/index.js` | `sendPushNotification` (on message create) + `sendCallPushNotification` (on call create) Cloud Functions |
 | `app/src/main/AndroidManifest.xml` | `FirebaseMessagingService` + `POST_NOTIFICATIONS` permission |
 | `app/src/test/java/com/firestream/chat/data/remote/fcm/ActiveChatTrackerTest.kt` | Suppression behaviour |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryPushReconcileTest.kt` | A pushed photo lands in Room and downloads with the chat closed; the open chat, a blocked sender, a missing document and a fetch that keeps failing write nothing; a fetch that fails once is tried again; the own-echo guard; a failed download, and "Wi-Fi only" off Wi-Fi, queue the retry once |
+| `app/src/test/java/com/firestream/chat/data/worker/MediaBackfillSchedulerTest.kt` | The retry request per auto-download preference |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | `fetchMessage` reads one document, `null` for a missing one |
 
-**Entry point:** Firestore message create → `sendPushNotification` Cloud Function → `FCMService.onMessageReceived` → notification or in-app marker.
+**Entry point:** Firestore message create → `sendPushNotification` Cloud Function → `FCMService.onMessageReceived` → `MessageRepository.reconcileFromPush` (the message and its media reach the phone before the chat is opened — FCM stores and forwards, so this is what runs on reconnect for a closed chat) alongside the delivery receipt → notification or in-app marker. A download the network drops is re-queued through `MediaBackfillScheduler.retryDownloads`; the daily backfill and the next chat open remain the fallbacks if the process dies mid-download.
 
 ---
 

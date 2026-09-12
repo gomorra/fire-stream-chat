@@ -34,6 +34,14 @@ interface MessageSource {
     fun observeMessages(chatId: String): Flow<List<RawMessage>>
     suspend fun fetchMessages(chatId: String): List<RawMessage>
 
+    /**
+     * One message by id, or `null` when the backend does not hold it. A push
+     * names the message it is for, and this is how a closed chat picks that one
+     * message up without listening to the whole collection. PocketBase v0
+     * answers `null` (its push path is the SSE hook, not FCM).
+     */
+    suspend fun fetchMessage(chatId: String, messageId: String): RawMessage?
+
     suspend fun sendMessage(
         chatId: String,
         senderId: String,

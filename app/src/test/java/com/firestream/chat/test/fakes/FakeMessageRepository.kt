@@ -345,6 +345,8 @@ internal class FakeMessageRepository : MessageRepository {
 
     override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
 
+    override suspend fun reconcileFromPush(chatId: String, messageId: String) = Unit
+
     override suspend fun sendTimerMessage(
         chatId: String,
         durationMs: Long,

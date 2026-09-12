@@ -71,6 +71,14 @@ class FCMService : FirebaseMessagingService() {
         val chatId = data["chatId"] ?: return
         val messageId = data["messageId"]
 
+        // The push is what runs for a closed chat on reconnect, so it fetches the
+        // message and its media itself; the repository yields to an open chat.
+        if (messageId != null) {
+            serviceScope.launch {
+                messageRepository.reconcileFromPush(chatId, messageId)
+            }
+        }
+
         // Suppress notification if the user is already viewing this chat
         // in the foreground — they are actively reading messages, so an
         // alert would be redundant noise.

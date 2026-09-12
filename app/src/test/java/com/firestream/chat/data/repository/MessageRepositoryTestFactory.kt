@@ -11,11 +11,13 @@ import com.firestream.chat.data.outbox.OutboxFiles
 import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.outbox.SendClock
+import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
+import com.firestream.chat.data.worker.MediaBackfillScheduler
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import io.mockk.coEvery
@@ -49,6 +51,8 @@ internal fun messageRepository(
     userSource: UserSource = mockk(relaxed = true),
     blockCheck: BlockCheck = BlockCheck(userSource),
     sendClock: SendClock = SendClock(),
+    activeChatTracker: ActiveChatTracker = ActiveChatTracker(),
+    mediaBackfillScheduler: MediaBackfillScheduler = mockk(relaxed = true),
 ) = MessageRepositoryImpl(
     messageDao = messageDao,
     chatDao = chatDao,
@@ -68,4 +72,6 @@ internal fun messageRepository(
     connectivityManager = connectivityManager,
     userSource = userSource,
     sendClock = sendClock,
+    activeChatTracker = activeChatTracker,
+    mediaBackfillScheduler = mediaBackfillScheduler,
 )

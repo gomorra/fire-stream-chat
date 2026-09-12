@@ -267,7 +267,7 @@ class SettingsViewModel @Inject constructor(
 
     fun startMediaBackfill() {
         val request = OneTimeWorkRequestBuilder<MediaBackfillWorker>()
-            .setInputData(workDataOf("manual" to true))
+            .setInputData(workDataOf(MediaBackfillWorker.KEY_MANUAL to true))
             .setConstraints(
                 Constraints.Builder()
                     .setRequiredNetworkType(NetworkType.CONNECTED)

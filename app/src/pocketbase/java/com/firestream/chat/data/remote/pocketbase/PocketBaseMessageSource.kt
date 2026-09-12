@@ -96,6 +96,10 @@ class PocketBaseMessageSource @Inject constructor(
         return (0 until items.length()).map { mapToRaw(items.getJSONObject(it)) }
     }
 
+    // v0 has no FCM push to reconcile from — new messages arrive over the SSE
+    // hook — so there is nothing for a single-record read to serve yet.
+    override suspend fun fetchMessage(chatId: String, messageId: String): RawMessage? = null
+
     override suspend fun sendPlainMessage(
         chatId: String,
         senderId: String,

@@ -391,6 +391,16 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### Three `MediaBackfillWorker` request builders
+
+**The smell.** The same `MediaBackfillWorker` is enqueued from three places, each building its own request: the daily periodic run in `FireStreamApp.scheduleMediaBackfill`, the manual run in `SettingsViewModel.startMediaBackfill` (`manual = true`, REPLACE), and — since offline outbox step 8 (2026-09-12) — the failed-download retry in `data/worker/MediaBackfillScheduler.retryDownloads` (KEEP, constraint from the preference). The new class is the natural home for all three, and `SettingsViewModel` importing the worker is one of the UI→data allowlist entries.
+
+**Why we're not doing it now.** The two older call sites pre-date the class and were outside the step-8 diff; moving them is mechanical but touches `FireStreamApp` and a UI allowlist entry, and wants the settings test run with it rather than a drive-by inside a receive-path change. Raised by the standards pass on step 8.
+
+**When to revisit.** Next time either older call site is touched, or when the allowlist is next pruned: move both builders onto `MediaBackfillScheduler` (`schedulePeriodic()`, `runNow()`), inject it into `SettingsViewModel`, and drop `MediaBackfillWorker` from `UI_ALLOWED_DATA_IMPORTS`.
+
+---
+
 ### The image editor's resize presets cannot exceed `ImageCompressor.MAX_DIMENSION`
 
 **The smell.** `.claude/plans/image-editor.md` §2.5 says "an explicit resize wins. If the

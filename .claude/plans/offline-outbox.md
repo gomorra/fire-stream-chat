@@ -302,8 +302,11 @@ enqueues instead of failing and the worker re-checks (§2.5 "Blocked recipient")
   chat's listener both check → decrypt → insert one message outside any lock; the per-peer lock makes the second
   decrypt fail on the advanced ratchet and its placeholder can `REPLACE` the good row. The common path is a cold
   start from a notification tap, racing on exactly the message the notification was for. The single receive
-  entry point under one lock (step 8 note) is the fix; it must land before encryption is enabled, whether or not
-  step 8 has shipped.
+  entry point under one lock (step 8 note) is the fix; it must land before encryption is enabled. **Since step 8
+  shipped there are three callers to fold in:** `reconcileRawMessage` (listener and push reconcile) and
+  `syncChatMessages`; the push reconcile adds the duplicate-FCM-delivery race (two pushes for one id) and the
+  open-the-chat-as-the-push-lands race to the list. A `KeyedMutex<String>` by message id in the repository around
+  check → decrypt → insert, with `syncChatMessages` routed through `reconcileRawMessage`, is the smallest shape.
 - **(step-4 /code-review, uncertain)** `SignalManager.encrypt` fetches the key bundle outside the session lock.
   If a peer re-registers while two encrypts to it are in flight, the one holding the older bundle can reset
   the session the other just built on the newer one, losing one message. It was as unguarded before step 4.
@@ -487,6 +490,61 @@ section gains the new repository entry point.
 If half 1 turns out larger than a step should be (the decrypt-on-push path meets the Signal lock
 for the first time), ship half 2 alone, drop checklist item 7 to *Pending* in BACKLOG, and open
 "reconcile on push" as its own plan — do not ship half 2 under this step's title.
+
+- **Shipped shape (both halves, one `feat:` commit).** The abort rule did not fire: half 1 is one
+  single-document read feeding the existing `reconcileRawMessage`. `MessageSource.fetchMessage(chatId,
+  messageId): RawMessage?` (Firestore: `messageRef(...).get()`, mapped like a snapshot row, `null` when the
+  document is gone; PocketBase: `null`, that flavor has no FCM). `MessageRepository.reconcileFromPush(chatId,
+  messageId)` returns early for the active chat (`ActiveChatTracker`, injected into the repository so the rule
+  and its test sit with the receive path) and for a signed-out user, then fetch → the listener's cached
+  blocked-sender read (`blockedUserIds`) → `signalManager.ensureInitialized()` only for a ciphertext row →
+  `reconcileRawMessage`, so it inherits the own-echo guard, the decrypt under `NonCancellable`, the record
+  write, `tryAutoDownload` and the list fetch; everything non-cancellation is logged and swallowed.
+  A *thrown* read is tried three times two seconds apart (`fetchMessageWithRetry`): FCM's socket comes back
+  before Firestore's, so the first read on the reconnect instant can fail while the connection is seconds away;
+  a `null` (document gone) is an answer and is not retried. `FCMService.onMessageReceived` launches it in
+  `serviceScope` for every message push carrying a `messageId`, before the active-chat branch and beside the
+  delivery receipt (the two are independent; a receipt that lands before the insert updates no row, so the
+  incoming row keeps the payload's status until the read receipt — invisible, ticks render on own messages
+  only). Half 2: `data/worker/MediaBackfillScheduler.retryDownloads()` — unique `media-download-retry`, KEEP,
+  one plain `MediaBackfillWorker` run (not `manual`, so the worker keeps honouring the preference), UNMETERED for
+  WIFI_ONLY, CONNECTED for ALWAYS, nothing for NEVER; called from `tryAutoDownload`'s catch, once after a
+  `savePendingMediaForChat` loop with any failure, **and from the "Wi-Fi only, not on Wi-Fi" branch** of
+  `tryAutoDownload` and of the chat-open scan (only when the chat has rows without a local copy) — found by
+  `/code-review`: the UNMETERED constraint exists for exactly that branch, and it used to return before anything
+  was queued. All wrapped (`retryDownloadsLater`) so a WorkManager failure cannot fail a scan. Tests:
+  `MessageRepositoryPushReconcileTest` (18 — the download runs on the repository's IO scope, so those
+  verifications carry a timeout), `MediaBackfillSchedulerTest` (3), `fetchMessage` in
+  `FirestoreMessageSourceTest` (2). Third unlocked check → decrypt → insert caller: recorded in the pre-enable
+  bullet above with the two new races it brings; not fixed here by design.
+  **Known limits:** a process killed mid-download after a push is not a failure, so nothing re-queues it — the
+  daily backfill or the next chat open covers it (BACKLOG 6.3 keeps the "queue up front" follow-up); a chat-list
+  sync that writes the row before the push reconcile runs (a cold start racing the push) leaves `reconcileRawMessage`
+  with nothing to do, and the sync path does not auto-download, so that photo waits for the chat-open scan.
+
+## Wrap-up (2026-09-12) — the plan is finished
+
+**Before end-to-end encryption can be enabled** (the "Before end-to-end encryption is switched on" list under
+step 4 is the authoritative one), in order of severity:
+1. Pre-key replenishment — its own plan (`.claude/plans/`, not yet written): a batch of one-time pre-keys with
+   rotating ids, replenish on start and below a threshold, a publish that cannot leave store and bundle
+   disagreeing, and a real-libsignal test for two new contacts in the replenish window.
+2. The single receive entry point under one lock — three callers now (listener, sync, push reconcile); a
+   `KeyedMutex` by message id around check → decrypt → insert with the sync routed through
+   `reconcileRawMessage`. Can be the second half of the same pre-enable plan.
+3. The stale-bundle race in `SignalManager.encrypt` (re-fetch once inside the lock when identities differ).
+4. Then the release-build, two-device checks: step-4 items 4–7 and step-6 item 7.
+
+**Device checklist state:** nothing from steps 1–8 has been on hardware. Every step's list sits in
+`docs/BACKLOG.md` § *Pending on-device verification*: step 1 (5 items), step 4 (3 + 4 E2E items), step 5 (3),
+step 6 (9), step 7 (3), step 8 (5). Run them **upgrading over an existing install**, with a second device as
+the peer; the Room 28 reset is expected once. The debug build never encrypts, so everything but the E2E items
+can be checked on debug APKs.
+
+**Not in the plan, still open:** the message-info sheet's "you can't message this user" line (needs a failure
+reason on the row — BACKLOG 6.3); the three TECH_DEBT entries from step 6 (`MessageColumns` delegation,
+`outboxAttempts` carrying two facts, the three per-key mutex variants); a run cancelled by constraint loss or
+process death spends one of the eight attempts.
 
 **(step-4 /simplify altitude review)** Step 4's per-peer lock serialises two decrypts of one message but does
 not make "decrypt once" hold: `reconcileRawMessage` and `syncChatMessages` each check for the row, decrypt and

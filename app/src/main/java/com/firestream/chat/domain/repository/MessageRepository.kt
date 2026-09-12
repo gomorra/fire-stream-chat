@@ -85,6 +85,14 @@ interface MessageRepository {
     suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
     // Background sync
     suspend fun syncAllChatMessages(chatIds: List<String>)
+    /**
+     * Pulls the one message a push notification names into the local store —
+     * decrypted, and with its media downloaded per the auto-download preference —
+     * so a photo received while the app was closed is on the phone before the
+     * chat is ever opened. A no-op while that chat is open (its listener owns
+     * it). Best-effort: never throws, since the push handler cannot retry.
+     */
+    suspend fun reconcileFromPush(chatId: String, messageId: String)
     // Timers (.timer.set)
     suspend fun sendTimerMessage(
         chatId: String,

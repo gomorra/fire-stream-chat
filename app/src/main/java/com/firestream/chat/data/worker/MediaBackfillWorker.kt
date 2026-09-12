@@ -26,7 +26,7 @@ class MediaBackfillWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        val isManual = inputData.getBoolean("manual", false)
+        val isManual = inputData.getBoolean(KEY_MANUAL, false)
 
         if (!isManual) {
             when (preferencesDataStore.autoDownloadFlow.first()) {
@@ -78,5 +78,10 @@ class MediaBackfillWorker @AssistedInject constructor(
         val network = connectivityManager.activeNetwork ?: return false
         val caps = connectivityManager.getNetworkCapabilities(network) ?: return false
         return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    companion object {
+        /** Input flag of a run the user asked for: skips the auto-download preference gate. */
+        const val KEY_MANUAL = "manual"
     }
 }

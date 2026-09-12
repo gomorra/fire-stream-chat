@@ -108,8 +108,7 @@ over an existing install**, with a second device as recipient:
    notification while it runs.
 9. Give-up: keep a captive-portal Wi-Fi (connected, no Firestore) for the eight attempts
    (about 20 minutes of backoff) → the bubble turns failed; tap retry once online → it sends.
-Item 7 of the plan's §4 checklist ("received image while offline → downloaded without opening
-the chat") belongs to step 8 and moves here with it; item 8 is the step-7 section below.
+Item 7 of the plan's §4 checklist is the step-8 section below; item 8 is the step-7 section.
 
 ### "Waiting for network…" (offline outbox step 7, 2026-09-12)
 
@@ -125,6 +124,31 @@ real one, and it cannot produce a captive portal at all. On a device:
    chat, and disappears again on reconnect. Nothing about the send changes: the queued message
    still ticks on its own.
 3. The message-info sheet of a queued message reads "Waiting to send".
+
+### Received media downloads on reconnect without opening the chat (offline outbox step 8, 2026-09-12)
+
+Shipped in the step-8 commit; nothing has been on hardware. FCM's store-and-forward, the
+`FirebaseMessagingService` process budget and WorkManager's network constraint cannot be
+exercised under Robolectric — the unit tests pin that a pushed message reaches Room and its
+download through the listener's reconcile, and which run a failed download queues. Two devices,
+the receiver upgrading over an existing install:
+1. **§4 checklist item 7.** Receiver in airplane mode, app swiped away → sender sends a photo →
+   receiver: airplane off, do **not** open the app → wait for the notification → open Settings →
+   Storage or the file manager: the photo must be under `Pictures/FireStream Images/` (or open the
+   chat afterwards and see it render at once, no download spinner). Then the same with the chat
+   list open but the chat closed.
+2. Same, but with the chat **open** when the network returns → the photo appears exactly once, and
+   logcat shows no `reconcileFromPush` line for that message (the listener owns it).
+3. Auto-download "Wi-Fi only", receiver on mobile data, chat closed → the notification arrives,
+   the photo is not downloaded; join Wi-Fi without opening the app → the queued
+   `media-download-retry` run (or the next chat open) fetches it.
+4. Kill the network the instant the notification arrives (airplane mode within a second) → a
+   `tryAutoDownload: download failed` line, then a `MediaBackfillScheduler: retryDownloads`
+   line; airplane off → the photo lands without opening the chat.
+5. FCM delivers at least once: if a message ever arrives as two notifications, the chat must
+   still show one row.
+Known limit: a process killed mid-download (the push handler's budget ran out) is not a
+failure, so nothing re-queues it — the daily backfill or the next chat open picks it up.
 
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
@@ -554,8 +578,9 @@ data-model change, and the provider decision a GIF forces:
 
 ### Offline resilience — what is left after the outbox (6.3)
 - The durable outbox itself shipped in step 6 of `.claude/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
-- Still open from the same plan: received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry). The "Waiting for network…" hint shipped in step 7 — see *Pending on-device verification* above.
+- The plan is complete: the "Waiting for network…" hint (step 7) and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry) shipped — see *Pending on-device verification* above.
 - The message-info sheet still says "Message not delivered" for a message the worker failed because the recipient is blocked; a "you can't message this user" line needs a failure reason on the row.
+- A process killed mid-download after a push (the handler's budget ran out) re-queues nothing; if the daily backfill turns out too slow for that case on hardware, the push reconcile could queue the backfill run up front for a media message instead of only on failure.
 
 ### Performance & pagination (6.4)
 - Paginated message loading (Paging 3)

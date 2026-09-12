@@ -5,18 +5,23 @@
 //   input → OutboxScheduler.enqueue; the row returns SENDING at once and
 //   OutboxWorker delivers it (docs/PATTERNS.md "Sends are idempotent by client
 //   id and drained by OutboxWorker"). Also media download with in-flight dedup,
-//   per-chat backfill scan, block-state filtering and Signal decryption on receive.
+//   per-chat backfill scan, block-state filtering and Signal decryption on
+//   receive — over three receive paths: the open chat's listener, the chat-list
+//   sync, and the one message a push names (reconcileFromPush).
 // Owns: MessageEntity rows; FAILED marking of what fails before the enqueue
 //   (failSendOnError); the split between a definite block (refused) and an
 //   unanswerable block check (queued — the worker asks again online); the
-//   tombstone path of a message deleted while queued.
+//   tombstone path of a message deleted while queued; the decision to hand a
+//   failed media download to MediaBackfillScheduler.retryDownloads.
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
 //   BlockCheck (the cached block-list read, shared with OutboxWorker),
 //   OutboxScheduler (enqueue / retryNow), OutboxFiles (staging), OutboxSender
 //   (uploadProgress only), MessageWriter (the broadcast fan-out's direct write),
 //   SendClock (every send's timestamp), SignalManager (decrypt path),
 //   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
-//   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check).
+//   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check),
+//   ActiveChatTracker (a push reconcile yields to the open chat's listener),
+//   MediaBackfillScheduler (the failed-download retry).
 // Don't put here: poll vote/close (PollRepositoryImpl), list mutations
 //   (ListRepositoryImpl), call signalling (CallRepositoryImpl), the upload / write
 //   / resume steps of a send (OutboxSender), the attempt's error policy
@@ -48,6 +53,7 @@ import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.outbox.SendTarget
 import com.firestream.chat.data.outbox.isUnacknowledged
 import com.firestream.chat.data.outbox.needsUpload
+import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -61,6 +67,7 @@ import com.firestream.chat.data.util.resolveTimerAlarmStyle
 import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
+import com.firestream.chat.data.worker.MediaBackfillScheduler
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageFilterType
@@ -84,6 +91,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
@@ -118,6 +126,12 @@ private const val BLOCK_CACHE_TTL_MS = 30_000L
 // a large backlog from opening an unbounded number of connections at once.
 private const val RECEIPT_WRITE_CONCURRENCY = 8
 
+// A push reconcile's read of its message: how many times a *thrown* read is
+// tried and how long between tries. Three tries over four seconds sit well
+// inside the background window a high-priority push grants the process.
+private const val PUSH_FETCH_ATTEMPTS = 3
+private const val PUSH_FETCH_RETRY_DELAY_MS = 2_000L
+
 // How long a list-update bubble stays "open" for further merging. Once the gap
 // between the previous list update and the next one exceeds this window, the
 // next update starts a fresh bubble instead of silently extending the old one.
@@ -143,6 +157,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val connectivityManager: ConnectivityManager,
     private val userSource: UserSource,
     private val sendClock: SendClock,
+    private val activeChatTracker: ActiveChatTracker,
+    private val mediaBackfillScheduler: MediaBackfillScheduler,
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -1201,6 +1217,50 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     /**
+     * The one message a push names, through the same reconcile as the listener
+     * — so it inherits the own-echo guard, the decrypt and the auto-download.
+     * Skipped for the open chat, whose listener holds or is about to hold it;
+     * the blocked-sender filter is the listener's cached read. Everything else
+     * is logged and swallowed: the push handler has no way to retry, and the
+     * chat-list sync or opening the chat picks the message up regardless.
+     */
+    override suspend fun reconcileFromPush(chatId: String, messageId: String) {
+        if (activeChatTracker.isActive(chatId)) return
+        val currentUid = authSource.currentUserId ?: return
+        try {
+            val raw = fetchMessageWithRetry(chatId, messageId) ?: return
+            if (raw.senderId != currentUid && raw.senderId in blockedUserIds(currentUid, chatId)) {
+                Log.d(TAG, "reconcileFromPush: filtered blocked sender=${raw.senderId} msg=$messageId chat=$chatId")
+                return
+            }
+            if (raw.ciphertext != null && raw.signalType != null) signalManager.ensureInitialized()
+            reconcileRawMessage(raw, currentUid, chatId)
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            Log.w(TAG, "reconcileFromPush: failed for msg=$messageId chat=$chatId", t)
+        }
+    }
+
+    /**
+     * The push's socket tends to come back before the backend's, so the read
+     * behind a push can fail on the reconnect instant while the connection is
+     * seconds away. A thrown read is tried again a few times; a missing document
+     * is an answer and is not.
+     */
+    private suspend fun fetchMessageWithRetry(chatId: String, messageId: String): RawMessage? {
+        repeat(PUSH_FETCH_ATTEMPTS - 1) { attempt ->
+            try {
+                return messageSource.fetchMessage(chatId, messageId)
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                Log.d(TAG, "reconcileFromPush: fetch attempt ${attempt + 1} failed for msg=$messageId, retrying", e)
+                delay(PUSH_FETCH_RETRY_DELAY_MS)
+            }
+        }
+        return messageSource.fetchMessage(chatId, messageId)
+    }
+
+    /**
      * An own message's row against the backend's copy of it. Only an acknowledged
      * snapshot may move the status: with client-set ids the SDK echoes this
      * client's own write — the payload's SENT included — before the server has
@@ -1268,7 +1328,12 @@ class MessageRepositoryImpl @Inject constructor(
             try {
                 val option = preferencesDataStore.autoDownloadFlow.first()
                 if (option == AutoDownloadOption.NEVER) return@launch
-                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) return@launch
+                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) {
+                    // Nothing downloads now; whatever this chat is missing
+                    // waits for Wi-Fi in the queued run (its UNMETERED constraint).
+                    if (messageDao.getMessagesWithoutLocalMediaForChat(chatId).isNotEmpty()) retryDownloadsLater()
+                    return@launch
+                }
                 savePendingMediaForChat(chatId)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -1299,6 +1364,7 @@ class MessageRepositoryImpl @Inject constructor(
      */
     private suspend fun savePendingMediaForChat(chatId: String) {
         val pending = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
+        var failed = false
         for (entity in pending) {
             try {
                 val url = entity.mediaUrl ?: continue
@@ -1307,8 +1373,10 @@ class MessageRepositoryImpl @Inject constructor(
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 Log.w(TAG, "savePendingMediaForChat: download failed for msg=${entity.id} chat=$chatId", e)
+                failed = true
             }
         }
+        if (failed) retryDownloadsLater()
     }
 
     private fun tryAutoDownload(message: Message) {
@@ -1316,7 +1384,12 @@ class MessageRepositoryImpl @Inject constructor(
             try {
                 val option = preferencesDataStore.autoDownloadFlow.first()
                 if (option == AutoDownloadOption.NEVER) return@launch
-                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) return@launch
+                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) {
+                    // Not now: the queued run's UNMETERED constraint is what
+                    // "Wi-Fi only" waits on, so this message lands once Wi-Fi is back.
+                    retryDownloadsLater()
+                    return@launch
+                }
 
                 val file = mediaFileManager.downloadAndSave(
                     message.chatId, message.id, message.mediaUrl!!
@@ -1324,9 +1397,26 @@ class MessageRepositoryImpl @Inject constructor(
                 messageDao.updateLocalUri(message.id, file.absolutePath)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
-                // Best-effort download; the user can still download manually from the bubble.
+                // The user can still download manually from the bubble; the
+                // queued run fetches it by itself once there is a network.
                 Log.w(TAG, "tryAutoDownload: download failed for msg=${message.id} chat=${message.chatId}", e)
+                retryDownloadsLater()
             }
+        }
+    }
+
+    /**
+     * A download that failed — the network went away under it, typically — or
+     * that "Wi-Fi only" declined is handed to a WorkManager run that waits for
+     * the right network. Best-effort itself: the daily backfill and the next
+     * chat open are the fallbacks.
+     */
+    private suspend fun retryDownloadsLater() {
+        try {
+            mediaBackfillScheduler.retryDownloads()
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w(TAG, "retryDownloadsLater: could not queue the retry", e)
         }
     }
 

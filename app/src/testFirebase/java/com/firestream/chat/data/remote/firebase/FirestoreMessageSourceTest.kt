@@ -274,6 +274,43 @@ class FirestoreMessageSourceTest {
         return updates
     }
 
+    // ── The single-document read behind a push reconcile ─────────────────────
+
+    @Test
+    fun `fetchMessage reads the one document under the message id`() = runTest {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.id } returns "msg1"
+        every { doc.data } returns mapOf(
+            "senderId" to "peer1", "type" to "IMAGE", "content" to "",
+            "mediaUrl" to "https://firebasestorage.example/msg1.jpg", "timestamp" to 5L,
+        )
+        every { doc.metadata.hasPendingWrites() } returns false
+        val getTask = mockk<Task<DocumentSnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns doc
+        every { messageRef.get() } returns getTask
+
+        val raw = source.fetchMessage("chat1", "msg1")!!
+
+        assertEquals("msg1", raw.id)
+        assertEquals("chat1", raw.chatId)
+        assertEquals("peer1", raw.senderId)
+        assertEquals("https://firebasestorage.example/msg1.jpg", raw.mediaUrl)
+        assertFalse(raw.hasPendingWrites)
+    }
+
+    @Test
+    fun `fetchMessage answers null for a document the backend does not hold`() = runTest {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.data } returns null
+        val getTask = mockk<Task<DocumentSnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns doc
+        every { messageRef.get() } returns getTask
+
+        assertEquals(null, source.fetchMessage("chat1", "msg1"))
+    }
+
     private fun <T> completeImmediately(task: Task<T>) {
         every { task.isComplete } returns true
         every { task.isCanceled } returns false

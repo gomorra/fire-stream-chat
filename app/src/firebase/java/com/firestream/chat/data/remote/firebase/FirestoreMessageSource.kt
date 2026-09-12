@@ -157,6 +157,11 @@ class FirestoreMessageSource @Inject constructor(
         }
     }
 
+    override suspend fun fetchMessage(chatId: String, messageId: String): RawMessage? {
+        val doc = messageRef(chatId, messageId).get().await()
+        return doc.data?.let { mapToRaw(doc.id, chatId, it, doc.metadata.hasPendingWrites()) }
+    }
+
     /**
      * Writes [data] at `chats/{chatId}/messages/{messageId}` — the row's own id,
      * so every attempt for one message addresses one document and a lost ack
