@@ -12,7 +12,9 @@
 //   (failSendOnError); the split between a definite block (refused) and an
 //   unanswerable block check (queued — the worker asks again online); the
 //   tombstone path of a message deleted while queued; the decision to hand a
-//   failed media download to MediaBackfillScheduler.retryDownloads.
+//   failed media download to MediaBackfillScheduler.retryDownloads; the receipt
+//   fan-out (forEachReceipt) and its forward-only local mark — a delivery
+//   receipt never takes a row back from READ (MessageDao.markDeliveredBatch).
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
 //   BlockCheck (the cached block-list read, shared with OutboxWorker),
 //   OutboxScheduler (enqueue / retryNow), OutboxFiles (staging), OutboxSender
@@ -800,8 +802,9 @@ class MessageRepositoryImpl @Inject constructor(
         forEachReceipt(messageIds, chatId, "markDelivered") {
             messageSource.markDelivered(chatId, it, userId, now)
         }
-        // Batch-update Room in one shot so the DAO flow emits only once
-        messageDao.updateMessageStatusBatch(messageIds, MessageStatus.DELIVERED.name)
+        // One Room write so the DAO flow emits once; forward-only, like the
+        // backend write, so a receipt landing after the read leaves READ alone.
+        messageDao.markDeliveredBatch(messageIds)
     }
 
     override suspend fun markMessagesAsRead(chatId: String, messageIds: List<String>): Result<Unit> = resultOf {

@@ -164,6 +164,16 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id IN (:messageIds)")
     suspend fun updateMessageStatusBatch(messageIds: List<String>, status: String)
 
+    /**
+     * A delivery receipt's local mark, forward-only: only a SENT row moves, so a
+     * row already READ stays READ. The push for a message can land after the open
+     * chat has read it, and taking the row back to DELIVERED makes the chat read
+     * it a second time. Receipts target incoming rows, which are never SENDING or
+     * FAILED; the SENT condition keeps an outgoing row out of reach regardless.
+     */
+    @Query("UPDATE messages SET status = 'DELIVERED' WHERE id IN (:messageIds) AND status = 'SENT'")
+    suspend fun markDeliveredBatch(messageIds: List<String>)
+
     // ── Column updates ──────────────────────────────────────────────────────
     // OutboxSender's resume points (one per finished step) and every other
     // change to a single column; none of them can reach a column it does not name.

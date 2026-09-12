@@ -31,6 +31,7 @@ class MessageRepositoryDeliveryTest {
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageDao.updateMessageStatusBatch(any(), any()) } just Runs
+        coEvery { messageDao.markDeliveredBatch(any()) } just Runs
         repository = messageRepository(
             messageDao = messageDao,
             messageSource = messageSource,
@@ -53,9 +54,7 @@ class MessageRepositoryDeliveryTest {
         ids.forEach { id ->
             coVerify(exactly = 1) { messageSource.markDelivered("chat1", id, "uid1", any()) }
         }
-        coVerify(exactly = 1) {
-            messageDao.updateMessageStatusBatch(ids, MessageStatus.DELIVERED.name)
-        }
+        coVerify(exactly = 1) { messageDao.markDeliveredBatch(ids) }
     }
 
     @Test
@@ -73,9 +72,7 @@ class MessageRepositoryDeliveryTest {
         coVerify(exactly = 1) { messageSource.markDelivered("chat1", "m1", any(), any()) }
         coVerify(exactly = 1) { messageSource.markDelivered("chat1", "m3", any(), any()) }
         // Room batch still runs for all IDs
-        coVerify(exactly = 1) {
-            messageDao.updateMessageStatusBatch(ids, MessageStatus.DELIVERED.name)
-        }
+        coVerify(exactly = 1) { messageDao.markDeliveredBatch(ids) }
     }
 
     @Test
@@ -86,7 +83,7 @@ class MessageRepositoryDeliveryTest {
 
         assertTrue(result.isFailure)
         coVerify(exactly = 0) { messageSource.markDelivered(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { messageDao.updateMessageStatusBatch(any(), any()) }
+        coVerify(exactly = 0) { messageDao.markDeliveredBatch(any()) }
     }
 
     // ── markMessagesAsRead ────────────────────────────────────────────────────

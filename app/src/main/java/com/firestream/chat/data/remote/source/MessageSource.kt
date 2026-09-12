@@ -102,6 +102,14 @@ interface MessageSource {
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String)
 
     suspend fun getUndeliveredMessageIds(chatId: String, currentUserId: String): List<String>
+
+    /**
+     * Records [userId]'s delivery of the message and moves its `status` to
+     * DELIVERED — unless it is already READ, which it keeps: the push that
+     * carries a delivery receipt can land after the open chat has read the
+     * message, and a status never moves backwards. The per-user timestamp is
+     * written either way.
+     */
     suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long)
     suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long)
 

@@ -6,6 +6,7 @@ import com.google.firebase.firestore.CollectionReference
 import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.Transaction
 import io.mockk.every
 import io.mockk.mockk
@@ -271,6 +272,74 @@ class FirestoreMessageSourceTest {
         val updates = mutableListOf<Map<String, Any>>()
         every { tx.update(chatRef, capture(updates)) } returns tx
         transactions.forEach { it.apply(tx) }
+        return updates
+    }
+
+    // ── Delivery receipts never take a message back from READ ────────────────
+    // Regression: the push for a message can land seconds after the open chat
+    // has marked it read, and its delivery receipt was a blind update() that
+    // wrote status = DELIVERED over READ — the sender's ticks flickered
+    // read → delivered → read.
+
+    @Test
+    fun `a delivery receipt on a read message records the delivery and keeps READ`() = runTest {
+        val updates = deliveryWrites(storedStatus = "READ")
+
+        assertEquals(1, updates.size)
+        assertEquals(5L, updates.single()["deliveredTo.uid1"])
+        assertFalse("status" in updates.single())
+        verify(exactly = 0) { messageRef.update(any<Map<String, Any>>()) }
+    }
+
+    // A transaction is not queued offline. The per-user timestamp still is, on
+    // its own, so it cannot take the status backwards when it lands.
+    @Test
+    fun `a delivery receipt that cannot run offline queues only the per-user timestamp`() = runTest {
+        val txTask = mockk<Task<Any?>>(relaxed = true)
+        every { txTask.isComplete } returns true
+        every { txTask.isCanceled } returns false
+        every { txTask.exception } returns
+            FirebaseFirestoreException("client is offline", FirebaseFirestoreException.Code.UNAVAILABLE)
+        every { firestore.runTransaction(any<Transaction.Function<Any?>>()) } returns txTask
+        every { messageRef.update("deliveredTo.uid1", 5L) } returns setTask
+
+        try {
+            source.markDelivered("chat1", "msg1", userId = "uid1", timestamp = 5L)
+            fail("expected the offline failure to surface")
+        } catch (e: FirebaseFirestoreException) {
+            assertEquals(FirebaseFirestoreException.Code.UNAVAILABLE, e.code)
+        }
+
+        verify(exactly = 1) { messageRef.update("deliveredTo.uid1", 5L) }
+        verify(exactly = 0) { messageRef.update(any<Map<String, Any>>()) }
+    }
+
+    @Test
+    fun `a delivery receipt on a sent message moves it to DELIVERED`() = runTest {
+        val updates = deliveryWrites(storedStatus = "SENT")
+
+        assertEquals("DELIVERED", updates.single()["status"])
+        assertEquals(5L, updates.single()["deliveredTo.uid1"])
+    }
+
+    /** Runs `markDelivered` and applies its transaction body against a document whose status is [storedStatus]. */
+    private suspend fun deliveryWrites(storedStatus: String): List<Map<String, Any>> {
+        val txTask = mockk<Task<Any?>>(relaxed = true)
+        completeImmediately(txTask)
+        val bodies = mutableListOf<Transaction.Function<Any?>>()
+        every { firestore.runTransaction(capture(bodies)) } returns txTask
+        // A blind update() would complete too; the assertion is on the transaction.
+        every { messageRef.update(any<Map<String, Any>>()) } returns setTask
+
+        source.markDelivered("chat1", "msg1", userId = "uid1", timestamp = 5L)
+
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.getString("status") } returns storedStatus
+        val tx = mockk<Transaction>(relaxed = true)
+        every { tx.get(messageRef) } returns doc
+        val updates = mutableListOf<Map<String, Any>>()
+        every { tx.update(messageRef, capture(updates)) } returns tx
+        bodies.forEach { it.apply(tx) }
         return updates
     }
 

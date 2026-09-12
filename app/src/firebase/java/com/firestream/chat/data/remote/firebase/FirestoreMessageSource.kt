@@ -9,7 +9,8 @@
 //   flush-then-create-if-absent on every later one, both bounded by the ack
 //   timeout. The tombstone of a message deleted while queued (deleteIfExists —
 //   flush, then update only an existing doc). The newer-only chat preview
-//   (writeBackChatPreview — a transaction, never a blind update).
+//   (writeBackChatPreview — a transaction, never a blind update) and the
+//   forward-only delivery receipt (markDelivered — the same, keeps READ).
 // Collaborators: MessageRepositoryImpl + OutboxSender via MessageWriter (only
 //   callers); decrypts via SignalManager on the way out. Also reachable through
 //   the MessageSource interface in data/remote/source/ so the pocketbase flavor
@@ -29,6 +30,7 @@ import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.MetadataChanges
 import com.google.firebase.firestore.Query
@@ -381,14 +383,33 @@ class FirestoreMessageSource @Inject constructor(
             .map { it.id }
     }
 
+    /**
+     * Forward-only, so a transaction rather than an update(): the status is
+     * written only when the document is not READ yet, the per-user timestamp
+     * always. Regression: the push handler's receipt for a message the open
+     * chat had already read wrote DELIVERED over READ, and the sender's ticks
+     * flickered. Like the chat preview, a transaction is not queued offline: it
+     * fails and the repository logs it. The per-user timestamp is then queued
+     * on its own — an update() that cannot touch the status — and the status
+     * catches up with the read receipt or the next chat-list pass
+     * (`getUndeliveredMessageIds`), whichever comes first once online.
+     */
     override suspend fun markDelivered(chatId: String, messageId: String, userId: String, timestamp: Long) {
-        firestore.collection("chats").document(chatId)
-            .collection("messages").document(messageId)
-            .update(mapOf(
-                "deliveredTo.$userId" to timestamp,
-                "status" to MessageStatus.DELIVERED.name
-            ))
-            .await()
+        val ref = messageRef(chatId, messageId)
+        val deliveredTo = "deliveredTo.$userId"
+        try {
+            firestore.runTransaction { tx ->
+                val fields = mutableMapOf<String, Any>(deliveredTo to timestamp)
+                if (tx.get(ref).getString("status") != MessageStatus.READ.name) {
+                    fields["status"] = MessageStatus.DELIVERED.name
+                }
+                tx.update(ref, fields)
+                null
+            }.await()
+        } catch (e: FirebaseFirestoreException) {
+            ref.update(deliveredTo, timestamp)
+            throw e
+        }
     }
 
     override suspend fun markRead(chatId: String, messageId: String, userId: String, timestamp: Long) {
