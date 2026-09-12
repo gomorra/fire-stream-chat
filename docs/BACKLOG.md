@@ -149,6 +149,10 @@ the receiver upgrading over an existing install:
    still show one row.
 Known limit: a process killed mid-download (the push handler's budget ran out) is not a
 failure, so nothing re-queues it — the daily backfill or the next chat open picks it up.
+**Findings:** the sender's ticks going read → delivered → read on a plain online text (the push's
+delivery receipt landing after the open chat had read the message, pre-existing, not step 8) was
+found on this pass and fixed in `69fcfd89` — a receipt never moves a status backwards, on Firestore
+and in Room. Re-check it on the next run: orange ticks must stay orange.
 
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 

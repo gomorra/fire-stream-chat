@@ -535,6 +535,8 @@ step 4 is the authoritative one), in order of severity:
 3. The stale-bundle race in `SignalManager.encrypt` (re-fetch once inside the lock when identities differ).
 4. Then the release-build, two-device checks: step-4 items 4–7 and step-6 item 7.
 
+**First device finding (2026-09-12, not a step-8 defect):** the push's delivery receipt could take a read message back to DELIVERED on both sides, flickering the sender's ticks — fixed in `69fcfd89` (forward-only receipts, transaction + SENT-only Room mark).
+
 **Device checklist state:** nothing from steps 1–8 has been on hardware. Every step's list sits in
 `docs/BACKLOG.md` § *Pending on-device verification*: step 1 (5 items), step 4 (3 + 4 E2E items), step 5 (3),
 step 6 (9), step 7 (3), step 8 (5). Run them **upgrading over an existing install**, with a second device as
