@@ -274,7 +274,11 @@ A retryable send — text, photo, video, document, voice note, location, forward
 | `app/src/main/java/com/firestream/chat/domain/model/AppError.kt` | `RecipientBlockedException` — the one permanent "blocked" failure, raised by the repository and the worker alike |
 | `app/src/main/java/com/firestream/chat/di/AppModule.kt` | `SystemModule.provideWorkManager`, injected as a `Provider` so the graph never builds WorkManager early |
 | `app/src/main/java/com/firestream/chat/FireStreamApp.kt` | `requeueQueuedSends` → `OutboxScheduler.requeueAll` on start |
-| `app/src/main/AndroidManifest.xml` | The `SystemForegroundService` merge with `dataSync`, which the upload foreground needs on Android 14+ |
+| `app/src/main/AndroidManifest.xml` | The `SystemForegroundService` merge with `dataSync`, which the upload foreground needs on Android 14+; `ACCESS_NETWORK_STATE` for the connectivity hint |
+| `app/src/main/java/com/firestream/chat/domain/util/ConnectivityObserver.kt` | Display-only "is there a validated network" flow — the UI's interface, never read by the send path |
+| `app/src/main/java/com/firestream/chat/data/util/AndroidConnectivityObserver.kt` | The default-network callback behind it; validated-only, so a captive portal reads as offline |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Mirrors the observer into `SessionState.isOffline`, the top bar's "Waiting for network…" |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageInfoScreen.kt` | A SENDING row reads "Waiting to send" — it is queued, not necessarily in flight |
 | `app/src/test/java/com/firestream/chat/data/worker/OutboxWorkerTest.kt` | Verdicts, the budget, the block re-check, the tombstone exemptions, the foreground — via `TestListenableWorkerBuilder` |
 | `app/src/test/java/com/firestream/chat/data/outbox/OutboxSchedulerTest.kt` | The work request, KEEP vs REPLACE, the expedited rule on both sides of API 31, `requeueAll` |
 | `app/src/test/java/com/firestream/chat/data/outbox/OutboxJobTest.kt` | The queued-for rule and the upload rule |
@@ -290,8 +294,10 @@ A retryable send — text, photo, video, document, voice note, location, forward
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySnapshotTest.kt` | Own echoes: pending never moves a status, acknowledged heals through `acknowledge`, on the listener and the sync alike; chat entry leaves a queued row alone |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | Which SDK call each attempt makes, the ack timeout on first and later attempts, the tombstone body |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseSendErrorClassifierTest.kt` | The verdict table |
+| `app/src/test/java/com/firestream/chat/data/util/AndroidConnectivityObserverTest.kt` | Validated vs captive portal, the loss, and unregistering once nothing collects |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatInfoManagerTest.kt` | `isOffline` on the session slice: the current value on open, both transitions, group chats too |
 
-**Entry point:** `ChatMessageSender` → `MessageRepositoryImpl.send*` inserts the row and returns once `OutboxScheduler.enqueue` has it → WorkManager runs `OutboxWorker` when connected → `OutboxSender.send` → `MessageWriter.write` → `FirestoreMessageSource.writeMessage`; the bubble's clock turns into a tick when `MessageDao.markSent` (or the acknowledged echo's `acknowledge`) lands. Tap-to-retry is `retryFailedMessage` → `OutboxScheduler.retryNow`.
+**Entry point:** `ChatMessageSender` → `MessageRepositoryImpl.send*` inserts the row and returns once `OutboxScheduler.enqueue` has it → WorkManager runs `OutboxWorker` when connected → `OutboxSender.send` → `MessageWriter.write` → `FirestoreMessageSource.writeMessage`; the bubble's clock turns into a tick when `MessageDao.markSent` (or the acknowledged echo's `acknowledge`) lands. Tap-to-retry is `retryFailedMessage` → `OutboxScheduler.retryNow`. What the user sees while the queue waits: the top bar's "Waiting for network…" (`ConnectivityObserver` → `SessionState.isOffline`) and "Waiting to send" in the message-info sheet — both display-only, and neither gates a send.
 
 ---
 

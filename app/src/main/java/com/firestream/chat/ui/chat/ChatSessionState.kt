@@ -33,6 +33,11 @@ internal data class SessionState(
     // the composer with an "Unblock to send" banner so the user sees the state
     // before they try to send.
     val isRecipientBlocked: Boolean = false,
+    // True while the device has no validated network. Display only — it explains
+    // the clock icon on a queued message ("Waiting for network…" in the top bar);
+    // nothing in the send path reads it, the outbox job's CONNECTED constraint
+    // decides when a send actually runs.
+    val isOffline: Boolean = false,
 )
 
 /**

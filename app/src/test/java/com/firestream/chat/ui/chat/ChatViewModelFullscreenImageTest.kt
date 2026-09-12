@@ -17,6 +17,7 @@ import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeConnectivityObserver
 import com.firestream.chat.test.fakes.FakeMessageRepository
 import com.firestream.chat.test.fakes.FakeUserRepository
 import io.mockk.coEvery
@@ -108,6 +109,7 @@ class ChatViewModelFullscreenImageTest {
         callStateHolder = callStateHolder,
         commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         timerAlarmScheduler = mockk(relaxed = true),
+        connectivityObserver = FakeConnectivityObserver(),
         appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,
     )

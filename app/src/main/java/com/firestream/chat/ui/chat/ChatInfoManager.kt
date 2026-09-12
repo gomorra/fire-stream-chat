@@ -6,7 +6,8 @@
 //   and OverlaysState.recentEmojis (Phase 2 will move these out per the manager
 //   contract — see docs/PATTERNS.md#chat-manager-slice-ownership).
 // Collaborators: ChatViewModel (composition root), ChatRepository, UserRepository,
-//   ListRepository, CheckGroupPermissionUseCase, PreferencesDataStore.
+//   ListRepository, CheckGroupPermissionUseCase, PreferencesDataStore,
+//   ConnectivityObserver (display-only offline hint).
 // Don't put here: composer state writes, message send/edit, overlay state writes.
 //   New session fields are fine; cross-slice writes are not.
 // endregion
@@ -31,6 +32,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
+import com.firestream.chat.domain.util.ConnectivityObserver
 
 internal class ChatInfoManager(
     private val chatId: String,
@@ -40,6 +42,7 @@ internal class ChatInfoManager(
     private val userRepository: UserRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
+    private val connectivityObserver: ConnectivityObserver,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope
 ) {
@@ -50,6 +53,7 @@ internal class ChatInfoManager(
 
     fun start() {
         loadAvailableChats()
+        observeConnectivity()
         observeReadReceiptsAllowed()
         loadChatInfo()
         observeRecentEmojis()
@@ -90,6 +94,20 @@ internal class ChatInfoManager(
                         )
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Mirror the device's validated-network state into the session slice, so the
+     * top bar can explain a queued message's clock icon with "Waiting for
+     * network…". Display only: a send is already durable without this, and the
+     * outbox job's CONNECTED constraint — not this flow — decides when it runs.
+     */
+    private fun observeConnectivity() {
+        scope.launch {
+            connectivityObserver.isOnline.collect { online ->
+                _uiState.update { it.copy(session = it.session.copy(isOffline = !online)) }
             }
         }
     }

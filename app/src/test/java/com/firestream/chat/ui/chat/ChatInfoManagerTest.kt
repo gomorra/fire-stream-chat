@@ -6,6 +6,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeConnectivityObserver
 import com.firestream.chat.test.fakes.FakeUserRepository
 import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,8 @@ class ChatInfoManagerTest {
 
     private val uiState = MutableStateFlow(ChatUiState(session = SessionState(currentUserId = "uid1")))
 
+    private val connectivityObserver = FakeConnectivityObserver()
+
     private fun manager(recipientId: String = "recipient1") = ChatInfoManager(
         chatId = "chat1",
         recipientId = recipientId,
@@ -39,6 +42,7 @@ class ChatInfoManagerTest {
         userRepository = userRepository,
         preferencesDataStore = preferencesDataStore,
         checkGroupPermissionUseCase = checkGroupPermissionUseCase,
+        connectivityObserver = connectivityObserver,
         _uiState = uiState,
         scope = TestScope(mainDispatcherRule.testDispatcher),
     )
@@ -124,6 +128,48 @@ class ChatInfoManagerTest {
         manager(recipientId = "").start()
 
         assertNull(uiState.value.session.chatName)
+    }
+
+    // ── Connectivity: the display-only "Waiting for network…" hint ─────────────
+
+    @Test
+    fun `start leaves isOffline false while the device has a validated network`() = runTest {
+        manager().start()
+
+        assertFalse(uiState.value.session.isOffline)
+    }
+
+    @Test
+    fun `losing the network sets isOffline and regaining it clears the hint`() = runTest {
+        manager().start()
+
+        connectivityObserver.setOnline(false)
+        assertTrue(uiState.value.session.isOffline)
+
+        connectivityObserver.setOnline(true)
+        assertFalse(uiState.value.session.isOffline)
+    }
+
+    @Test
+    fun `a chat opened while offline shows the hint without waiting for a change`() = runTest {
+        // The observer is a StateFlow, so the current value arrives on collect —
+        // entering a chat in airplane mode must not need a network event first.
+        connectivityObserver.setOnline(false)
+
+        manager().start()
+
+        assertTrue(uiState.value.session.isOffline)
+    }
+
+    @Test
+    fun `connectivity is observed in group chats too`() = runTest {
+        // observeConnectivity must sit outside the recipientId guard — a group
+        // chat has no 1:1 recipient but queues sends the same way.
+        manager(recipientId = "").start()
+
+        connectivityObserver.setOnline(false)
+
+        assertTrue(uiState.value.session.isOffline)
     }
 
     @Test

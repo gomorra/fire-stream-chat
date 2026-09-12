@@ -446,6 +446,22 @@ update the preview the same way.
 - Chat top bar subtitle shows "Waiting for network…" while offline; `MessageInfoScreen` "Sending /
   In progress…" → "Waiting to send". Display only — nothing in the send path reads it.
 - Test: the owning manager's slice with a fake observer.
+- **Shipped shape (read before step 8).** `domain/util/ConnectivityObserver` is a one-property interface
+  (`isOnline: StateFlow<Boolean>`); `data/util/AndroidConnectivityObserver` is a `@Singleton` whose flow is a
+  `callbackFlow` over `registerDefaultNetworkCallback`, `stateIn(appScope, WhileSubscribed(5_000))` — the
+  callback lives while something collects, not for the process's life, because nothing durable depends on it.
+  Online means INTERNET **and** VALIDATED, seeded synchronously from `activeNetwork` so a chat opened in
+  airplane mode shows the hint on its first frame. `ACCESS_NETWORK_STATE` is now declared explicitly in the
+  manifest (it already arrived transitively from firebase-auth and WorkManager). `ChatInfoManager` owns the
+  hint — it already owns `SessionState` — and mirrors the flow into `SessionState.isOffline` in `start()`,
+  outside the `recipientId` guard so group chats get it too; the top bar's subtitle `when` puts `isOffline`
+  **above** `isRecipientOnline`, since a cached "Online" while this device has no network only misleads.
+  `MessageInfoScreen`'s SENDING row reads "Sending / Waiting to send" unconditionally — the row is queued
+  whether or not this instant has a network, so it needs no connectivity input. Tests:
+  `AndroidConnectivityObserverTest` drives the callback Robolectric records but never dispatches (validated,
+  captive portal, loss, and the unregister after `WhileSubscribed`), and four cases on `ChatInfoManagerTest`
+  with `test/fakes/FakeConnectivityObserver`. No `/simplify` (a slice field and a subtitle branch), no
+  `/code-review` (the send path is untouched by construction).
 
 ### Step 8 — Received media downloads on reconnect without opening the chat (`feat:`)
 **(review) The original step could not meet checklist item 7.** It enqueued a retry only on a

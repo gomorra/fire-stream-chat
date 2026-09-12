@@ -5,6 +5,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.test.MainDispatcherRule
 import com.firestream.chat.test.fakes.FakeChatRepository
+import com.firestream.chat.test.fakes.FakeConnectivityObserver
 import com.firestream.chat.test.fakes.FakeUserRepository
 import io.mockk.every
 import io.mockk.mockk
@@ -46,6 +47,7 @@ class ChatInfoManagerRecentEmojiTest {
         userRepository = FakeUserRepository(),
         preferencesDataStore = preferencesDataStore,
         checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>(relaxed = true),
+        connectivityObserver = FakeConnectivityObserver(),
         _uiState = uiState,
         scope = TestScope(mainDispatcherRule.testDispatcher),
     )

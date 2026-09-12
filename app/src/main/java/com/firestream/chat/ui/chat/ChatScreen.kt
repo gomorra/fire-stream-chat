@@ -943,6 +943,18 @@ fun ChatScreen(
                                 overflow = TextOverflow.Ellipsis
                             )
                             when {
+                                // Offline outranks presence: a cached "Online" while
+                                // this device has no validated network only misleads,
+                                // and this line is what explains a queued message's
+                                // clock icon. The message is already safe — the outbox
+                                // sends it when the network comes back.
+                                uiState.session.isOffline -> Text(
+                                    text = "Waiting for network…",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                                 uiState.session.isRecipientOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,

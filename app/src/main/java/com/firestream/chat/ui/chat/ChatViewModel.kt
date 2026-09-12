@@ -37,6 +37,7 @@ import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
+import com.firestream.chat.domain.util.ConnectivityObserver
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.domain.util.SourceImage
@@ -109,6 +110,7 @@ class ChatViewModel @Inject constructor(
     private val speechRecognizerManager: SpeechRecognizerManager,
     private val callStateHolder: CallStateHolder,
     private val commandRegistry: CommandRegistry,
+    private val connectivityObserver: ConnectivityObserver,
     private val timerAlarmScheduler: TimerAlarmScheduler,
     @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
@@ -188,7 +190,7 @@ class ChatViewModel @Inject constructor(
     )
     private val infoManager = ChatInfoManager(
         chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
-        checkGroupPermissionUseCase, _uiState, viewModelScope
+        checkGroupPermissionUseCase, connectivityObserver, _uiState, viewModelScope
     )
     private val dictationManager = ChatDictationManager(
         speechRecognizerManager, callStateHolder, context, _uiState, viewModelScope

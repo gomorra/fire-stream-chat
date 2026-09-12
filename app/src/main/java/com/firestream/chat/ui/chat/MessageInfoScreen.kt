@@ -266,7 +266,10 @@ private fun RecipientStatusRow(userId: String, timestamp: Long, isRead: Boolean)
 
 private fun buildStatusRows(message: Message): List<Triple<String, String, Boolean>> {
     return when (message.status) {
-        MessageStatus.SENDING -> listOf(Triple("Sending", "In progress...", false))
+        // SENDING is a queued outbox row, not necessarily an attempt in flight:
+        // it survives leaving the chat, process death and reboot, and the worker
+        // runs it when there is a network. "Waiting to send" is the honest label.
+        MessageStatus.SENDING -> listOf(Triple("Sending", "Waiting to send", false))
         MessageStatus.SENT -> listOf(Triple("Sent", formatFull(message.timestamp), false))
         MessageStatus.DELIVERED -> listOf(
             Triple("Sent", formatFull(message.timestamp), false),

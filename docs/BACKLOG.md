@@ -108,9 +108,23 @@ over an existing install**, with a second device as recipient:
    notification while it runs.
 9. Give-up: keep a captive-portal Wi-Fi (connected, no Firestore) for the eight attempts
    (about 20 minutes of backoff) → the bubble turns failed; tap retry once online → it sends.
-Items 7 ("received image while offline → downloaded without opening the chat") and 8
-("Waiting for network…") of the plan's §4 checklist belong to steps 8 and 7 and move here
-with them.
+Item 7 of the plan's §4 checklist ("received image while offline → downloaded without opening
+the chat") belongs to step 8 and moves here with it; item 8 is the step-7 section below.
+
+### "Waiting for network…" (offline outbox step 7, 2026-09-12)
+
+Shipped in the step-7 commit; nothing has been on hardware. `AndroidConnectivityObserver`'s
+unit test drives the recorded default-network callback itself — Robolectric never dispatches a
+real one, and it cannot produce a captive portal at all. On a device:
+1. **Captive-portal Wi-Fi shows the hint** (§4 checklist item 8): join a network that holds the
+   portal page (a hotel / café, or a phone hotspot with no upstream) → the chat's top bar must
+   read "Waiting for network…", not the recipient's "Online", and a send must show the clock.
+   This is the case `NET_CAPABILITY_VALIDATED` exists for; a plain `isConnected` check would
+   claim the phone is online here.
+2. Airplane mode in an open chat → the hint appears within a second or two without leaving the
+   chat, and disappears again on reconnect. Nothing about the send changes: the queued message
+   still ticks on its own.
+3. The message-info sheet of a queued message reads "Waiting to send".
 
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
@@ -540,7 +554,7 @@ data-model change, and the provider decision a GIF forces:
 
 ### Offline resilience — what is left after the outbox (6.3)
 - The durable outbox itself shipped in step 6 of `.claude/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
-- Still open from the same plan: the "Waiting for network…" hint in the chat top bar and the message-info sheet (step 7, a `ConnectivityObserver` that requires `NET_CAPABILITY_VALIDATED`), and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry).
+- Still open from the same plan: received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry). The "Waiting for network…" hint shipped in step 7 — see *Pending on-device verification* above.
 - The message-info sheet still says "Message not delivered" for a message the worker failed because the recipient is blocked; a "you can't message this user" line needs a failure reason on the row.
 
 ### Performance & pagination (6.4)

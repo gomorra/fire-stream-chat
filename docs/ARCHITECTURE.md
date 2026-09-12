@@ -400,6 +400,7 @@ com.firestream.chat/
 │   │   ├── SendTarget.kt        # Peer / NoPeer, the outboxRecipientId column in one place
 │   │   └── SendClock.kt         # Strictly increasing send timestamps
 │   ├── util/
+│   │   ├── AndroidConnectivityObserver.kt # Default-network callback; validated-only, so a captive portal is offline
 │   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
 │   │   ├── KeyedMutex.kt        # One lock per key, dropped when unused
 │   │   ├── MediaFileManager.kt  # Local media storage & gallery export
@@ -448,7 +449,9 @@ com.firestream.chat/
 │   │   ├── chat/                # CheckGroupPermissionUseCase
 │   │   ├── list/                # SendListUpdateToChatsUseCase
 │   │   └── message/             # SearchMessagesUseCase
-│   └── util/MentionParser.kt
+│   └── util/
+│       ├── MentionParser.kt
+│       └── ConnectivityObserver.kt # Validated-network StateFlow — display only, never the send path
 ├── navigation/NavGraph.kt
 ├── ui/
 │   ├── auth/                    # Login, Otp, ProfileSetup, AuthViewModel
