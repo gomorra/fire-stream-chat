@@ -222,6 +222,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `AnimatedVisibility` must be composed hidden and *then* shown — one composed visible
   from the start skips its enter animation. See `ui/components/OnEnterSettledTest.kt`.
 
+- **Robolectric records a network callback but never dispatches to it.**
+  `ShadowConnectivityManager` keeps every callback passed to
+  `registerDefaultNetworkCallback` in `shadowOf(cm).networkCallbacks`, and changing the
+  shadow's networks fires nothing — a test that flips shadow state and waits will simply
+  see the initial value forever. Drive the recorded callback yourself
+  (`callback.onCapabilitiesChanged(network, caps)` / `onLost(network)`); build the
+  capabilities with `ShadowNetworkCapabilities.newInstance()` +
+  `shadowOf(caps).addCapability(…)`, which is also the only way to express a captive
+  portal (INTERNET without VALIDATED). See `AndroidConnectivityObserverTest`.
+
 ## Platform / dependencies
 
 - **Media3 is pinned to 1.9.0.** 1.10.x raises the minimum `compileSdk` to 36; this
