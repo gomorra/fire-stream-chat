@@ -2,6 +2,16 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.31.0] — 2026-09-12
+
+### Added
+
+- **Messages send themselves once you are back online, even if the app was closed in between.** A message written without a connection used to fail on the spot, with a tap on the failed bubble the only way to try again, and only while the app was open. Everything you send is now kept in a queue on the phone and goes out on its own the moment there is a connection, whether you left the chat, swiped the app away or restarted the phone in between; the clock icon means "waiting to be sent", a tick means the server has it, and a message never arrives twice. A message that keeps failing gives up after eight tries and shows the failed bubble, deleting a message that is still waiting deletes it for good on both sides, and sending to someone you have blocked is still refused. On Android 10 and 11 an upload shows a small "Sending" notification while it runs. (`7ad1b81f`)
+
+### Changed
+
+- **The app rebuilds its local copy of your messages once more on this update.** The bookkeeping a queued message needs moved beside the message in the local store, so the store is reset once again, exactly as with the previous update: every chat reloads its history from the server the first time you open it, photos and videos already on the phone are picked up without downloading again, and unsent or failed messages, stars and scheduled reminders do not come back. (`f1b5d887`)
+
 ## [UNRELEASED] [1.30.0] — 2026-09-11
 
 ### Added
