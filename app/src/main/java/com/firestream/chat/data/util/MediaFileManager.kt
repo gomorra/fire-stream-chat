@@ -41,6 +41,9 @@ class MediaFileManager @Inject constructor(
         return getLocalFile(chatId, messageId, extension).exists()
     }
 
+    /** Whether [file] is one of the copies this manager keeps — the durable local file of a sent or received message. */
+    fun isManagedFile(file: File): Boolean = file.parentFile == mediaRoot
+
     suspend fun downloadAndSave(chatId: String, messageId: String, mediaUrl: String): File =
         withContext(Dispatchers.IO) {
             val extension = extractExtension(mediaUrl)

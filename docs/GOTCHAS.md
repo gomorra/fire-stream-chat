@@ -233,6 +233,14 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   back to the main looper. Don't "optimize" it onto `Dispatchers.IO` — it throws.
   Listener callbacks arrive on the starting looper. Transcoding is device-only; the JVM
   suite covers only the pure dimension math (`VideoTranscoderLogicTest`).
+- **A photo-picker `content://` grant does not outlive the process, and `cacheDir` can be
+  purged.** A URI handed to a send is readable *now*, not later: a WorkManager attempt may run
+  after a process death, when the grant is gone (`SecurityException` / `FileNotFoundException`)
+  or the editor's `cacheDir/edits/` file has been reclaimed. `OutboxFiles.stage` copies every
+  input that is not already a file the app keeps into `filesDir/outbox/<id>.<ext>` *before* the
+  row is enqueued, and the row points at the copy. A staging failure fails the send at once
+  (a FAILED bubble) rather than queue a row nothing can read. Regression: `OutboxFilesTest`,
+  `MessageRepositoryMediaSendFailureTest`.
 - **WorkManager typed `setForeground` needs a manifest merge on Android 14+.** Declare
   `<service android:name="androidx.work.impl.foreground.SystemForegroundService"
   android:foregroundServiceType="dataSync" tools:node="merge"/>` or the worker 400s.

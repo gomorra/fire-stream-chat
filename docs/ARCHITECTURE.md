@@ -239,9 +239,11 @@ Tracking message delivery involves an interplay between Android background servi
 
 ```mermaid
 stateDiagram-v2
-    [*] --> SENDING : Locally enqueued
-    SENDING --> SENT : Successfully uploaded to Firestore
-    SENDING --> FAILED : Network/Encryption Error
+    [*] --> SENDING : Composed — row inserted, input staged, OutboxWorker enqueued
+    SENDING --> SENDING : Attempt fails transiently — backoff, the next attempt resumes the row
+    SENDING --> SENT : The backend acknowledges the write (worker) or its echo (listener / sync)
+    SENDING --> FAILED : Permanent error, or the 8th executed attempt fails
+    FAILED --> SENDING : Tap retry — fresh attempt budget, the work replaced
 
     SENT --> DELIVERED : Recipient's FCM or Foreground app receives Payload
     DELIVERED --> READ : Recipient opens Chat Screen
@@ -258,7 +260,8 @@ stateDiagram-v2
 
 ### Status Implementation Details
 
-1. **SENT**: Assigned after a successful `firestore.document(id).set(...)` call.
+1. **SENDING**: The optimistic row, from compose until the backend acknowledges it — queued or in flight alike. Delivered by `OutboxWorker`, one unique WorkManager job per message, online by constraint (see the *Offline Outbox* section of [FEATURE-MAP.md](FEATURE-MAP.md) and the pattern in [PATTERNS.md](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker)).
+1. **SENT**: Assigned once `firestore.document(id).set(...)` — or, on a re-attempt, the flush-then-create-if-absent transaction — is acknowledged, or once the listener sees an acknowledged echo of the write (`MessageDao.markSent` / `acknowledge`).
 2. **DELIVERED**: Triggered via two vectors:
    - **Background**: `FCMService` intercepts a data push, extracts `messageId`, and updates Firestore status to `DELIVERED`.
    - **Foreground**: `ChatListViewModel` or `ChatViewModel` processes the Firestore snapshot and marks pending messages as `DELIVERED`.
@@ -382,13 +385,23 @@ com.firestream.chat/
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
 │   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, SignalDao, UserDao
-│   │   ├── entity/              # 5 core (Chat, Contact, List, Message, User) + 6 Signal entities + SignalTrustedIdentity
+│   │   ├── entity/              # 5 core (Chat, Contact, List, Message + its embedded MessageRecord, User) + 6 Signal entities + SignalTrustedIdentity
 │   │   ├── AppDatabase.kt       # fire_stream_chat.db — application data
 │   │   ├── SignalDatabase.kt    # signal.db — Signal Protocol key material (split from AppDatabase)
 │   │   ├── Converters.kt
 │   │   └── PreferencesDataStore.kt
+│   ├── outbox/
+│   │   ├── OutboxScheduler.kt   # One unique WorkManager job per queued message; requeueAll on start
+│   │   ├── OutboxSender.kt      # The attempt's pipeline: resume, upload, encrypt once, write, SENT
+│   │   ├── OutboxJob.kt         # What a row is queued for (send / tombstone / nothing)
+│   │   ├── OutboxFiles.kt       # Staged send inputs under filesDir/outbox/
+│   │   ├── BlockCheck.kt        # The cached per-peer block-list read in front of a send
+│   │   ├── MessageWriter.kt     # Encrypt-or-plaintext decision + the MessageSource write
+│   │   ├── SendTarget.kt        # Peer / NoPeer, the outboxRecipientId column in one place
+│   │   └── SendClock.kt         # Strictly increasing send timestamps
 │   ├── util/
 │   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
+│   │   ├── KeyedMutex.kt        # One lock per key, dropped when unused
 │   │   ├── MediaFileManager.kt  # Local media storage & gallery export
 │   │   ├── ProfileImageManager.kt # Avatar download/cache management
 │   │   ├── SpeechRecognizerManager.kt # System SpeechRecognizer wrapper for composer dictation
@@ -397,6 +410,8 @@ com.firestream.chat/
 │   │   ├── ResultExt.kt         # Result extension helpers
 │   │   └── CurrentActivityHolder.kt
 │   ├── worker/
+│   │   ├── OutboxWorker.kt        # One delivery attempt per queued message (offline outbox)
+│   │   ├── WorkerForeground.kt    # Shared foreground promotion + data-sync ForegroundInfo
 │   │   ├── MediaBackfillWorker.kt # WorkManager job to backfill local media
 │   │   └── UpdateCheckWorker.kt   # 24h periodic check; notifies on new release
 │   ├── remote/

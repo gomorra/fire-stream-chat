@@ -3,6 +3,7 @@ package com.firestream.chat.di
 import android.app.AlarmManager
 import android.content.Context
 import android.net.ConnectivityManager
+import androidx.work.WorkManager
 import com.firestream.chat.data.repository.AppUpdateRepositoryImpl
 import com.firestream.chat.data.repository.AuthRepositoryImpl
 import com.firestream.chat.data.repository.CallRepositoryImpl
@@ -104,6 +105,12 @@ object SystemModule {
     @Singleton
     fun provideAlarmManager(@ApplicationContext context: Context): AlarmManager =
         context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+
+    // Not @Singleton, and injected as Provider<WorkManager>: getInstance reads
+    // FireStreamApp.workManagerConfiguration, whose worker factory is itself a
+    // Hilt-injected field, so it must not run while the graph is still being built.
+    @Provides
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager = WorkManager.getInstance(context)
 }
 
 /**

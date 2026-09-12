@@ -39,8 +39,7 @@ over an existing install, with a second device as recipient:
 5. (Step 2, `97baf879`) Clear app data or pick a contact never messaged since launch, go
    offline, send a photo → the bubble must stay, marked failed with retry, instead of a
    snackbar and nothing. Reconnect, retry → one copy arrives.
-The rest of the outbox checklist lives in `.claude/plans/offline-outbox.md` §4 and moves
-here when step 6 ships.
+The rest of the outbox checklist is the step-6 section below.
 
 ### Encrypt once and the per-contact Signal lock (offline outbox step 4, 2026-09-11)
 
@@ -80,6 +79,38 @@ transaction, which Robolectric cannot run, so only its body is unit-tested. Two 
    flicks back to the previous message while the preview write is in flight.
 3. Airplane mode → send a text (fails) → send another after reconnecting → retry the first →
    the chat list keeps showing the second.
+
+### The offline outbox — queued sends drained by `OutboxWorker` (step 6, 2026-09-12)
+
+Shipped in `f1b5d887` (the messages-row split, Room 27 → 28) and the step-6 commit; nothing
+has been on hardware. Firestore transactions, `MetadataChanges`, WorkManager scheduling and the
+foreground promotion cannot be exercised under Robolectric — the unit tests pin which SDK call
+each attempt makes, the verdict table and the row's transitions. Test on hardware, **upgrading
+over an existing install**, with a second device as recipient:
+1. Airplane mode → send a text, an image, a video, a voice note and a location → clock icons →
+   airplane off → all tick, and the recipient gets exactly one of each.
+2. Same, but leave the chat / swipe the app away / reboot before reconnecting.
+3. Send offline, reconnect, kill the app mid-upload of a video → it resumes, no duplicate, no
+   re-transcode (the row keeps the transcoded file and the thumbnail URL).
+4. Retry after a lost ack: send, kill the app the instant it goes online → one message, and
+   reactions and receipts intact. Have the recipient react to and read it *before* the sender
+   comes back — this is the case `waitForPendingWrites()` exists for. Also confirm the known
+   legacy duplicate (step 1) only affects rows that predate the upgrade.
+5. Delete a queued message while offline, reconnect → it never appears on the recipient, and
+   the sender's row stays deleted (the tombstone path).
+6. Send to a user who blocked you: online → the banner as before; offline → a clock, then
+   "failed" once connected (the worker's authoritative check).
+7. Release build, two devices, E2E on (once encryption is switched on): a burst of mixed media
+   and text offline → all decrypt on the recipient.
+8. Compose→SENT latency online, before vs after step 6 (logcat timestamps). Include an API
+   29/30 device or emulator, where a text send runs as non-expedited work, and confirm no
+   notification flashes for a text send there; an upload shows the low-importance "Sending"
+   notification while it runs.
+9. Give-up: keep a captive-portal Wi-Fi (connected, no Firestore) for the eight attempts
+   (about 20 minutes of backoff) → the bubble turns failed; tap retry once online → it sends.
+Items 7 ("received image while offline → downloaded without opening the chat") and 8
+("Waiting for network…") of the plan's §4 checklist belong to steps 8 and 7 and move here
+with them.
 
 ### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
 
@@ -507,10 +538,10 @@ data-model change, and the provider decision a GIF forces:
 - Message sync across linked devices
 - Files: `data/crypto/SignalManager.kt`, new `ui/settings/LinkedDevicesScreen.kt`
 
-### Offline resilience — durable outbox (6.3)
-- Orphaned-send recovery already ships (stuck "sending" flips to `FAILED` on app start / chat re-entry, restoring tap-to-retry); **the durable outbox is open.**
-- Auto-queue and resend on reconnect, a `MessageRetryWorker` with exponential backoff, and an offline indicator.
-- Cross-referenced as the deferred "durable-outbox follow-up" in [`TECH_DEBT.md`](../TECH_DEBT.md) — check there for the recorded reasoning before starting.
+### Offline resilience — what is left after the outbox (6.3)
+- The durable outbox itself shipped in step 6 of `.claude/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
+- Still open from the same plan: the "Waiting for network…" hint in the chat top bar and the message-info sheet (step 7, a `ConnectivityObserver` that requires `NET_CAPABILITY_VALIDATED`), and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry).
+- The message-info sheet still says "Message not delivered" for a message the worker failed because the recipient is blocked; a "you can't message this user" line needs a failure reason on the row.
 
 ### Performance & pagination (6.4)
 - Paginated message loading (Paging 3)

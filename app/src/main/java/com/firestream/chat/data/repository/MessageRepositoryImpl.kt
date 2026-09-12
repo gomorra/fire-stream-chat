@@ -1,22 +1,28 @@
 // region: AGENT-NOTE
 // Responsibility: Message CRUD across all message types — text / image / voice /
-//   document / poll / location / list / call. A retryable send (text, media,
-//   voice, location) is validate → optimistic insert → block check → OutboxSender,
-//   which uploads, writes through MessageWriter and swaps the row to SENT. Also media
-//   download with in-flight dedup, per-chat backfill scan, block-state filtering
-//   and Signal decryption on receive.
-// Owns: MessageEntity rows; FAILED marking of a send (failSendOnError).
-//   uploadProgress is OutboxSender's, re-exposed here.
+//   document / poll / location / list / call. A queued send (text, media, voice,
+//   location, forward) is validate → optimistic insert → block check → stage the
+//   input → OutboxScheduler.enqueue; the row returns SENDING at once and
+//   OutboxWorker delivers it (docs/PATTERNS.md "Sends are idempotent by client
+//   id and drained by OutboxWorker"). Also media download with in-flight dedup,
+//   per-chat backfill scan, block-state filtering and Signal decryption on receive.
+// Owns: MessageEntity rows; FAILED marking of what fails before the enqueue
+//   (failSendOnError); the split between a definite block (refused) and an
+//   unanswerable block check (queued — the worker asks again online); the
+//   tombstone path of a message deleted while queued.
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
-//   OutboxSender (send pipeline), MessageWriter (encrypt-or-plain write for forward
-//   and the broadcast fan-out), SendClock (every send's timestamp), SignalManager (decrypt path),
+//   BlockCheck (the cached block-list read, shared with OutboxWorker),
+//   OutboxScheduler (enqueue / retryNow), OutboxFiles (staging), OutboxSender
+//   (uploadProgress only), MessageWriter (the broadcast fan-out's direct write),
+//   SendClock (every send's timestamp), SignalManager (decrypt path),
 //   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
 //   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check).
 // Don't put here: poll vote/close (PollRepositoryImpl), list mutations
 //   (ListRepositoryImpl), call signalling (CallRepositoryImpl), the upload / write
-//   / resume steps of a send (OutboxSender). Class is large
-//   (~1340 LOC) — Phase 2 plan adds a section-comment TOC and 1100-LOC ceiling.
-//   See docs/PATTERNS.md for the AppError-wrap convention.
+//   / resume steps of a send (OutboxSender), the attempt's error policy
+//   (OutboxWorker). Class is large (~1340 LOC) — Phase 2 plan adds a
+//   section-comment TOC and 1100-LOC ceiling. See docs/PATTERNS.md for the
+//   AppError-wrap convention.
 // endregion
 
 package com.firestream.chat.data.repository
@@ -33,9 +39,15 @@ import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
+import com.firestream.chat.data.outbox.BlockCheck
 import com.firestream.chat.data.outbox.MessageWriter
+import com.firestream.chat.data.outbox.OutboxFiles
+import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.outbox.OutboxSender
 import com.firestream.chat.data.outbox.SendClock
+import com.firestream.chat.data.outbox.SendTarget
+import com.firestream.chat.data.outbox.isUnacknowledged
+import com.firestream.chat.data.outbox.needsUpload
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
@@ -57,6 +69,7 @@ import com.firestream.chat.domain.model.MessageSearchLimits
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.RecipientBlockedException
 import com.firestream.chat.domain.model.TimerAlarmSound
 import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
@@ -92,7 +105,6 @@ import javax.inject.Singleton
 
 private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
 private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
-private const val ERR_USER_BLOCKED = "Cannot send messages to a blocked user"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
 private const val TAG = "MessageRepo"
@@ -119,6 +131,9 @@ class MessageRepositoryImpl @Inject constructor(
     private val authSource: AuthSource,
     private val signalManager: SignalManager,
     private val outboxSender: OutboxSender,
+    private val outboxScheduler: OutboxScheduler,
+    private val outboxFiles: OutboxFiles,
+    private val blockCheck: BlockCheck,
     private val messageWriter: MessageWriter,
     private val chatRepository: dagger.Lazy<ChatRepository>,
     private val listRepository: dagger.Lazy<ListRepository>,
@@ -134,16 +149,15 @@ class MessageRepositoryImpl @Inject constructor(
 
     override val uploadProgress: StateFlow<Map<String, Float>> = outboxSender.uploadProgress
 
-    // Block state is read on the two hottest paths in the app — once per backend
-    // snapshot on receive, once per send — and each read was a round-trip to the
-    // backend. Both now go through a short-lived cache: the block list changes at
-    // human speed, so a few seconds of staleness costs nothing while the round
-    // trip sat directly in front of the message the user is waiting to see.
+    // The block list is read once per backend snapshot on receive, and each
+    // read was a round-trip to the backend. It goes through a short-lived cache:
+    // the block list changes at human speed, so a few seconds of staleness costs
+    // nothing while the round trip sat in front of the message the user is
+    // waiting to see. The per-peer read in front of a send is BlockCheck's.
     private val blockCacheMutex = Mutex()
     private var blockedIdsCache: Set<String>? = null
     private var blockedIdsCacheUid: String? = null
     private var blockedIdsCachedAt = 0L
-    private val blockedPairCache = HashMap<String, Pair<Boolean, Long>>()
 
     /**
      * The set of users [userId] has blocked, cached for [BLOCK_CACHE_TTL_MS].
@@ -174,33 +188,86 @@ class MessageRepositoryImpl @Inject constructor(
         }
     }
 
-    /**
-     * Whether [senderId] has blocked [recipientId], cached for
-     * [BLOCK_CACHE_TTL_MS]. Unlike [blockedUserIds] this does *not* fail open —
-     * a fetch error propagates, so a send is refused rather than delivered to
-     * someone who may have blocked the sender.
-     *
-     * Send paths call it inside [failSendOnError], *after* the optimistic
-     * insert: offline, a cache miss throws, and running it first dropped the
-     * message with no bubble and nothing to retry. Now the row lands FAILED.
-     */
-    private suspend fun isBlocked(senderId: String, recipientId: String): Boolean {
-        val key = "$senderId|$recipientId"
-        blockCacheMutex.withLock {
-            val cached = blockedPairCache[key]
-            if (cached != null && System.currentTimeMillis() - cached.second < BLOCK_CACHE_TTL_MS) {
-                return cached.first
-            }
-            return userSource.isUserBlocked(senderId, recipientId).also {
-                blockedPairCache[key] = it to System.currentTimeMillis()
-            }
+    private sealed interface BlockVerdict {
+        data object Clear : BlockVerdict
+        data object Blocked : BlockVerdict
+        class Unknown(val cause: Exception) : BlockVerdict
+    }
+
+    /** Whether [senderId] may send to [target]: the cached block-list read, with an unanswerable one as its own verdict. */
+    private suspend fun blockVerdict(senderId: String, target: SendTarget?): BlockVerdict {
+        val peer = target?.peerId ?: return BlockVerdict.Clear
+        return try {
+            if (blockCheck.isBlocked(senderId, peer)) BlockVerdict.Blocked else BlockVerdict.Clear
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            BlockVerdict.Unknown(e)
         }
     }
 
-    /** Throws [ERR_USER_BLOCKED] for a blocked 1:1 peer; group sends pass an empty [recipientId]. */
+    /**
+     * The strict rule, for a send written directly (a timer): a definite block and
+     * an unanswerable check both refuse it — nothing would ask again later.
+     */
     private suspend fun ensureNotBlocked(senderId: String, recipientId: String) {
-        if (recipientId.isNotEmpty() && isBlocked(senderId, recipientId)) {
-            throw Exception(ERR_USER_BLOCKED)
+        when (val verdict = blockVerdict(senderId, SendTarget.of(recipientId))) {
+            BlockVerdict.Blocked -> throw RecipientBlockedException()
+            is BlockVerdict.Unknown -> throw verdict.cause
+            BlockVerdict.Clear -> Unit
+        }
+    }
+
+    /**
+     * The rule in front of a queued send. A definite block refuses it —
+     * [RecipientBlockedException], the row lands FAILED, the banner shows as it
+     * always has. A check that cannot be answered (offline, the block list not
+     * cached) lets the row queue: `OutboxWorker` runs the authoritative check
+     * once it is online, and a block there is a permanent failure.
+     */
+    private suspend fun refuseIfBlocked(senderId: String, target: SendTarget?) {
+        when (val verdict = blockVerdict(senderId, target)) {
+            BlockVerdict.Blocked -> throw RecipientBlockedException()
+            is BlockVerdict.Unknown ->
+                Log.w(TAG, "block check unanswerable for target=$target — queuing, the worker asks again online", verdict.cause)
+            BlockVerdict.Clear -> Unit
+        }
+    }
+
+    /**
+     * Copies a send's input to where the worker can read it after the process,
+     * and with it a picker grant, are gone — unless the row has already uploaded
+     * (a forward, a resumed row) or points at a file the app keeps. The row then
+     * points at the copy. A DOCUMENT's [mimeType] travels as the copy's extension.
+     */
+    private suspend fun stageInput(row: MessageEntity, mimeType: String?) {
+        val localUri = row.localUri ?: return
+        if (row.mediaUrl != null) return
+        outboxFiles.stage(row.id, localUri, mimeType)?.let { messageDao.updateLocalUri(row.id, it) }
+    }
+
+    /**
+     * What follows an optimistic insert or a FAILED → SENDING flip: the block
+     * check against [blockTarget] (`null`: none), the staged input, the worker.
+     * Returns as soon as the work is enqueued — the row is SENDING and
+     * `OutboxWorker` owns it from here. Anything that throws before that marks
+     * the row FAILED ([failSendOnError]).
+     *
+     * Not cancellable: the caller runs in the chat's scope, and a user leaving
+     * the chat between the insert and the enqueue would otherwise leave a
+     * SENDING row no work owns until the next app start — when the picker's
+     * grant is gone. The phase is short (a cached read, a file copy, an enqueue).
+     */
+    private suspend fun enqueueSend(
+        row: MessageEntity,
+        mimeType: String? = null,
+        blockTarget: SendTarget? = row.sendTarget,
+        retry: Boolean = false,
+    ): Message = failSendOnError(row.id) {
+        withContext(NonCancellable) {
+            refuseIfBlocked(row.senderId, blockTarget)
+            stageInput(row, mimeType)
+            if (retry) outboxScheduler.retryNow(row.id, row.needsUpload) else outboxScheduler.enqueue(row.id, row.needsUpload)
+            row.toDomain()
         }
     }
 
@@ -208,13 +275,8 @@ class MessageRepositoryImpl @Inject constructor(
         val currentUid = authSource.currentUserId ?: ""
 
         return channelFlow {
-            // Orphan recovery on chat (re)entry: a send cancelled mid-flight when
-            // the user previously left this chat leaves its row stuck at SENDING.
-            // Flip it to FAILED before we start observing so the retry button is
-            // back the moment the chat opens. Safe here — the user has not started
-            // a new send in this chat yet, so no live SENDING row is in flight.
-            runCatching { messageDao.failStuckSendingMessagesForChat(chatId) }
-                .onFailure { Log.w(TAG, "getMessages: stuck-SENDING recovery failed for chat=$chatId", it) }
+            // No SENDING → FAILED flip on chat entry any more: a SENDING row is a
+            // live queued send that OutboxWorker owns, whether or not this chat is open.
             downloadPendingMediaForChat(chatId)
             launch {
                 try {
@@ -306,61 +368,14 @@ class MessageRepositoryImpl @Inject constructor(
 
         if (raw.senderId == currentUid) {
             if (existing != null) {
-                // Ids are client-set, so Firestore's latency-compensated echo of
-                // our own write arrives under this row's id with the payload's
-                // status=SENT while nothing has reached the server yet. Only an
-                // acknowledged snapshot may move the status. The acknowledged
-                // case also heals a row flipped FAILED by a send whose await
-                // died (user left the chat) but whose write landed anyway.
-                if (raw.hasPendingWrites) return
-                // Update status from remote if it changed (e.g. DELIVERED, READ).
-                // acknowledge also takes a healed row out of the outbox.
-                val remoteStatus = parseMessageStatus(raw.status)
-                if (existing.status != remoteStatus.name) {
-                    messageDao.acknowledge(raw.id, remoteStatus.name)
-                }
+                acknowledgeOwnEcho(raw, existing)
                 return
             }
             // Skip if there's a pending optimistic message being replaced
             val pending = messageDao.getPendingSendingMessage(raw.chatId, raw.timestamp, raw.senderId)
             if (pending != null) return
             val content = raw.content ?: "[Sent message]"
-            val message = Message(
-                id = raw.id,
-                chatId = raw.chatId,
-                senderId = raw.senderId,
-                content = content,
-                type = parseMessageType(raw.type),
-                mediaUrl = raw.mediaUrl,
-                mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                status = parseMessageStatus(raw.status),
-                replyToId = raw.replyToId,
-                timestamp = raw.timestamp,
-                editedAt = raw.editedAt,
-                reactions = raw.reactions,
-                isForwarded = raw.isForwarded,
-                duration = raw.duration,
-                readBy = raw.readBy,
-                deliveredTo = raw.deliveredTo,
-                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                mentions = raw.mentions,
-                deletedAt = raw.deletedAt,
-                emojiSizes = raw.emojiSizes,
-                listId = raw.listId,
-                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                isPinned = raw.isPinned,
-                mediaWidth = raw.mediaWidth,
-                mediaHeight = raw.mediaHeight,
-                latitude = raw.latitude,
-                longitude = raw.longitude,
-                isHd = raw.isHd,
-                timerDurationMs = raw.timerDurationMs,
-                timerStartedAtMs = raw.timerStartedAtMs,
-                timerState = raw.timerState?.let { parseTimerState(it) },
-                timerRemainingMs = raw.timerRemainingMs,
-                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-            )
+            val message = raw.toMessage(content)
             messageDao.upsertRecord(MessageRecord.fromDomain(message))
             return
         }
@@ -400,45 +415,10 @@ class MessageRepositoryImpl @Inject constructor(
                 }
             }
 
-            val message = Message(
-                id = raw.id,
-                chatId = raw.chatId,
-                senderId = raw.senderId,
-                content = content,
-                type = parseMessageType(raw.type),
-                mediaUrl = raw.mediaUrl,
-                mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                status = parseMessageStatus(raw.status),
-                replyToId = raw.replyToId,
-                timestamp = raw.timestamp,
-                editedAt = raw.editedAt,
-                reactions = raw.reactions,
-                isForwarded = raw.isForwarded,
-                duration = raw.duration,
-                readBy = raw.readBy,
-                deliveredTo = raw.deliveredTo,
-                pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                mentions = raw.mentions,
-                deletedAt = raw.deletedAt,
-                emojiSizes = raw.emojiSizes,
-                listId = raw.listId,
-                listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                isPinned = raw.isPinned,
-                mediaWidth = raw.mediaWidth,
-                mediaHeight = raw.mediaHeight,
-                latitude = raw.latitude,
-                longitude = raw.longitude,
-                isHd = raw.isHd,
-                timerDurationMs = raw.timerDurationMs,
-                timerStartedAtMs = raw.timerStartedAtMs,
-                timerState = raw.timerState?.let { parseTimerState(it) },
-                timerRemainingMs = raw.timerRemainingMs,
-                timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-            )
-            // A record upsert: the row's localUri, star and outbox columns are
+            val message = raw.toMessage(content)
+            // A record write: the row's localUri, star and outbox columns are
             // not the backend's to overwrite, and the partial entity cannot.
-            messageDao.upsertRecord(MessageRecord.fromDomain(message))
+            writeRecord(MessageRecord.fromDomain(message), existing)
 
             // Auto-download media for incoming messages
             if (message.mediaUrl != null && existing?.localUri == null &&
@@ -457,11 +437,12 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Wraps a send pipeline so any failure flips the optimistic row at
-     * [messageId] to FAILED (restoring the retry affordance) before rethrowing.
-     * Cancellation is a control-flow signal — e.g. the user left the chat
-     * mid-send — so the row is left at SENDING; orphan recovery in
-     * [getMessages] flips stuck rows to FAILED on the next chat entry.
+     * Wraps what runs between a send's optimistic insert and its enqueue (or, for
+     * a timer, its direct write) so any failure flips the row at [messageId] to
+     * FAILED — restoring the retry affordance — before rethrowing. Cancellation is
+     * a control-flow signal — the user left the chat — so the row is left SENDING;
+     * a queued row stays the worker's, and `OutboxScheduler.requeueAll` re-queues
+     * it on the next start if the enqueue itself never happened.
      */
     private suspend fun <T> failSendOnError(messageId: String, block: suspend () -> T): T {
         try {
@@ -511,16 +492,32 @@ class MessageRepositoryImpl @Inject constructor(
             mentions = mentions,
             emojiSizes = emojiSizes
         )
-        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
-
-        failSendOnError(tempId) {
-            ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId)
-        }
+        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
+        messageDao.insertOutbox(row)
+        enqueueSend(row)
     }
 
+    /**
+     * An acknowledged message is tombstoned on the backend and soft-deleted here.
+     *
+     * An own message the backend has not acknowledged — queued, in flight or
+     * given up on — takes the outbox's tombstone path instead (plan §2.5).
+     * Cancelling its work is not enough: a first attempt's `set()` the SDK has
+     * persisted still replays on reconnect, and a hard-deleted local row would be
+     * re-inserted by its own echo. So the row stays, soft-deleted (the echo then
+     * finds it, and `OutboxJob` reads it as a tombstone whether it was SENDING or
+     * FAILED), its staged input goes, and a REPLACE run asks `OutboxSender` to
+     * write the tombstone only if the document exists.
+     */
     override suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit> = resultOf {
         val deletedAt = System.currentTimeMillis()
+        val row = messageDao.getMessageById(messageId)
+        if (row != null && row.senderId == authSource.currentUserId && row.isUnacknowledged) {
+            messageDao.softDeleteMessage(messageId, deletedAt)
+            outboxFiles.delete(messageId)
+            outboxScheduler.retryNow(messageId, uploads = false)
+            return@resultOf
+        }
         messageSource.deleteMessage(chatId, messageId)
         messageDao.softDeleteMessage(messageId, deletedAt)
     }
@@ -586,12 +583,9 @@ class MessageRepositoryImpl @Inject constructor(
             mediaHeight = null,
             isHd = sendAsHd
         )
-        messageDao.insertOutbox(MessageEntity.outbox(placeholder, recipientId))
-
-        failSendOnError(tempId) {
-            ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId, sourceMimeType = mimeType)
-        }
+        val row = MessageEntity.outbox(placeholder, SendTarget.of(recipientId))
+        messageDao.insertOutbox(row)
+        enqueueSend(row, mimeType)
     }
 
     override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> = resultOf {
@@ -600,19 +594,15 @@ class MessageRepositoryImpl @Inject constructor(
         if (entity.status != MessageStatus.FAILED.name) {
             throw IllegalStateException("Cannot retry message in state ${entity.status}")
         }
-        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        // Before the flip to SENDING: a throw leaves the row FAILED, nothing is lost.
-        // Asked about the peer recorded on the row — the one OutboxSender encrypts for.
-        ensureNotBlocked(senderId, entity.outboxRecipientId ?: recipientId)
-        // Flip the row back to SENDING so the bubble updates immediately while the
-        // pipeline re-runs; failSendOnError reverts it to FAILED if the retry itself
-        // errors. OutboxSender resumes past whatever the failed attempt persisted,
-        // and encrypts for the peer recorded on the row at insert.
-        messageDao.updateMessageStatus(messageId, MessageStatus.SENDING.name)
-
-        failSendOnError(messageId) {
-            outboxSender.send(messageId)
-        }
+        // Flip the row back to SENDING so the bubble updates immediately, and give
+        // it a fresh budget of automatic attempts; failSendOnError reverts it to
+        // FAILED if the enqueue itself fails. OutboxSender resumes past whatever the
+        // earlier attempts persisted and encrypts for the target recorded on the row
+        // at insert; the screen's recipient only stands in for the block check of a
+        // row that recorded none, which the worker refuses rather than guess.
+        messageDao.requeueForRetry(messageId)
+        val queued = entity.copy(record = entity.record.copy(status = MessageStatus.SENDING.name))
+        enqueueSend(queued, blockTarget = queued.sendTarget ?: SendTarget.of(recipientId), retry = true)
     }
 
     override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> = resultOf {
@@ -637,10 +627,17 @@ class MessageRepositoryImpl @Inject constructor(
         messageSource.updateReactions(chatId, messageId, updatedReactions)
     }
 
+    /**
+     * A forward is a queued send like any other: the source message's row, re-stamped
+     * for the target chat, goes through the outbox. Its media is already uploaded
+     * (`mediaUrl` set), so the worker skips straight to the write.
+     */
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        // Before the insert: the source message stays in its chat, so a throw loses nothing.
-        ensureNotBlocked(senderId, recipientId)
+        val target = SendTarget.of(recipientId)
+        // Before the insert: the source message stays in its chat, so a refusal
+        // loses nothing and leaves no FAILED bubble in the target chat.
+        refuseIfBlocked(senderId, target)
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
 
@@ -656,19 +653,9 @@ class MessageRepositoryImpl @Inject constructor(
             // Mentions name members of the source chat, not of this one.
             mentions = emptyList(),
         )
-        // Recorded like any outbox row, so a forward left SENDING (and flipped FAILED
-        // on the next chat entry) can still be retried through OutboxSender. The write
-        // below is its first attempt, so that retry writes if-absent, never over a
-        // copy that already landed.
-        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId).copy(outboxAttempts = 1))
-
-        // The row as inserted is what is written, so the recipient's copy matches ours.
-        val remoteId = messageWriter.send(optimisticMessage, recipientId)
-
-        val sentMessage = optimisticMessage.copy(id = remoteId, status = MessageStatus.SENT)
-        messageDao.markSent(tempId, MessageRecord.fromDomain(sentMessage), sentMessage.localUri)
-        chatDao.updateLastMessage(targetChatId, remoteId, messageSource.lastContentFor(message.type, message.content), timestamp)
-        sentMessage
+        val row = MessageEntity.outbox(optimisticMessage, target)
+        messageDao.insertOutbox(row)
+        enqueueSend(row, blockTarget = null)
     }
 
     override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
@@ -687,12 +674,9 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             duration = durationSeconds
         )
-        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
-
-        failSendOnError(tempId) {
-            ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId)
-        }
+        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
+        messageDao.insertOutbox(row)
+        enqueueSend(row)
     }
 
     override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> = resultOf {
@@ -870,7 +854,7 @@ class MessageRepositoryImpl @Inject constructor(
                             status = MessageStatus.SENDING,
                             timestamp = timestamp,
                         )
-                        val fanOutRemoteId = messageWriter.send(fanOut, recipientId)
+                        val fanOutRemoteId = messageWriter.send(fanOut, SendTarget.Peer(recipientId))
                         chatDao.updateLastMessage(individualChat.id, fanOutRemoteId, messageSource.lastContentFor(MessageType.TEXT, content), timestamp)
                     } catch (e: Exception) {
                         e.rethrowIfCancellation()
@@ -991,12 +975,9 @@ class MessageRepositoryImpl @Inject constructor(
             latitude = latitude,
             longitude = longitude
         )
-        messageDao.insertOutbox(MessageEntity.outbox(optimisticMessage, recipientId))
-
-        failSendOnError(tempId) {
-            ensureNotBlocked(senderId, recipientId)
-            outboxSender.send(tempId)
-        }
+        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
+        messageDao.insertOutbox(row)
+        enqueueSend(row)
     }
 
     override suspend fun sendTimerMessage(
@@ -1175,36 +1156,11 @@ class MessageRepositoryImpl @Inject constructor(
 
             if (raw.senderId == currentUid) {
                 if (existing != null) {
-                    val remoteStatus = parseMessageStatus(raw.status)
-                    if (existing.status != remoteStatus.name) {
-                        messageDao.acknowledge(raw.id, remoteStatus.name)
-                    }
+                    acknowledgeOwnEcho(raw, existing)
                     continue
                 }
                 val content = raw.content ?: "[Sent message]"
-                val message = Message(
-                    id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
-                    content = content,
-                    type = parseMessageType(raw.type),
-                    mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                    status = parseMessageStatus(raw.status),
-                    replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
-                    reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
-                    readBy = raw.readBy, deliveredTo = raw.deliveredTo,
-                    pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                    mentions = raw.mentions, deletedAt = raw.deletedAt,
-                    emojiSizes = raw.emojiSizes, listId = raw.listId,
-                    listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                    isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
-                    latitude = raw.latitude, longitude = raw.longitude,
-                    isHd = raw.isHd,
-                    timerDurationMs = raw.timerDurationMs,
-                    timerStartedAtMs = raw.timerStartedAtMs,
-                    timerState = raw.timerState?.let { parseTimerState(it) },
-                    timerRemainingMs = raw.timerRemainingMs,
-                    timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                    timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-                )
+                val message = raw.toMessage(content)
                 messageDao.upsertRecord(MessageRecord.fromDomain(message))
                 continue
             }
@@ -1238,33 +1194,74 @@ class MessageRepositoryImpl @Inject constructor(
                     }
                 }
 
-                val message = Message(
-                    id = raw.id, chatId = raw.chatId, senderId = raw.senderId,
-                    content = content,
-                    type = parseMessageType(raw.type),
-                    mediaUrl = raw.mediaUrl, mediaThumbnailUrl = raw.mediaThumbnailUrl,
-                    status = parseMessageStatus(raw.status),
-                    replyToId = raw.replyToId, timestamp = raw.timestamp, editedAt = raw.editedAt,
-                    reactions = raw.reactions, isForwarded = raw.isForwarded, duration = raw.duration,
-                    readBy = raw.readBy, deliveredTo = raw.deliveredTo,
-                    pollData = raw.pollData?.let { parsePollFromFirestore(it) },
-                    mentions = raw.mentions, deletedAt = raw.deletedAt,
-                    emojiSizes = raw.emojiSizes, listId = raw.listId,
-                    listDiff = raw.listDiff?.let { ListDiff.fromMap(it) },
-                    isPinned = raw.isPinned, mediaWidth = raw.mediaWidth, mediaHeight = raw.mediaHeight,
-                    latitude = raw.latitude, longitude = raw.longitude,
-                    isHd = raw.isHd,
-                    timerDurationMs = raw.timerDurationMs,
-                    timerStartedAtMs = raw.timerStartedAtMs,
-                    timerState = raw.timerState?.let { parseTimerState(it) },
-                    timerRemainingMs = raw.timerRemainingMs,
-                    timerAlarmStyle = resolveTimerAlarmStyle(raw.timerAlarmStyle, raw.timerSilent),
-                    timerAlarmSound = resolveTimerAlarmSound(raw.timerAlarmSound),
-                )
-                messageDao.upsertRecord(MessageRecord.fromDomain(message))
+                val message = raw.toMessage(content)
+                writeRecord(MessageRecord.fromDomain(message), existing)
             }
         }
     }
+
+    /**
+     * An own message's row against the backend's copy of it. Only an acknowledged
+     * snapshot may move the status: with client-set ids the SDK echoes this
+     * client's own write — the payload's SENT included — before the server has
+     * it, to the listener and, merged into a `get()`, to the sync alike. The
+     * acknowledged case also heals a row a send left SENDING or FAILED but whose
+     * write landed, and `acknowledge` takes it out of the outbox.
+     */
+    private suspend fun acknowledgeOwnEcho(raw: RawMessage, existing: MessageEntity) {
+        if (raw.hasPendingWrites) return
+        // Deleted here, not there: a message deleted while queued whose write
+        // landed anyway. Its tombstone is still owed (OutboxJob), and healing the
+        // row to SENT would take it out of the queue with the message delivered.
+        if (existing.deletedAt != null && raw.deletedAt == null) return
+        val remoteStatus = parseMessageStatus(raw.status)
+        if (existing.status != remoteStatus.name) {
+            messageDao.acknowledge(raw.id, remoteStatus.name)
+        }
+    }
+
+    /** Writes the backend's columns of a message, as an update when [existing] is in hand. */
+    private suspend fun writeRecord(record: MessageRecord, existing: MessageEntity?) {
+        if (existing == null) messageDao.upsertRecord(record) else messageDao.updateRecord(record)
+    }
+
+    /** The backend's copy of a message as a domain [Message], with [content] decrypted or defaulted by the caller. */
+    private fun RawMessage.toMessage(content: String) = Message(
+        id = id,
+        chatId = chatId,
+        senderId = senderId,
+        content = content,
+        type = parseMessageType(type),
+        mediaUrl = mediaUrl,
+        mediaThumbnailUrl = mediaThumbnailUrl,
+        status = parseMessageStatus(status),
+        replyToId = replyToId,
+        timestamp = timestamp,
+        editedAt = editedAt,
+        reactions = reactions,
+        isForwarded = isForwarded,
+        duration = duration,
+        readBy = readBy,
+        deliveredTo = deliveredTo,
+        pollData = pollData?.let { parsePollFromFirestore(it) },
+        mentions = mentions,
+        deletedAt = deletedAt,
+        emojiSizes = emojiSizes,
+        listId = listId,
+        listDiff = listDiff?.let { ListDiff.fromMap(it) },
+        isPinned = isPinned,
+        mediaWidth = mediaWidth,
+        mediaHeight = mediaHeight,
+        latitude = latitude,
+        longitude = longitude,
+        isHd = isHd,
+        timerDurationMs = timerDurationMs,
+        timerStartedAtMs = timerStartedAtMs,
+        timerState = timerState?.let { parseTimerState(it) },
+        timerRemainingMs = timerRemainingMs,
+        timerAlarmStyle = resolveTimerAlarmStyle(timerAlarmStyle, timerSilent),
+        timerAlarmSound = resolveTimerAlarmSound(timerAlarmSound),
+    )
 
     private fun downloadPendingMediaForChat(chatId: String) {
         downloadScope.launch {

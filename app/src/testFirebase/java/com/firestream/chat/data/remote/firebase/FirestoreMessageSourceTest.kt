@@ -22,13 +22,14 @@ import org.junit.Test
 import java.io.IOException
 
 /**
- * The idempotent-write contract of [FirestoreMessageSource.writeMessage], and
- * the newer-only chat preview written after it.
+ * The idempotent-write contract of [FirestoreMessageSource.writeMessage], the
+ * newer-only chat preview written after it, and the tombstone of a message
+ * deleted while it was queued.
  *
  * Firestore itself cannot run under Robolectric, so these tests pin the parts
  * a unit test *can* see: which SDK call each attempt makes, what a transaction
- * body does against a stubbed document, and that a re-attempt is bounded when
- * the SDK's flush never completes.
+ * body does against a stubbed document, and that every attempt is bounded when
+ * the SDK never acknowledges.
  */
 class FirestoreMessageSourceTest {
 
@@ -150,6 +151,28 @@ class FirestoreMessageSourceTest {
         verify(exactly = 2) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
     }
 
+    // A connected network is not a live Firestore stream: a set() can wait for
+    // an ack that is not coming. The worker retries; the next attempt is a
+    // re-attempt and finds the write the SDK kept.
+    @Test
+    fun `a first attempt fails within the timeout when the write is never acknowledged`() = runTest {
+        every { messageRef.set(any<Map<String, Any?>>()) } returns mockk(relaxed = true)
+
+        try {
+            source.sendPlainMessage(
+                chatId = "chat1", senderId = "uid1", messageId = "msg1",
+                content = "hi", type = MessageType.TEXT, replyToId = null, timestamp = 1L,
+            )
+            fail("expected the attempt to give up")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("msg1"))
+        }
+        assertEquals(SEND_ACK_TIMEOUT_MS, testScheduler.currentTime)
+        verify(exactly = 1) { messageRef.set(any<Map<String, Any?>>()) }
+        // No chat preview for a write that was not acknowledged.
+        assertTrue(transactions.isEmpty())
+    }
+
     @Test
     fun `re-attempt fails within the timeout when the flush never acknowledges`() = runTest {
         // A relaxed Task never reports complete and never invokes its listener:
@@ -165,9 +188,74 @@ class FirestoreMessageSourceTest {
         } catch (e: IOException) {
             assertTrue(e.message!!.contains("msg1"))
         }
-        assertEquals(RETRY_ACK_TIMEOUT_MS, testScheduler.currentTime)
+        assertEquals(SEND_ACK_TIMEOUT_MS, testScheduler.currentTime)
         verify(exactly = 0) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
         verify(exactly = 0) { messageRef.set(any<Map<String, Any?>>()) }
+    }
+
+    // ── a message deleted while queued ──────────────────────────────────────
+
+    /** Stubs the flush and the transaction to complete at once, capturing the body. */
+    private fun stubOnlineTransaction(): MutableList<Transaction.Function<Unit>> {
+        val flushTask = mockk<Task<Void>>(relaxed = true)
+        completeImmediately(flushTask)
+        every { firestore.waitForPendingWrites() } returns flushTask
+        val txTask = mockk<Task<Unit>>(relaxed = true)
+        completeImmediately(txTask)
+        val bodies = mutableListOf<Transaction.Function<Unit>>()
+        every { firestore.runTransaction(capture(bodies)) } returns txTask
+        return bodies
+    }
+
+    /** Runs [body] against a message document that does or does not [exist]; returns the update it made, if any. */
+    private fun runAgainstMessage(body: Transaction.Function<Unit>, exists: Boolean): Map<String, Any?>? {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.exists() } returns exists
+        val tx = mockk<Transaction>(relaxed = true)
+        every { tx.get(messageRef) } returns doc
+        val updates = mutableListOf<Map<String, Any?>>()
+        every { tx.update(messageRef, capture(updates)) } returns tx
+        body.apply(tx)
+        verify(exactly = 0) { tx.set(messageRef, any<Map<String, Any?>>()) }
+        return updates.singleOrNull()
+    }
+
+    @Test
+    fun `a tombstone flushes pending writes first, then updates only a document that exists`() = runTest {
+        val bodies = stubOnlineTransaction()
+
+        source.deleteIfExists("chat1", "msg1", deletedAt = 5_000L)
+
+        verifyOrder {
+            firestore.waitForPendingWrites()
+            firestore.runTransaction(any<Transaction.Function<Unit>>())
+        }
+        val update = runAgainstMessage(bodies.single(), exists = true)!!
+        assertEquals(5_000L, update["deletedAt"])
+        assertEquals("", update["content"])
+        assertTrue("ciphertext" in update && update["ciphertext"] == null)
+        assertTrue("mediaUrl" in update && update["mediaUrl"] == null)
+    }
+
+    @Test
+    fun `a tombstone never creates a document the backend does not hold`() = runTest {
+        val bodies = stubOnlineTransaction()
+
+        source.deleteIfExists("chat1", "msg1", deletedAt = 5_000L)
+
+        assertEquals(null, runAgainstMessage(bodies.single(), exists = false))
+    }
+
+    @Test
+    fun `a tombstone fails within the timeout when the flush never acknowledges`() = runTest {
+        try {
+            source.deleteIfExists("chat1", "msg1", deletedAt = 5_000L)
+            fail("expected the tombstone to give up")
+        } catch (e: IOException) {
+            assertTrue(e.message!!.contains("msg1"))
+        }
+        assertEquals(SEND_ACK_TIMEOUT_MS, testScheduler.currentTime)
+        verify(exactly = 0) { firestore.runTransaction(any<Transaction.Function<Unit>>()) }
     }
 
     /**

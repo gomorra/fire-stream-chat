@@ -18,6 +18,7 @@ Tests are the primary feedback loop during implementation, not a step appended a
 - Crypto tests: encryption round-trip (encrypt → decrypt == original plaintext)
 - Test files live alongside source in `app/src/test/`
 - Prefer the fakes in `test/fakes/` for the Message/Chat/User repositories; MockK elsewhere
+- WorkManager workers: build the `@HiltWorker` with `TestListenableWorkerBuilder` (`androidx.work:work-testing`) and a `WorkerFactory` that calls its constructor with mocks, then `doWork()` under Robolectric — no `WorkManagerTestInitHelper` is needed. `OutboxWorkerTest` is the shape; the enqueue side (`OutboxSchedulerTest`) mocks `WorkManager` and inspects the captured request's `workSpec`
 
 ### 2. Compose UI tests (Robolectric + `createComposeRule`)
 

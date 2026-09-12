@@ -6,11 +6,14 @@
 // Owns: Listener registrations on chats/{chatId}/messages — caller must close
 //   the returned Flow to detach. The idempotent write contract for retryable
 //   sends (writeMessage): client-set doc id, plain set() on the first attempt,
-//   flush-then-create-if-absent on every later one. The newer-only chat preview
+//   flush-then-create-if-absent on every later one, both bounded by the ack
+//   timeout. The tombstone of a message deleted while queued (deleteIfExists —
+//   flush, then update only an existing doc). The newer-only chat preview
 //   (writeBackChatPreview — a transaction, never a blind update).
-// Collaborators: MessageRepositoryImpl + OutboxSender (only callers); decrypts via SignalManager
-//   on the way out. Also reachable through the MessageSource interface in
-//   data/remote/source/ so the pocketbase flavor can swap in its own impl.
+// Collaborators: MessageRepositoryImpl + OutboxSender via MessageWriter (only
+//   callers); decrypts via SignalManager on the way out. Also reachable through
+//   the MessageSource interface in data/remote/source/ so the pocketbase flavor
+//   can swap in its own impl.
 // Don't put here: Signal encryption itself (SignalManager), Room caching
 //   (MessageRepositoryImpl), unread-count increments (sendPushNotification
 //   Cloud Function in functions/index.js).
@@ -44,8 +47,12 @@ private const val CALL_CONTENT = "📞 Voice call"
 private const val TIMER_CONTENT = "⏱ Timer"
 private const val TAG = "FirestoreMessageSource"
 
-/** Upper bound on a re-attempt (flush + create-if-absent); see [FirestoreMessageSource.writeMessage]. */
-internal const val RETRY_ACK_TIMEOUT_MS = 30_000L
+/**
+ * Upper bound on any attempt's wait for the server's acknowledgement — the first
+ * attempt's `set()`, a re-attempt's flush + create-if-absent, a tombstone; see
+ * [FirestoreMessageSource.writeMessage].
+ */
+internal const val SEND_ACK_TIMEOUT_MS = 30_000L
 
 @Singleton
 class FirestoreMessageSource @Inject constructor(
@@ -167,12 +174,15 @@ class FirestoreMessageSource @Inject constructor(
      * first-attempt `set()` the SDK has persisted but not yet flushed; the
      * transaction would create the doc and the replay would then overwrite it.
      * `waitForPendingWrites()` lands that replay first, so the transaction finds
-     * the document. Both calls need the network — but neither *fails* without
-     * it: the flush simply waits for an ack that is not coming, and that is
-     * exactly the state a retry is in. The re-attempt is therefore bounded by
-     * [RETRY_ACK_TIMEOUT_MS] and surfaces as an [IOException] (→
-     * `AppError.Network`), so a retry while offline lands back at FAILED instead
-     * of parking the caller's coroutine.
+     * the document.
+     *
+     * Neither attempt *fails* without the network: a `set()` waits for an ack,
+     * the flush waits for the acks of everything queued before it, and a
+     * connected network is not a live Firestore stream (a captive portal, a link
+     * that just dropped). Both are therefore bounded by [SEND_ACK_TIMEOUT_MS]
+     * and surface as an [IOException] (→ `AppError.Network`, transient to
+     * `OutboxWorker`). The SDK keeps a timed-out first `set()`, so the next
+     * attempt — a re-attempt by then — flushes it and finds the document.
      */
     private suspend fun writeMessage(
         chatId: String,
@@ -180,23 +190,55 @@ class FirestoreMessageSource @Inject constructor(
         data: Map<String, Any?>,
         ifAbsent: Boolean,
     ) {
-        val ref = firestore
-            .collection("chats").document(chatId)
-            .collection("messages").document(messageId)
-        if (!ifAbsent) {
-            ref.set(data).await()
-            return
+        val ref = messageRef(chatId, messageId)
+        awaitAck("Message $messageId") {
+            if (!ifAbsent) {
+                ref.set(data).await()
+            } else {
+                firestore.waitForPendingWrites().await()
+                firestore.runTransaction { tx ->
+                    if (!tx.get(ref).exists()) tx.set(ref, data)
+                }.await()
+            }
         }
-        withTimeoutOrNull(RETRY_ACK_TIMEOUT_MS) {
+    }
+
+    private fun messageRef(chatId: String, messageId: String) =
+        firestore.collection("chats").document(chatId).collection("messages").document(messageId)
+
+    /** Runs [block] under [SEND_ACK_TIMEOUT_MS]; past it, an [IOException] naming [what]. */
+    private suspend fun awaitAck(what: String, block: suspend () -> Unit) {
+        withTimeoutOrNull(SEND_ACK_TIMEOUT_MS) {
+            block()
+            true
+        } ?: throw IOException("$what not acknowledged within $SEND_ACK_TIMEOUT_MS ms — offline?")
+    }
+
+    /**
+     * The tombstone of a message deleted while it was queued (offline outbox plan
+     * §2.5). The document may exist — an earlier attempt's write landed — or may be
+     * about to: the SDK replays a persisted `set()` on reconnect whatever the app
+     * does, so the flush comes first and the transaction only ever *updates*. A
+     * document that is not there stays not there.
+     */
+    override suspend fun deleteIfExists(chatId: String, messageId: String, deletedAt: Long) {
+        val ref = messageRef(chatId, messageId)
+        awaitAck("Tombstone of message $messageId") {
             firestore.waitForPendingWrites().await()
             firestore.runTransaction { tx ->
-                if (!tx.get(ref).exists()) tx.set(ref, data)
+                if (tx.get(ref).exists()) tx.update(ref, tombstoneFields(deletedAt))
             }.await()
-            true
-        } ?: throw IOException(
-            "Retry of message $messageId not acknowledged within ${RETRY_ACK_TIMEOUT_MS} ms — offline?"
-        )
+        }
     }
+
+    /** What a deleted message keeps: the fact and the time; body, ciphertext and media are gone. */
+    private fun tombstoneFields(deletedAt: Long): Map<String, Any?> = mapOf(
+        "deletedAt" to deletedAt,
+        "content" to "",
+        "ciphertext" to null,
+        "mediaUrl" to null,
+        "mediaThumbnailUrl" to null,
+    )
 
     override suspend fun sendMessage(
         chatId: String,
@@ -312,17 +354,7 @@ class FirestoreMessageSource @Inject constructor(
     }
 
     override suspend fun deleteMessage(chatId: String, messageId: String) {
-        firestore
-            .collection("chats").document(chatId)
-            .collection("messages").document(messageId)
-            .update(mapOf(
-                "deletedAt" to System.currentTimeMillis(),
-                "content" to "",
-                "ciphertext" to null,
-                "mediaUrl" to null,
-                "mediaThumbnailUrl" to null
-            ))
-            .await()
+        messageRef(chatId, messageId).update(tombstoneFields(System.currentTimeMillis())).await()
     }
 
     override suspend fun updateMessageStatus(chatId: String, messageId: String, status: String) {

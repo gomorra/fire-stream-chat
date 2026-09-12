@@ -52,6 +52,7 @@ class MessageRepositoryLocalUriTest {
     private val firestoreFlow = MutableSharedFlow<List<RawMessage>>(extraBufferCapacity = 1)
     private val roomFlow = MutableSharedFlow<List<MessageEntity>>(replay = 1)
     private val upsertSlot = slot<MessageRecord>()
+    private val updateSlot = slot<MessageRecord>()
 
     private lateinit var repository: MessageRepositoryImpl
 
@@ -63,6 +64,7 @@ class MessageRepositoryLocalUriTest {
         every { messageDao.getMessagesByChatId("chat1") } returns roomFlow
         coEvery { signalManager.ensureInitialized() } just Runs
         coEvery { messageDao.upsertRecord(capture(upsertSlot)) } just Runs
+        coEvery { messageDao.updateRecord(capture(updateSlot)) } just Runs
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns emptyList()
         coEvery { messageDao.updateReactions(any(), any()) } just Runs
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
@@ -85,12 +87,12 @@ class MessageRepositoryLocalUriTest {
     }
 
     // ── local columns on a re-processed message ──────────────────────────────
-    // An edit echo of a received message is written as a MessageRecord upsert,
+    // An edit echo of a received message is written as a MessageRecord update,
     // which cannot touch localUri or the star (MessageDaoOutboxColumnsTest pins
     // the DAO side). The repository's part: write the record, and nothing else.
 
     @Test
-    fun `an edited incoming message is written as a record upsert, not a whole-row replace`() = runTest {
+    fun `an edited incoming message is written as a record update, not a whole-row replace`() = runTest {
         val localPath = "/storage/emulated/0/Pictures/FireStream Images/msg1.jpg"
         val existingEntity = MessageEntity(
             MessageRecord(
@@ -121,11 +123,12 @@ class MessageRepositoryLocalUriTest {
         firestoreFlow.emit(listOf(raw))
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { messageDao.upsertRecord(any()) }
+        coVerify(exactly = 1) { messageDao.updateRecord(any()) }
+        coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
         coVerify(exactly = 0) { messageDao.insertOutbox(any()) }
         coVerify(exactly = 0) { messageDao.updateLocalUri(any(), any()) }
-        assertEquals("Hello edited", upsertSlot.captured.content)
-        assertEquals(99999L, upsertSlot.captured.editedAt)
+        assertEquals("Hello edited", updateSlot.captured.content)
+        assertEquals(99999L, updateSlot.captured.editedAt)
         // The row already has its file; the edit must not queue a second download.
         coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
 
@@ -243,6 +246,7 @@ class MessageRepositoryLocalUriTest {
 
         // No write at all for an unchanged message.
         coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
+        coVerify(exactly = 0) { messageDao.updateRecord(any()) }
 
         job.cancel()
     }

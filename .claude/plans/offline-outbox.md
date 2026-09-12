@@ -371,6 +371,73 @@ update the preview the same way.
   remove "Durable offline-send outbox" (its plan pointer is dead) and rewrite "Sends still await two
   backend round trips"; `docs/BACKLOG.md` 6.3 → *Pending on-device verification* with §4's checklist.
 - `/simplify` triggers: concurrency + cross-cutting. `/code-review`.
+- **Shipped shape (read before step 7).** Two commits: the refactor `f1b5d887` (Room 27 → 28) and the
+  `feat:` commit. `MessageEntity` now embeds a `MessageRecord` — every column the backend holds, and Room's
+  partial entity for the table — beside the local-only columns (`localUri`, `isStarred`, the five `outbox*`);
+  a snapshot, sync, edit echo or poll vote is `MessageDao.upsertRecord` and *cannot* reach the local columns,
+  which retired reconcile's preserved-field copying, `insertMessage` / `replaceMessage` and the GOTCHAS trap.
+  `insertOutbox` inserts an own send whole; `markSent(oldId, record, localUri)` is the SENT transaction and
+  `acknowledge(id, status)` the heal of a row the backend turns out to hold — both around the one `clearOutbox`.
+  `isStarred` and `outboxAttempts` carry `DEFAULT 0` (a partial insert omits them), which is why the bump.
+  `SendTarget` (`Peer(id)` / `NoPeer`) is the one place `outboxRecipientId` is mapped; `MessageWriter.encode`
+  and `send` take it. The repository's `enqueueSend` = block check against a target → `OutboxFiles.stage` →
+  `OutboxScheduler.enqueue` / `retryNow`, wrapped in `failSendOnError`; `refuseIfBlocked` throws
+  `RecipientBlockedException` (`domain/model/AppError.kt`) on a definite block and *queues* on a fetch error,
+  while `sendTimerMessage` keeps the strict `ensureNotBlocked`. A forward checks the block list *before* its
+  insert (nothing to lose) and queues with attempt count 0. `retryFailedMessage` is one statement,
+  `MessageDao.requeueForRetry` (SENDING, `outboxAttempts = MIN(attempts, 1)` — a fresh budget, still
+  if-absent), then REPLACEs the work. `deleteMessage` on an own SENDING **or FAILED** row takes the tombstone
+  path (soft-delete, staged file gone, REPLACE run — no status flip: `OutboxJob` reads a deleted unacknowledged
+  row as a tombstone, and `getQueuedMessages` is the SQL half of that rule); `OutboxSender` branches on `deletedAt` first, asks
+  `MessageSource.deleteIfExists` only when `outboxAttempts > 0`, and ends the row as SENT ("deleted here, and
+  there if it ever arrived"). `OutboxWorker`: SENDING gate → attempt budget (`outboxAttempts >= 8` before running,
+  or after a transient failure; tombstones exempt) → `userSource.isUserBlocked` for a `Peer` → foreground for a
+  row that still uploads (`needsUpload`, `tryPromoteForeground` like `ApkDownloadWorker`) → `OutboxSender.send`;
+  `SendErrorClassifier.classify` walks the cause chain (backend codes first, then the neutral rules:
+  `RecipientBlockedException` / `MediaLimitException` / `FileNotFoundException` / `IllegalState` permanent,
+  `IOException` transient, unknown permanent). `OutboxScheduler`: `outbox-<id>`, CONNECTED, exponential from
+  10 s, expedited when `SDK_INT >= 31 || needsUpload` (`RUN_AS_NON_EXPEDITED_WORK_REQUEST`); `requeueAll` also
+  fails SENDING rows of non-sendable types (a timer whose await died) and sweeps staged files no queued row owns;
+  `enqueue` / `retryNow` take the message id and an `uploads` flag (`MessageEntity.needsUpload`), not a row.
+  `BlockCheck` (`data/outbox/`) is the 30 s per-peer cache both the repository's `blockVerdict` and the worker
+  use, so the worker's re-check is a cache hit when the repository's answer is recent; `WorkerForeground.kt`
+  holds the foreground scaffolding `OutboxWorker` shares with `ApkDownloadWorker`.
+  `WorkManager` is a Hilt `@Provides` injected as `Provider<WorkManager>` (the config reads a Hilt field).
+  `FirestoreMessageSource`: the first attempt's `set()` is under the same 30 s `SEND_ACK_TIMEOUT_MS` as the
+  re-attempt and the tombstone (`IOException` → transient). `OutboxFiles` stages under
+  `filesDir/outbox/<id>.<ext>`, the extension from the picked mime type (a document's upload type on retry),
+  and `isDurable` decides the SENT row's `localUri`: the media dir copy of an image or video is kept, a staged
+  document or voice recording is dropped (the voice player streams `mediaUrl`; the backfill fetches a
+  document). `OutboxSender.send` has no `sourceMimeType` parameter any more and runs under a `KeyedMutex`
+  per id. **Found in the step:** `syncChatMessages` lacked the pending-echo guard — a `get()` merges this
+  client's pending writes, so a queued send's own echo reached the sync with the payload's SENT; fixed with
+  a regression test. `OutboxSender`'s tombstone and the give-up rely on `outboxAttempts` counting at the
+  *start* of a run (step 4), so attempt 0 ⇒ nothing pending. **`/simplify` (four reviewers: Reuse and
+  Simplification on Sonnet, Efficiency and Altitude on Opus)** produced `OutboxJob`, `BlockCheck`,
+  `WorkerForeground`, `SendTarget.peerId`, the id-based scheduler, `requeueForRetry`, `updateRecord` for a row
+  in hand, the shared `RawMessage.toMessage` mapper and `acknowledgeOwnEcho`; three findings were recorded in
+  `TECH_DEBT.md` instead (the `MessageColumns` delegation, `outboxAttempts` carrying two facts, the three
+  per-key mutex variants). A block check that fails transiently in the worker is not counted as an attempt —
+  the network condition that causes it fails the send too, which is counted — so it is bounded by WorkManager's
+  backoff (five hours at most) rather than the budget. **`/code-review`** (Spec on Fable, Standards on Opus)
+  closed four races before the commit, each with a regression test: an acknowledged echo of a row deleted while
+  queued no longer heals it to SENT (`acknowledgeOwnEcho` leaves the tombstone owed); `OutboxSender.send`
+  decides the job under its lock, so a row an echo healed meanwhile is returned as it is instead of being refused
+  for its cleared target; `MessageDao.markSent` declines a row deleted while the attempt ran (the delete's REPLACE
+  run then tombstones the document the write created) and the worker's `failQueued` is conditional on SENDING;
+  the write-to-SENT phase and the repository's post-insert phase run `NonCancellable`, so a REPLACE cannot leave
+  a detached Firestore transaction behind the tombstone's flush and leaving the chat cannot strand a row nothing
+  owns. Two findings stand as known limits: a run cancelled by constraint loss or process death has already
+  spent one of the eight attempts (`outboxAttempts` counts at the start of a run, by step 4's design — a manual
+  retry restores the budget), and on PocketBase a SENT id swap drops the star (`markSent` writes the record, not
+  the local columns; §0 keeps that flavor compiling only).
+- **(step-6 notes for step 7)** The message-info sheet still shows "Sending / In progress…" for a queued row and
+  "Message not delivered" for one the worker failed as blocked — step 7 owns the first; the second needs a
+  failure reason on the row (in BACKLOG 6.3). `ConnectivityObserver` is display-only: nothing in the send path
+  may read it, WorkManager's constraint is the one source of "online".
+- **(step-6 notes for step 8)** `FCMService` still only marks delivery; the pending-echo guard now exists on both
+  receive paths, and a push reconcile must inherit it. `requeueAll` runs on app start only — a `BootCompleted`
+  path is not needed because WorkManager persists the work itself.
 
 ### Step 7 — "Waiting for network" hint (`feat:`, use the `app-ui-design` skill)
 - `domain/…/ConnectivityObserver` (interface, `StateFlow<Boolean>`), `data/util/AndroidConnectivityObserver`

@@ -65,7 +65,6 @@ class MessageRepositorySnapshotTest {
     fun setUp() {
         every { authSource.currentUserId } returns SELF
         coEvery { userSource.getBlockedUserIds(any()) } returns emptySet()
-        coEvery { messageDao.failStuckSendingMessagesForChat(any()) } returns 0
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat(any()) } returns emptyList()
         every { messageDao.getMessagesByChatId(any()) } returns flowOf(emptyList())
         coEvery { messageDao.getMessageById(any()) } coAnswers {
@@ -226,6 +225,86 @@ class MessageRepositorySnapshotTest {
 
         coVerify(exactly = 1) { messageDao.acknowledge("own1", MessageStatus.SENT.name) }
         job.cancel()
+    }
+
+    // A SENDING row is a live queued send that OutboxWorker owns; opening the
+    // chat must not flip it FAILED the way the old orphan recovery did.
+    @Test
+    fun `a queued own row is left SENDING on chat entry`() = runTest {
+        val queued = ownRow("own1", MessageStatus.SENDING)
+        coEvery { messageDao.getMessageById("own1") } returns queued
+        every { messageDao.getMessagesByChatId(CHAT) } returns flowOf(listOf(queued))
+        every { messageSource.observeMessages(CHAT) } returns flowOf(emptyList())
+
+        val emitted = repository.getMessages(CHAT).toList()
+
+        assertEquals(MessageStatus.SENDING, emitted.last().single().status)
+        coVerify(exactly = 0) { messageDao.updateMessageStatus(any(), any()) }
+        coVerify(exactly = 0) { messageDao.acknowledge(any(), any()) }
+    }
+
+    // A message deleted while queued whose first write landed anyway: its echo
+    // must not heal the row to SENT, or OutboxJob would read "nothing owed" and
+    // the recipient would keep a message the sender deleted. The worker's
+    // tombstone run — enqueued by the delete — owns the row.
+    @Test
+    fun `an acknowledged echo of a row deleted while queued leaves its tombstone owed`() = runTest {
+        val deletedLocally = ownRow("own1", MessageStatus.SENDING).let {
+            it.copy(record = it.record.copy(deletedAt = 5_000L, content = ""))
+        }
+        coEvery { messageDao.getMessageById("own1") } returns deletedLocally
+        every { messageSource.observeMessages(CHAT) } returns
+            flowOf(listOf(ownEcho("own1", hasPendingWrites = false)))
+
+        val job = launch { repository.getMessages(CHAT).collect { } }
+        advanceUntilIdle()
+
+        coVerify(exactly = 0) { messageDao.acknowledge("own1", any()) }
+        coVerify(exactly = 0) { messageDao.updateMessageStatus("own1", any()) }
+        job.cancel()
+    }
+
+    @Test
+    fun `an acknowledged echo that is itself deleted still heals the row`() = runTest {
+        // Deleted on both sides — the tombstone landed — so the status may move.
+        val deletedLocally = ownRow("own1", MessageStatus.SENDING).let {
+            it.copy(record = it.record.copy(deletedAt = 5_000L, content = ""))
+        }
+        coEvery { messageDao.getMessageById("own1") } returns deletedLocally
+        every { messageSource.observeMessages(CHAT) } returns
+            flowOf(listOf(ownEcho("own1", hasPendingWrites = false).copy(deletedAt = 5_000L)))
+
+        val job = launch { repository.getMessages(CHAT).collect { } }
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { messageDao.acknowledge("own1", MessageStatus.SENT.name) }
+        job.cancel()
+    }
+
+    // ── The chat-list sync sees the same echoes ─────────────────────────────
+    //
+    // A get() merges this client's pending writes into its result, so a queued
+    // send's own echo reaches the sync too, with the payload's SENT.
+
+    @Test
+    fun `the chat-list sync ignores a pending echo of an own write`() = runTest {
+        coEvery { messageDao.getMessageById("own1") } returns ownRow("own1", MessageStatus.SENDING)
+        coEvery { messageSource.fetchMessages(CHAT) } returns listOf(ownEcho("own1", hasPendingWrites = true))
+
+        repository.syncAllChatMessages(listOf(CHAT))
+
+        coVerify(exactly = 0) { messageDao.acknowledge("own1", any()) }
+        coVerify(exactly = 0) { messageDao.updateMessageStatus("own1", any()) }
+    }
+
+    @Test
+    fun `the chat-list sync heals a FAILED row the backend holds`() = runTest {
+        coEvery { messageDao.getMessageById("own1") } returns ownRow("own1", MessageStatus.FAILED)
+        coEvery { messageSource.fetchMessages(CHAT) } returns listOf(ownEcho("own1", hasPendingWrites = false))
+
+        repository.syncAllChatMessages(listOf(CHAT))
+
+        coVerify(exactly = 1) { messageDao.acknowledge("own1", MessageStatus.SENT.name) }
     }
 
     private fun ownRow(id: String, status: MessageStatus) = MessageEntity.fromDomain(

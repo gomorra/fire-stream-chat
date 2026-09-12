@@ -81,6 +81,16 @@ interface MessageSource {
 
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, editedAt: Long, emojiSizes: Map<Int, Float> = emptyMap())
     suspend fun deleteMessage(chatId: String, messageId: String)
+
+    /**
+     * Tombstones the message at [messageId] if — and only if — the backend holds
+     * it, and never creates it. For a message deleted while it was still queued:
+     * an earlier attempt's write may have landed, or may still sit in the SDK's
+     * queue, so pending writes are flushed first and the document checked after.
+     * Needs the network and is bounded like a re-attempt. PocketBase accepts and
+     * ignores it.
+     */
+    suspend fun deleteIfExists(chatId: String, messageId: String, deletedAt: Long)
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String)
 
     suspend fun getUndeliveredMessageIds(chatId: String, currentUserId: String): List<String>

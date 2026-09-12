@@ -200,6 +200,10 @@ class PocketBaseMessageSource @Inject constructor(
     override suspend fun deleteMessage(chatId: String, messageId: String) =
         throw NotImplementedError("PB v0: delete deferred")
 
+    // Accepted and ignored: this flavor never queues a write it could tombstone
+    // (the offline outbox plan keeps it compiling only).
+    override suspend fun deleteIfExists(chatId: String, messageId: String, deletedAt: Long) = Unit
+
     override suspend fun updateMessageStatus(chatId: String, messageId: String, status: String) =
         throw NotImplementedError("PB v0: status update deferred")
 

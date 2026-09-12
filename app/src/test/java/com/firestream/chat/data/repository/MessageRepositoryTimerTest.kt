@@ -61,7 +61,7 @@ class MessageRepositoryTimerTest {
         val optimisticSlot = slot<MessageRecord>()
         val replacedSlot = slot<MessageRecord>()
         coEvery { messageDao.upsertRecord(capture(optimisticSlot)) } just Runs
-        coEvery { messageDao.markSent(any(), capture(replacedSlot), any()) } just Runs
+        coEvery { messageDao.markSent(any(), capture(replacedSlot), any()) } returns true
 
         val result = repository.sendTimerMessage("chat1", 30_000L, "Pizza", "recipient1")
 

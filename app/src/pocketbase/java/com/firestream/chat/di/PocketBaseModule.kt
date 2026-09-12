@@ -22,6 +22,7 @@ import com.firestream.chat.data.remote.pocketbase.PocketBaseListHistorySource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseListSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseMessageSource
 import com.firestream.chat.data.remote.pocketbase.PocketBasePresenceSource
+import com.firestream.chat.data.remote.pocketbase.PocketBaseSendErrorClassifier
 import com.firestream.chat.data.remote.pocketbase.PocketBaseStorageSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseUserSource
 import com.firestream.chat.data.remote.source.AuthSource
@@ -32,6 +33,7 @@ import com.firestream.chat.data.remote.source.ListHistorySource
 import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.PresenceSource
+import com.firestream.chat.data.remote.source.SendErrorClassifier
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.UserSource
 import dagger.Binds
@@ -77,6 +79,9 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindContactSource(impl: PocketBaseContactSource): ContactSource
+
+    @Binds @Singleton
+    abstract fun bindSendErrorClassifier(impl: PocketBaseSendErrorClassifier): SendErrorClassifier
 
     /**
      * Adds [PocketBaseLifecycleHook] to the multibound `Set<FlavorBootstrap>`

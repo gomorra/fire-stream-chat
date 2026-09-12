@@ -6,6 +6,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
+import com.firestream.chat.data.outbox.SendTarget
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -48,7 +49,7 @@ class MessageDaoOutboxColumnsTest {
         localUri = "content://picker/1",
     )
 
-    private val queued = MessageEntity.outbox(unsent, recipientId = "peer1")
+    private val queued = MessageEntity.outbox(unsent, SendTarget.Peer("peer1"))
         .copy(isStarred = true, outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxPeerIdentity = "id-1", outboxAttempts = 2)
 
     @Before
@@ -67,7 +68,7 @@ class MessageDaoOutboxColumnsTest {
 
     @Test
     fun `step, attempt, ciphertext and pin updates keep every outbox column`() = runTest {
-        dao.insertOutbox(MessageEntity.outbox(unsent, recipientId = "peer1"))
+        dao.insertOutbox(MessageEntity.outbox(unsent, SendTarget.Peer("peer1")))
 
         dao.incrementOutboxAttempts("msg1")
         dao.incrementOutboxAttempts("msg1")
@@ -160,6 +161,39 @@ class MessageDaoOutboxColumnsTest {
         assertNull(row.localUri)
         assertTrue(row.isStarred)
         assertEquals(0, row.outboxAttempts)
+    }
+
+    @Test
+    fun `markSent declines a row deleted while the attempt ran, leaving it queued for its tombstone`() = runTest {
+        dao.insertOutbox(queued)
+        dao.softDeleteMessage("msg1", deletedAt = 5_000L)
+
+        val written = dao.markSent("msg1", MessageRecord.fromDomain(unsent.copy(status = MessageStatus.SENT)), localUri = null)
+
+        assertFalse(written)
+        val row = dao.getMessageById("msg1")!!
+        assertEquals(5_000L, row.deletedAt)
+        assertEquals("", row.content)
+        assertEquals(MessageStatus.SENDING.name, row.status)
+        assertEquals("peer1", row.outboxRecipientId)
+        assertEquals(2, row.outboxAttempts)
+    }
+
+    @Test
+    fun `markSent declines a row that is gone`() = runTest {
+        assertFalse(dao.markSent("ghost", MessageRecord.fromDomain(unsent.copy(status = MessageStatus.SENT)), localUri = null))
+    }
+
+    @Test
+    fun `failQueued fails a SENDING row and leaves an acknowledged one alone`() = runTest {
+        dao.insertOutbox(queued)
+        dao.insertOutbox(queued.copy(record = queued.record.copy(id = "healed", status = MessageStatus.SENT.name)))
+
+        dao.failQueued("msg1")
+        dao.failQueued("healed")
+
+        assertEquals(MessageStatus.FAILED.name, dao.getMessageById("msg1")!!.status)
+        assertEquals(MessageStatus.SENT.name, dao.getMessageById("healed")!!.status)
     }
 
     // A send whose await died but whose write landed heals through the

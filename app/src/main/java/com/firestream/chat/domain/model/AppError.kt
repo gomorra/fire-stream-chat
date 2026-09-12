@@ -92,3 +92,12 @@ sealed interface AppError {
  * satisfies the Konsist purity rule.
  */
 class MediaLimitException(message: String) : Exception(message)
+
+/**
+ * Thrown by a send whose 1:1 recipient is blocked by the sender — by the
+ * repository when the block list can be read, and by `OutboxWorker`'s
+ * authoritative check once online. A permanent failure: the row is marked
+ * FAILED, and [AppError.from] leaves it an [AppError.Unknown] so the banner
+ * shows [message] verbatim, as it always has.
+ */
+class RecipientBlockedException : Exception("Cannot send messages to a blocked user")

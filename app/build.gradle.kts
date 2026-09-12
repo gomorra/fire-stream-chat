@@ -482,6 +482,7 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.robolectric)
     testImplementation(libs.mockwebserver)
+    testImplementation(libs.work.testing)
     // Konsist parses production Kotlin sources to enforce architecture rules
     // (see test/.../architecture/ArchitectureTest.kt).
     testImplementation(libs.konsist)

@@ -31,13 +31,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### Sends still await two backend round trips before the tick
+### Sends run only through WorkManager — no in-process fast path
 
-**The smell.** `sendMessage` awaits `add()` (server ack) before flipping the optimistic Room row from `SENDING` to `SENT`, and the first send into a chat additionally awaits a block-state read. Firestore latency-compensates the write locally, so the message is effectively queued the moment it is written — but the app deliberately waits for the ack, because `SENT` is a claim about the backend and because the `FAILED` path (and its retry affordance) has nothing else to hang off.
+**The smell.** Every retryable send is enqueued as WorkManager work (`OutboxScheduler` → `OutboxWorker` → `OutboxSender`) and the tick waits for that job to be scheduled, run, and acknowledged by the server. WorkManager adds latency a direct attempt would not: an expedited job on API 31+ usually starts within a second or two, ordinary work below that — text on API 29/30 — can wait longer under Doze or battery restrictions.
 
-**Why we haven't fixed it.** Trusting the local write would mean the app owns the durability story: a real outbox with retry, a distinct "queued" state in the UI, and reconciliation on restart. That is the already-logged "Durable offline-send outbox" work below, not something to bolt onto the current send path.
+**Why we haven't fixed it.** The offline outbox plan (§0) decided WorkManager only, so there is one code path with one durability story. An in-process fast path racing the worker would need `OutboxSender`'s per-id lock to arbitrate every time and would re-open the cancellation semantics the outbox removed (a send tied to the chat's `viewModelScope`). Checklist item 6 in [`docs/BACKLOG.md`](docs/BACKLOG.md) measures compose→SENT before and after.
 
-**When to revisit.** Together with the durable offline-send outbox — the two are the same piece of work.
+**When to revisit.** When that measurement, or dogfooding, shows a noticeable regression online. The shape would be: right after `enqueue`, run one attempt inline under the per-id lock while the app is in the foreground, and let the queued work find the row already SENT.
 
 ---
 
@@ -83,15 +83,33 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### Durable offline-send outbox — auto-retry, reconnect flush, reboot survival
+### `MessageEntity` delegates 33 columns through the `MessageColumns` interface
 
-**The smell.** A failed send is a dead end: the user must manually tap each `FAILED` bubble to retry, only while the app is alive. There's no durable queue, no connectivity monitoring, no auto-retry on reconnect, and no offline UX — a message composed with no network just fails. The *silent-loss* half of this was fixed on 2026-06-08: a send cancelled mid-flight (user leaves the chat) used to leave its row stuck at `SENDING` forever — never retried, never failed. `MessageDao.failStuckSendingMessages()` now flips those orphans to `FAILED` on app start (all chats, via `FireStreamApp.recoverOrphanedSends`) and on chat re-entry (one chat, via `MessageRepositoryImpl.getMessages`), so the existing manual-retry button reappears. `getPendingSendingMessage` was widened to match `FAILED` as well as `SENDING` so a row flipped to `FAILED` that had actually reached the backend is still de-duplicated when its remote echo arrives. What remains deferred is the full "send works offline and catches up automatically" experience.
+**The smell.** `messages` is split into the embedded `MessageRecord` (the backend's columns, Room's partial entity) and the local-only columns on `MessageEntity`, and the entity implements `MessageColumns by record` so `entity.status` keeps compiling everywhere. Every backend column is therefore declared three times — in `MessageRecord`, in the interface, and implicitly through the delegation — and a caller that changes a record field on an entity in hand writes `entity.copy(record = entity.record.copy(…))`.
 
-**The deferred design (Option C).** A backend-agnostic Room-backed outbox: a new `QUEUED` status, an `OutboxSender` engine extracted from `MessageRepositoryImpl`, a WorkManager `OutboxWorker` draining the queue (per-chat ordering, exponential backoff, `MAX_ATTEMPTS`), a `ConnectivityMonitor` that flushes on reconnect, reboot re-enqueue via `BootCompletedReceiver`, and a "Waiting for network" bubble state + chat-level offline banner. Full plan (8 steps, model/effort table, correctness-risk analysis) at `~/.claude/plans/what-happens-currently-if-cheeky-pony.md`.
+**Why we haven't fixed it.** The split is what makes a snapshot upsert unable to reach `localUri`, the star or the outbox columns (the trap step 6 of the offline outbox removed), and the delegation kept a 53-file diff from also touching every reader of an entity field. The `/simplify` altitude review on that step called it a source-compatibility shim and asked that it be recorded rather than left implicit.
 
-**Why we haven't done it.** It's a large cross-cutting change (schema migration + DAO + a new send engine + worker + connectivity infra + UI, across both `firebase` and `pocketbase` flavors) whose correctness hinges on subtle concurrency: per-chat ordering vs head-of-line blocking, duplicate-send across process death (needs client-set idempotent doc-ids plus the widened echo-dedupe), and the cancellation-semantics flip from moving sends off the chat's `viewModelScope`. The user scoped this down on 2026-06-08 to the cheap orphan-recovery fix above, which removes the *orphaned-SENDING* silent-loss path. The rest is quality-of-life (auto-retry, offline banner) layered on top, not correctness. Note the plan explicitly rejects the one-line `FirebaseFirestore.setPersistenceEnabled(true)` shortcut: Firestore offline persistence covers neither Cloud Storage uploads (the dominant image-failure mode) nor the `pocketbase` flavor nor the compression/Signal pre-steps, and would add a second divergent code path.
+**When to revisit.** The next time a backend column is added to `messages`. Either drop the interface and let readers say `entity.record.x`, or generate the delegation; do not add a fourth declaration.
 
-**When to revisit.** When "send offline, catch up later" (WhatsApp-grade) becomes a product requirement, or when manual-retry friction shows up in dogfooding / user reports. The shipped `failStuckSendingMessages` is the natural first brick — it becomes `requeueStuckSending` in the full plan. Pick the plan up from step 1; the orphan-recovery query and the widened `getPendingSendingMessage` are already in place.
+---
+
+### `outboxAttempts` carries two facts
+
+**The smell.** One integer on a queued row answers both "may an earlier write have landed?" (`> 0` makes the next write create-if-absent) and "how many automatic attempts has this row used?" (the worker gives up at 8). A manual retry therefore cannot reset the count — it sets `MIN(attempts, 1)` (`MessageDao.requeueForRetry`) — so a retried message gets seven automatic attempts rather than eight, and the "reset" reads oddly.
+
+**Why we haven't fixed it.** Separating them is a Room column (a one-way `outboxWritten` flag, or a budget origin the give-up compares against) and so a destructive schema bump; step 6 had just paid one for the row split. The behaviour is correct and the plan's give-up rule ("8 executed attempts, read from `outboxAttempts`") holds. A related edge the code review noted: the count is taken at the *start* of a run, so a run cancelled by a lost network constraint or a process death spends an attempt without a failure — eight network flaps during one video upload would fail it, with the retry button restoring the budget.
+
+**When to revisit.** The next `AppDatabase` bump that touches `messages` — add the flag then and let `outboxAttempts` be the budget alone.
+
+---
+
+### Three per-key mutex variants
+
+**The smell.** `ListRepositoryImpl.mutexFor` (`ConcurrentHashMap<String, Mutex>`, never evicted), `SignalManager.sessionLock` (same shape) and `data/util/KeyedMutex` (ref-counted, evicted when unused — `OutboxSender`'s per-message lock) all implement "one lock per key". The first two are fine for a bounded key space; `KeyedMutex` exists because message ids are not bounded.
+
+**Why we haven't fixed it.** `ListRepositoryMutexTripwireTest` reflects into `listMutexes` by name to prove every list insert runs under its lock, and `SignalManager` is crypto code outside the outbox diff; retrofitting either was out of step 6's scope.
+
+**When to revisit.** The next change to either lock. Move it onto `KeyedMutex` and give the tripwire a `KeyedMutex.isTracked`-style probe instead of the reflected map.
 
 ---
 

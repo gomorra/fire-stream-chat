@@ -53,7 +53,7 @@ class MessageWriterTest {
 
     @Test
     fun `a 1-to-1 message in a build that encrypts is encrypted for its peer, after Signal is initialised`() = runTest {
-        val body = writer().encode(text, recipientId = "peer1")
+        val body = writer().encode(text, SendTarget.Peer("peer1"))
 
         assertEquals(EncryptedMessage("cipher-1", signalType = 3), body)
         coVerifyOrder {
@@ -64,24 +64,24 @@ class MessageWriterTest {
 
     @Test
     fun `a build that does not encrypt writes plaintext`() = runTest {
-        assertPlain(writer(buildEncrypts = false).encode(text, recipientId = "peer1"))
+        assertPlain(writer(buildEncrypts = false).encode(text, SendTarget.Peer("peer1")))
     }
 
     @Test
     fun `a group or broadcast message has no peer and goes out in plaintext`() = runTest {
-        assertPlain(writer().encode(text, recipientId = ""))
+        assertPlain(writer().encode(text, SendTarget.NoPeer))
     }
 
     @Test
     fun `a location goes out in plaintext even to a 1-to-1 peer`() = runTest {
-        assertPlain(writer().encode(text.copy(type = MessageType.LOCATION), recipientId = "peer1"))
+        assertPlain(writer().encode(text.copy(type = MessageType.LOCATION), SendTarget.Peer("peer1")))
     }
 
     @Test
     fun `a user who opted out of end-to-end encryption writes plaintext`() = runTest {
         every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(false)
 
-        assertPlain(writer().encode(text, recipientId = "peer1"))
+        assertPlain(writer().encode(text, SendTarget.Peer("peer1")))
     }
 
     @Test
@@ -96,7 +96,7 @@ class MessageWriterTest {
             )
         } returns "msg1"
 
-        val remoteId = writer().send(text, recipientId = "peer1")
+        val remoteId = writer().send(text, SendTarget.Peer("peer1"))
 
         assertEquals("msg1", remoteId)
         coVerify(exactly = 1) {

@@ -1,4 +1,4 @@
-<!-- last-verified: 2026-09-10 -->
+<!-- last-verified: 2026-09-12 -->
 
 # Feature → File Map
 
@@ -247,6 +247,54 @@ RTDB-backed presence with a Cloud Function mirror to Firestore.
 
 ---
 
+## Offline Outbox (queued, idempotent sends)
+
+A retryable send — text, photo, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it. The row is the queue: it survives leaving the chat, process death and reboot, every attempt resumes from what the row already records, and the client-generated id is at once the Room key, the Firestore document id and the Storage object name, so a lost acknowledgement can never produce a second copy. Design and decisions: `.claude/plans/offline-outbox.md`; the convention: [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker).
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/data/local/entity/MessageEntity.kt` | `MessageRecord` — the backend's columns, Room's partial entity — embedded beside the local-only columns: `localUri`, `isStarred` and the five `outbox*` columns a snapshot upsert cannot reach |
+| `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | `insertOutbox`, `upsertRecord` / `updateRecord`, `markSent` / `acknowledge` around the one `clearOutbox`, the step column updates, `getQueuedMessages` (the SQL half of `OutboxJob`), `failQueuedOfOtherTypes`, `requeueForRetry` |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxJob.kt` | What a row is queued for — `SEND`, `TOMBSTONE` or nothing — and whether its next attempt uploads; the one Kotlin rule the worker, the scheduler and the repository share |
+| `app/src/main/java/com/firestream/chat/data/outbox/BlockCheck.kt` | The per-peer block-list read behind every send, cached 30 s and shared by the repository and the worker, so the worker's re-check is a cache hit when the repository just asked |
+| `app/src/main/java/com/firestream/chat/data/outbox/SendTarget.kt` | `Peer(id)` / `NoPeer` — who a send is for, mapped to and from `outboxRecipientId` in one place |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxFiles.kt` | Stages a send's input under `filesDir/outbox/<id>.<ext>` before the enqueue; the durable-or-not rule for a SENT row's `localUri`; a document's picked type as the copy's extension |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxScheduler.kt` | One unique work per message id (`outbox-<id>`): KEEP on compose, REPLACE on retry, CONNECTED, exponential backoff from 10 s, the expedited rule (API 31+, or an upload); `requeueAll` on app start |
+| `app/src/main/java/com/firestream/chat/data/worker/OutboxWorker.kt` | One attempt: the `OutboxJob` gate, the authoritative block check, the foreground for an upload, `OutboxSender.send`, the transient / permanent verdict, give-up after 8 executed attempts |
+| `app/src/main/java/com/firestream/chat/data/worker/WorkerForeground.kt` | `tryPromoteForeground`, `dataSyncForegroundInfo`, `ensureLowImportanceChannel` — the foreground scaffolding `OutboxWorker` and `ApkDownloadWorker` share |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | The pipeline an attempt resumes — compress / transcode → thumbnail → upload → encrypt once → write → the SENT transaction — plus the tombstone of a row deleted while queued and the per-id lock |
+| `app/src/main/java/com/firestream/chat/data/outbox/MessageWriter.kt` | `encode` / `write` / `send` by `SendTarget` — Signal ciphertext for a peer, plaintext otherwise |
+| `app/src/main/java/com/firestream/chat/data/util/KeyedMutex.kt` | One lock per key, dropped once its last user leaves — `OutboxSender`'s per-message lock |
+| `app/src/main/java/com/firestream/chat/data/remote/source/SendErrorClassifier.kt` | `SendFailure` and the backend-neutral verdicts (input and policy errors permanent, plain IO transient), walking the cause chain |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseSendErrorClassifier.kt` | Firestore status codes and Storage error codes, transient or permanent |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseSendErrorClassifier.kt` | v0 stub — neutral rules only |
+| `app/src/main/java/com/firestream/chat/data/remote/source/MessageSource.kt` | `sendMessage` / `sendPlainMessage` under a client id with `ifAbsent`; `deleteIfExists`, the tombstone that never creates |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSource.kt` | `writeMessage` — `set()` on the first attempt, flush then create-if-absent on every later one, both under the 30 s ack timeout; `deleteIfExists`; the newer-only chat preview |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Insert → block verdict (a definite block refuses, an unanswerable one queues; a timer keeps the strict rule) → stage → enqueue (`enqueueSend`); the retry's fresh budget; the forward through the outbox; the tombstone path of `deleteMessage`; the own-echo heal (`acknowledgeOwnEcho`) shared by the listener and the sync |
+| `app/src/main/java/com/firestream/chat/domain/model/AppError.kt` | `RecipientBlockedException` — the one permanent "blocked" failure, raised by the repository and the worker alike |
+| `app/src/main/java/com/firestream/chat/di/AppModule.kt` | `SystemModule.provideWorkManager`, injected as a `Provider` so the graph never builds WorkManager early |
+| `app/src/main/java/com/firestream/chat/FireStreamApp.kt` | `requeueQueuedSends` → `OutboxScheduler.requeueAll` on start |
+| `app/src/main/AndroidManifest.xml` | The `SystemForegroundService` merge with `dataSync`, which the upload foreground needs on Android 14+ |
+| `app/src/test/java/com/firestream/chat/data/worker/OutboxWorkerTest.kt` | Verdicts, the budget, the block re-check, the tombstone exemptions, the foreground — via `TestListenableWorkerBuilder` |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxSchedulerTest.kt` | The work request, KEEP vs REPLACE, the expedited rule on both sides of API 31, `requeueAll` |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxJobTest.kt` | The queued-for rule and the upload rule |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxSenderTest.kt` | The pipeline against an in-memory table: resume points, encrypt once, the SENT transaction and the kept `localUri`, the tombstone |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxFilesTest.kt` | Staging on Robolectric — the extension carries the type, durability, the sweep |
+| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | A record upsert cannot touch the local columns; `markSent` and `acknowledge` clear the outbox |
+| `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxQueueTest.kt` | The queue queries: own SENDING rows of sendable types, the stranded-type flip, the budget reset, the echo dedupe |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryBlockTest.kt` | A definite block fails the row, an unanswerable check queues it; the timer keeps the strict rule |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryRetryTest.kt` | The flip, the budget, REPLACE, the block check against the row's target |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryForwardTest.kt` | A forward queues with attempt count 0 and stages nothing |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryDeleteTest.kt` | The tombstone path of a queued or failed own message vs the backend-first delete |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryMediaSendFailureTest.kt` | A staging failure leaves a FAILED bubble; success points the row at the copy |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositorySnapshotTest.kt` | Own echoes: pending never moves a status, acknowledged heals through `acknowledge`, on the listener and the sync alike; chat entry leaves a queued row alone |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreMessageSourceTest.kt` | Which SDK call each attempt makes, the ack timeout on first and later attempts, the tombstone body |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseSendErrorClassifierTest.kt` | The verdict table |
+
+**Entry point:** `ChatMessageSender` → `MessageRepositoryImpl.send*` inserts the row and returns once `OutboxScheduler.enqueue` has it → WorkManager runs `OutboxWorker` when connected → `OutboxSender.send` → `MessageWriter.write` → `FirestoreMessageSource.writeMessage`; the bubble's clock turns into a tick when `MessageDao.markSent` (or the acknowledged echo's `acknowledge`) lands. Tap-to-retry is `retryFailedMessage` → `OutboxScheduler.retryNow`.
+
+---
+
 ## E2E Encryption (with release-mode opt-out)
 
 Signal Protocol message encryption. Disabled in debug builds; release users can opt out via Settings → Privacy.
@@ -271,7 +319,7 @@ Signal Protocol message encryption. Disabled in debug builds; release users can 
 | `app/src/test/java/com/firestream/chat/data/local/dao/MessageDaoOutboxColumnsTest.kt` | A `MessageRecord` upsert cannot touch `localUri`, the star or the outbox columns; `markSent` and `acknowledge` are what clear the outbox |
 | `app/src/test/java/com/firestream/chat/ui/settings/SettingsViewModelTest.kt` | Toggle persistence |
 
-**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext for the peer's current identity) and then `write` for text / media / voice / location; forward and the broadcast fan-out call `send`, which does both — and `encode` picks plaintext or Signal.
+**Entry point:** every 1:1 send reaches `MessageWriter` — `OutboxSender.send()` calls `encode` (skipped when the row already holds ciphertext for the peer's current identity) and then `write` for text / media / voice / location / forward; the broadcast fan-out calls `send`, which does both — and `encode` picks plaintext or Signal by the row's `SendTarget`.
 
 ---
 

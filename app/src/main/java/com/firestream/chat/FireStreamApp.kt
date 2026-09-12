@@ -1,6 +1,7 @@
 package com.firestream.chat
 
 import android.app.Application
+import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.work.Configuration
@@ -13,7 +14,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
-import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
@@ -50,7 +51,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     lateinit var flavorBootstraps: @JvmSuppressWildcards Set<FlavorBootstrap>
 
     @Inject
-    lateinit var messageDao: MessageDao
+    lateinit var outboxScheduler: OutboxScheduler
 
     @Inject
     lateinit var imageEditRasterizer: ImageEditRasterizer
@@ -110,18 +111,21 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             // sweepStale keeps only what a recent send might still retry.
             imageEditRasterizer.sweepStale()
         }
-        recoverOrphanedSends()
+        requeueQueuedSends()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
     }
 
-    // A message left at SENDING by a process that died or was killed mid-send is
-    // never retried and never marked failed. On startup, flip any such orphan to
-    // FAILED so it regains the manual-retry affordance. At this point no send is
-    // in flight (the process just started), so only genuine orphans are caught.
-    // The deferred auto-retry/durable-outbox follow-up is in TECH_DEBT.md.
-    private fun recoverOrphanedSends() {
-        appScope.launch { runCatching { messageDao.failStuckSendingMessages() } }
+    // An own row still SENDING belongs to the outbox: WorkManager already holds
+    // its work across a process death or a reboot, and requeueAll (KEEP) is the
+    // belt to those braces. It also sweeps staged inputs no queued row owns, and
+    // fails the SENDING rows of types the outbox cannot send — a timer whose
+    // await died with the process — so their retry affordance returns.
+    private fun requeueQueuedSends() {
+        appScope.launch {
+            runCatching { outboxScheduler.requeueAll() }
+                .onFailure { Log.w("FireStreamApp", "requeueAll failed", it) }
+        }
     }
 
     private fun scheduleUpdateCheck() {

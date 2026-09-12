@@ -58,6 +58,7 @@ class OutboxSenderTest {
     private val videoTranscoder = mockk<VideoTranscoder>()
     private val mediaFileManager = mockk<MediaFileManager>()
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
+    private val outboxFiles = mockk<OutboxFiles>(relaxed = true)
 
     /** The messages table, keyed by id. */
     private val rows = mutableMapOf<String, MessageEntity>()
@@ -95,11 +96,18 @@ class OutboxSenderTest {
         coEvery { messageDao.getMessageById(any()) } answers { rows[firstArg()] }
         coEvery { messageDao.markSent(any(), any(), any()) } answers {
             val sent = secondArg<MessageRecord>()
-            rows.remove(firstArg<String>())
-            // What the DAO transaction does: the record, the kept localUri, the outbox columns cleared.
-            val row = MessageEntity(sent, localUri = thirdArg())
-            rows[row.id] = row
-            persisted += row
+            val current = rows[firstArg<String>()]
+            // What the DAO transaction does: declined for a row gone or deleted meanwhile;
+            // otherwise the record, the kept localUri, the outbox columns cleared.
+            if (current == null || current.deletedAt != null) {
+                false
+            } else {
+                rows.remove(firstArg<String>())
+                val row = MessageEntity(sent, localUri = thirdArg())
+                rows[row.id] = row
+                persisted += row
+                true
+            }
         }
         coEvery { messageDao.updateSendProgress(any(), any(), any(), any(), any(), any(), any()) } answers {
             val current = rows.getValue(firstArg())
@@ -115,6 +123,16 @@ class OutboxSenderTest {
             )
             rows[row.id] = row
             persisted += row
+        }
+        coEvery { messageDao.acknowledge(any(), any()) } answers {
+            val id = firstArg<String>()
+            rows[id] = rows.getValue(id).let {
+                it.copy(
+                    record = it.record.copy(status = secondArg()),
+                    outboxRecipientId = null, outboxCiphertext = null, outboxSignalType = null,
+                    outboxPeerIdentity = null, outboxAttempts = 0,
+                )
+            }
         }
         coEvery { messageDao.incrementOutboxAttempts(any()) } answers {
             val id = firstArg<String>()
@@ -138,6 +156,9 @@ class OutboxSenderTest {
         every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
         // The peer keeps its identity unless a test re-registers it.
         coEvery { signalManager.isCurrentIdentity(any(), any()) } returns true
+        // Only the media dir is a place the app keeps files; a staged copy or a cache path is not.
+        every { outboxFiles.isDurable(any()) } answers { firstArg<String>().startsWith("/media/") }
+        every { outboxFiles.mimeTypeOf(any()) } returns null
 
         sender = newSender(buildEncrypts = false)
     }
@@ -150,7 +171,7 @@ class OutboxSenderTest {
     private fun newSender(buildEncrypts: Boolean) = OutboxSender(
         messageDao, chatDao, messageSource, storageSource,
         MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts),
-        imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore,
+        outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore,
     )
 
     /** Records every plaintext write in [writes]. A test that stubs a failing write calls it again to recover. */
@@ -198,9 +219,9 @@ class OutboxSenderTest {
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
-    /** Inserts [message] as the repository does, recording its peer — and, for a re-attempt, earlier runs. */
+    /** Inserts [message] as the repository does, recording its target — and, for a re-attempt, earlier runs. */
     private fun store(message: Message, recipientId: String = "", attempts: Int = 0) {
-        rows[message.id] = MessageEntity.outbox(message, recipientId).copy(outboxAttempts = attempts)
+        rows[message.id] = MessageEntity.outbox(message, SendTarget.of(recipientId)).copy(outboxAttempts = attempts)
     }
 
     private fun sending(id: String, type: MessageType, localUri: String? = null) = Message(
@@ -228,6 +249,7 @@ class OutboxSenderTest {
         assertEquals("msg1", sent.id)
         assertEquals(MessageStatus.SENT, stored("msg1").status)
         coVerify(exactly = 1) { chatDao.updateLastMessage("chat1", "msg1", "preview", 1_000L) }
+        coVerify(exactly = 1) { outboxFiles.delete("msg1") }
     }
 
     // Regression for the duplicate-on-retry bug: a retry used to `add()` under a
@@ -287,6 +309,44 @@ class OutboxSenderTest {
         val error = runCatching { sender.send("ghost") }.exceptionOrNull()
 
         assertTrue(error is IllegalStateException)
+    }
+
+    // The worker decides to run outside this lock; an acknowledged echo can heal
+    // the row — SENT, outbox columns cleared — in between. Refusing the row for
+    // its missing target would then fail a message the backend has.
+    @Test
+    fun `a row the backend acknowledged meanwhile owes nothing and is returned as it is`() = runTest {
+        rows["msg1"] = MessageEntity.fromDomain(sending("msg1", MessageType.TEXT).copy(status = MessageStatus.SENT))
+
+        val result = sender.send("msg1")
+
+        assertEquals(MessageStatus.SENT, result.status)
+        assertTrue(writes.isEmpty())
+        coVerify(exactly = 0) { messageDao.incrementOutboxAttempts(any()) }
+        coVerify(exactly = 0) { messageDao.markSent(any(), any(), any()) }
+    }
+
+    // A delete that lands while the write is in flight must not be undone by the
+    // SENT transaction: the row stays deleted and queued, and the tombstone run
+    // the delete enqueued finds the document this write created.
+    @Test
+    fun `a write whose row was deleted meanwhile does not undelete it, and leaves the tombstone owed`() = runTest {
+        store(sending("msg1", MessageType.TEXT))
+        coEvery { anyPlainWrite() } answers {
+            writes += Write(arg(2), arg(4), arg(7), arg(8), arg(10), ifAbsent = arg(18))
+            rows["msg1"] = rows.getValue("msg1").let { it.copy(record = it.record.copy(deletedAt = 5_000L, content = "")) }
+            arg<String>(2)
+        }
+
+        sender.send("msg1")
+
+        val row = rows.getValue("msg1")
+        assertEquals(5_000L, row.deletedAt)
+        assertEquals(MessageStatus.SENDING.name, row.status)
+        assertEquals(OutboxJob.TOMBSTONE, row.outboxJob)
+        assertEquals(1, row.outboxAttempts)
+        coVerify(exactly = 0) { chatDao.updateLastMessage(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { outboxFiles.delete(any()) }
     }
 
     // A row whose outbox columns were reset by a whole-row replace has lost the
@@ -352,7 +412,7 @@ class OutboxSenderTest {
     fun `a stored ciphertext is encrypted again once the peer has re-registered`() = runTest {
         coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
         coEvery { signalManager.isCurrentIdentity("peer1", "id-1") } returns false
-        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), "peer1")
+        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), SendTarget.Peer("peer1"))
             .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxPeerIdentity = "id-1", outboxAttempts = 1)
 
         newSender(buildEncrypts = true).send("msg1")
@@ -367,7 +427,7 @@ class OutboxSenderTest {
     @Test
     fun `a stored ciphertext without a recorded peer identity is not reused`() = runTest {
         coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-2", signalType = 3, peerIdentity = "id-2")
-        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), "peer1")
+        rows["msg1"] = MessageEntity.outbox(sending("msg1", MessageType.TEXT).copy(content = "hello"), SendTarget.Peer("peer1"))
             .copy(outboxCiphertext = "cipher-1", outboxSignalType = 3, outboxAttempts = 1)
 
         newSender(buildEncrypts = true).send("msg1")
@@ -411,6 +471,9 @@ class OutboxSenderTest {
         assertEquals(listOf(Upload("img1", "image/jpeg", reportsProgress = true)), uploads)
         assertEquals("https://storage.example/img1", writes.single().mediaUrl)
         assertFalse("encoder output in cacheDir is cleaned up", compressed.exists())
+        // The media dir copy is a file the app keeps; the SENT row goes on showing it.
+        assertEquals("/media/img1.jpg", stored("img1").localUri)
+        coVerify(exactly = 1) { outboxFiles.delete("img1") }
     }
 
     @Test
@@ -596,19 +659,23 @@ class OutboxSenderTest {
 
     // ── documents and voice ─────────────────────────────────────────────────
 
+    // The picked type travels as the staged copy's extension, so a retry — which
+    // has only the row — uploads a document under the right type too.
     @Test
-    fun `a document uploads under the picked mime type and its SENT row drops the picked uri`() = runTest {
-        store(sending("doc1", MessageType.DOCUMENT, localUri = "content://docs/report.pdf"))
+    fun `a document uploads under the type its staged copy carries, and its SENT row drops the copy`() = runTest {
+        every { outboxFiles.mimeTypeOf("/data/outbox/doc1.pdf") } returns "application/pdf"
+        store(sending("doc1", MessageType.DOCUMENT, localUri = "/data/outbox/doc1.pdf"), attempts = 1)
 
-        sender.send("doc1", sourceMimeType = "application/pdf")
+        sender.send("doc1")
 
         assertEquals(listOf(Upload("doc1", "application/pdf", reportsProgress = true)), uploads)
-        assertNull(stored("doc1").localUri)
+        assertNull("the staged copy is deleted; the media backfill fetches a durable one", stored("doc1").localUri)
+        coVerify(exactly = 1) { outboxFiles.delete("doc1") }
     }
 
     @Test
-    fun `a document retry has no mime type and uploads as octet-stream`() = runTest {
-        store(sending("doc1", MessageType.DOCUMENT, localUri = "content://docs/report.pdf"), attempts = 1)
+    fun `a document whose extension maps to no type uploads as octet-stream`() = runTest {
+        store(sending("doc1", MessageType.DOCUMENT, localUri = "/data/outbox/doc1.bin"))
 
         sender.send("doc1")
 
@@ -626,6 +693,49 @@ class OutboxSenderTest {
             Write("voice1", MessageType.VOICE, "https://storage.example/voice1", null, 5, ifAbsent = false),
             writes.single(),
         )
-        assertEquals("/cache/voice1.aac", stored("voice1").localUri)
+        // A staged recording is not a file the app keeps; the player streams mediaUrl.
+        assertNull(stored("voice1").localUri)
+    }
+
+    // ── a message deleted while queued ──────────────────────────────────────
+
+    private fun deleted(attempts: Int) = MessageEntity.outbox(sending("msg1", MessageType.TEXT), SendTarget.Peer("peer1"))
+        .copy(record = MessageRecord.fromDomain(sending("msg1", MessageType.TEXT).copy(deletedAt = 5_000L, content = "")), outboxAttempts = attempts)
+
+    @Test
+    fun `a deleted row an earlier attempt may have written asks the backend for its tombstone`() = runTest {
+        rows["msg1"] = deleted(attempts = 1)
+
+        val result = sender.send("msg1")
+
+        coVerify(exactly = 1) { messageSource.deleteIfExists("chat1", "msg1", 5_000L) }
+        assertTrue("nothing is written that could create the document", writes.isEmpty())
+        coVerify(exactly = 0) { messageDao.incrementOutboxAttempts(any()) }
+        assertEquals(MessageStatus.SENT, result.status)
+        assertEquals(MessageStatus.SENT, stored("msg1").status)
+        assertNull("out of the outbox", rows.getValue("msg1").outboxRecipientId)
+        coVerify(exactly = 1) { outboxFiles.delete("msg1") }
+    }
+
+    @Test
+    fun `a deleted row no attempt ever started has nothing pending and asks the backend nothing`() = runTest {
+        rows["msg1"] = deleted(attempts = 0)
+
+        sender.send("msg1")
+
+        coVerify(exactly = 0) { messageSource.deleteIfExists(any(), any(), any()) }
+        assertTrue(writes.isEmpty())
+        assertEquals(MessageStatus.SENT, stored("msg1").status)
+    }
+
+    @Test
+    fun `a tombstone the backend did not acknowledge leaves the row queued for another run`() = runTest {
+        rows["msg1"] = deleted(attempts = 1)
+        coEvery { messageSource.deleteIfExists(any(), any(), any()) } throws IOException("not acknowledged")
+
+        assertTrue(runCatching { sender.send("msg1") }.exceptionOrNull() is IOException)
+
+        assertEquals(MessageStatus.SENDING, stored("msg1").status)
+        coVerify(exactly = 0) { messageDao.acknowledge(any(), any()) }
     }
 }

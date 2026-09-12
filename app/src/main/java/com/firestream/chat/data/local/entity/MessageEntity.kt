@@ -5,6 +5,7 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.TypeConverters
 import com.firestream.chat.data.local.Converters
+import com.firestream.chat.data.outbox.SendTarget
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.data.util.parseMessageStatus
 import com.firestream.chat.data.util.parseMessageType
@@ -56,6 +57,10 @@ data class MessageEntity(
 
     fun toDomain(): Message = record.toDomain(localUri = localUri, isStarred = isStarred)
 
+    /** Who the outbox sends this row to; `null` when the row never recorded a target and must not be sent. */
+    val sendTarget: SendTarget?
+        get() = SendTarget.fromColumn(outboxRecipientId)
+
     companion object {
         /** The whole row for [message] with no outbox bookkeeping — for reads and tests; a send inserts through [outbox]. */
         fun fromDomain(message: Message) = MessageEntity(
@@ -64,9 +69,9 @@ data class MessageEntity(
             isStarred = message.isStarred,
         )
 
-        /** The optimistic row of a send OutboxSender will deliver, with the peer it encrypts for. */
-        fun outbox(message: Message, recipientId: String) =
-            fromDomain(message).copy(outboxRecipientId = recipientId)
+        /** The optimistic row of a send the outbox will deliver, with the target it encrypts for. */
+        fun outbox(message: Message, target: SendTarget) =
+            fromDomain(message).copy(outboxRecipientId = target.column)
     }
 }
 

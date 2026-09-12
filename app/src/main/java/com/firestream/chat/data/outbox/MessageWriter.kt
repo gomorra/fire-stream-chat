@@ -6,9 +6,9 @@
 //   so tests can take the encrypted branch), the e2e opt-out read, and the types
 //   that always travel in plaintext.
 // Collaborators: OutboxSender (encode, persist the ciphertext on the row, then
-//   write), MessageRepositoryImpl.forwardMessage and the broadcast fan-out (send —
+//   write — every queued send), MessageRepositoryImpl's broadcast fan-out (send —
 //   no row to keep the ciphertext on), SignalManager, MessageSource,
-//   PreferencesDataStore.
+//   PreferencesDataStore. SendTarget says whether there is a peer to encrypt for.
 // Don't put here: attempts, retries or any Room access — the row belongs to
 //   OutboxSender and this class keeps no state.
 // endregion
@@ -52,33 +52,33 @@ class MessageWriter internal constructor(
     )
 
     /**
-     * [message]'s content encrypted for [recipientId] when this build encrypts,
-     * the user has not opted out, the type is not a plaintext one and there is a
-     * 1:1 peer (`""` for group and broadcast chats — a Signal session cannot
-     * address a group); `null` when it travels in plaintext.
+     * [message]'s content encrypted for [target]'s peer when this build encrypts,
+     * the user has not opted out and the type is not a plaintext one; `null` when
+     * it travels in plaintext — always for [SendTarget.NoPeer], since a Signal
+     * session cannot address a group or a broadcast.
      *
      * Encrypting advances the peer's session. A caller that may write the same
      * message again keeps the result instead of calling this twice.
      */
-    suspend fun encode(message: Message, recipientId: String): EncryptedMessage? {
-        val encrypts = recipientId.isNotEmpty() &&
-            message.type !in PLAINTEXT_TYPES &&
+    suspend fun encode(message: Message, target: SendTarget): EncryptedMessage? {
+        val peer = target.peerId ?: return null
+        val encrypts = message.type !in PLAINTEXT_TYPES &&
             buildEncrypts &&
             preferencesDataStore.e2eEncryptionEnabledFlow.first()
         if (!encrypts) return null
         signalManager.ensureInitialized()
-        return signalManager.encrypt(recipientId, message.content)
+        return signalManager.encrypt(peer, message.content)
     }
 
     /**
-     * Whether [stored], encrypted by an earlier attempt, can still be written as
-     * is: only while the peer publishes the identity it was encrypted for. After
-     * a re-registration the session behind it is gone on their side, so the
-     * caller drops the bytes and [encode]s again, which rebuilds the session.
+     * Whether [stored], encrypted by an earlier attempt for [peerId], can still be
+     * written as is: only while the peer publishes the identity it was encrypted
+     * for. After a re-registration the session behind it is gone on their side,
+     * so the caller drops the bytes and [encode]s again, which rebuilds the session.
      */
-    suspend fun isReusable(recipientId: String, stored: EncryptedMessage): Boolean {
+    suspend fun isReusable(peerId: String, stored: EncryptedMessage): Boolean {
         val peerIdentity = stored.peerIdentity ?: return false
-        return signalManager.isCurrentIdentity(recipientId, peerIdentity)
+        return signalManager.isCurrentIdentity(peerId, peerIdentity)
     }
 
     /**
@@ -139,6 +139,6 @@ class MessageWriter internal constructor(
         }
 
     /** [encode] then [write], for a send with no row to keep the ciphertext on. */
-    suspend fun send(message: Message, recipientId: String): String =
-        write(message, encode(message, recipientId))
+    suspend fun send(message: Message, target: SendTarget): String =
+        write(message, encode(message, target))
 }

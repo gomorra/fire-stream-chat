@@ -171,6 +171,23 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ---
 
+## Sends are idempotent by client id and drained by OutboxWorker
+
+**Definition.** A retryable send — text, image, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it (`outbox-<messageId>`). The row is the queue. The client generates the id once at compose time, and it is the Room key, the Firestore document id and the Storage object name; every attempt reads the row, skips the steps it already records (`OutboxSender`), and writes create-if-absent once an earlier attempt may have landed (`outboxAttempts > 0`). The repository's job ends at `OutboxScheduler.enqueue`; `OutboxWorker` owns the row from there — the block check asked again online, the transient / permanent verdict (`SendErrorClassifier`), give-up after eight executed attempts. `SENDING` means "not yet acknowledged by the backend", queued or in flight alike; there is no QUEUED status, and nothing flips a `SENDING` row to `FAILED` because it looks old.
+
+**Use when.** Adding a message type that should survive going offline, leaving the chat, process death and reboot: insert it through `MessageEntity.outbox(message, target)`, stage any input the attempt reads (`OutboxFiles.stage`, before the enqueue), add the type to `OutboxSender.SENDABLE_TYPES`, and let the worker deliver it. What a row is queued for is one rule, `MessageEntity.outboxJob` (`OutboxJob.kt`) paired with `MessageDao.getQueuedMessages`; anything that must happen to a queued row is a column update or goes through the worker — a delete is the tombstone path of `MessageRepositoryImpl.deleteMessage`, never a hard delete or a direct backend write.
+**Don't use when.** The send has no retry story and is awaited in the caller's scope — timer, poll, list and call messages still write directly, and `sendTimerMessage` keeps the strict block check. Do not add an in-process "fast path" beside the worker: plan §0 decided WorkManager only, and the compose→SENT latency is measured first (`TECH_DEBT.md`).
+
+**Example.** `app/src/main/java/com/firestream/chat/data/outbox/OutboxScheduler.kt` (the work request, the expedited rule, `requeueAll`), `data/worker/OutboxWorker.kt` (one attempt), `data/outbox/OutboxSender.kt` (the pipeline and the tombstone), `data/repository/MessageRepositoryImpl.kt` `enqueueSend` and `deleteMessage`, `app/src/firebase/.../FirestoreMessageSource.kt` `writeMessage` (`set()` vs flush-then-create-if-absent, both under the ack timeout). Design and the reasoning behind each rule: `.claude/plans/offline-outbox.md` §2.
+
+**Trap.** Four, each already paid for:
+- **Writing a queued row whole.** `messages` is split so a snapshot's `MessageRecord` upsert *cannot* reach `localUri`, the star or the outbox columns; keep it that way — a new local-only column goes beside `record` on `MessageEntity`, never inside `MessageRecord`, and a new writer of an unsent row is a column update.
+- **"Recovering" a `SENDING` row by flipping it `FAILED`.** That is what the pre-outbox orphan recovery did on app start and chat entry; a `SENDING` row is now live work that WorkManager holds. `requeueAll` re-queues, and only fails rows of types the outbox cannot send.
+- **Hard-deleting a queued row, or deleting it on the backend directly.** A first attempt's `set()` the SDK has persisted replays on reconnect whatever the app does; the row stays, soft-deleted, and the worker writes the tombstone only if the document exists, after `waitForPendingWrites()`.
+- **Trusting a connected network.** `NetworkType.CONNECTED` is not a live Firestore stream: `set().await()` and `waitForPendingWrites()` never fail offline, they wait. Every attempt is bounded by `SEND_ACK_TIMEOUT_MS` and the timeout is a transient failure; the next attempt is a re-attempt and finds the write the SDK kept.
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:

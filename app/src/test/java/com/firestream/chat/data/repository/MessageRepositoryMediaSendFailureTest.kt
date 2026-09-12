@@ -4,7 +4,8 @@ import android.net.Uri
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
-import com.firestream.chat.data.outbox.OutboxSender
+import com.firestream.chat.data.outbox.OutboxFiles
+import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.util.VideoMetadata
 import com.firestream.chat.data.util.VideoTranscoder
@@ -19,28 +20,34 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkStatic
 import io.mockk.unmockkStatic
+import io.mockk.verify
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.FileNotFoundException
 
 /**
- * Regression tests for the "second image silently dropped" bug. The optimistic
- * Room row must be inserted before any IO so the message bubble survives a
- * compression OOM, MediaStore IO error, or upload failure — the user always
- * sees the bubble with FAILED status instead of having it disappear.
+ * Regression tests for the "second image silently dropped" bug, carried over to
+ * the queued send. The optimistic Room row must be inserted before any IO so
+ * the bubble survives whatever fails after it — once a compression OOM in the
+ * caller's scope, now the staging of the input — and the user always sees the
+ * bubble, FAILED, instead of having it disappear.
  *
- * The IO itself runs in [OutboxSender], mocked here; what it persists between
- * its steps, and how a retry resumes from that, is covered in `OutboxSenderTest`.
+ * The upload and the write run in `OutboxWorker`; what the pipeline persists
+ * between its steps, and how a retry resumes from that, is `OutboxSenderTest`.
  */
 class MessageRepositoryMediaSendFailureTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
     private val authSource = mockk<AuthSource>()
-    private val outboxSender = mockk<OutboxSender>(relaxed = true)
+    private val outboxScheduler = mockk<OutboxScheduler>(relaxed = true)
+    private val outboxFiles = mockk<OutboxFiles>()
     private val chatRepository = mockk<dagger.Lazy<ChatRepository>>()
     private val listRepository = mockk<dagger.Lazy<ListRepository>>()
     private val videoTranscoder = mockk<VideoTranscoder>(relaxed = true)
@@ -70,7 +77,8 @@ class MessageRepositoryMediaSendFailureTest {
         repository = messageRepository(
             messageDao = messageDao,
             authSource = authSource,
-            outboxSender = outboxSender,
+            outboxScheduler = outboxScheduler,
+            outboxFiles = outboxFiles,
             chatRepository = chatRepository,
             listRepository = listRepository,
             videoTranscoder = videoTranscoder,
@@ -84,11 +92,9 @@ class MessageRepositoryMediaSendFailureTest {
     }
 
     @Test
-    fun `pipeline failure leaves message bubble visible with FAILED status`() = runTest {
-        // The OOM symptom: ImageCompressor throws "Cannot decode image" when two
-        // large images compress concurrently and one runs out of memory.
-        coEvery { outboxSender.send(any(), any()) } throws
-            IllegalArgumentException("Cannot decode image")
+    fun `a staging failure leaves the message bubble visible with FAILED status`() = runTest {
+        // The picker's grant is gone, or the cache file was purged before the copy.
+        coEvery { outboxFiles.stage(any(), any(), any()) } throws FileNotFoundException("content://media/picker/0/photo.jpg")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",
@@ -98,7 +104,7 @@ class MessageRepositoryMediaSendFailureTest {
             caption = "look at this"
         )
 
-        // The optimistic row was inserted BEFORE the pipeline ran — bubble appears.
+        // The optimistic row was inserted BEFORE the staging ran — bubble appears.
         val placeholder = insertedEntities.single()
         assertEquals("SENDING", placeholder.status)
         assertEquals("IMAGE", placeholder.type)
@@ -107,15 +113,16 @@ class MessageRepositoryMediaSendFailureTest {
 
         // Status was flipped to FAILED so the bubble shows the error indicator.
         assertEquals(listOf(placeholder.id to "FAILED"), statusUpdates)
+        verify(exactly = 0) { outboxScheduler.enqueue(any(), any()) }
 
         // The Result is a failure so the snackbar still fires.
         assertTrue(result.isFailure)
     }
 
     @Test
-    fun `success hands the placeholder and its picked mime type to the pipeline and never marks FAILED`() = runTest {
-        coEvery { outboxSender.send(any(), any()) } answers {
-            insertedEntities.single().toDomain().copy(status = MessageStatus.SENT)
+    fun `success stages the input under the picked type, points the row at the copy and queues it`() = runTest {
+        coEvery { outboxFiles.stage(any(), "content://docs/report.pdf", "application/pdf") } answers {
+            "/data/outbox/${firstArg<String>()}.pdf"
         }
 
         val result = repository.sendMediaMessage(
@@ -126,22 +133,21 @@ class MessageRepositoryMediaSendFailureTest {
             caption = ""
         )
 
-        assertEquals(MessageStatus.SENT, result.getOrThrow().status)
+        assertEquals(MessageStatus.SENDING, result.getOrThrow().status)
         val placeholder = insertedEntities.single()
         assertEquals("DOCUMENT", placeholder.type)
         assertEquals("", placeholder.outboxRecipientId)
-        coVerify(exactly = 1) {
-            outboxSender.send(placeholder.id, sourceMimeType = "application/pdf")
-        }
+        coVerify(exactly = 1) { messageDao.updateLocalUri(placeholder.id, "/data/outbox/${placeholder.id}.pdf") }
+        verify(exactly = 1) { outboxScheduler.enqueue(placeholder.id, uploads = true) }
         assertTrue(statusUpdates.isEmpty())
     }
 
     @Test
-    fun `video mime creates a VIDEO-typed placeholder before the pipeline, flipped FAILED when it throws`() = runTest {
+    fun `video mime creates a VIDEO-typed placeholder before staging, flipped FAILED when staging throws`() = runTest {
         // Metadata within limits so the guard passes and the optimistic row is inserted.
         coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
             VideoMetadata(width = 1920, height = 1080, durationMs = 30_000L, rotationDegrees = 0, sizeBytes = 5_000_000L)
-        coEvery { outboxSender.send(any(), any()) } throws RuntimeException("transcode boom")
+        coEvery { outboxFiles.stage(any(), any(), any()) } throws FileNotFoundException("gone")
 
         val result = repository.sendMediaMessage(
             chatId = "chat1",
@@ -158,6 +164,28 @@ class MessageRepositoryMediaSendFailureTest {
         assertEquals("my clip", placeholder.content)
         assertEquals("content://media/picker/0/clip.mp4", placeholder.localUri)
         assertEquals(listOf(placeholder.id to "FAILED"), statusUpdates)
+    }
+
+    // The send runs in the chat's scope. Leaving the chat between the insert and
+    // the enqueue used to be the orphan-recovery case; now nothing would own the
+    // row until the next app start, when the picker's grant is gone.
+    @Test
+    fun `leaving the chat while the input is being staged still queues the send`() = runTest {
+        lateinit var sending: Job
+        coEvery { outboxFiles.stage(any(), any(), any()) } coAnswers {
+            sending.cancel()
+            "/data/outbox/${firstArg<String>()}.pdf"
+        }
+
+        sending = launch {
+            repository.sendMediaMessage("chat1", "content://docs/report.pdf", "application/pdf", "", "")
+        }
+        sending.join()
+
+        val placeholder = insertedEntities.single()
+        coVerify(exactly = 1) { messageDao.updateLocalUri(placeholder.id, "/data/outbox/${placeholder.id}.pdf") }
+        verify(exactly = 1) { outboxScheduler.enqueue(placeholder.id, uploads = true) }
+        assertTrue(statusUpdates.isEmpty())
     }
 
     @Test
@@ -180,7 +208,7 @@ class MessageRepositoryMediaSendFailureTest {
         // No placeholder row was ever written — guard runs before the insert.
         assertTrue(insertedEntities.isEmpty())
         assertTrue(statusUpdates.isEmpty())
-        coVerify(exactly = 0) { outboxSender.send(any(), any()) }
+        verify(exactly = 0) { outboxScheduler.enqueue(any(), any()) }
 
         // The thrown exception is a MediaLimitException that AppError.from maps to Validation.
         val error = result.exceptionOrNull()

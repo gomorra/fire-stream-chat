@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import androidx.room.Upsert
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
@@ -19,28 +20,46 @@ interface MessageDao {
     suspend fun getMessageById(messageId: String): MessageEntity?
 
     // Echo-dedupe lookup for an optimistic self-message that hasn't been replaced
-    // by its remote row yet. Matches FAILED as well as SENDING so that a row the
-    // orphan-recovery flip turned to FAILED (see failStuckSendingMessages) — but
-    // which had actually reached the backend before the local replace ran — is
-    // still recognised when its remote echo arrives, instead of being inserted a
-    // second time as a duplicate.
+    // by its remote row yet. Matches FAILED as well as SENDING so that a row a
+    // permanent failure or the give-up turned to FAILED — but which had actually
+    // reached the backend — is still recognised when its remote echo arrives,
+    // instead of being inserted a second time as a duplicate.
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND timestamp = :timestamp AND senderId = :senderId AND status IN ('SENDING', 'FAILED') LIMIT 1")
     suspend fun getPendingSendingMessage(chatId: String, timestamp: Long, senderId: String): MessageEntity?
 
-    // Orphan recovery: a send whose coroutine was cancelled mid-flight (e.g. the
-    // user navigated away from the chat before it completed) leaves its optimistic
-    // row stuck at SENDING forever — never retried, never marked FAILED. Flipping
-    // it to FAILED restores the existing manual-retry affordance on the bubble.
-    // Called on app start (all chats) and on chat (re)entry (one chat); at both
-    // points the user has not initiated a new send, so no live SENDING row exists
-    // and only genuine orphans are caught. Returns the number of rows recovered.
-    // The deferred auto-retry/durable-outbox follow-up is logged in TECH_DEBT.md
-    // ("Durable offline-send outbox").
-    @Query("UPDATE messages SET status = 'FAILED' WHERE status = 'SENDING'")
-    suspend fun failStuckSendingMessages(): Int
+    // ── Offline outbox queue ────────────────────────────────────────────────
+    // A SENDING own row is the queue (.claude/plans/offline-outbox.md §2.1):
+    // queued or in flight alike, until the backend acknowledges it. A soft-
+    // deleted row that was never acknowledged — SENDING, or FAILED after the
+    // give-up — is a tombstone still to be written.
 
-    @Query("UPDATE messages SET status = 'FAILED' WHERE chatId = :chatId AND status = 'SENDING'")
-    suspend fun failStuckSendingMessagesForChat(chatId: String): Int
+    /**
+     * Own rows the outbox still owes the backend, of the [types] it can send —
+     * the SQL half of `MessageEntity.outboxJob`; keep the two predicates in step.
+     */
+    @Query(
+        """
+        SELECT * FROM messages WHERE senderId = :senderId AND type IN (:types)
+          AND (status = 'SENDING' OR (deletedAt IS NOT NULL AND status = 'FAILED'))
+        """
+    )
+    suspend fun getQueuedMessages(senderId: String, types: List<String>): List<MessageEntity>
+
+    /**
+     * A SENDING own row of a type the outbox cannot send — a timer whose await
+     * died with the process — has nothing to drain it; FAILED restores its retry
+     * affordance. Only called on app start, when no such send is in flight.
+     */
+    @Query("UPDATE messages SET status = 'FAILED' WHERE status = 'SENDING' AND senderId = :senderId AND type NOT IN (:types)")
+    suspend fun failQueuedOfOtherTypes(senderId: String, types: List<String>): Int
+
+    /**
+     * A manual retry: back to SENDING with a fresh budget of automatic attempts.
+     * The count stays above zero when it was, so the next write is still
+     * create-if-absent. One statement, so Room's flow sees one change.
+     */
+    @Query("UPDATE messages SET status = 'SENDING', outboxAttempts = MIN(outboxAttempts, 1) WHERE id = :messageId")
+    suspend fun requeueForRetry(messageId: String)
 
     // ── Writes ──────────────────────────────────────────────────────────────
     // Two shapes. A row this device composes is inserted whole, outbox
@@ -67,6 +86,15 @@ interface MessageDao {
     suspend fun upsertRecords(records: List<MessageRecord>)
 
     /**
+     * [upsertRecord] for a row the caller has just read and knows exists. Room's
+     * upsert tries the INSERT first and updates only after the constraint
+     * violation, so on the snapshot reconcile path — where the row is in hand —
+     * this saves a thrown exception per changed message.
+     */
+    @Update(entity = MessageEntity::class)
+    suspend fun updateRecord(record: MessageRecord)
+
+    /**
      * The one statement that takes a row out of the outbox: its bookkeeping back
      * to the defaults a row that never queued has. Only [markSent] and
      * [acknowledge] call it — both mean the backend has the message.
@@ -85,14 +113,30 @@ interface MessageDao {
      * backend used (a PocketBase retry swaps it), with the [localUri] the send
      * decided to keep, and out of the outbox — one transaction, so no reader sees
      * a SENT row that still carries ciphertext or an attempt count.
+     *
+     * Returns `false`, writing nothing, when the row is gone or was deleted while
+     * the attempt ran: the record in hand predates the delete, and writing it would
+     * undelete the message locally and take the row out of the queue with its
+     * tombstone still owed. The delete path already re-queued the row for that.
      */
     @Transaction
-    suspend fun markSent(oldId: String, sent: MessageRecord, localUri: String?) {
+    suspend fun markSent(oldId: String, sent: MessageRecord, localUri: String?): Boolean {
+        val current = getMessageById(oldId) ?: return false
+        if (current.deletedAt != null) return false
         if (oldId != sent.id) deleteMessage(oldId)
         upsertRecord(sent)
         updateLocalUri(sent.id, localUri)
         clearOutbox(sent.id)
+        return true
     }
+
+    /**
+     * FAILED for a row that is still queued — a permanent failure or the give-up.
+     * Conditional, because an acknowledged echo can heal the row to SENT while an
+     * attempt is failing; the backend has the message, so the tick stays.
+     */
+    @Query("UPDATE messages SET status = 'FAILED' WHERE id = :messageId AND status = 'SENDING'")
+    suspend fun failQueued(messageId: String)
 
     /**
      * The backend's status for an own message it holds — an acknowledged echo or a
@@ -120,8 +164,9 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id IN (:messageIds)")
     suspend fun updateMessageStatusBatch(messageIds: List<String>, status: String)
 
-    // ── Offline outbox ──────────────────────────────────────────────────────
-    // OutboxSender's resume points, one column update per finished step.
+    // ── Column updates ──────────────────────────────────────────────────────
+    // OutboxSender's resume points (one per finished step) and every other
+    // change to a single column; none of them can reach a column it does not name.
 
     @Query("UPDATE messages SET outboxAttempts = outboxAttempts + 1 WHERE id = :messageId")
     suspend fun incrementOutboxAttempts(messageId: String)

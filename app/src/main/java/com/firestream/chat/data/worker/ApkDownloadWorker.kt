@@ -1,13 +1,10 @@
 package com.firestream.chat.data.worker
 
-import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.net.Uri
-import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
@@ -125,15 +122,8 @@ class ApkDownloadWorker @AssistedInject constructor(
         }
     }
 
-    private suspend fun tryPromoteForeground(bytes: Long, total: Long): Boolean = try {
-        setForeground(buildForegroundInfo(bytes, total))
-        true
-    } catch (e: CancellationException) {
-        throw e
-    } catch (t: Throwable) {
-        Log.w(TAG, "setForeground rejected — continuing as background worker", t)
-        false
-    }
+    private suspend fun tryPromoteForeground(bytes: Long, total: Long): Boolean =
+        tryPromoteForeground(TAG, buildForegroundInfo(bytes, total))
 
     private fun buildForegroundInfo(bytes: Long, total: Long): ForegroundInfo {
         ensureChannel()
@@ -148,11 +138,7 @@ class ApkDownloadWorker @AssistedInject constructor(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
             .build()
-        return if (Build.VERSION.SDK_INT >= 34) {
-            ForegroundInfo(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            ForegroundInfo(NOTIF_ID, notif)
-        }
+        return dataSyncForegroundInfo(NOTIF_ID, notif)
     }
 
     private fun postInstallReadyNotification(apkFile: File) {
@@ -191,9 +177,7 @@ class ApkDownloadWorker @AssistedInject constructor(
 
     private fun ensureChannel() {
         if (channelCreated) return
-        context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "App updates", NotificationManager.IMPORTANCE_LOW)
-        )
+        context.ensureLowImportanceChannel(CHANNEL_ID, "App updates")
         channelCreated = true
     }
 

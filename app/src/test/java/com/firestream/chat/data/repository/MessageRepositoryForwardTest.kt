@@ -3,10 +3,14 @@ package com.firestream.chat.data.repository
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.outbox.MessageWriter
+import com.firestream.chat.data.outbox.OutboxFiles
+import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import io.mockk.Called
 import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -14,6 +18,7 @@ import io.mockk.every
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -22,21 +27,23 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * `forwardMessage` writes the row it inserts, through [MessageWriter.send].
- *
- * Regression: the write used to carry only the text, the media link and its
- * size, so a forwarded video arrived without its thumbnail or length, a voice
- * note without its length and a location without its coordinates — while the
- * sender's own copy showed all of them.
+ * A forward is a queued send: the source message, re-stamped for the target
+ * chat, is inserted through the outbox factory and handed to [OutboxScheduler]
+ * with attempt count 0 — the worker's write is its first attempt. Its media is
+ * already uploaded, so the worker's pipeline goes straight to the write with the
+ * row as inserted, which is why the row must carry everything the recipient's
+ * copy should show.
  */
 class MessageRepositoryForwardTest {
 
     private val messageDao = mockk<MessageDao>(relaxed = true)
+    private val messageSource = mockk<MessageSource>()
     private val authSource = mockk<AuthSource>()
     private val messageWriter = mockk<MessageWriter>()
+    private val outboxScheduler = mockk<OutboxScheduler>(relaxed = true)
+    private val outboxFiles = mockk<OutboxFiles>(relaxed = true)
 
     private val inserted = slot<MessageEntity>()
-    private val written = slot<Message>()
 
     private lateinit var repository: MessageRepositoryImpl
 
@@ -44,12 +51,15 @@ class MessageRepositoryForwardTest {
     fun setUp() {
         every { authSource.currentUserId } returns "uid1"
         coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
-        coEvery { messageWriter.send(capture(written), any()) } answers { firstArg<Message>().id }
+        coEvery { outboxFiles.stage(any(), any(), any()) } returns null
 
         repository = messageRepository(
             messageDao = messageDao,
+            messageSource = messageSource,
             authSource = authSource,
             messageWriter = messageWriter,
+            outboxScheduler = outboxScheduler,
+            outboxFiles = outboxFiles,
         )
     }
 
@@ -64,7 +74,7 @@ class MessageRepositoryForwardTest {
     )
 
     @Test
-    fun `a forwarded video is written with its thumbnail, size, length and HD flag, to the target chat`() = runTest {
+    fun `a forwarded video is queued for the target chat with its thumbnail, size, length and HD flag`() = runTest {
         val video = source(MessageType.VIDEO).copy(
             mediaUrl = "https://storage.example/v",
             mediaThumbnailUrl = "https://storage.example/v_thumb",
@@ -76,12 +86,12 @@ class MessageRepositoryForwardTest {
 
         val result = repository.forwardMessage(video, targetChatId = "chat2", recipientId = "recipient1")
 
-        assertTrue("forward should succeed: ${result.exceptionOrNull()}", result.isSuccess)
-        coVerify(exactly = 1) { messageWriter.send(any(), "recipient1") }
-        with(written.captured) {
-            assertEquals(inserted.captured.id, id)
+        assertTrue("forward should queue: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(MessageStatus.SENDING, result.getOrThrow().status)
+        with(inserted.captured) {
             assertEquals("chat2", chatId)
             assertEquals("uid1", senderId)
+            assertEquals(MessageStatus.SENDING.name, status)
             assertTrue(isForwarded)
             assertEquals("https://storage.example/v", mediaUrl)
             assertEquals("https://storage.example/v_thumb", mediaThumbnailUrl)
@@ -90,30 +100,46 @@ class MessageRepositoryForwardTest {
             assertEquals(12, duration)
             assertTrue(isHd)
         }
+        // Its media is already uploaded, so the work is not an upload.
+        verify(exactly = 1) { outboxScheduler.enqueue(inserted.captured.id, uploads = false) }
+        // No direct write any more: the worker writes the row.
+        verify { messageWriter wasNot Called }
+        verify { messageSource wasNot Called }
     }
 
-    // Regression: the forward row recorded no recipient, so once a forward whose
-    // write never finished was flipped FAILED, OutboxSender refused every retry.
+    // Regression: the forward once recorded no recipient, so a forward whose
+    // write never finished could not be retried; then it wrote directly with
+    // attempt count 1. Now the worker's write is the first attempt.
     @Test
-    fun `a forward records its recipient and counts its write, so a retry resumes if-absent`() = runTest {
+    fun `a forward records its target and starts with no attempts, so the worker's write is the first one`() = runTest {
         repository.forwardMessage(source(MessageType.TEXT), targetChatId = "chat2", recipientId = "recipient1")
 
         assertEquals("recipient1", inserted.captured.outboxRecipientId)
-        assertEquals(1, inserted.captured.outboxAttempts)
+        assertEquals(0, inserted.captured.outboxAttempts)
     }
 
     @Test
-    fun `a forwarded location is written with its coordinates`() = runTest {
+    fun `a forward's media is already uploaded, so nothing is staged`() = runTest {
+        val photo = source(MessageType.IMAGE).copy(mediaUrl = "https://storage.example/p", localUri = "/media/src1.jpg")
+
+        repository.forwardMessage(photo, targetChatId = "chat2", recipientId = "recipient1")
+
+        coVerify(exactly = 0) { outboxFiles.stage(any(), any(), any()) }
+        assertEquals("/media/src1.jpg", inserted.captured.localUri)
+    }
+
+    @Test
+    fun `a forwarded location keeps its coordinates on the row`() = runTest {
         val location = source(MessageType.LOCATION).copy(latitude = 52.52, longitude = 13.40)
 
         repository.forwardMessage(location, targetChatId = "chat2", recipientId = "recipient1")
 
-        assertEquals(52.52, written.captured.latitude!!, 0.0)
-        assertEquals(13.40, written.captured.longitude!!, 0.0)
+        assertEquals(52.52, inserted.captured.latitude!!, 0.0)
+        assertEquals(13.40, inserted.captured.longitude!!, 0.0)
     }
 
     @Test
-    fun `a forward drops the source chat's mentions, reactions and reply, in the row and on the wire`() = runTest {
+    fun `a forward drops the source chat's mentions, reactions and reply`() = runTest {
         val text = source(MessageType.TEXT).copy(
             mentions = listOf("uid7"),
             reactions = mapOf("uid7" to "👍"),
@@ -122,11 +148,10 @@ class MessageRepositoryForwardTest {
 
         repository.forwardMessage(text, targetChatId = "chat2", recipientId = "recipient1")
 
-        with(written.captured) {
+        with(inserted.captured) {
             assertTrue(mentions.isEmpty())
             assertTrue(reactions.isEmpty())
             assertNull(replyToId)
         }
-        assertTrue(inserted.captured.mentions.isEmpty())
     }
 }
