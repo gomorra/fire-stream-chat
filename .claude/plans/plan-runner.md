@@ -241,6 +241,16 @@ instead.
   command and a pointer here. Keep it to a few lines each — the detail stays in this file.
 - `docs/PATTERNS.md`: no entry (this is workflow, not code). `.gitignore`: `.claude/plans/.runs/`.
 
+**Shipped** `73f694b2` (2026-09-13) — tier: max (interactive, by hand). skills: none. Reviewer models: none.
+Departures (for sign-off): the `/code-review` line under *Review tools* in CLAUDE.md was reworded
+too — it said "not part of the automatic workflow, run manually", which contradicted the new item
+4 and the `skills:` tags; it now reads "judgment-gated like `/simplify`, mandatory where a plan tags
+it, always before a release". No gate run: the step changes no production code.
+**(step-1)** for step 2: the template's placeholder list (top of `step-prompt.md`) is the driver's
+fill contract — `{{BASE}}` is `git merge-base main HEAD`, `{{SKILLS_FLOOR}}` is the literal
+`none` when untagged, `{{TAGGED_TIER}}` equals `{{TIER}}` unless `--cap` lowered it. The schema's
+`commit` is the *code* commit; the driver finds the `docs(plan):` commit by the `**Shipped**` line.
+
 ### Step 2 — The driver (`feat(tooling):`) — skills: code-review; model: strong
 
 - `scripts/run-plan.sh` per §2.5, bash (the repo's other scripts are bash; the interactive shell
