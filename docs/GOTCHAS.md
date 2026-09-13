@@ -290,6 +290,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Build tooling
 
+- **A pre-commit hook that reads `/dev/tty` hangs, or errors, on any headless commit.**
+  `.claude/hooks/ask-simplify.sh` prompts interactively ("Run /simplify before
+  committing? [y/N]") before letting a `git commit` through. That's fine in a terminal
+  session, but a plan-runner step, a CI job, or any other session with no controlling
+  terminal has nobody to answer it — the read either hangs forever or fails outright,
+  and either way the commit never lands. The hook now guards on `PLAN_RUNNER=1` (set by
+  `scripts/run-plan.sh`) and on `/dev/tty` being unreadable at all, letting the commit
+  through untouched in both cases. Any *other* hook that reads `/dev/tty` needs the same
+  guard before it can be trusted headless. See `.claude/plans/plan-runner.md` §2.7.
+
 - **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
   Several test names in this repo contain an em dash (e.g.
   `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),
