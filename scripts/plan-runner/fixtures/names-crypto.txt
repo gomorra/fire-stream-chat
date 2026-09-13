@@ -1,0 +1,2 @@
+app/src/main/java/com/firestream/chat/data/crypto/SignalManager.kt
+app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt

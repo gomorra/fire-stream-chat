@@ -1,0 +1,1 @@
+{"type":"result","subtype":"success","is_error":false,"session_id":"s-complete","num_turns":3,"total_cost_usd":0.5,"permission_denials":[],"structured_output":{"status":"done","step":2,"commit":"abc1234","skills":{"intended":[],"run":[],"skipped":[]},"reviewerModels":[],"question":null,"summary":"x"}}

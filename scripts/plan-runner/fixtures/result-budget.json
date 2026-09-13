@@ -1,0 +1,1 @@
+{"type":"result","subtype":"error_max_budget_usd","is_error":true,"terminal_reason":"budget_exhausted","session_id":"s-budget","num_turns":1,"total_cost_usd":0.02,"permission_denials":[],"result":null,"structured_output":null}

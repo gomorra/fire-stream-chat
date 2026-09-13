@@ -1,0 +1,3 @@
+docs/ARCHITECTURE.md
+.claude/plans/fixture.md
+CLAUDE.md

@@ -68,6 +68,10 @@ To stop: write a `**Decision needed**` block under your step's heading in the pl
 the options, your recommendation — commit nothing, leave the work in progress in the worktree, and
 end with `status: needs_decision`. The human resumes this session to answer.
 
+If a `**Decision taken**` block already sits under your step, it is the human's answer to a
+question an earlier attempt asked: honour it, fold it into the `**Shipped**` departures line, and
+do not ask again.
+
 ## Carrying insight forward
 
 Before you write the `**Shipped**` line, re-read the remaining steps of the plan and annotate any
@@ -94,6 +98,8 @@ Follow CLAUDE.md's post-step workflow, then land the step as two commits:
 Rules that hold throughout:
 
 - Never `git push`, never touch `main`, never `./gradlew --stop`, never leave this worktree.
+- Never feed `git commit` from a HEREDOC — a repo hook blocks it and the turn is wasted. Use chained
+  `-m` flags, one per paragraph.
 - Do not update local memory (`MEMORY.md` does not exist here); route facts to the tracked docs.
 - Do not ask questions with any tool; the decision rule above is the only way to involve the human.
 - Do not skip or delete a failing test; fix the cause. If the gate cannot be made green, end with

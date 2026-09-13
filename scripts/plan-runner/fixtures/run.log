@@ -1,0 +1,6 @@
+{"ts":"t","plan":"plan","event":"launched","step":"1","start":"abc"}
+{"ts":"t","plan":"plan","event":"result","step":"1","status":"done"}
+{"ts":"t","plan":"plan","event":"validated","step":"1"}
+{"ts":"t","plan":"plan","event":"checkpoint","step":"1"}
+{"ts":"t","plan":"plan","event":"launched","step":"2","start":"def"}
+{"ts":"t","plan":"plan","event":"needs_decision","step":"2","session":"s2"}

@@ -1,0 +1,36 @@
+name: Plan runner self-check
+
+# Parser, tripwire and result classifier of the plan runner
+# (scripts/run-plan.sh + scripts/plan-runner/lib.sh) against their fixtures.
+# Seconds, no Android SDK. Its own workflow rather than a job in ci.yml because
+# ci.yml ignores `**.md` and the self-check's inputs include fixtures/plan.md
+# and step-prompt.md. A broken parser must be caught here, not by an
+# unattended run — see .claude/plans/plan-runner.md.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/run-plan.sh'
+      - 'scripts/plan-runner/**'
+      - '.github/workflows/plan-runner.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/run-plan.sh'
+      - 'scripts/plan-runner/**'
+      - '.github/workflows/plan-runner.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  selfcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The dry-run check needs `main` to resolve for merge-base.
+          fetch-depth: 0
+      - name: Self-check
+        run: scripts/plan-runner/selfcheck.sh
