@@ -191,7 +191,9 @@ design point of the plan; never ask a question interactively.*
    ```
    with the worktree as cwd. The tier→model mapping (`MODEL_MAX`, `MODEL_STRONG`, `MODEL_MID`)
    lives at the top of the script only; `--cap <tier>` clamps every step's tier for this run, and
-   the prompt tells the session its tier is the ceiling for any sub-agent it spawns.
+   the prompt tells the session its tier is the ceiling for any sub-agent it spawns. The tier also
+   implies the `--effort` passed to the session — `max` and `strong` run at `xhigh`, `mid` at
+   `high` — from the same mapping block; plans carry no effort tag.
 4. On `done`: verify `commit` is reachable from HEAD and the `**Shipped**` line exists, **re-run
    the gate itself** on the branch head (`:app:testFirebaseDebugUnitTest assembleFirebaseDebug` —
    CPU, not tokens; the agent's claim of green is the one thing worth not trusting unattended), run
