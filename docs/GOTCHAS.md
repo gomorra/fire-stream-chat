@@ -300,6 +300,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   through untouched in both cases. Any *other* hook that reads `/dev/tty` needs the same
   guard before it can be trusted headless. See `.claude/plans/plan-runner.md` §2.7.
 
+- **A headless Claude session cannot write under `.claude/` — and an allow rule does not help.**
+  In `claude -p`, every `Edit`/`Write` of a file below `.claude/` (plans included), and every
+  Bash command whose text names such a path as a write target or even a `cp` source, is refused
+  with "requested permissions to edit … which is a sensitive file". Nobody can answer the prompt,
+  so the call is silently denied and the session reasons around it. `--allowedTools
+  "Edit(.claude/plans/**)"` does **not** override the guard (probed 2026-09-13 in a scratch repo).
+  `Read` and `git *` are exempt, which is why a step session can `git mv` a plan out, edit it,
+  and `git mv` it back — a detour, not a design. Anything a headless session must edit belongs at
+  a normal path. Interactive sessions only see a permission prompt.
+
 - **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
   Several test names in this repo contain an em dash (e.g.
   `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),

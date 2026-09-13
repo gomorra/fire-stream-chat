@@ -302,6 +302,38 @@ Departures (for sign-off):
   one-step, low-risk change. Record the pilot's session id, cost, and any prompt-template fixes in
   the `**Shipped**` block of step 4 — the first real data on what a step costs.
 
+**Shipped** `926d82a8` (2026-09-13) — tier: max (interactive, by hand). skills: none. Reviewer models: none.
+Pilot record (a step session cannot see its own id or spend — the driver's log has them, so they
+live here rather than under step 4 as the bullet above asked):
+- Launch 1, 18:57: refused before any API call — the schema's `$schema` key (draft 2020-12) is
+  unknown to the CLI's validator; with the result file empty, `--argjson` crashed the driver.
+  Fixed in `6bf52e61` (schema key dropped; `pr_result_field`/`pr_result_json` with fallbacks; an
+  ERR trap so a driver crash exits 1 instead of masquerading as exit 2). $0.
+- Launch 2, 18:59–19:11: session `17028a0d-d211-4020-b317-bc3a0e790bce`, sonnet/high, `done`,
+  73 turns, $2.20, 11 permission denials. Step 4 landed as `d8a07066` + `7445a37a` (+ `1b1de17e`,
+  a template note, see below). Then the driver failed its own validation on a bogus reason — its
+  progress line `gate skipped` was on stdout, which the caller captures as the reasons text —
+  spent the one nudge ($0.39, 11 turns, 3.5 min; the session re-ran the gate by hand, green) and
+  blocked. Fixed in the commit after this pilot (`say` → stderr, self-check pinned). The branch
+  was fast-forwarded into `main` by hand.
+- Nudge mechanics verified live: `--resume` on a print-mode session keeps the id and the schema,
+  and the session acted on the nudge text.
+Departures (for sign-off):
+- **Files under `.claude/` are harness-sensitive in a headless session.** `Edit`, `Write` and any
+  Bash command naming a `.claude/plans/…` path as a write target *or* a `cp` source were refused
+  ("requested permissions to edit … which is a sensitive file"); an explicit
+  `--allowedTools "Edit(.claude/plans/**)"` does **not** override it (probed 2026-09-13, scratch
+  repo, sonnet). 9 of the 11 denials were this; the other 2 were `/tmp` and `find /` probes the
+  session made while diagnosing it. The session worked around it with `git mv` out of the
+  directory, edit, `git mv` back (`git *` is allowed and the guard only inspects the command text),
+  and wrote that detour into `step-prompt.md` (`1b1de17e`). §2.1's premise — the step session
+  writes its own `**Shipped**` block — needs a decision: move plans to a normal path (recommended:
+  `docs/plans/` + `docs/plans/done/`, runs log alongside), or keep the `git mv` detour as the
+  documented mechanism. Pending the human; see the session's own account under step 4.
+- The `permission_denials` entries carry only `tool_name`, `tool_input`, `tool_use_id` — no
+  message. The refusal text is only in the session's transcript / its `summary`.
+- Allowlist otherwise sufficient: no denial of a legitimate command.
+
 ### Step 4 — Retire the handoff loop (`docs:`) — skills: none
 
 - Move `handoff-phase{1,5,6}.md` to `.claude/plans/done/` (their content is captured in
