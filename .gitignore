@@ -52,6 +52,7 @@ firebase.log
 !.claude/hooks/promote-memory.sh
 !.claude/settings.json
 !.claude/plans/
+.claude/plans/.runs/
 !.claude/skills/
 
 # Kotlin compiler daemon error logs

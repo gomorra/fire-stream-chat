@@ -83,7 +83,10 @@ Name tiers, not versions — do not hard-code model version numbers in this file
 Plans must include an **Order** line that defines the build sequence:
 - `→` = sequential (wait for previous step)
 - `+` = parallel (run simultaneously)
-- Example: `Order: 1 → 2 → 3+4 → 5` — steps 3 and 4 run in parallel after 2; step 5 waits for both
+- `‖` = checkpoint (stop after the step to its left and wait for the human — sign-off on departures, `/code-review ultra` if wanted)
+- Example: `Order: 1 → 2 → 3+4 ‖ 5` — steps 3 and 4 run in parallel after 2; the run pauses for the human before step 5
+
+Step headings may carry tags after the title: `skills: code-review, simplify` (mandatory skills for that step), `model: max | strong | mid` (tier; untagged = mid), `budget: <USD>`. See *Plan runner* below.
 
 **Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
 
@@ -92,7 +95,7 @@ Plans must include an **Order** line that defines the build sequence:
 Two tools, non-overlapping scopes — pick by what you are looking for:
 
 - **`/simplify`** — quality only: reuse, simplification, efficiency, altitude. It applies its own fixes. Trigger-gated inside the post-step workflow below, and offered by the pre-commit `ask-simplify.sh` hook.
-- **`/code-review`** — correctness bugs, which `/simplify` explicitly does not hunt. **Not** part of the automatic workflow: run it manually before cutting a release, or on any diff touching Signal/crypto, coroutine scoping, or the sync path. `/code-review ultra` is user-triggered and billed — Claude cannot launch it, so never write it into an auto-run step.
+- **`/code-review`** — correctness bugs, which `/simplify` explicitly does not hunt. Judgment-gated in post-step item 4 like `/simplify` and mandatory where a plan's `skills:` tag names it; always before cutting a release, and on any diff touching Signal/crypto, coroutine scoping, or the sync path. `/code-review ultra` is user-triggered and billed — Claude cannot launch it, so never write it into an auto-run step.
 
 Do not reimplement either with a custom review prompt.
 
@@ -102,16 +105,19 @@ Do not reimplement either with a custom review prompt.
 1. **Write unit tests** when the step/phase introduced **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes. Bug fixes always get a regression test, written *before* the fix — see Change Safety below.
 2. `./gradlew test` — unit tests must pass
 3. `./gradlew assembleDebug` — build must be clean
-4. `/simplify` — **only when needed**. Skip by default; invoke `Skill(skill: "simplify")` only when one of the triggers below applies. Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin (stronger models for the trigger categories below).
-   - **Triggers** (any one is sufficient): (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines).
+4. **Review skills — floor, intent, re-decision.** A step's `skills:` tag is the floor: those run unconditionally. On top of it, *before touching code* decide which further skills the step is worth (one reason each; none is a legitimate answer for a small step), and *after the gate is green* re-decide against the real diff — add freely, drop only what you added yourself and only with a reason. `/simplify` is worth it when one of these holds: (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines). `/code-review` is worth it on (a), (b), the sync path, and any bug fix in those areas. Invoke via `Skill(skill: "simplify")` / `Skill(skill: "code-review")`; `/simplify`'s Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin, and never above the step's tier.
    - **If `/simplify` changed anything, re-run steps 2–3.** Its fixes are production code and must not be committed unverified.
 5. `git commit` — **commit immediately once green; do not wait for user instruction.** One commit, carrying the code *and* its tests. Never split logic into one commit and its tests into the next: every commit must stand on its own as green.
-6. Update MEMORY.md — record what was done, key patterns established, remove stale entries
+6. Update MEMORY.md — record what was done, key patterns established, remove stale entries. Interactive sessions only: a runner step session has no memory store and routes facts to the tracked docs instead (`docs/GOTCHAS.md`, `docs/PATTERNS.md`, `docs/BACKLOG.md`, `TECH_DEBT.md`).
 
 ### Token efficiency
 
 - When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
 - When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
+
+### Plan runner
+
+Multi-step plans run unattended with `scripts/run-plan.sh <plan-path> [--from N] [--dry-run] [--cap <tier>]` from a terminal (not from inside a Claude session). One fresh headless session per step in a dedicated worktree on `plan/<name>`; the plan file is the state — a step is done when a `**Shipped**` block sits under its heading, written by the step session in a `docs(plan):` commit after its green code commit. The driver stops for `needs_decision` (resume the printed session to answer), `blocked`, and every `‖` checkpoint; it never pushes. A plan finished partly by hand needs `**Shipped**` lines for its done steps or `--from N` — always `--dry-run` first. Contract and design: `.claude/plans/plan-runner.md`; result schema and prompt template: `scripts/plan-runner/`.
 
 ## Architecture
 

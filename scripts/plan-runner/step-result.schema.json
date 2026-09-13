@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plan runner step result",
+  "description": "The structured result every headless step session ends with. Contract: .claude/plans/plan-runner.md §2.2. The driver (scripts/run-plan.sh) branches on `status`, enforces `skills.run` against the plan's tags and the diff tripwire, and logs the rest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "step", "commit", "skills", "reviewerModels", "question", "summary"],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["done", "needs_decision", "blocked"],
+      "description": "done: the step's code commit and its docs(plan) commit are on the branch. needs_decision: a **Decision needed** block is written under the step, nothing committed. blocked: the gate could not be made green, or the step cannot be built as specified; nothing committed unless noted in summary."
+    },
+    "step": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The step number from the plan's Order line."
+    },
+    "commit": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "The hash of the green code+tests commit when status is done; null otherwise. The docs(plan) commit that follows it is not reported — the driver finds it by the **Shipped** line."
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intended", "run", "skipped"],
+      "properties": {
+        "intended": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Skills declared before touching code: the plan's tag (the floor) plus the agent's own judgment."
+        },
+        "run": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Skills actually invoked. The driver enforces this list against the floor and the diff tripwire."
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["skill", "reason"],
+            "properties": {
+              "skill": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          },
+          "description": "Skills that were in `intended` but not run, each with a reason. A tagged skill may never appear here."
+        }
+      }
+    },
+    "reviewerModels": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "One entry per review skill that spawned sub-agents, naming the model of each, e.g. \"simplify: opus, opus, sonnet\". Satisfies CLAUDE.md's report-the-model-per-sub-agent rule in a headless run. Empty when no review skill ran."
+    },
+    "question": {
+      "type": ["string", "null"],
+      "description": "The decision the human must make, when status is needs_decision; null otherwise. The full block with options and a recommendation is in the plan under the step."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Two or three sentences for the notification and the run log: what was built, what departed from the plan, what the human should look at."
+    }
+  }
+}
