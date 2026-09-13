@@ -15,7 +15,7 @@
 set -euo pipefail
 
 # ---- tunables (the only place model ids and effort levels live) -------------
-MODEL_MAX=fable;     EFFORT_MAX=xhigh
+MODEL_MAX=fable;     EFFORT_MAX=xhigh     # a step's `effort:` tag overrides the tier's effort
 MODEL_STRONG=opus;   EFFORT_STRONG=xhigh
 MODEL_MID=sonnet;    EFFORT_MID=high
 DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
@@ -134,7 +134,10 @@ prepare_step() {
     FLOOR=$(pr_tag_skills "$HEADING")
     TAGGED_TIER=$(pr_tag_tier "$HEADING")
     TIER=$(pr_cap_tier "$TAGGED_TIER" "$CAP")
-    MODEL=$(model_for "$TIER"); EFFORT=$(effort_for "$TIER")
+    MODEL=$(model_for "$TIER")
+    # Effort follows the *tagged* tier, then an explicit `effort:` tag; --cap lowers the
+    # model only — a cheaper model thinking longer is the better trade.
+    EFFORT=$(pr_tag_effort "$HEADING" "$(effort_for "$TAGGED_TIER")")
     BUDGET=${BUDGET_OVERRIDE:-$(pr_tag_budget "$HEADING" "$DEFAULT_BUDGET_USD")}
     NUDGED=0; SESSION_ID=''; RESULT_FILE=''
 }

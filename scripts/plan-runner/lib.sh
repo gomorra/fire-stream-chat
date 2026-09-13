@@ -155,6 +155,18 @@ pr_tag_tier() {
     esac
 }
 
+# pr_tag_effort <heading> <default>  → the `effort:` tag or the default (the tier's
+# effort); exit 1 on a value the CLI does not accept. Untagged steps follow the
+# tier; the tag is for the steps where volume and subtlety disagree.
+pr_tag_effort() {
+    local e
+    e=$(pr_tag "$1" effort)
+    case "${e:-$2}" in
+        low|medium|high|xhigh|max) echo "${e:-$2}" ;;
+        *) echo "plan-runner: unknown effort '$e' (want low|medium|high|xhigh|max)" >&2; return 1 ;;
+    esac
+}
+
 # pr_tag_budget <heading> <default>  → the `budget:` tag or the default.
 pr_tag_budget() {
     local b

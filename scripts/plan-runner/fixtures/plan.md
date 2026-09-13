@@ -36,7 +36,7 @@ Body.
 ### Step 5 — Untagged
 The word **Shipped** inside prose, not at line start, must not count as shipped.
 
-### Step 6 — UI step — skills: app-ui-design
+### Step 6 — UI step — skills: app-ui-design; effort: low
 Body.
 
 ### Step 7 — Shipped with skills (`feat:`) — skills: code-review

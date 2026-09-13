@@ -86,7 +86,7 @@ Plans must include an **Order** line that defines the build sequence:
 - `‖` = checkpoint (stop after the step to its left and wait for the human — sign-off on departures, `/code-review ultra` if wanted)
 - Example: `Order: 1 → 2 → 3+4 ‖ 5` — steps 3 and 4 run in parallel after 2; the run pauses for the human before step 5
 
-Step headings may carry tags after the title: `skills: code-review, simplify` (mandatory skills for that step), `model: max | strong | mid` (tier; untagged = mid), `budget: <USD>`. See *Plan runner* below.
+Step headings may carry tags after the title: `skills: code-review, simplify` (mandatory skills for that step), `model: max | strong | mid` (tier; untagged = mid), `effort: low | medium | high | xhigh | max` (only where the tier's default — xhigh for max/strong, high for mid — is wrong for the step: a large mechanical step, or a small subtle one), `budget: <USD>`. See *Plan runner* below.
 
 **Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
 
