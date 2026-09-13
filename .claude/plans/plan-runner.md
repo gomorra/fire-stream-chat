@@ -1,0 +1,275 @@
+# Plan runner — unattended multi-step plan execution
+
+Brief for replacing the manual loop (implement a step → write a handoff → paste it into a fresh
+session → repeat) with a driver that runs one fresh headless session per step, stops for the
+decisions that are the human's, and makes review skills deterministic. Written 2026-09-13 from
+a read of `main` at `3a1538dd`, the four hooks in `.claude/hooks/`, the `handoff` /
+`claude-handoff` / `implement` skills and the `claude` CLI's print-mode flags.
+
+**Order: 1 → 2 ‖ 3 → 4**
+
+`‖` is the checkpoint marker this plan introduces (§2.4): the driver stops after step 2 and waits
+for the human to read the driver before it is ever run unattended. This plan is executed by hand
+up to that point and is the runner's first pilot from step 3 on.
+
+## 0. Decisions (signed off 2026-09-13 — do not re-litigate)
+
+| Question | Decision |
+|---|---|
+| State carrier | **The plan file itself.** No handoff documents. Each step's session appends a `**Shipped**` block under its heading and commits it; the next step's prompt is one line. |
+| Session shape | **One fresh `claude -p` session per step**, driven by a shell script. Not one long interactive session, not `Agent` sub-agents from an orchestrator session — fresh context per step is the point, and print mode returns a session id the human can `--resume` into. |
+| Skill selection | **Plan tags are a floor; the agent's judgment adds, never removes.** The agent declares intended skills at the start and re-decides against the real diff at the end (§2.3). The driver cross-checks the mechanical triggers. |
+| Decisions in flight | **Two classes.** Routine judgment calls: decide, record as a *departure* for after-the-fact sign-off. Anything that would change a §0 decision or the §2 design of the plan being executed: stop with `needs_decision`. Never `AskUserQuestion` in a headless step. |
+| Where the human answers | **Resume the session** (`claude --resume <id>` in the worktree) — the question is waiting in context. Editing the plan and re-running the driver is the fallback (cloud, or a session that is gone). |
+| Isolation | **A dedicated worktree and branch per plan** (`.claude/worktrees/plan-<name>`, branch `plan/<name>`). The human fast-forwards `main` and pushes. `git push` is denied to the step sessions. |
+| Permissions | `--permission-mode acceptEdits` plus an allowlist for gradle/git/find/grep — **not** `bypassPermissions`. Step sessions never leave the worktree. |
+| Cost guard | `--max-budget-usd` per step (default in the script, overridable per step via a heading tag). A step that hits it is `blocked`, never silently partial. |
+| Model per step | **Three role-named tiers in the plan, model ids only in the script.** `model: max` (today Fable) for Signal/crypto and security-critical steps; `model: strong` (today Opus) for concurrency, schema and architecture steps; untagged = `mid` (today Sonnet). A `--cap <tier>` run flag clamps a whole run for cost. The step's tier is also an upper bound for the reviewers `/simplify` and `/code-review` spawn. |
+| `/code-review ultra` | Stays manual — user-triggered and billed. Checkpoints are where the human runs it. |
+| Cloud routines | Out of scope for v1. The driver is local. Nothing in the design prevents a cloud variant later (the plan-edit fallback exists for it). |
+
+Not in scope: parallel steps (`+` in the Order line is accepted by the parser but executed
+sequentially in v1, with a warning), a web dashboard, cross-plan scheduling.
+
+## 1. Current state (verified 2026-09-13)
+
+- Plans live in `.claude/plans/`, tracked in git, with an `**Order:**` line and per-step headings
+  `### Step N — Title (\`prefix:\`, notes)`. Shipped plans move to `.claude/plans/done/`.
+- The handoff docs (`handoff-phase{1,5,6}.md`) carry two things the plan does not: "where things
+  stand" (commits landed, what the code looks like now) and the previous step's review findings.
+  The offline-outbox plan already folds both into the plan file as `**(step-N review)**` /
+  `**(step-N /simplify altitude review)**` annotations — the pattern this plan generalises.
+- Skills: `simplify`, `code-review`, `app-ui-design`, `changelog-release`, `tdd` are
+  model-invocable; `implement`, `handoff`, `claude-handoff` are user-only (`disable-model-invocation`).
+  Both review skills spawn sub-agents through the `Agent` tool, which works in print mode.
+- `claude-handoff` is the closest existing tool: summarise the conversation, then
+  `claude --bg --name "…" "<summary>"` in the same directory (its `agents/openai.yaml` is only a
+  display manifest). The runner keeps its named sessions, its "suggested skills" idea (as the
+  `skills:` tag + declared intent) and its "reference artifacts, do not duplicate them" rule; it
+  drops the summary (the plan's `**Shipped**` block replaces it) and `--bg` (no structured result
+  or exit status to chain on — a driver would have to poll `claude agents --json`). Trade-off:
+  a `--bg` session can be opened and steered while it runs; a `-p` session only after it ends.
+  Revisit if watching a step live turns out to matter more than chaining.
+- Hooks in `.claude/settings.json`: `session-start.sh` (SessionStart), `block-heredoc-commit.sh`
+  (PreToolUse Bash), `promote-memory.sh` (PostToolUse Write|Edit). **`ask-simplify.sh` is not
+  wired** and reads `/dev/tty` — wiring it would hang every headless commit.
+- CLI (this build): `-p/--print`, `--output-format json`, `--json-schema <schema>`,
+  `--max-budget-usd`, `--permission-mode`, `--allowedTools` / `--disallowedTools`, `--model`,
+  `--effort`, `--append-system-prompt`, `-n/--name`, `-r/--resume <id>`, `-w/--worktree`.
+  `--output-format json` emits a result object carrying `session_id` and, with `--json-schema`,
+  the structured output — **confirm the exact field names in step 2 before parsing them.**
+- Host: `jq` and `notify-send` are installed. Gradle daemons are shared across worktrees (never
+  `--stop` from the runner). A fresh worktree needs `local.properties` and `google-services.json`
+  copied in before Gradle works.
+- Existing worktrees: `.claude/worktrees/fix-receipt-downgrade` (locked), `p3-verify` (detached).
+  The runner must not touch either.
+
+## 2. Design
+
+### 2.1 The plan file is the state
+
+A step is *unshipped* until a `**Shipped**` line exists under its heading. The step session writes
+it as the last act before its commit, so the plan and the code land together:
+
+```
+**Shipped** `a1b2c3d` (2026-09-14) — skills: code-review, simplify. Reviewer models: …
+Departures (for sign-off): …
+```
+
+The driver finds the next unshipped step by scanning headings in Order-line order. Re-running the
+driver after any stop resumes from there with no other bookkeeping.
+
+**Carrying insight forward.** There is no handoff document, but there is a handoff: the step
+agent edits the plan while the knowledge is fresh, and the plan lands in the same commit as the
+code. Four channels, one per kind of insight:
+
+| Insight | Goes to | Read by |
+|---|---|---|
+| A fact that changes a later step's spec (a method to delete, a path the review found, a test that must exist) | The affected step's section, marked `**(step-N)**` / `**(step-N /code-review)**` — the convention `offline-outbox.md` already uses | The agent for that step, in place |
+| A departure from the plan in this step | The step's own `**Shipped**` block | Every later step's agent (the prompt says to read all earlier `**Shipped**` blocks: later steps build on the code as it is, not as the plan first described it) and the human at the next checkpoint |
+| Where things stand | Not written by hand: the driver injects `git log --oneline <plan base>..HEAD` into the prompt | The next agent, before reading anything else |
+| A finding outside the plan's scope | `docs/BACKLOG.md`, `TECH_DEBT.md`, `docs/GOTCHAS.md`, as CLAUDE.md already routes them | Whoever it concerns; never the plan |
+
+The step prompt makes the first two mandatory: before the `**Shipped**` line, re-read the
+remaining steps and annotate any whose spec this step's work has changed. The old handoff docs
+wrote all four kinds into one narrative; splitting them puts each where its reader looks.
+
+A `needs_decision` stop writes a `**Decision needed**` block under the step (question, options,
+the agent's recommendation) and commits nothing else; work in progress stays in the worktree.
+
+### 2.2 Step contract — the structured result
+
+Every step session ends with a JSON object validated by `--json-schema` (`scripts/plan-runner/step-result.schema.json`):
+
+```json
+{
+  "status": "done | needs_decision | blocked",
+  "step": 5,
+  "commit": "sha or null",
+  "skills": {
+    "intended": ["code-review"],
+    "run":      ["code-review", "simplify"],
+    "skipped":  [{ "skill": "tdd", "reason": "no new logic seam" }]
+  },
+  "reviewerModels": ["simplify: opus, opus, sonnet", "code-review: opus, opus"],
+  "question": "null unless needs_decision",
+  "summary": "two or three sentences for the notification"
+}
+```
+
+`skills.run` is what the driver enforces against (§2.3). `reviewerModels` satisfies CLAUDE.md's
+"report the model per sub-agent" rule in a headless run, where nobody sees it live.
+
+### 2.3 Skill protocol — floor, intent, re-decision, tripwire
+
+1. **Floor.** A step heading may carry a tag: `skills: code-review, simplify` or
+   `skills: app-ui-design`. Tagged skills are mandatory; the agent copies them into `intended`
+   without evaluation.
+2. **Intent at the start.** Before touching code the agent writes `intended` — the floor plus
+   whatever it judges worth running for this step, one reason each. `[]` is a legitimate answer for
+   a small untagged step.
+3. **Re-decision at the end.** Against the real diff (`git diff --stat`, paths touched, whether a
+   bug fix got its regression test), the agent may add skills. It may drop one from `intended`
+   only with a stated reason in `skipped`, and never a tagged one.
+4. **Tripwire in the driver.** The driver recomputes the *mechanical* triggers from the diff
+   between the step's start commit and its end commit and compares them with `skills.run`:
+   - changed lines > 600 → `simplify` required
+   - any path under `data/crypto/`, `data/worker/`, `di/`, or two or more `*ViewModel.kt` →
+     `code-review` required
+   - any path under `ui/` with a new `@Composable` → `app-ui-design` required
+   - any tagged skill → required
+   If a required skill is missing, the driver resumes the same session once with
+   "the diff crossed trigger (b); run `/code-review`, re-run the gate, amend the commit" and
+   re-validates. A second miss is `blocked`. Subjective calls stay with the agent.
+
+`/simplify` that changes code re-runs the gate before commit, as CLAUDE.md already requires.
+`/code-review` findings the agent can act on, it acts on. Findings that need the human become
+`needs_decision`.
+
+### 2.4 Decisions and checkpoints
+
+The Order grammar gains one symbol: `‖` = *checkpoint*. The driver stops after the step to its
+left and waits for the human, regardless of results. Use it after crypto, schema, or
+minor-bump steps — wherever departures should be signed off before more work builds on them, and
+wherever `/code-review ultra` is worth its price. Example: `Order: 1 → 2 → 3 → 4 ‖ 5 → 6 ‖ 7 → 8`.
+
+`+` (parallel) is parsed and executed sequentially in v1, with a warning in the log.
+
+The `needs_decision` rule for step agents, verbatim in the step prompt: *decide routine things
+yourself and record them as departures; stop if the answer would change a §0 decision or a §2
+design point of the plan; never ask a question interactively.*
+
+### 2.5 The driver loop
+
+`scripts/run-plan.sh <plan-path> [--from N] [--dry-run] [--budget USD]`:
+
+1. Parse the Order line and the step headings (number, title, `skills:`, `model:`, `budget:` tags).
+2. Ensure the worktree and branch exist; copy `local.properties` and `google-services.json` in.
+3. For the next unshipped step: record `start=$(git rev-parse HEAD)`, build the prompt from the
+   template (`scripts/plan-runner/step-prompt.md`: plan path, step number, CLAUDE.md post-step
+   workflow, the §2.3 and §2.4 rules, the result schema), and run
+
+   ```
+   claude -p --output-format json --json-schema step-result.schema.json \
+     --model <tier→alias> --max-budget-usd <budget> \
+     --permission-mode acceptEdits \
+     --allowedTools "Bash(./gradlew *)" "Bash(git *)" "Bash(find *)" "Bash(grep *)" "Bash(jq *)" \
+     --disallowedTools "Bash(git push*)" "AskUserQuestion" \
+     -n "plan <name> step <N>" "<prompt>"
+   ```
+   with the worktree as cwd. The tier→model mapping (`MODEL_MAX`, `MODEL_STRONG`, `MODEL_MID`)
+   lives at the top of the script only; `--cap <tier>` clamps every step's tier for this run, and
+   the prompt tells the session its tier is the ceiling for any sub-agent it spawns.
+4. On `done`: verify `commit` is reachable from HEAD and the `**Shipped**` line exists, run the
+   §2.3 tripwire, then continue. If the gate is red or the result malformed, resume once with a
+   fix-forward nudge, then `blocked`.
+5. On `needs_decision` / `blocked` / a checkpoint: `notify-send`, print the summary and the exact
+   resume command, exit non-zero. Log every session id and result to `.claude/plans/.runs/<name>.log`
+   (gitignored).
+6. After the last step: notify, print `git log main..plan/<name>` and the fast-forward command.
+
+### 2.6 Local memory inside the worktree
+
+The auto-memory store is keyed by the working directory, so a step session running in
+`.claude/worktrees/plan-<name>` sees an empty store and no root `MEMORY.md` symlink. CLAUDE.md's
+post-step item 6 ("update MEMORY.md") therefore cannot run as written. The step prompt says:
+route every fact to the tracked docs (`GOTCHAS`, `PATTERNS`, `BACKLOG`, `TECH_DEBT`) and skip
+local memory; the human updates memory at a checkpoint or at the end. This is the same rule
+cloud sessions already follow, and the plan's `**Shipped**` blocks carry what memory used to.
+
+### 2.7 Hook guard
+
+`ask-simplify.sh` gains `[ -r /dev/tty ] || exit 0` and a `PLAN_RUNNER=1` bypass so it can never
+block a headless commit even if someone wires it later. The driver exports `PLAN_RUNNER=1`;
+`block-heredoc-commit.sh` and `promote-memory.sh` are unaffected.
+
+## 3. Steps
+
+Every step follows CLAUDE.md's post-step workflow. This is tooling: no CHANGELOG entry, no
+version bump. Shell has no unit-test gate in this repo; step 2 adds a fixture-driven self-check
+instead.
+
+### Step 1 — Protocol and contract (`docs:`) — skills: none
+
+- `scripts/plan-runner/step-result.schema.json` (§2.2) and `scripts/plan-runner/step-prompt.md`
+  (the template; contains the §2.3 intent/re-decision rule, the §2.4 decision rule and the §2.1
+  carry-forward duty verbatim, plus a `{{COMMITS}}` slot the driver fills from
+  `git log --oneline <plan base>..HEAD`).
+- CLAUDE.md, *Plan Execution Workflow*: add `‖` to the Order grammar; replace post-step item 4's
+  "skip by default, invoke on a trigger" with the floor + intent + re-decision rule so interactive
+  sessions follow the same protocol as the runner; add a short *Plan runner* paragraph with the
+  command and a pointer here. Keep it to a few lines each — the detail stays in this file.
+- `docs/PATTERNS.md`: no entry (this is workflow, not code). `.gitignore`: `.claude/plans/.runs/`.
+
+### Step 2 — The driver (`feat(tooling):`) — skills: code-review; model: strong
+
+- `scripts/run-plan.sh` per §2.5, bash (the repo's other scripts are bash; the interactive shell
+  is fish and must not be assumed). `set -euo pipefail`, `jq` for all JSON, no HEREDOC piped into
+  `git commit` (the `block-heredoc-commit.sh` rule applies to the runner's own commits too).
+- `--dry-run` prints, for each unshipped step, the exact `claude` invocation and the tripwire
+  thresholds without running anything.
+- Self-check: `scripts/plan-runner/selfcheck.sh` runs the parser and tripwire against fixtures in
+  `scripts/plan-runner/fixtures/` (a plan with tags, `‖`, `+`, one shipped step; a fake diff stat
+  crossing each trigger; a `done` result missing a required skill) and asserts the decisions. Wire
+  it into `ci.yml` as a cheap job — a broken parser must not be found by an unattended run.
+- Confirm the `--output-format json` field names (`session_id`, structured output) against a
+  one-turn `claude -p` call before parsing; record the shape in a comment at the parse site.
+- Confirm `--model` accepts the aliases `fable`, `opus`, `sonnet` (the `Agent` tool does); if not,
+  the mapping at the top of the script is the one place to change.
+- `/code-review` on the diff: it is concurrency-adjacent in the "what runs while the human is
+  away" sense — the failure modes are silent skips and runaway retries.
+
+### Step 3 — Hook guard and pilot (`chore:`) — skills: none
+
+- §2.7 guard in `ask-simplify.sh`.
+- Pilot: run the driver on **this plan** for step 4 (`--from 4`). That exercises worktree
+  creation, the prompt template, a `done` result, the tripwire and the notification on a
+  one-step, low-risk change. Record the pilot's session id, cost, and any prompt-template fixes in
+  the `**Shipped**` block of step 4 — the first real data on what a step costs.
+
+### Step 4 — Retire the handoff loop (`docs:`) — skills: none
+
+- Move `handoff-phase{1,5,6}.md` to `.claude/plans/done/` (their content is captured in
+  `image-editor.md`); the `handoff` / `claude-handoff` skills stay for ad-hoc use but CLAUDE.md
+  no longer describes them as the way plans advance.
+- `docs/GOTCHAS.md`: one entry — "`ask-simplify.sh` reads `/dev/tty`; anything headless must bypass
+  it" — host-independent, so it belongs in git, not local memory.
+- Local memory: replace the offline-outbox entry's "hand-off" wording with a pointer to the runner.
+
+## 4. Verification (pilot checklist, step 3)
+
+1. Driver started from `main` creates `.claude/worktrees/plan-plan-runner` on `plan/plan-runner`
+   with Gradle working on the first invocation (no `SDK location not found`, no
+   `processGoogleServices` failure).
+2. The step session commits exactly one commit carrying code + `**Shipped**` line; the driver
+   finds it unshipped before and shipped after.
+3. `--dry-run` on `offline-outbox.md` (all shipped) prints "nothing to do"; on a fixture with a
+   `‖` it stops at the checkpoint.
+4. A forced `needs_decision` (fixture prompt) produces a desktop notification, a
+   `**Decision needed**` block, a printed `claude --resume <id>` command that opens in the
+   worktree, and a non-zero exit.
+5. A `done` result whose `skills.run` misses a tagged skill triggers exactly one resume nudge,
+   then `blocked`.
+6. `git push` from inside a step session is refused by the tool policy, not only by the prompt.
+7. The budget cap ends a step as `blocked` with the partial work left in the worktree and the
+   session id in the log.

@@ -5,7 +5,7 @@ picker (earpiece, speaker, Bluetooth, wired headset), and for raising `minSdk` f
 31 so the routing can use the one non-deprecated API. Written 2026-09-11 from a code read
 of `main` at `4b0e5fa3`; re-verify line numbers before editing.
 
-**Order: 1 → 2 → 3 → 4 → 5**
+**Order: 1 ‖ 2 → 3 → 4 → 5** (`‖` = checkpoint, see `.claude/plans/plan-runner.md` §2.4: the runner stops after the minSdk step for the human to look at the fallout before feature work builds on it)
 
 ## 0. Decisions (signed off 2026-09-11 — do not re-litigate)
 
@@ -166,7 +166,7 @@ Load the `app-ui-design` skill before touching the screen. Shape:
 Each step ends with the post-step gate from `CLAUDE.md` (tests → `assembleFirebaseDebug` →
 commit). `/simplify` triggers only on step 3 (concurrency: listeners + collector + wake lock).
 
-### Step 1 — minSdk 31 (`chore(build)!` — user-visible, gets a CHANGELOG `Removed` entry)
+### Step 1 — minSdk 31 (`chore(build)!` — user-visible, gets a CHANGELOG `Removed` entry) — skills: changelog-release
 Files: `app/build.gradle.kts`, `baselineprofile/build.gradle.kts`, the four branch files in §1,
 `TimerAlarmSchedulerTest.kt`, 26 Robolectric tests, `docs/PATTERNS.md`, possibly the four
 snapshot PNGs, `CHANGELOG.md`. Invoke `changelog-release` for the bump decision (recommendation:
@@ -191,14 +191,14 @@ Tests (all pure, table-style):
 - tablet {SPEAKER} only → SPEAKER
 - `routeOf` mapping for every listed type + an unknown type → null
 
-### Step 3 — router + service wiring (`feat(call)`, no CHANGELOG yet)
+### Step 3 — router + service wiring (`feat(call)`, no CHANGELOG yet) — skills: simplify, code-review; model: strong
 Files: new `data/call/CallAudioRouter.kt`, `CallService.kt` (§2.4), `CallViewModel.kt`
 (`selectAudioRoute`). Keep the router free of coroutines except the `MutableStateFlow`; the
 listeners write to it on the main executor. No unit test for the router (Android `AudioManager`),
 the policy test is the coverage. Run `/simplify` (concurrency trigger). Run `/code-review` on
 the step-2+3 diff before commit: this touches coroutine scoping in a foreground service.
 
-### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry)
+### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
 state wants a shared helper. Load `app-ui-design` first. Compose test not required (UI-only,
 no logic), but a Robolectric smoke test that the sheet lists three rows when
