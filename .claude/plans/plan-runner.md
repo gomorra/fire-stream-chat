@@ -22,9 +22,9 @@ up to that point and is the runner's first pilot from step 3 on.
 | Decisions in flight | **Two classes.** Routine judgment calls: decide, record as a *departure* for after-the-fact sign-off. Anything that would change a §0 decision or the §2 design of the plan being executed: stop with `needs_decision`. Never `AskUserQuestion` in a headless step. |
 | Where the human answers | **Resume the session** (`claude --resume <id>` in the worktree) — the question is waiting in context. Editing the plan and re-running the driver is the fallback (cloud, or a session that is gone). |
 | Isolation | **A dedicated worktree and branch per plan** (`.claude/worktrees/plan-<name>`, branch `plan/<name>`). The human fast-forwards `main` and pushes. `git push` is denied to the step sessions. |
-| Permissions | `--permission-mode acceptEdits` plus an allowlist for gradle/git/find/grep — **not** `bypassPermissions`. Step sessions never leave the worktree. |
-| Cost guard | `--max-budget-usd` per step (default in the script, overridable per step via a heading tag). A step that hits it is `blocked`, never silently partial. |
-| Model per step | **Three role-named tiers in the plan, model ids only in the script.** `model: max` (today Fable) for Signal/crypto and security-critical steps; `model: strong` (today Opus) for concurrency, schema and architecture steps; untagged = `mid` (today Sonnet). A `--cap <tier>` run flag clamps a whole run for cost. The step's tier is also an upper bound for the reviewers `/simplify` and `/code-review` spawn. |
+| Permissions | `--permission-mode acceptEdits` plus a Bash allowlist and a deny list — **not** `bypassPermissions`. In print mode a non-allowlisted call is silently denied, so the allowlist is tuned from data: the result object's `permission_denials` are logged per step, and the pilot passes only with zero. Deny list: `git push`, `git reset --hard`, `git checkout main`, `./gradlew --stop`, `rm -rf` outside the worktree. |
+| Cost guard | `--max-budget-usd` per step (default in the script, overridable per step via a heading tag). A step that exhausts its budget or turns is `blocked` at once — never resumed, never silently partial. The one fix-forward nudge (§2.5) has its own small fixed budget. |
+| Model per step | **Three role-named tiers in the plan, model ids only in the script.** `model: max` (today Fable) for Signal/crypto and security-critical steps; `model: strong` (today Opus) for concurrency, schema and architecture steps; untagged = `mid` (today Sonnet). A `--cap <tier>` run flag clamps a whole run for cost. The step's tier is also the ceiling for the reviewers `/simplify` and `/code-review` spawn — advisory, since the skills pick their own sub-agent models; `reviewerModels` in the result shows whether it was honoured. A step capped below its tag records that in its `**Shipped**` block so the human can re-review at the checkpoint. |
 | `/code-review ultra` | Stays manual — user-triggered and billed. Checkpoints are where the human runs it. |
 | Cloud routines | Out of scope for v1. The driver is local. Nothing in the design prevents a cloud variant later (the plan-edit fallback exists for it). |
 
@@ -68,16 +68,24 @@ sequentially in v1, with a warning), a web dashboard, cross-plan scheduling.
 
 ### 2.1 The plan file is the state
 
-A step is *unshipped* until a `**Shipped**` line exists under its heading. The step session writes
-it as the last act before its commit, so the plan and the code land together:
+A step is *unshipped* until a `**Shipped**` line exists under its heading. A commit cannot carry
+its own hash, so a step lands as **two commits**, the shape the repo already uses for CHANGELOG
+hashes: first the green code+tests commit, then a `docs(plan):` commit that adds the `**Shipped**`
+block naming that hash (and, for a user-visible step, the CHANGELOG entry's hash):
 
 ```
-**Shipped** `a1b2c3d` (2026-09-14) — skills: code-review, simplify. Reviewer models: …
+**Shipped** `a1b2c3d` (2026-09-14) — tier: strong. skills: code-review, simplify. Reviewer models: …
 Departures (for sign-off): …
 ```
 
 The driver finds the next unshipped step by scanning headings in Order-line order. Re-running the
-driver after any stop resumes from there with no other bookkeeping.
+driver after any stop resumes from there with no other bookkeeping. The runner itself never
+commits; every commit on the plan branch is a step session's.
+
+A plan finished partly by hand before this convention has no `**Shipped**` lines for its done
+steps. Either add them (hash + date is enough) or start with `--from N`; the driver has no other
+way to tell a hand-shipped step from an unshipped one, and `--dry-run` shows which steps it would
+run so this is checked before anything spends tokens.
 
 **Carrying insight forward.** There is no handoff document, but there is a handoff: the step
 agent edits the plan while the knowledge is fresh, and the plan lands in the same commit as the
@@ -87,7 +95,7 @@ code. Four channels, one per kind of insight:
 |---|---|---|
 | A fact that changes a later step's spec (a method to delete, a path the review found, a test that must exist) | The affected step's section, marked `**(step-N)**` / `**(step-N /code-review)**` — the convention `offline-outbox.md` already uses | The agent for that step, in place |
 | A departure from the plan in this step | The step's own `**Shipped**` block | Every later step's agent (the prompt says to read all earlier `**Shipped**` blocks: later steps build on the code as it is, not as the plan first described it) and the human at the next checkpoint |
-| Where things stand | Not written by hand: the driver injects `git log --oneline <plan base>..HEAD` into the prompt | The next agent, before reading anything else |
+| Where things stand | Not written by hand: the driver injects `git log --oneline <plan base>..HEAD` into the prompt, plan base = `git merge-base main HEAD` (so a fast-forward of `main` at a checkpoint shortens the list rather than breaking it) | The next agent, before reading anything else |
 | A finding outside the plan's scope | `docs/BACKLOG.md`, `TECH_DEBT.md`, `docs/GOTCHAS.md`, as CLAUDE.md already routes them | Whoever it concerns; never the plan |
 
 The step prompt makes the first two mandatory: before the `**Shipped**` line, re-read the
@@ -95,7 +103,8 @@ remaining steps and annotate any whose spec this step's work has changed. The ol
 wrote all four kinds into one narrative; splitting them puts each where its reader looks.
 
 A `needs_decision` stop writes a `**Decision needed**` block under the step (question, options,
-the agent's recommendation) and commits nothing else; work in progress stays in the worktree.
+the agent's recommendation) and commits nothing — block and work in progress stay uncommitted in
+the worktree, where the resumed session finds them.
 
 ### 2.2 Step contract — the structured result
 
@@ -136,8 +145,11 @@ Every step session ends with a JSON object validated by `--json-schema` (`script
    - changed lines > 600 → `simplify` required
    - any path under `data/crypto/`, `data/worker/`, `di/`, or two or more `*ViewModel.kt` →
      `code-review` required
-   - any path under `ui/` with a new `@Composable` → `app-ui-design` required
    - any tagged skill → required
+
+   `app-ui-design` is not tripwired: it is a reference to load *before* writing Compose code, and a
+   post-hoc nudge adds nothing. The prompt template says to load it first whenever the step touches
+   `ui/`; the plan tag makes it mandatory.
    If a required skill is missing, the driver resumes the same session once with
    "the diff crossed trigger (b); run `/code-review`, re-run the gate, amend the commit" and
    re-validates. A second miss is `blocked`. Subjective calls stay with the agent.
@@ -180,12 +192,18 @@ design point of the plan; never ask a question interactively.*
    with the worktree as cwd. The tier→model mapping (`MODEL_MAX`, `MODEL_STRONG`, `MODEL_MID`)
    lives at the top of the script only; `--cap <tier>` clamps every step's tier for this run, and
    the prompt tells the session its tier is the ceiling for any sub-agent it spawns.
-4. On `done`: verify `commit` is reachable from HEAD and the `**Shipped**` line exists, run the
-   §2.3 tripwire, then continue. If the gate is red or the result malformed, resume once with a
-   fix-forward nudge, then `blocked`.
-5. On `needs_decision` / `blocked` / a checkpoint: `notify-send`, print the summary and the exact
-   resume command, exit non-zero. Log every session id and result to `.claude/plans/.runs/<name>.log`
-   (gitignored).
+4. On `done`: verify `commit` is reachable from HEAD and the `**Shipped**` line exists, **re-run
+   the gate itself** on the branch head (`:app:testFirebaseDebugUnitTest assembleFirebaseDebug` —
+   CPU, not tokens; the agent's claim of green is the one thing worth not trusting unattended), run
+   the §2.3 tripwire, write a `validated` entry to the log, then continue. A red gate, a missing
+   skill, or a complete-but-schema-invalid result gets one fix-forward resume on a small fixed
+   budget, then `blocked`. A budget or turn exhaustion (non-success result subtype, no structured
+   output) is `blocked` immediately — no resume. On start-up, if the most recently shipped step has
+   no `validated` log entry (it was finished by the human in a resumed session), validate it first.
+5. On `needs_decision` / `blocked` / a checkpoint: notify, print the summary and the exact resume
+   command, exit non-zero. The notify command is one variable at the top of the script (default
+   `notify-send`) so it can be pointed at a phone later without touching the loop. Log every
+   session id, result, `permission_denials` and cost to `.claude/plans/.runs/<name>.log` (gitignored).
 6. After the last step: notify, print `git log main..plan/<name>` and the fast-forward command.
 
 ### 2.6 Local memory inside the worktree
@@ -224,8 +242,9 @@ instead.
 ### Step 2 — The driver (`feat(tooling):`) — skills: code-review; model: strong
 
 - `scripts/run-plan.sh` per §2.5, bash (the repo's other scripts are bash; the interactive shell
-  is fish and must not be assumed). `set -euo pipefail`, `jq` for all JSON, no HEREDOC piped into
-  `git commit` (the `block-heredoc-commit.sh` rule applies to the runner's own commits too).
+  is fish and must not be assumed). `set -euo pipefail`, `jq` for all JSON. The runner never
+  commits. The Order parser reads only the bold span of the `**Order: …**` line — trailing prose
+  after the closing `**` is allowed (`call-audio-routes.md` has some) and must be ignored.
 - `--dry-run` prints, for each unshipped step, the exact `claude` invocation and the tripwire
   thresholds without running anything.
 - Self-check: `scripts/plan-runner/selfcheck.sh` runs the parser and tripwire against fixtures in
@@ -254,22 +273,27 @@ instead.
   no longer describes them as the way plans advance.
 - `docs/GOTCHAS.md`: one entry — "`ask-simplify.sh` reads `/dev/tty`; anything headless must bypass
   it" — host-independent, so it belongs in git, not local memory.
-- Local memory: replace the offline-outbox entry's "hand-off" wording with a pointer to the runner.
+- Local memory: replace the offline-outbox entry's "hand-off" wording with a pointer to the runner —
+  **by the human, not the pilot session** (§2.6: the worktree has no memory store).
 
 ## 4. Verification (pilot checklist, step 3)
 
 1. Driver started from `main` creates `.claude/worktrees/plan-plan-runner` on `plan/plan-runner`
    with Gradle working on the first invocation (no `SDK location not found`, no
    `processGoogleServices` failure).
-2. The step session commits exactly one commit carrying code + `**Shipped**` line; the driver
-   finds it unshipped before and shipped after.
-3. `--dry-run` on `offline-outbox.md` (all shipped) prints "nothing to do"; on a fixture with a
-   `‖` it stops at the checkpoint.
+2. The step session lands two commits — green code+tests, then the `docs(plan):` commit with the
+   `**Shipped**` line naming the first hash; the driver finds the step unshipped before and shipped
+   after, and its own gate re-run on the branch head is green.
+3. `--dry-run` on a fixture with every step shipped prints "nothing to do"; on `offline-outbox.md`
+   (shipped by hand, no `**Shipped**` lines) it lists all eight steps as runnable — the documented
+   reason to dry-run first; on a fixture with a `‖` it stops at the checkpoint.
 4. A forced `needs_decision` (fixture prompt) produces a desktop notification, a
    `**Decision needed**` block, a printed `claude --resume <id>` command that opens in the
    worktree, and a non-zero exit.
 5. A `done` result whose `skills.run` misses a tagged skill triggers exactly one resume nudge,
    then `blocked`.
 6. `git push` from inside a step session is refused by the tool policy, not only by the prompt.
-7. The budget cap ends a step as `blocked` with the partial work left in the worktree and the
-   session id in the log.
+7. The budget cap ends a step as `blocked` with no resume attempted, the partial work left in the
+   worktree and the session id in the log.
+8. The pilot step's log shows zero `permission_denials`; any denial is an allowlist fix before the
+   runner is used on a real plan.
