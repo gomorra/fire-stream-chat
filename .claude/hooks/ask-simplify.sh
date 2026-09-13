@@ -6,6 +6,14 @@
 # /simplify is the QUALITY gate (reuse, simplification, efficiency). For
 # correctness bugs the tool is /code-review — see CLAUDE.md "Review tools".
 
+# Headless guard: a plan-runner step session (PLAN_RUNNER=1, exported by
+# scripts/run-plan.sh) or any session without a terminal has nobody to answer
+# the prompt below — reading /dev/tty would hang the commit forever. Let it
+# through untouched. See .claude/plans/plan-runner.md §2.7.
+if [ "${PLAN_RUNNER:-}" = 1 ] || ! { : < /dev/tty; } 2>/dev/null; then
+    exit 0
+fi
+
 input=$(cat)
 command=$(echo "$input" | jq -r '.tool_input.command // empty' 2>/dev/null)
 
