@@ -251,6 +251,23 @@ pr_result_kind() {
     fi
 }
 
+# pr_result_field <file> <jq-path> [<default>]  → the field as text, or the default
+# ("null" unless given) when the file is missing, empty, not JSON, or the field is
+# null. Never fails, never prints nothing — safe inside $(…) under set -e.
+pr_result_field() {
+    local out
+    out=$(jq -r "$2 | if . == null then empty else tostring end" "$1" 2>/dev/null || true)
+    printf '%s' "${out:-${3:-null}}"
+}
+
+# pr_result_json <file> <jq-path> <default-json>  → the field as compact JSON, or the
+# default when absent — for `jq --argjson`, which rejects an empty string.
+pr_result_json() {
+    local out
+    out=$(jq -c "$2 // empty" "$1" 2>/dev/null || true)
+    printf '%s' "${out:-$3}"
+}
+
 # ---- checkpoints (§2.4) -----------------------------------------------------
 
 # pr_checkpoint_due <log-file> <step-id> <ran-now 0|1>  → exit 0 when the ‖ after

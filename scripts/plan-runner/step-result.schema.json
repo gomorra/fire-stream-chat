@@ -1,5 +1,4 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Plan runner step result",
   "description": "The structured result every headless step session ends with. Contract: .claude/plans/plan-runner.md §2.2. The driver (scripts/run-plan.sh) branches on `status`, enforces `skills.run` against the plan's tags and the diff tripwire, and logs the rest.",
   "type": "object",

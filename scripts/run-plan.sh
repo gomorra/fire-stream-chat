@@ -12,7 +12,9 @@
 # The runner never commits and never pushes. Every commit on plan/<name> is a
 # step session's. State lives in the plan file (**Shipped** blocks) and in the
 # gitignored run log .claude/plans/.runs/<name>.log (one JSON object per line).
-set -euo pipefail
+set -Eeuo pipefail
+# A driver crash must not look like a decision (2) or a block (3): report and exit 1.
+trap 'echo "plan-runner: internal error at line $LINENO (exit $?) — this is a driver bug, not a step result" >&2; exit 1' ERR
 
 # ---- tunables (the only place model ids and effort levels live) -------------
 MODEL_MAX=fable;     EFFORT_MAX=xhigh     # a step's `effort:` tag overrides the tier's effort
@@ -173,15 +175,15 @@ run_claude() { # run_claude <out-file> <prompt>  (cwd = worktree; a non-zero exi
     (cd "$WT" && claude "${CLAUDE_ARGS[@]}" "$2" > "$1" 2> "$1.stderr") || true
 }
 
-# result_get <jq-path>  → the field from RESULT_FILE, or "null". Shape: lib.sh pr_result_kind.
-result_get() { jq -r "$1 // \"null\"" "$RESULT_FILE" 2>/dev/null || echo null; }
+# result_get <jq-path>  → the field from RESULT_FILE as text, or "null". Shape: lib.sh pr_result_kind.
+result_get() { pr_result_field "$RESULT_FILE" "$1"; }
 
-log_result() {
+log_result() { # never fails: every value has a fallback (the file may be empty or not JSON)
     log result --arg step "$STEP" --arg session "$(result_get .session_id)" --arg subtype "$(result_get .subtype)" \
         --arg status "$(result_get .structured_output.status)" --arg commit "$(result_get .structured_output.commit)" \
-        --argjson cost "$(result_get .total_cost_usd | grep -E '^[0-9.]+$' || echo 0)" \
-        --argjson turns "$(result_get .num_turns | grep -E '^[0-9]+$' || echo 0)" \
-        --argjson denials "$(jq -c '.permission_denials // []' "$RESULT_FILE" 2>/dev/null || echo '[]')" \
+        --argjson cost "$(pr_result_json "$RESULT_FILE" .total_cost_usd 0)" \
+        --argjson turns "$(pr_result_json "$RESULT_FILE" .num_turns 0)" \
+        --argjson denials "$(pr_result_json "$RESULT_FILE" .permission_denials '[]')" \
         --arg file "$(rel "$RESULT_FILE")"
 }
 
@@ -320,7 +322,7 @@ run_step() {
     run_claude "$RESULT_FILE" "$prompt"
     SESSION_ID=$(result_get .session_id)
     log_result
-    say "step $STEP session $SESSION_ID: $(result_get .subtype), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(jq '.permission_denials | length' "$RESULT_FILE" 2>/dev/null || echo '?')"
+    say "step $STEP session $SESSION_ID: $(result_get .subtype), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd 0), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
     handle_result
 }
 

@@ -130,6 +130,21 @@ check "execution error → failed"              "failed"     "$(pr_result_kind "
 check "empty file → failed"                   "failed"     "$(pr_result_kind "$F/result-empty.json")"
 check "missing file → failed"                 "failed"     "$(pr_result_kind "$TMP/nope.json")"
 
+echo "Result fields"
+check "field from a complete result"          "s-complete" "$(pr_result_field "$F/result-complete.json" .session_id)"
+check "nested field"                          "done" "$(pr_result_field "$F/result-complete.json" .structured_output.status)"
+check "number as text"                        "0.5" "$(pr_result_field "$F/result-complete.json" .total_cost_usd)"
+check "null field → null"                     "null" "$(pr_result_field "$F/result-complete.json" .structured_output.question)"
+check "false is not null"                     "false" "$(pr_result_field "$F/result-complete.json" .is_error)"
+check "empty file → default"                  "null" "$(pr_result_field "$F/result-empty.json" .session_id)"
+check "empty file → given default"            "0" "$(pr_result_field "$F/result-empty.json" .total_cost_usd 0)"
+check "missing file → default"                "null" "$(pr_result_field "$TMP/nope.json" .session_id)"
+check "json field from a complete result"     "[]" "$(pr_result_json "$F/result-complete.json" .permission_denials '[]')"
+check "json number"                           "0.5" "$(pr_result_json "$F/result-complete.json" .total_cost_usd 0)"
+check "json field from an empty file → default" "[]" "$(pr_result_json "$F/result-empty.json" .permission_denials '[]')"
+check "json default is valid for --argjson"   "ok" "$(jq -nr --argjson d "$(pr_result_json "$F/result-empty.json" .permission_denials '[]')" '"ok"')"
+check "schema has no \$schema key (the CLI rejects draft URIs)" "0" "$(grep -c '"\$schema"' "$HERE/step-result.schema.json" || true)"
+
 echo "Checkpoints"
 check_rc "due when shipped in this run"                 0 pr_checkpoint_due "$F/run.log" 9 1
 check_rc "not due: no log at all"                       1 pr_checkpoint_due "$TMP/nolog" 1 0
