@@ -104,7 +104,11 @@ wrote all four kinds into one narrative; splitting them puts each where its read
 
 A `needs_decision` stop writes a `**Decision needed**` block under the step (question, options,
 the agent's recommendation) and commits nothing — block and work in progress stay uncommitted in
-the worktree, where the resumed session finds them.
+the worktree, where the resumed session finds them. The driver refuses to launch a step while such
+a block is under it. The human answers either by resuming the session, or by editing the
+**branch's** copy of the plan (`.claude/worktrees/plan-<name>/…`, not main's): rename the block to
+`**Decision taken**` and add the answer. The next session for that step honours a `**Decision
+taken**` block, folds it into its departures line and never asks again.
 
 ### 2.2 Step contract — the structured result
 
@@ -166,6 +170,11 @@ minor-bump steps — wherever departures should be signed off before more work b
 wherever `/code-review ultra` is worth its price. Example: `Order: 1 → 2 → 3 → 4 ‖ 5 → 6 ‖ 7 → 8`.
 
 `+` (parallel) is parsed and executed sequentially in v1, with a warning in the log.
+
+A checkpoint is *due* when the step to its left shipped in this invocation, or when the runner had
+a hand in that step (a launch, or a `needs_decision` the human then finished by resuming) and no
+`checkpoint` event has been logged for it — so a stop mid-step cannot erase the pause. A step the
+runner never touched (shipped by hand) passes through; the human already had that pause.
 
 The `needs_decision` rule for step agents, verbatim in the step prompt: *decide routine things
 yourself and record them as departures; stop if the answer would change a §0 decision or a §2
@@ -269,6 +278,17 @@ fill contract — `{{BASE}}` is `git merge-base main HEAD`, `{{SKILLS_FLOOR}}` i
   the mapping at the top of the script is the one place to change.
 - `/code-review` on the diff: it is concurrency-adjacent in the "what runs while the human is
   away" sense — the failure modes are silent skips and runaway retries.
+
+**Shipped** `faf7b9e8` (2026-09-13) — tier: max (interactive, by hand; tagged strong). skills: code-review. Reviewer models: code-review: opus, opus.
+Departures (for sign-off):
+- Self-check lives in its own workflow `.github/workflows/plan-runner.yml` (path-filtered to the runner's files), not as a job in `ci.yml`: `ci.yml` ignores `**.md`, and the self-check's inputs include `fixtures/plan.md` and `step-prompt.md`, so a fixture-only change would have skipped it.
+- The driver skips the Gradle gate re-run when the step's diff touches nothing under `app/`, `baselineprofile/`, `gradle/` or the Gradle files (docs-only steps); §2.5 said unconditional. Ten minutes of CPU for a CHANGELOG edit seemed wrong; the Spec reviewer flagged it as a departure.
+- `--dry-run` marks where a run would stop at a `‖` and keeps listing the later steps for review, instead of stopping (§4 item 3 said "stops at the checkpoint"). The listing is the point of a dry run.
+- Allowlist: no interpreter (`python3` would route around every deny pattern), `rm` only as `rm -rf app/build/*`; `sed`/`awk`/`cp`/`mv` and the coreutils are allowed. Tune from the log's `permission_denials` in the pilot.
+- The `**Decision taken**` block (§2.1) was introduced by step 1's template and is now in the design text.
+- Both reviewers ran on opus (the step's tier ceiling); the Standards reviewer found the start-commit-in-a-subshell bug that made the gate and tripwire dead, the Spec reviewer the checkpoint-erased-by-a-stop and stale-result cases. Fixed before commit; the self-check now has cases for each.
+**(step-2)** for step 3: the driver exports `PLAN_RUNNER=1` already — the hook guard only has to read it. The pilot (`--from 4`) creates the worktree from `main`, so steps 1–3 and this plan must be committed on `main` first. The dry run on the fixture plan is part of the self-check, so `scripts/plan-runner/selfcheck.sh` is the quick regression check after any driver change. Headings must be `### Step N` — `### Phase N` plans (image-editor) are rejected with a clear message and are out of scope.
+**(step-2)** for step 4: the handoff docs move to `done/`; also delete the `implement` skill's claim that it commits (it stays user-only) only if it contradicts CLAUDE.md — check before editing.
 
 ### Step 3 — Hook guard and pilot (`chore:`) — skills: none
 
