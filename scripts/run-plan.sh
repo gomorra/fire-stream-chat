@@ -91,7 +91,8 @@ unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD
 export PLAN_RUNNER=1
 
 ts()  { date -u +%Y-%m-%dT%H:%M:%SZ; }
-say() { printf '[plan-runner %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
+# Progress goes to stderr: validate_step's stdout is its reasons text, captured by the caller.
+say() { printf '[plan-runner %s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
 log() { # log <event> [jq --arg k v]…  → one JSON line; `step` is always a string
     local ev=$1; shift
     jq -nc --arg ts "$(ts)" --arg plan "$NAME" --arg event "$ev" "$@" \

@@ -168,6 +168,7 @@ check "unfilled placeholders are reported"    "{{BASE}}" "$(pr_unfilled "$(pr_re
 
 echo "Driver"
 check_rc "run-plan.sh parses"                 0 bash -n "$HERE/../run-plan.sh"
+check "driver progress lines go to stderr (validate_step's stdout is its reasons)" "1" "$(grep -cE '^say\(\) .*>&2; }$' "$HERE/../run-plan.sh" || true)"
 dry=$(PLAN_RUNNER_RUNS_DIR=$TMP/runs "$HERE/../run-plan.sh" "$PLAN" --dry-run --cap strong 2>"$TMP/dry.err") || { echo "  dry-run exit $? — stderr:"; sed 's/^/    /' "$TMP/dry.err"; fail=$((fail + 1)); }
 check "dry run skips shipped step 1"          "0" "$(printf '%s' "$dry" | grep -c '^step 1 ' || true)"
 check "dry run lists step 2 with its tags"    "1" "$(printf '%s' "$dry" | grep -c '^step 2 .*skills: code-review, simplify; model: strong; budget: 12' || true)"
