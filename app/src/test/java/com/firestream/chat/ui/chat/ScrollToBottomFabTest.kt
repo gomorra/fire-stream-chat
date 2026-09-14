@@ -52,7 +52,7 @@ import org.robolectric.annotation.Config
  * chat screen's height from the newest message (bottom).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ScrollToBottomFabTest {
 
     @get:Rule

@@ -58,7 +58,7 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 > answers `403` on CONNECT instead. It passes locally and in CI. Any *other* failure is real.
 
 - JVM target: 17
-- `minSdk = 29`, `targetSdk = 35`, `compileSdk = 35`
+- `minSdk = 31`, `targetSdk = 35`, `compileSdk = 35`
 - Core library desugaring enabled
 - Package: `com.firestream.chat`
 - Annotation processing: **KSP** (not KAPT)

@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
  * or renames a table without updating the DAO, these tests fail at compile or first save.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class SignalDatabaseSmokeTest {
 
     private lateinit var db: SignalDatabase

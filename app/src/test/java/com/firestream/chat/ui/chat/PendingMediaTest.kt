@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
  * it leans on would test the stubs.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class PendingMediaTest {
 
     private fun uri(value: String): Uri = Uri.parse(value)

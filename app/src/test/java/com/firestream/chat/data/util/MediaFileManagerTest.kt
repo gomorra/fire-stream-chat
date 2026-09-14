@@ -29,7 +29,7 @@ import java.io.File
 // ContentResolver is spied to capture insert/update/delete without a real provider.
 // Stub Application — FireStreamApp is @HiltAndroidApp and crashes Firebase init on JVM.
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class MediaFileManagerTest {
 
     private val realContext: Context = ApplicationProvider.getApplicationContext()

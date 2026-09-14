@@ -33,7 +33,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ### Sends run only through WorkManager — no in-process fast path
 
-**The smell.** Every retryable send is enqueued as WorkManager work (`OutboxScheduler` → `OutboxWorker` → `OutboxSender`) and the tick waits for that job to be scheduled, run, and acknowledged by the server. WorkManager adds latency a direct attempt would not: an expedited job on API 31+ usually starts within a second or two, ordinary work below that — text on API 29/30 — can wait longer under Doze or battery restrictions.
+**The smell.** Every retryable send is enqueued as WorkManager work (`OutboxScheduler` → `OutboxWorker` → `OutboxSender`) and the tick waits for that job to be scheduled, run, and acknowledged by the server. WorkManager adds latency a direct attempt would not: an expedited job usually starts within a second or two, but can wait longer under Doze or battery restrictions.
 
 **Why we haven't fixed it.** The offline outbox plan (§0) decided WorkManager only, so there is one code path with one durability story. An in-process fast path racing the worker would need `OutboxSender`'s per-id lock to arbitrate every time and would re-open the cancellation semantics the outbox removed (a send tied to the chat's `viewModelScope`). Checklist item 6 in [`docs/BACKLOG.md`](docs/BACKLOG.md) measures compose→SENT before and after.
 

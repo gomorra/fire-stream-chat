@@ -36,7 +36,7 @@ import org.robolectric.annotation.Config
  * transaction commits must not replace the newer preview a send wrote to Room.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class ChatDaoUpsertRemoteTest {
 
     private lateinit var db: AppDatabase
