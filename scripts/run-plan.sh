@@ -318,7 +318,7 @@ run_step() {
     fi
     RESULT_FILE=$RUNS/$NAME.step$STEP.$stamp.result.json
     log launched --arg step "$STEP" --arg start "$START_SHA" --arg tier "$TIER" --arg tagged "$TAGGED_TIER" \
-        --arg model "$MODEL" --arg budget "$BUDGET" --arg prompt "$(rel "$prompt_file")"
+        --arg model "$MODEL" --arg effort "$EFFORT" --arg budget "$BUDGET" --arg prompt "$(rel "$prompt_file")"
     say "step $STEP → $MODEL/$EFFORT, budget \$$BUDGET, floor $(pr_join "$FLOOR" none)"
     run_claude "$RESULT_FILE" "$prompt"
     SESSION_ID=$(result_get .session_id)
