@@ -44,8 +44,14 @@ internal class ChatMessageSender(
         if (content.isBlank()) return
         typingDebounceJob?.cancel()
         val state = _uiState.value
+        // Typing-off is a backend write that is awaited until the server acks;
+        // with no (or a bad) connection it does not return for as long as the
+        // connection is missing. It must run *beside* the send, never in front
+        // of it: awaiting it here held the message back from the repository, so
+        // the bubble never appeared while offline and leaving the screen
+        // cancelled the coroutine before the message was ever written to Room.
+        scope.launch { chatRepository.setTyping(chatId, false) }
         scope.launch {
-            chatRepository.setTyping(chatId, false)
             // Deliberately no `isSending = true` here: it gates the send button
             // (ChatScreen), and a text send is local-first — the optimistic
             // bubble is already on screen. Holding the button disabled until the

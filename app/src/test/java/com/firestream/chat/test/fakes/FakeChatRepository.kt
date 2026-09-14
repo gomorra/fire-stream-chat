@@ -3,6 +3,7 @@ package com.firestream.chat.test.fakes
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.GroupPermissions
 import com.firestream.chat.domain.repository.ChatRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -15,6 +16,16 @@ internal class FakeChatRepository : ChatRepository {
     private val _typing = MutableStateFlow<Map<String, List<String>>>(emptyMap())
 
     var nextFailure: Throwable? = null
+
+    /**
+     * When set, every [setTyping] call suspends until this completes — the shape
+     * of a Firestore write awaiting a server ack with no network. Leave it
+     * uncompleted to model "offline for the rest of the test".
+     */
+    var typingGate: CompletableDeferred<Unit>? = null
+
+    /** Every [setTyping] call, in order, as (chatId, isTyping). */
+    val typingCalls: MutableList<Pair<String, Boolean>> = mutableListOf()
 
     val resetUnreadCalls: MutableList<String> = mutableListOf()
     val archivedIds: MutableList<Pair<String, Boolean>> = mutableListOf()
@@ -36,6 +47,8 @@ internal class FakeChatRepository : ChatRepository {
         _chats.value = emptyList()
         _typing.value = emptyMap()
         nextFailure = null
+        typingGate = null
+        typingCalls.clear()
         chatByIdResult = null
         resetUnreadCalls.clear()
         archivedIds.clear()
@@ -62,7 +75,10 @@ internal class FakeChatRepository : ChatRepository {
     override fun observeTyping(chatId: String): Flow<List<String>> =
         _typing.map { it[chatId].orEmpty() }
 
-    override suspend fun setTyping(chatId: String, isTyping: Boolean) = Unit
+    override suspend fun setTyping(chatId: String, isTyping: Boolean) {
+        typingCalls.add(chatId to isTyping)
+        typingGate?.await()
+    }
 
     // ── Unread ────────────────────────────────────────────────────────────────
 
