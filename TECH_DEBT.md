@@ -478,6 +478,23 @@ twin together, never one alone.
 
 ---
 
+### Robolectric `@Config(sdk = [29]` is a bare literal repeated across ~34 test files
+
+**The smell.** Every JVM-Robolectric test pins its own `@Config(sdk = [...], application = ...)`.
+The `sdk` value has no shared constant — it's the same integer literal copy-pasted into each
+file. Raising `minSdk` (29 → 31, `518acbae`) meant a mechanical `sed` across all ~34 of them
+instead of a one-line change to a shared default.
+
+**Why we haven't fixed it.** No live bug, and it wasn't asked for by anything in flight — flagged
+by `/code-review`'s Standards axis on the minSdk-bump step as a judgement-call smell (Primitive
+Obsession / Shotgun Surgery), not a documented-standard violation.
+
+**When to revisit.** Next time `minSdk` moves and this sed has to be repeated, or if Robolectric's
+own `robolectric.properties` / a project-wide `sdk` default can absorb it without weakening the
+per-file `Config.NONE` manifest note in `docs/PATTERNS.md`.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

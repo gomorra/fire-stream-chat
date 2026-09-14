@@ -174,6 +174,34 @@ minor is enough, this is not an API break; the skill decides).
 Gate: full `:app:testFirebaseDebugUnitTest` — this is the step most likely to surface a
 surprise, so run the whole suite, not a filter.
 
+**Shipped** `518acbae` (2026-09-14) — tier: mid. skills: changelog-release, code-review.
+Reviewer models: code-review: sonnet, sonnet.
+Departures (for sign-off): 34 Robolectric `@Config(sdk = [29]` pins found and bulk-edited to
+`sdk = [31]`, not the 26 the plan estimated (re-verified against code, not a scope change). Three
+*other* tests — `TimerAlarmRequestTest`, `TimerAlarmReceiverIntentTest`, and
+`TimerAlarmSchedulerTest` — already pinned `sdk = [Build.VERSION_CODES.UPSIDE_DOWN_CAKE]` (34) and
+were never `sdk = [29]`, so they're not part of the 34 edited files; `TimerAlarmSchedulerTest` is
+still touched in this commit, but only to delete its now-dead pre-S test, not its `@Config`. (An
+earlier draft of this note conflated "34 edited" with these 3 untouched files, which the
+step's own `/code-review` Spec review caught as internally inconsistent — corrected here; it
+doesn't change what shipped, only what this line claims about it.) Where the plan's estimate of 26
+came from doesn't reconcile against either count. Version bump taken as **major** (`1.31.1` → `2.0.0`), not the plan's
+suggested minor: the commit carries an explicit `!` breaking-change marker (dropping install/update
+on two OS versions), and the CHANGELOG header's own rule generalizes `!` → major regardless of
+`feat`/`chore` prefix. CHANGELOG entry landed as a separate `docs(changelog): 352f31b7` commit
+rather than inside the code commit — a CHANGELOG line citing its own commit's hash is circular
+(the hash depends on the tree, which includes the line), so it cannot be self-referential in one
+commit; this matches the repo's existing convention of a follow-up `docs(changelog):` commit
+(see `168d6efb`, `349d842a` in prior history) and is otherwise the two commits the step asked for.
+No Roborazzi diff on API 31 — snapshot PNGs untouched, `testFirebaseDebugUnitTest` passed clean.
+`CLAUDE.md`'s `minSdk = 29` line and one stale "API 29/30" aside in `TECH_DEBT.md` were also
+updated (not in the plan's file list, but left stale they'd mislead the next session).
+`/code-review` (Standards + Spec, both sonnet, run on `efd0fe8f..518acbae`) found no hard
+violations on either axis and no missing/wrong requirements; the only finding besides the count
+fixed above was a Standards judgement call — the bare `sdk = [29]` literal repeated across 34
+files has no shared constant, so a future SDK bump pays this same bulk-edit cost again — logged
+as a candidate in `TECH_DEBT.md` rather than acted on now (small, no live bug, not asked for).
+
 ### Step 2 — model + policy + tests (`feat(call)`, no CHANGELOG yet — nothing visible)
 Files: `domain/model/CallState.kt`, new `data/call/CallAudioRoutePolicy.kt`,
 `CallStateHolder.kt` (`updateAudioRoutes`), `CallStateHolderTest.kt`,
