@@ -145,7 +145,7 @@ internal data class AdjustCallbacks(
  *
  * The screen builds an [AdjustStack] of [RasterOp]s and flattens it **once**, on
  * Done, into a single new JPEG that becomes one entry in the preview's edit
- * history (`.claude/plans/image-editor.md` §2.1). Cancel writes nothing at all.
+ * history (`docs/plans/image-editor.md` §2.1). Cancel writes nothing at all.
  * Nothing here is a NavHost route: `pendingMedia` is state local to `ChatScreen`
  * and making the editors routes would force the whole batch through a
  * `SavedStateHandle` round-trip for no user-visible gain (§2.4).
@@ -200,7 +200,7 @@ internal fun AdjustImageScreen(
      * user is *not* looking at owns some of the oldest files in the cache while
      * its newest one is still the image that page shows. Without this, flattening
      * a crop on page 1 can delete the crop already made on page 3
-     * (`.claude/plans/image-editor.md` §3, Phase 2 departure 7).
+     * (`docs/plans/image-editor.md` §3, Phase 2 departure 7).
      */
     liveSteps: () -> Set<Uri> = { emptySet() },
 ) {

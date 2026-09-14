@@ -117,7 +117,7 @@ Four open items from the step-4 reviews also belong to that check, two of them b
 pre-key replenishment (one fixed-id pre-key, replenished only after a successful decrypt),
 the double decrypt between the chat-list sync and the open chat, the stale-bundle race when
 a peer re-registers, and the lock tests' 300 ms window
-(`.claude/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
+(`docs/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
 
 ### Newer-only chat preview and send timestamps (offline outbox step 5, 2026-09-11)
 
@@ -611,7 +611,7 @@ data-model change, and the provider decision a GIF forces:
   **shipped with the editor in Phase 5b**, because it is flattened into the JPEG.
 - **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
   impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
-  one frame and a worse sticker (`.claude/plans/image-editor.md` §2.8).
+  one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
 - **The provider-privacy decision, already made and written down:** sending a Giphy URL
   makes the recipient's device fetch from Giphy, which tells a third party who received
   what and hollows out the Signal-Protocol story. For this app only downloading the bytes
@@ -648,7 +648,7 @@ data-model change, and the provider decision a GIF forces:
 - Files: `data/crypto/SignalManager.kt`, new `ui/settings/LinkedDevicesScreen.kt`
 
 ### Offline resilience — what is left after the outbox (6.3)
-- The durable outbox itself shipped in step 6 of `.claude/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
+- The durable outbox itself shipped in step 6 of `docs/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
 - The plan is complete: the "Waiting for network…" hint (step 7) and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry) shipped — see *Pending on-device verification* above.
 - The message-info sheet still says "Message not delivered" for a message the worker failed because the recipient is blocked; a "you can't message this user" line needs a failure reason on the row.
 - A process killed mid-download after a push (the handler's budget ran out) re-queues nothing; if the daily backfill turns out too slow for that case on hardware, the push reconcile could queue the backfill run up front for a media message instead of only on failure.
@@ -708,7 +708,7 @@ Less-specified than the items above — kept because the thinking is worth not r
 - **Compact/comfortable density toggle** — spacious vs. compact chat layouts
 - **Animated transitions** — shared element transitions between chat list and chat detail
 - **Haptic feedback** — subtle vibrations on message send, reactions, and gestures
-- **Save from the profile's shared-media gallery** — it shows the same chat photos as the chat's own gallery, which has Save to Downloads, but offers no save. Needs `MediaFileManager` and a snackbar channel in `ProfileViewModel`; found in the image editor's Phase 6 download-button audit and deliberately left out of that commit (`.claude/plans/image-editor.md`, Phase 6)
+- **Save from the profile's shared-media gallery** — it shows the same chat photos as the chat's own gallery, which has Save to Downloads, but offers no save. Needs `MediaFileManager` and a snackbar channel in `ProfileViewModel`; found in the image editor's Phase 6 download-button audit and deliberately left out of that commit (`docs/plans/image-editor.md`, Phase 6)
 
 ### AI-powered features
 - **Smart replies** — contextual quick responses based on incoming messages

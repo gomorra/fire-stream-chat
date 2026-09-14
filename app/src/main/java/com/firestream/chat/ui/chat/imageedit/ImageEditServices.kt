@@ -23,7 +23,7 @@ import com.firestream.chat.domain.util.SourceImage
  *
  * ### Why lambdas rather than the rasterizer
  *
- * No editor composable touches Hilt (`.claude/plans/image-editor.md` §2.2). The
+ * No editor composable touches Hilt (`docs/plans/image-editor.md` §2.2). The
  * hosting ViewModel owns `ImageEditRasterizer` — the editor's single
  * `UI_ALLOWED_DATA_IMPORTS` entry — and hands its capabilities down as plain
  * functions, so every screen here is constructible in a Robolectric test with a

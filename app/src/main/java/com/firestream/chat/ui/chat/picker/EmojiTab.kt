@@ -261,7 +261,7 @@ private data class SizePickerState(
  * Content only: the search field, the tab island and the delete button belong to
  * [PickerPanel], and [query] arrives from it already scoped to this tab. What
  * stays here is what is genuinely about emoji and would leak into the sticker
- * tab if the shell owned it (`.claude/plans/image-editor.md` §4):
+ * tab if the shell owned it (`docs/plans/image-editor.md` §4):
  *
  * - **The frozen recents order.** [recentEmojis] is snapshotted once per
  *   composition of this tab, so the grid never reorders under the user's finger

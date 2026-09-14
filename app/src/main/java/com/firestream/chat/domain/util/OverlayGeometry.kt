@@ -31,7 +31,7 @@ enum class OverlayHandle {
  * be able to disagree. A sticker that sat over a face on screen and landed a
  * centimetre off in the JPEG is the same class of failure as a blur that missed,
  * and the fix is the same: one copy of the numbers, as pure functions a JVM test
- * can pin down (`.claude/plans/image-editor.md` §2.3).
+ * can pin down (`docs/plans/image-editor.md` §2.3).
  *
  * It sits in `domain/` because both renderers need it and `ArchitectureTest`
  * forbids `data → ui`: a helper in `ui/chat/imageedit/` would be unreachable
@@ -80,7 +80,7 @@ object OverlayGeometry {
      * a deliberate tilt holds still — and it is what makes a dedicated rotate
      * handle worth having at all. A combined scale-and-rotate corner cannot
      * snap, because every rotation it produces is also a resize
-     * (`.claude/plans/image-editor.md` §3 Phase 5).
+     * (`docs/plans/image-editor.md` §3 Phase 5).
      */
     const val ROTATION_SNAP_DEGREES = 15f
 
@@ -290,7 +290,7 @@ object OverlayGeometry {
      * matters, and stops being fine the moment a shape is in — a box drawn round
      * something is usually wanted axis-aligned or at a deliberate angle, and a
      * combined handle cannot rotate without also resizing
-     * (`.claude/plans/image-editor.md` §3 Phase 5).
+     * (`docs/plans/image-editor.md` §3 Phase 5).
      */
     fun handleCenter(
         handle: OverlayHandle,

@@ -29,7 +29,7 @@ import com.firestream.chat.ui.chat.imageedit.drawOverlayShape
  * ### Why shapes are here at all
  *
  * "Put a box round this" is the other half of the blur tool's job
- * (`.claude/plans/image-editor.md` §3 Phase 5). A redaction that nobody notices
+ * (`docs/plans/image-editor.md` §3 Phase 5). A redaction that nobody notices
  * is a redaction nobody trusts, and pointing at the thing you covered is what
  * makes the covering legible. Both serve the same redact-before-sending purpose,
  * which is why they ship together.

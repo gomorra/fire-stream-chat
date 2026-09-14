@@ -16,7 +16,7 @@ import org.junit.Test
  * The draw screen's history, and what survives a rotation.
  *
  * Linear, one stroke at a time, and the same cursor-not-a-stack shape
- * `PendingMedia` and [AdjustStack] use — see `.claude/plans/image-editor.md`
+ * `PendingMedia` and [AdjustStack] use — see `docs/plans/image-editor.md`
  * §2.7 for why redo forbids undo from simply dropping the last item.
  */
 class DrawStackTest {

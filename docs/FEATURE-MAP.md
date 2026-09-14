@@ -62,7 +62,7 @@ System `SpeechRecognizer` powering the composer mic button. Language picker in S
 
 Local-first image send: compress → store locally → display immediately → upload with progress → backfill on first launch.
 
-Editing sits *before* that pipeline and leaves it untouched: each editor screen rasterizes its layer into a new JPEG in `cacheDir/edits/` and `PendingMedia` points at the newest one, so `sendMediaMessage` receives a different URI and is otherwise unaware editing exists (`.claude/plans/image-editor.md` §2.1).
+Editing sits *before* that pipeline and leaves it untouched: each editor screen rasterizes its layer into a new JPEG in `cacheDir/edits/` and `PendingMedia` points at the newest one, so `sendMediaMessage` receives a different URI and is otherwise unaware editing exists (`docs/plans/image-editor.md` §2.1).
 
 | File | Role |
 |---|---|
@@ -135,7 +135,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 
 **Second entry point — a photo already sent:** `FullscreenImagePager` / `FullscreenImageViewer` (Edit, beside Save and Close) → `ChatViewModel.editFromViewer()` → `MediaFileManager.downloadAndSave()` only if there is no readable local file → `ImageEditRasterizer.importSource()` copies it into `cacheDir/edits/sources/` → `OverlaysState.viewerEdit = Ready(uri)` → `ChatScreen` consumes it into a one-item `pendingMedia` (carrying the viewer's memory-cache key as the preview's placeholder) and closes the viewer only once the preview has faded in over it (`OnEnterSettled`) → the same `ImagePreviewScreen` path as above. The copy, not the message's own file, is the batch's `originalUri`, and the result is a new message.
 
-The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below), 5b added the overlay screen and its three editor-only tabs, and Phase 6 added the entry from the fullscreen viewer above.
+The `ui/chat/imageedit/` package is Phases 1–4 of [`docs/plans/image-editor.md`](../docs/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below), 5b added the overlay screen and its three editor-only tabs, and Phase 6 added the entry from the fullscreen viewer above.
 
 ---
 
@@ -146,7 +146,7 @@ a detail of any screen. `PickerPanel` owns the chrome — a search control, an i
 tabs, a delete button for the host's selection — and **implements no content**: what a tab
 shows is the host's business, so a tab's own state stays with the host that has it.
 
-**The island's tabs are declared by the host** (`.claude/plans/image-editor.md` §2.8), and
+**The island's tabs are declared by the host** (`docs/plans/image-editor.md` §2.8), and
 a host that declares one tab renders no island at all — so nothing ever ships greyed-out
 and unreachable, and the three pre-existing hosts look exactly as they did before the
 shell existed.
@@ -253,7 +253,7 @@ RTDB-backed presence with a Cloud Function mirror to Firestore.
 
 ## Offline Outbox (queued, idempotent sends)
 
-A retryable send — text, photo, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it. The row is the queue: it survives leaving the chat, process death and reboot, every attempt resumes from what the row already records, and the client-generated id is at once the Room key, the Firestore document id and the Storage object name, so a lost acknowledgement can never produce a second copy. Design and decisions: `.claude/plans/offline-outbox.md`; the convention: [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker).
+A retryable send — text, photo, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it. The row is the queue: it survives leaving the chat, process death and reboot, every attempt resumes from what the row already records, and the client-generated id is at once the Room key, the Firestore document id and the Storage object name, so a lost acknowledgement can never produce a second copy. Design and decisions: `docs/plans/offline-outbox.md`; the convention: [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker).
 
 | File | Role |
 |---|---|

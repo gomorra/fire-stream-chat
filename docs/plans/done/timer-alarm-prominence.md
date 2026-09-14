@@ -153,7 +153,7 @@ Runs in parallel with Step 3 — it only needs Step 2's enums.
 `CHANGELOG.md` (feat → minor bump), `docs/FEATURE-MAP.md` if files were added,
 `docs/GOTCHAS.md` for anything machine-independent the spike turns up (channel
 immutability and the insistent-vibration finding both qualify), plan archived to
-`.claude/plans/done/`.
+`docs/plans/done/`.
 
 ## Order
 

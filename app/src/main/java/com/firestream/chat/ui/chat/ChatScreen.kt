@@ -2324,7 +2324,7 @@ fun ChatScreen(
 
     // "Edit" from any of the viewers above, once the photo is in the edit cache:
     // the send preview opens on a one-item batch whose original is that copy
-    // (`.claude/plans/image-editor.md` §2.6) and the viewer closes — the result
+    // (`docs/plans/image-editor.md` §2.6) and the viewer closes — the result
     // is a new message, not a change to the one on screen, so backing out of the
     // preview must land in the chat, not in the viewer. Search, if open, stays
     // open: its results took a query to produce.

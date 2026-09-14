@@ -7,7 +7,7 @@ import org.junit.Test
 
 /**
  * The mapping every overlay tool asks "where on the bitmap did the finger land"
- * through (`.claude/plans/image-editor.md` §2.3). Pure JVM: no Robolectric, no
+ * through (`docs/plans/image-editor.md` §2.3). Pure JVM: no Robolectric, no
  * Compose — the whole point of the helper is that this arithmetic is checkable
  * without a device, because a few pixels of drift here is a blur that misses the
  * face it was meant to cover.

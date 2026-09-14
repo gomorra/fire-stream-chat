@@ -156,7 +156,7 @@ echo "Prompt template"
 TPL=$HERE/step-prompt.md
 commits=$'abc1234 feat: one\n0123abc docs(plan): two'
 special='a $HOME & \\backslash "quoted" `tick` {{NOT_A_KEY}}'
-out=$(pr_render "$TPL" "PLAN_PATH=.claude/plans/x.md" "PLAN_NAME=x" "STEP=2" \
+out=$(pr_render "$TPL" "PLAN_PATH=docs/plans/x.md" "PLAN_NAME=x" "STEP=2" \
     "STEP_HEADING=$h2" "TIER=strong" "TAGGED_TIER=max" "SKILLS_FLOOR=code-review, simplify" \
     "BRANCH=plan/x" "BASE=deadbeef" "COMMITS=$commits" "SCHEMA_PATH=scripts/plan-runner/step-result.schema.json")
 check "header comment stripped"               "0" "$(printf '%s' "$out" | grep -c '^<!--' || true)"

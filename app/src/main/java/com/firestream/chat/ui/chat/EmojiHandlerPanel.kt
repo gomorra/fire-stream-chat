@@ -31,7 +31,7 @@ enum class EmojiMode {
  * ### Why this is a thin alias rather than the panel itself
  *
  * The image editor needed a picker with four tabs, and the app already had one
- * picker mounted from three places (`.claude/plans/image-editor.md` §2.8).
+ * picker mounted from three places (`docs/plans/image-editor.md` §2.8).
  * Adding a fourth copy would have been the third mistake in a row, so the shell
  * became [PickerPanel] and the grid became [EmojiTab]. This alias is what let
  * that extraction land as a commit with **no behaviour change at all**: the

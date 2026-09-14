@@ -389,7 +389,7 @@ class ChatViewModel @Inject constructor(
      * standard quality — what the HD sheet's two rows are labelled with.
      *
      * The rasterizer is injected here rather than into the sheet so no editor
-     * composable touches Hilt (`.claude/plans/image-editor.md` §2.2): every one
+     * composable touches Hilt (`docs/plans/image-editor.md` §2.2): every one
      * of them takes plain lambdas and is constructible in a Robolectric test
      * with a fake.
      */
@@ -416,7 +416,7 @@ class ChatViewModel @Inject constructor(
      * Routed through the rasterizer rather than computed on the screen so the
      * mosaic the user checks a redaction against is the same one the flatten
      * writes — the difference between a preview that promises and a file that
-     * delivers (`.claude/plans/image-editor.md` §3, Phase 4).
+     * delivers (`docs/plans/image-editor.md` §3, Phase 4).
      */
     internal suspend fun pixelateForEditor(bitmap: Bitmap): Bitmap? =
         withContext(Dispatchers.Default) {
@@ -432,7 +432,7 @@ class ChatViewModel @Inject constructor(
      * cache's byte-budget eviction. It is not defaulted anywhere on the way down
      * from here: eviction is globally oldest-first, so a forgotten argument
      * would not fail to compile, it would delete the crop the user made on
-     * another page of the batch (`.claude/plans/image-editor.md` §3).
+     * another page of the batch (`docs/plans/image-editor.md` §3).
      */
     internal suspend fun rasterizeEdit(
         source: Uri,
@@ -483,7 +483,7 @@ class ChatViewModel @Inject constructor(
      * local file yet, copies it into the edit cache, and publishes the copy as
      * [ViewerEdit.Ready] for the screen to open the send preview on.
      *
-     * The result is a *new* message (`.claude/plans/image-editor.md` §2.6) — the
+     * The result is a *new* message (`docs/plans/image-editor.md` §2.6) — the
      * sent one is immutable — which is why the copy, not the message's own file,
      * becomes the batch's original: see [ImageEditRasterizer.importSource].
      *

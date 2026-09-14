@@ -1,10 +1,10 @@
 <!--
-Step prompt template for the plan runner (.claude/plans/plan-runner.md).
+Step prompt template for the plan runner (docs/plans/done/plan-runner.md).
 scripts/run-plan.sh fills the {{PLACEHOLDERS}} and passes the result as the prompt of one
 headless `claude -p` session per step. Everything below the line is what the step session reads.
 
 Placeholders:
-  {{PLAN_PATH}}     repo-relative plan path, e.g. .claude/plans/call-audio-routes.md
+  {{PLAN_PATH}}     repo-relative plan path, e.g. docs/plans/call-audio-routes.md
   {{PLAN_NAME}}     plan file stem, e.g. call-audio-routes
   {{STEP}}          step number from the Order line
   {{STEP_HEADING}}  the step's full heading line, tags included
@@ -94,14 +94,6 @@ Follow CLAUDE.md's post-step workflow, then land the step as two commits:
    **Shipped** `<code commit hash>` (<YYYY-MM-DD>) — tier: {{TIER}}<, tagged {{TAGGED_TIER}} if capped>. skills: <run list or none>. Reviewer models: <or none>.
    Departures (for sign-off): <one line each, or "none">
    ```
-
-   **If writing the `**Shipped**` block (or any other edit) to a file directly under
-   `.claude/plans/` is refused as "a sensitive file"**, that's the harness protecting the plan
-   documents from a direct `Edit`/`Write`/Bash content-write in a headless session — `git mv` is
-   exempt (it runs under the `git *` allowlist). Work around it: `git mv` the plan file to a
-   scratch path outside `.claude/plans/` (e.g. the worktree root), edit it there with the normal
-   tools, then `git mv` it back to its original path before committing. The resulting diff and
-   history are identical to a direct edit.
 
 Rules that hold throughout:
 

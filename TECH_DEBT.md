@@ -17,7 +17,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **When to revisit.** The next time someone is actively debugging E2E decryption on a real device with encryption re-enabled (recall `BuildConfig.DEBUG` disables Signal in debug builds), or when we gain integration tests that exercise the full snapshot → decrypt → Room pipeline. Don't take this on as a standalone "cleanup" task.
 
-**Related:** finding #2 from the April 2026 audit at `/root/.claude/plans/graceful-mixing-plum.md`.
+**Related:** finding #2 from the April 2026 audit at `/root/docs/plans/graceful-mixing-plum.md`.
 
 ---
 
@@ -177,7 +177,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **The smell.** `ChatViewModel.ensureLocalCopiesIfBrowsingMedia` fires `messageRepository.ensureLocalCopiesForChat(chatId)` on `@ApplicationScope` the first time a Photos or Videos chip activates in a chat. That call deliberately **bypasses the auto-download preference** and downloads every not-yet-local image, video and document in the chat. Before the search merge it took navigating to a dedicated Shared Media screen; now an idle chip tap while text-searching starts it, on a metered connection, with no way to cancel — it is on the application scope precisely so it survives the user leaving.
 
-**Why we haven't changed it.** It is what makes the browse worth opening: the grid fetches these files over the network to render them anyway, so without the backfill every re-entry re-downloads the same remote-only media. That was the original rationale in `SharedMediaViewModel`, and the chat-search-filters plan carried it over deliberately (`.claude/plans/done/chat-search-filters.md`, step 6). Narrowing it to the explicit "Shared Media" entry point would leave the chip-opened browse — now the *primary* way in — re-downloading forever, which is the bug the backfill exists to prevent. It is also once-per-ViewModel, so it cannot loop.
+**Why we haven't changed it.** It is what makes the browse worth opening: the grid fetches these files over the network to render them anyway, so without the backfill every re-entry re-downloads the same remote-only media. That was the original rationale in `SharedMediaViewModel`, and the chat-search-filters plan carried it over deliberately (`docs/plans/done/chat-search-filters.md`, step 6). Narrowing it to the explicit "Shared Media" entry point would leave the chip-opened browse — now the *primary* way in — re-downloading forever, which is the bug the backfill exists to prevent. It is also once-per-ViewModel, so it cannot loop.
 
 **When to revisit.** If a real device on a metered connection shows this costing meaningful data, or if the auto-download preference gains a "never, and mean it" setting. The honest fix is probably to gate the backfill on the browse actually rendering results, or to scope it to the filtered result set rather than the whole chat, rather than to move where it fires. Raised by the code-review pass on `56cb67a`…`261704d` (2026-09-07).
 
@@ -219,7 +219,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **The smell.** `ImageEditGeometry.WORKING_MAX_DIMENSION` decodes every edit pass at 4096 px on the long edge, so an HD send of a photo the user *edited* carries less detail than an HD send of the same photo untouched — which keeps its full resolution through `ImageCompressor`. Two images that look identical in the preview leave the device at different resolutions, and nothing in the UI says so.
 
-**Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `.claude/plans/image-editor.md` §2.1 weighed and rejected for this feature.
+**Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `docs/plans/image-editor.md` §2.1 weighed and rejected for this feature.
 
 **When to revisit.** If generational quality loss or the ceiling turns out to be visible in practice — the trigger §5 of the plan records for reopening the accumulated-`ImageEdit` decision. Revisit the two together, never separately: raising the ceiling without changing the model just moves the OOM. Landed with Phase 2 of the image editor (2026-09-09).
 
@@ -251,7 +251,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ## PocketBase v0 walking-skeleton — follow-ups
 
-The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `.claude/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
+The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `docs/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
 
 ### PocketBase push: automate FCM access-token refresh
 
@@ -417,7 +417,7 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ### The image editor's resize presets cannot exceed `ImageCompressor.MAX_DIMENSION`
 
-**The smell.** `.claude/plans/image-editor.md` §2.5 says "an explicit resize wins. If the
+**The smell.** `docs/plans/image-editor.md` §2.5 says "an explicit resize wins. If the
 user sets an output long edge in the adjust screen, that is the resolution; HD then governs
 only the encode quality (100 vs 80), not a second downscale." Nothing carries that choice
 into the send: `MessageRepositoryImpl.sendMediaMessage` calls

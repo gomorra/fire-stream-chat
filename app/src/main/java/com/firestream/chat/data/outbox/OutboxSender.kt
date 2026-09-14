@@ -20,7 +20,7 @@
 // Don't put here: validation, the optimistic insert, staging the input, the
 //   block check and FAILED marking — they stay in MessageRepositoryImpl and
 //   OutboxWorker, where a definite block and an unanswerable block check part
-//   ways (.claude/plans/offline-outbox.md §2.5). The encrypt-or-plaintext
+//   ways (docs/plans/offline-outbox.md §2.5). The encrypt-or-plaintext
 //   decision — MessageWriter. No semaphore of its own either —
 //   "MediaProcessingLimiter owns the concurrency bound" (docs/PATTERNS.md).
 // endregion

@@ -7,7 +7,7 @@ screen) and Phase 5 (the picker shell and the overlay screen) on 2026-09-10; Pha
 (edit from the fullscreen viewer) on 2026-09-11. **Phases 3 to 6 are build- and
 test-verified only — nothing in them has been on hardware**, and every unchecked
 item is listed in `docs/BACKLOG.md` §*Pending on-device verification*. Once those
-passes are run the plan is a candidate for `.claude/plans/done/`.
+passes are run the plan is a candidate for `docs/plans/done/`.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/

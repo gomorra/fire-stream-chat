@@ -2,7 +2,7 @@ Implement **Phase 5** of the image editor in this repo (FireStream Chat, Android
 
 ## Read first
 
-`.claude/plans/image-editor.md` is the brief and is self-sufficient. **§3 "Phase 5"** is the deliverable list; it is governed by §2.1 (rasterize per screen), §2.3 (`ImageFitMapper`, geometry normalized to the image), §2.4 (editors are full-screen overlays, NOT NavHost routes), §2.7 (undo/redo and layer visibility at two levels), §2.8 (one picker, four hosts, host-declared tabs) and §4 (Traps). Do not re-derive or re-litigate any of it.
+`docs/plans/image-editor.md` is the brief and is self-sufficient. **§3 "Phase 5"** is the deliverable list; it is governed by §2.1 (rasterize per screen), §2.3 (`ImageFitMapper`, geometry normalized to the image), §2.4 (editors are full-screen overlays, NOT NavHost routes), §2.7 (undo/redo and layer visibility at two levels), §2.8 (one picker, four hosts, host-declared tabs) and §4 (Traps). Do not re-derive or re-litigate any of it.
 
 Also read `CLAUDE.md` (build gate, post-step workflow, Key Conventions, Change Safety, Model Guidelines) and `docs/PATTERNS.md#image-edits-rasterize-per-screen-overlay-geometry-is-normalized`.
 

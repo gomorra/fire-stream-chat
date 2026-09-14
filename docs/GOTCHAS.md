@@ -136,7 +136,7 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   it, keeping the placeholder opaque because it came from the cache. And **a
   progress scrim published before a fast operation flashes:** gate `Preparing` on
   the slow path (a download), not on the operation as a whole. Bit us as Phase 6's
-  "pops away and comes back" (`.claude/plans/image-editor.md`, Phase 6 items 8, 9,
+  "pops away and comes back" (`docs/plans/image-editor.md`, Phase 6 items 8, 9,
   14).
 
 ## Coroutines / lifecycle
@@ -360,10 +360,11 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   and either way the commit never lands. The hook now guards on `PLAN_RUNNER=1` (set by
   `scripts/run-plan.sh`) and on `/dev/tty` being unreadable at all, letting the commit
   through untouched in both cases. Any *other* hook that reads `/dev/tty` needs the same
-  guard before it can be trusted headless. See `.claude/plans/plan-runner.md` §2.7.
+  guard before it can be trusted headless. See `docs/plans/done/plan-runner.md` §2.7.
 
 - **A headless Claude session cannot write under `.claude/` — and an allow rule does not help.**
-  In `claude -p`, every `Edit`/`Write` of a file below `.claude/` (plans included), and every
+  In `claude -p`, every `Edit`/`Write` of a file below `.claude/` (which is why plans moved to
+  `docs/plans/` on 2026-09-14), and every
   Bash command whose text names such a path as a write target or even a `cp` source, is refused
   with "requested permissions to edit … which is a sensitive file". Nobody can answer the prompt,
   so the call is silently denied and the session reasons around it. `--allowedTools
