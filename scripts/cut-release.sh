@@ -115,6 +115,11 @@ fi
 CHANGELOG="CHANGELOG.md"
 [[ -f "$CHANGELOG" ]] || die "$CHANGELOG not found at repo root"
 
+UNRELEASED_COUNT="$(grep -c '^## \[UNRELEASED\]' "$CHANGELOG" || true)"
+if [[ "${UNRELEASED_COUNT:-0}" -gt 1 ]]; then
+    die "CHANGELOG.md has $UNRELEASED_COUNT '[UNRELEASED]' sections — an older one below the top would ship under $TAG with a header that still says unreleased; merge it into the top section first"
+fi
+
 LINE_NO="$(grep -n -m1 '^## ' "$CHANGELOG" | cut -d: -f1 || true)"
 [[ -n "$LINE_NO" ]] || die "no top-level '## ' section header found in $CHANGELOG"
 
