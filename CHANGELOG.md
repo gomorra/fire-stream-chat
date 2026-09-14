@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.31.1] — 2026-09-14
+
+### Fixed
+
+- **A text message written without a connection shows up in the chat at once, and is never lost.** With flight mode on, or on a mobile connection too poor to reach the server, a photo appeared immediately with its waiting clock but a text message did not appear at all; it only turned up, and went out, once the network was back, and if the app was swiped away before that the message was gone for good. Before handing the message over, the send was waiting for the server to confirm that the "typing…" indicator had been cleared, a wait that never ends while the connection is missing. The indicator is still cleared, but the message no longer waits for it: it is stored on the phone and shows its clock straight away, exactly as a photo does. (`d199da08`)
+
 ## [1.31.0] — 2026-09-12
 
 ### Added

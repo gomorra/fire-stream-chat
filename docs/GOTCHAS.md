@@ -137,6 +137,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **`BroadcastReceiver.goAsync()` work needs IO dispatcher + timeout.** Wrap in
   `withContext(Dispatchers.IO) { withTimeoutOrNull(8_000L) { ... } }` to stay under the
   ~10s receiver budget; do fast local work first, slow remote work second.
+- **Never await a backend write in front of an optimistic local insert.** A
+  Firestore `update(...).await()` completes only on the server ack, so offline (or on
+  a connection the phone still reports as live) it suspends for as long as the network
+  is missing. `ChatMessageSender.sendMessage` awaited the typing-off write before
+  calling the repository: with flight mode on, no text bubble appeared at all while a
+  photo showed its clock at once, and swiping the app away cancelled the coroutine
+  before the message ever reached Room — lost for good (fixed in `d199da08`, regression
+  `ChatMessageSenderOfflineTest`). Best-effort remote writes on a send path run as a
+  sibling `scope.launch`, never as a step before the insert; anything a send must do
+  before its row exists has to be local.
 - **List-shaped `StateFlow` observers must diff per id.** Never
   `forEach { reactTo(it) }` on each emission — keep a `Map<id, snapshot>` and react
   only to deltas, even when the side effect is idempotent (binder calls etc. are not

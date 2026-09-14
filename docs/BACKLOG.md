@@ -108,6 +108,14 @@ over an existing install**, with a second device as recipient:
    notification while it runs.
 9. Give-up: keep a captive-portal Wi-Fi (connected, no Firestore) for the eight attempts
    (about 20 minutes of backoff) → the bubble turns failed; tap retry once online → it sends.
+
+First device pass, 2026-09-14 (phone, mobile data): items 1 and 2 **failed for text** — the
+image showed its clock, three texts showed nothing at all until the network came back, and a
+text sent on a poor mobile connection was lost after swiping the app away. Not the outbox: the
+send was waiting on the typing-off Firestore write before it ever reached the repository
+(`d199da08`, gotcha *Never await a backend write in front of an optimistic local insert*).
+Re-run 1 and 2 for text, and add the poor-mobile-data variant of 2 (signal bars present, no
+server reachable): the text must show its clock at once and survive the swipe.
 Item 7 of the plan's §4 checklist is the step-8 section below; item 8 is the step-7 section.
 
 ### "Waiting for network…" (offline outbox step 7, 2026-09-12)
