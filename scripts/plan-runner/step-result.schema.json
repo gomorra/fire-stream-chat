@@ -1,6 +1,6 @@
 {
   "title": "Plan runner step result",
-  "description": "The structured result every headless step session ends with. Contract: .claude/plans/plan-runner.md §2.2. The driver (scripts/run-plan.sh) branches on `status`, enforces `skills.run` against the plan's tags and the diff tripwire, and logs the rest.",
+  "description": "The structured result every headless step session ends with. Contract: docs/plans/done/plan-runner.md §2.2. The driver (scripts/run-plan.sh) branches on `status`, enforces `skills.run` against the plan's tags and the diff tripwire, and logs the rest.",
   "type": "object",
   "additionalProperties": false,
   "required": ["status", "step", "commit", "skills", "reviewerModels", "question", "summary"],

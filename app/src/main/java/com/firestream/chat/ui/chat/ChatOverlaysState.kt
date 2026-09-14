@@ -37,7 +37,7 @@ internal data class FullscreenVideo(
     val source: String,
 )
 
-// Where "Edit" from a fullscreen viewer has got to (`.claude/plans/image-editor.md`
+// Where "Edit" from a fullscreen viewer has got to (`docs/plans/image-editor.md`
 // §2.6). A sent photo is immutable, so editing one means sending a new one: the
 // displayed image is fetched if it has no local file yet, copied into the edit
 // cache, and handed to the send preview as a one-item batch.

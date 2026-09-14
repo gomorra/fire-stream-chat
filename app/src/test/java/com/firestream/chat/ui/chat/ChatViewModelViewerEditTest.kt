@@ -49,7 +49,7 @@ import java.io.File
 import java.io.IOException
 
 /**
- * "Edit" from a fullscreen viewer (`.claude/plans/image-editor.md` §2.6): the
+ * "Edit" from a fullscreen viewer (`docs/plans/image-editor.md` §2.6): the
  * displayed photo is fetched if it has no readable local file, copied into the
  * edit cache, and published for the screen to open the send preview on.
  *

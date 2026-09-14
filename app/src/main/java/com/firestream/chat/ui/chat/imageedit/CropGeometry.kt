@@ -9,7 +9,7 @@ import com.firestream.chat.domain.util.RasterOp
  * The crop frame, in fractions of the image it is drawn over.
  *
  * Normalized rather than in pixels for the same reason overlay geometry is
- * (`.claude/plans/image-editor.md` §2.3): the frame means "the middle 60% of
+ * (`docs/plans/image-editor.md` §2.3): the frame means "the middle 60% of
  * this photo", not "212 px into the canvas I happened to be laid out in", so it
  * survives a device rotation and a screen-size change without drifting, and it
  * converts to a [RasterOp.Crop] with no arithmetic at all.

@@ -16,7 +16,7 @@ import androidx.compose.runtime.saveable.listSaver
  * ### Edits are a cursor over rasterized files, not a stack
  *
  * Every editor screen flattens its layer into a new full-size JPEG (see
- * `.claude/plans/image-editor.md` §2.1), so the chain of files in
+ * `docs/plans/image-editor.md` §2.1), so the chain of files in
  * [editHistory] *is* the undo history — nothing extra has to be recorded to get
  * one. Because redo must be able to walk forward again, undo cannot delete the
  * file it steps off: [editCursor] moves, the files stay. `0` means "the
@@ -76,7 +76,7 @@ internal data class PendingMedia(
      *
      * Two things make a file unreachable, and both are this function's job
      * because both are consequences of where the cursor was
-     * (`.claude/plans/image-editor.md` §2.7):
+     * (`docs/plans/image-editor.md` §2.7):
      *
      * - **The abandoned tail.** Finishing an edit while the cursor is not at the
      *   top discards what redo was holding — linear history, the same rule as

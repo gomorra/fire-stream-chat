@@ -43,7 +43,7 @@ data class StickerDesign(val id: String, val name: String, val parts: List<Stick
 
 /**
  * The bundled sticker pack — the local set the editor's sticker tab offers
- * (`.claude/plans/image-editor.md` §3 Phase 5).
+ * (`docs/plans/image-editor.md` §3 Phase 5).
  *
  * ### Why these are drawn rather than decoded
  *

@@ -33,7 +33,7 @@ import com.firestream.chat.domain.util.SizeEstimate
  *
  * Per-image, not global: picking a row sets `PendingMedia.isHd` for this item
  * only, and the global Settings preference stays the fallback for every item
- * the user never touches (`.claude/plans/image-editor.md` §2.5).
+ * the user never touches (`docs/plans/image-editor.md` §2.5).
  *
  * The sizes are **estimates and say so**. Measuring them exactly would mean a
  * second full decode-and-encode of every image in the batch, which is precisely

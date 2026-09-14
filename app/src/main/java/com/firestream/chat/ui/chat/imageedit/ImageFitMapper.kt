@@ -13,7 +13,7 @@ internal data class FitPoint(val x: Float, val y: Float)
 /**
  * Where the image being edited actually sits on screen, and how to get a point
  * between the three spaces the editor screens work in
- * (`.claude/plans/image-editor.md` §2.3).
+ * (`docs/plans/image-editor.md` §2.3).
  *
  * Every editor screen displays the *current* image axis-aligned under
  * `ContentScale.Fit`, which is what makes this one small helper enough for draw,

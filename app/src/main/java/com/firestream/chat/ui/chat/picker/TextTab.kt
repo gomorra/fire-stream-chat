@@ -38,7 +38,7 @@ import com.firestream.chat.ui.theme.FsTextMute
  *
  * The run is a single line: a text box that wraps needs a width, and the overlay
  * screen's scale handle is uniform, so there is nothing to express a wrap width
- * with (`.claude/plans/image-editor.md` §3 Phase 5 — "centre alignment"). One
+ * with (`docs/plans/image-editor.md` §3 Phase 5 — "centre alignment"). One
  * line also means the preview and the flatten centre it identically, which
  * multi-line layout would put at risk.
  *

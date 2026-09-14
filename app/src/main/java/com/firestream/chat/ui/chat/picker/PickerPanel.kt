@@ -60,7 +60,7 @@ import androidx.compose.ui.unit.dp
  * ### One picker, four hosts
  *
  * The app had one emoji panel mounted from three places and was about to grow a
- * fourth for the image editor (`.claude/plans/image-editor.md` §2.8). This is
+ * fourth for the image editor (`docs/plans/image-editor.md` §2.8). This is
  * the shell those hosts share. It owns the chrome and the per-tab state and
  * **implements no content**: what a tab shows is [content]'s business, so a
  * tab's own parameters — recents, colours, a text style — stay with the host

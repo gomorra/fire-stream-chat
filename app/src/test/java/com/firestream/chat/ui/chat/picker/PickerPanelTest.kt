@@ -31,7 +31,7 @@ import org.robolectric.annotation.Config
  * Two halves, and the first is the reason this commit exists. The emoji panel
  * was ~700 lines mounted from three places and the extraction into
  * [PickerPanel] + [EmojiTab] had to change **nothing** at those three
- * (`.claude/plans/image-editor.md` §2.8, §4) — so the first half asserts the
+ * (`docs/plans/image-editor.md` §2.8, §4) — so the first half asserts the
  * one-tab hosts still look and behave exactly as they did: no island, no search
  * button, a backspace only where a text field is being typed into, a
  * quick-reactions strip only where there is a message to react to, and a

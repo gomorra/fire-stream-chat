@@ -33,8 +33,10 @@ sequentially in v1, with a warning), a web dashboard, cross-plan scheduling.
 
 ## 1. Current state (verified 2026-09-13)
 
-- Plans live in `.claude/plans/`, tracked in git, with an `**Order:**` line and per-step headings
-  `### Step N — Title (\`prefix:\`, notes)`. Shipped plans move to `.claude/plans/done/`.
+- Plans live in `docs/plans/`, tracked in git, with an `**Order:**` line and per-step headings
+  `### Step N — Title (\`prefix:\`, notes)`. Shipped plans move to `docs/plans/done/`.
+  (Until 2026-09-14 they lived in `.claude/plans/`; moved because a headless session cannot
+  write under `.claude/` — see step 3's pilot record and `docs/GOTCHAS.md`.)
 - The handoff docs (`handoff-phase{1,5,6}.md`) carry two things the plan does not: "where things
   stand" (commits landed, what the code looks like now) and the previous step's review findings.
   The offline-outbox plan already folds both into the plan file as `**(step-N review)**` /
@@ -218,7 +220,7 @@ design point of the plan; never ask a question interactively.*
 5. On `needs_decision` / `blocked` / a checkpoint: notify, print the summary and the exact resume
    command, exit non-zero. The notify command is one variable at the top of the script (default
    `notify-send`) so it can be pointed at a phone later without touching the loop. Log every
-   session id, result, `permission_denials` and cost to `.claude/plans/.runs/<name>.log` (gitignored).
+   session id, result, `permission_denials` and cost to `docs/plans/.runs/<name>.log` (gitignored).
 6. After the last step: notify, print `git log main..plan/<name>` and the fast-forward command.
 
 ### 2.6 Local memory inside the worktree
@@ -252,7 +254,7 @@ instead.
   "skip by default, invoke on a trigger" with the floor + intent + re-decision rule so interactive
   sessions follow the same protocol as the runner; add a short *Plan runner* paragraph with the
   command and a pointer here. Keep it to a few lines each — the detail stays in this file.
-- `docs/PATTERNS.md`: no entry (this is workflow, not code). `.gitignore`: `.claude/plans/.runs/`.
+- `docs/PATTERNS.md`: no entry (this is workflow, not code). `.gitignore`: `docs/plans/.runs/`.
 
 **Shipped** `73f694b2` (2026-09-13) — tier: max (interactive, by hand). skills: none. Reviewer models: none.
 Departures (for sign-off): the `/code-review` line under *Review tools* in CLAUDE.md was reworded
@@ -334,9 +336,16 @@ Departures (for sign-off):
   message. The refusal text is only in the session's transcript / its `summary`.
 - Allowlist otherwise sufficient: no denial of a legitimate command.
 
+**Decision taken** (2026-09-14): plans moved to `docs/plans/` + `docs/plans/done/` (`git mv`, history
+follows); the run log to `docs/plans/.runs/`; every path reference rewritten; the `git mv` detour
+paragraph removed from `step-prompt.md`. Rationale: plans are documents, `.claude/` is harness
+config and the harness guards it; the detour was an accident of the guard's text matching and
+cost turns on every step. `~/.claude/plans/` (the home-dir location cloud sessions cannot see)
+is still the place *not* to keep a plan.
+
 ### Step 4 — Retire the handoff loop (`docs:`) — skills: none
 
-- Move `handoff-phase{1,5,6}.md` to `.claude/plans/done/` (their content is captured in
+- Move `handoff-phase{1,5,6}.md` to `docs/plans/done/` (their content is captured in
   `image-editor.md`); the `handoff` / `claude-handoff` skills stay for ad-hoc use but CLAUDE.md
   no longer describes them as the way plans advance.
 - `docs/GOTCHAS.md`: one entry — "`ask-simplify.sh` reads `/dev/tty`; anything headless must bypass
@@ -353,9 +362,9 @@ Departures (for sign-off):
   launch"). No further prompt-template or driver fixes were needed from inside this session.
 - Session id and cost are not observable from inside a step session — nothing in the CLI surface
   gives a running session its own id or spend — so they aren't recorded here as §3 step 3 asked.
-  They're in the driver's own invocation output / `.claude/plans/.runs/plan-runner.log`, outside
+  They're in the driver's own invocation output / `docs/plans/.runs/plan-runner.log`, outside
   this worktree; the human should pull them from there for the record.
-- **Every file directly under `.claude/plans/` is harness-flagged "sensitive"**: an `Edit`, a
+- **Every file directly under `.claude/plans/` is harness-flagged "sensitive"** (the path at the time; moved since): an `Edit`, a
   `Write`, or a Bash content-write (`>>`, `cp` naming the path either as source or destination) on
   any of them — this plan included — was refused outright ("requested permissions to edit … which
   is a sensitive file"), with no prompt this headless session could answer. `git mv` is exempt (it

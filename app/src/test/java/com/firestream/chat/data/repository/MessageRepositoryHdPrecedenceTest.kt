@@ -20,7 +20,7 @@ import org.junit.Test
 
 /**
  * Per-image HD beats the global preference; a null follows it
- * (`.claude/plans/image-editor.md` §2.5).
+ * (`docs/plans/image-editor.md` §2.5).
  *
  * Both halves matter. The override is the feature; the fall-through is the
  * promise that nothing changes for anyone who never touches the toggle — every

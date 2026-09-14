@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  * The draw screen's strokes, and how far along them undo has walked.
  *
  * A cursor rather than a stack, exactly as [AdjustStack] keeps one and for the
- * same reason (`.claude/plans/image-editor.md` §2.7): redo has to be able to go
+ * same reason (`docs/plans/image-editor.md` §2.7): redo has to be able to go
  * forward again, so undo moves the cursor instead of dropping the stroke.
  * History is **linear** — drawing anything while the cursor is not at the top
  * discards what redo was holding.

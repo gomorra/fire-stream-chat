@@ -28,7 +28,7 @@ interface MessageDao {
     suspend fun getPendingSendingMessage(chatId: String, timestamp: Long, senderId: String): MessageEntity?
 
     // ── Offline outbox queue ────────────────────────────────────────────────
-    // A SENDING own row is the queue (.claude/plans/offline-outbox.md §2.1):
+    // A SENDING own row is the queue (docs/plans/offline-outbox.md §2.1):
     // queued or in flight alike, until the backend acknowledges it. A soft-
     // deleted row that was never acknowledged — SENDING, or FAILED after the
     // give-up — is a tombstone still to be written.

@@ -11,7 +11,7 @@ trees are clean at `af02358`; no feature code exists on this branch.
 
 ## Task
 
-Implement **Phase 1** of [`.claude/plans/image-editor.md`](image-editor.md).
+Implement **Phase 1** of [`docs/plans/image-editor.md`](image-editor.md).
 
 **Read the plan first.** It is the product of a long design conversation and is
 self-sufficient: six phases, every decision with its rejected alternatives and rationale,

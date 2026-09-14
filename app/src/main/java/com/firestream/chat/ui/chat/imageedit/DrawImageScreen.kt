@@ -119,7 +119,7 @@ internal data class DrawCallbacks(
  *
  * The screen builds a [DrawStack] of strokes and flattens it **once**, on Done,
  * into a single `RasterOp.Strokes` and a single new JPEG that becomes one entry
- * in the preview's edit history (`.claude/plans/image-editor.md` §2.1). Cancel
+ * in the preview's edit history (`docs/plans/image-editor.md` §2.1). Cancel
  * writes nothing. Nothing here is a NavHost route (§2.4).
  *
  * ### The preview and the file must not be able to disagree

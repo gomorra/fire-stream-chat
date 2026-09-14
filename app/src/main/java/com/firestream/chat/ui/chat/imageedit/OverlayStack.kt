@@ -30,7 +30,7 @@ import com.firestream.chat.domain.util.ShapeKind
  * ### What is a step and what is not
  *
  * **Placements and deletions are steps; moving, scaling and rotating are not**
- * (`.claude/plans/image-editor.md` §3 Phase 5). The unit people expect back is
+ * (`docs/plans/image-editor.md` §3 Phase 5). The unit people expect back is
  * "that emoji I just added", not "the last two millimetres I dragged it" — so a
  * drag edits the current step in place ([adjust]) while a placement commits a
  * new one ([place]). History is **linear**, like both other stacks: placing

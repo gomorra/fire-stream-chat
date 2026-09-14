@@ -6,7 +6,7 @@ Long-pressing a chat bubble gains a **Snooze** action: pick a time (chat-style p
 
 Nearly everything clones existing machinery: the `.timer` pipeline (`data/timer/`: `TimerAlarmScheduler`, `TimerAlarmReceiver`, `TimerNotificationChannel`, `BootCompletedReceiver`+`BootRestoreLogic`), the star feature (local-only Room flag + `ui/starred/` overview screen), the command framework (`domain/command/ChatCommand`, `ui/chat/command/TimerCommand`, `di/CommandModule` `@IntoSet`), and `ChatScreen`'s existing `jumpToSourceMessage(id)` scroll+highlight (lines ~308–337). Manifest already has `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `POST_NOTIFICATIONS`.
 
-> On execution start: copy this plan into repo `.claude/plans/` and commit (CLAUDE.md convention — home-dir plans are invisible to cloud sessions).
+> On execution start: copy this plan into repo `docs/plans/` and commit (CLAUDE.md convention — home-dir plans are invisible to cloud sessions).
 
 ## Execution model (user-requested)
 

@@ -19,7 +19,7 @@ internal enum class AdjustTool {
  * far along them undo has walked.
  *
  * A cursor rather than a stack, for the same reason `PendingMedia` keeps one
- * (`.claude/plans/image-editor.md` §2.7): redo has to be able to go forward
+ * (`docs/plans/image-editor.md` §2.7): redo has to be able to go forward
  * again, so undo moves the cursor instead of dropping the op. History is
  * **linear** — committing anything while the cursor is not at the top discards
  * what redo was holding, because branch management inside a send preview is a

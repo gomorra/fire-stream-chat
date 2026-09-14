@@ -88,7 +88,7 @@ internal fun ImageEditActions(
 
 /**
  * Undo / redo over the edit steps, and the original⇄edited jump between the two
- * ends of that same axis (`.claude/plans/image-editor.md` §2.7). One pill, so
+ * ends of that same axis (`docs/plans/image-editor.md` §2.7). One pill, so
  * the three read as one history control rather than three more tools.
  */
 @Composable

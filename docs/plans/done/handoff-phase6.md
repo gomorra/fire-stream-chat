@@ -2,7 +2,7 @@ Implement **Phase 6** of the image editor in this repo (FireStream Chat, Android
 
 ## Read first
 
-`.claude/plans/image-editor.md` is the brief and is self-sufficient. **§3 "Phase 6"** is the deliverable list; it is governed by **§2.6** (editing a sent image means sending a *new* one — the decisive constraint), §2.4 (editors are full-screen overlays, not NavHost routes) and §2.1 (edits rasterize per screen into `cacheDir/edits/`). Do not re-derive or re-litigate any of it.
+`docs/plans/image-editor.md` is the brief and is self-sufficient. **§3 "Phase 6"** is the deliverable list; it is governed by **§2.6** (editing a sent image means sending a *new* one — the decisive constraint), §2.4 (editors are full-screen overlays, not NavHost routes) and §2.1 (edits rasterize per screen into `cacheDir/edits/`). Do not re-derive or re-litigate any of it.
 
 Each earlier phase's section carries a "departures … flagged for sign-off rather than settled" list written by the agent that built it. **41 such departures across Phases 1–5 are still unsigned** — read the ones you build on, since the human may have signed off, reversed or amended them.
 
@@ -96,7 +96,7 @@ Use the flavor-qualified tasks; bare `test` also builds the unmaintained pocketb
 
 ## Housekeeping the user has been asked about and not answered
 
-Three stale files sit untracked in the tree: `phase3-handoff.md`, `phase3-system-prompt.md`, and `.claude/plans/handoff-phase5.md`. Ask before removing any of them. `.claude/plans/image-editor.md` stays either way — and once Phase 6 lands, the whole plan is a candidate for `.claude/plans/done/`.
+Three stale files sit untracked in the tree: `phase3-handoff.md`, `phase3-system-prompt.md`, and `docs/plans/handoff-phase5.md`. Ask before removing any of them. `docs/plans/image-editor.md` stays either way — and once Phase 6 lands, the whole plan is a candidate for `docs/plans/done/`.
 
 ## Suggested skills
 

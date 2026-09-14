@@ -5,7 +5,7 @@ name: Plan runner self-check
 # Seconds, no Android SDK. Its own workflow rather than a job in ci.yml because
 # ci.yml ignores `**.md` and the self-check's inputs include fixtures/plan.md
 # and step-prompt.md. A broken parser must be caught here, not by an
-# unattended run — see .claude/plans/plan-runner.md.
+# unattended run — see docs/plans/done/plan-runner.md.
 on:
   push:
     branches: [main]

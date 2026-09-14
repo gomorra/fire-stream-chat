@@ -526,7 +526,7 @@ for the first time), ship half 2 alone, drop checklist item 7 to *Pending* in BA
 
 **Before end-to-end encryption can be enabled** (the "Before end-to-end encryption is switched on" list under
 step 4 is the authoritative one), in order of severity:
-1. Pre-key replenishment — its own plan (`.claude/plans/`, not yet written): a batch of one-time pre-keys with
+1. Pre-key replenishment — its own plan (`docs/plans/`, not yet written): a batch of one-time pre-keys with
    rotating ids, replenish on start and below a threshold, a publish that cannot leave store and bundle
    disagreeing, and a real-libsignal test for two new contacts in the replenish window.
 2. The single receive entry point under one lock — three callers now (listener, sync, push reconcile); a

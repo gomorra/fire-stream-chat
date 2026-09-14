@@ -17,7 +17,7 @@ import org.robolectric.annotation.Config
  * Both are cheap to get subtly wrong and expensive to notice: a saver that
  * drops the history makes undo look broken exactly after a rotation, and one
  * that saves the history but not the cursor silently re-applies edits the user
- * had just undone (`.claude/plans/image-editor.md` §4).
+ * had just undone (`docs/plans/image-editor.md` §4).
  *
  * Robolectric rather than a mocked `Uri`: the saver's whole job is a
  * `Uri`→`String`→`Uri` round-trip, and stubbing the very parse and `toString`

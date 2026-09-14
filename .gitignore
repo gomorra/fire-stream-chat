@@ -42,8 +42,10 @@ firebase.log
 # Ignore contents by default, but share the SessionStart hook and its wiring
 # so every Claude Code on the web session pre-warms the Gradle cache
 # (sandbox tool-execution cannot reach dl.google.com — SessionStart can).
-# Plans are tracked (in-flight + done/) so cloud sessions can execute them —
-# a cloud checkout never sees ~/.claude, so the repo is the only shared path.
+# Plans live in docs/plans/ (tracked, in-flight + done/) so cloud sessions can
+# execute them — a cloud checkout never sees ~/.claude, and a headless session
+# cannot write under .claude/ at all (docs/GOTCHAS.md). The rest of .claude/ is
+# harness config: only the hooks, settings and skills below are tracked.
 .claude/*
 !.claude/hooks/
 .claude/hooks/*
@@ -51,9 +53,10 @@ firebase.log
 !.claude/hooks/block-heredoc-commit.sh
 !.claude/hooks/promote-memory.sh
 !.claude/settings.json
-!.claude/plans/
-.claude/plans/.runs/
 !.claude/skills/
+
+# Plan runner logs and rendered prompts (scripts/run-plan.sh) — per host, never shared
+docs/plans/.runs/
 
 # Kotlin compiler daemon error logs
 .kotlin/

@@ -91,7 +91,7 @@ internal data class OverlayCallbacks(
  * ### One screen for four kinds of thing
  *
  * Drag, scale, rotate, z-order and delete are the same machinery whichever of
- * them is selected (`.claude/plans/image-editor.md` §3 Phase 5); only the
+ * them is selected (`docs/plans/image-editor.md` §3 Phase 5); only the
  * painting differs. Four screens would have been that machinery written four
  * times, and four chances for a sticker and a text run to behave differently
  * under the same finger.
