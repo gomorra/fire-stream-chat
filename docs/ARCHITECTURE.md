@@ -107,7 +107,7 @@ The concrete implementation resolving the Repository Interfaces.
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 22 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference. The search-results and filter-chip rendering lives in `ui/search/` instead, because global search renders the same way.
+- **ChatScreen** is split into 22 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardMessagePanel`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference. The search-results and filter-chip rendering lives in `ui/search/` instead, because global search renders the same way.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -466,14 +466,16 @@ com.firestream.chat/
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
 │   │                            # FullscreenImageViewer, ImagePreviewScreen,
 │   │                            # ZoomableBox, PendingMedia,
-│   │                            # ForwardChatPicker, LocationPickerSheet,
+│   │                            # ForwardMessagePanel, LocationPickerSheet,
 │   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
 │   │                            # MessageInfoScreen, ChatUtils, BubbleTailShape,
 │   │                            # MentionFormatter, MessageGrouping
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,
 │   │                            # ArchivedChatsScreen
-│   ├── components/              # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator
+│   ├── components/              # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator,
+│   │                            # ChatPickerPanel / ChatPickerOverlay / ChatTargets
+│   │                            # (the shared "send this to a chat" panel and its rules)
 │   ├── contacts/                # ContactsScreen, ContactsViewModel
 │   ├── group/                   # CreateGroupScreen, CreateGroupViewModel,
 │   │                            # GroupSettingsScreen, GroupSettingsViewModel,
@@ -481,7 +483,7 @@ com.firestream.chat/
 │   ├── lists/                   # ListsScreen, ListsViewModel, ListDetailScreen,
 │   │                            # ListDetailViewModel, SharedListsScreen,
 │   │                            # SharedListsViewModel, AvatarStack,
-│   │                            # ListContextSheet, ListShareSheet
+│   │                            # ListContextSheet, ListShareSheet, ShareListPanel
 │   ├── main/                    # MainScreen (HorizontalPager — Chats/Calls/Lists tabs),
 │   │                            # BottomNavBar
 │   ├── profile/                 # ProfileScreen, ProfileViewModel

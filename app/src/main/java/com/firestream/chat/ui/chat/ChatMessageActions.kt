@@ -1,10 +1,14 @@
 package com.firestream.chat.ui.chat
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.Reminder
@@ -12,6 +16,8 @@ import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.ui.components.destinationLabel
+import com.firestream.chat.ui.components.sendRecipientId
 
 internal class ChatMessageActions(
     private val chatId: String,
@@ -74,10 +80,37 @@ internal class ChatMessageActions(
         }
     }
 
-    fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) {
+    /**
+     * Forwards [message] into every chat in [targets], addressing each send by
+     * the chat's own kind — `sendRecipientId` is the one place that rule lives,
+     * and a group must not be addressed to one arbitrary member (see
+     * docs/PATTERNS.md#one-chat-picker-three-hosts).
+     *
+     * The fan-out belongs here rather than in the picker's callback so the panel
+     * hands over a list of chats and nothing else. [onForwarded] receives the
+     * destination label for the confirmation, and only when something landed —
+     * a failed send has already put its error on the session slice.
+     */
+    fun forwardMessage(
+        message: Message,
+        targets: List<Chat>,
+        onForwarded: (destination: String) -> Unit = {},
+    ) {
+        if (targets.isEmpty()) return
+        val session = _uiState.value.session
         scope.launch {
-            messageRepository.forwardMessage(message, targetChatId, targetRecipientId)
-                .onFailure { e -> _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) } }
+            val delivered = targets.count { chat ->
+                messageRepository.forwardMessage(
+                    message,
+                    chat.id,
+                    chat.sendRecipientId(session.currentUserId),
+                ).onFailure { e ->
+                    _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
+                }.isSuccess
+            }
+            if (delivered > 0) {
+                onForwarded(targets.destinationLabel(session.currentUserId, session.chatParticipants))
+            }
         }
     }
 

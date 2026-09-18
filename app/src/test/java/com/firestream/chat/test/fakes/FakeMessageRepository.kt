@@ -207,11 +207,15 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(Unit)
     }
 
+    /** Every forward that reached the repository, as `chatId to recipientId`. */
+    val forwardedTargets = mutableListOf<Pair<String, String>>()
+
     override suspend fun forwardMessage(
         message: Message,
         targetChatId: String,
         recipientId: String,
     ): Result<Message> {
+        forwardedTargets += targetChatId to recipientId
         consumeFailure()?.let { return it }
         val forwarded = message.copy(id = UUID.randomUUID().toString(), chatId = targetChatId, isForwarded = true)
         lastSentMessage = forwarded

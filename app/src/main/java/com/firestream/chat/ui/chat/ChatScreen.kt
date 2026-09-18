@@ -2182,19 +2182,21 @@ fun ChatScreen(
         }
     }
 
-    // Forward picker
-    forwardTargetMessage?.let { targetMsg ->
-        ForwardChatPicker(
-            chats = uiState.session.availableChats,
-            currentUserId = uiState.session.currentUserId,
-            onDismiss = { forwardTargetMessage = null },
-            onForward = { chatId, recipientId ->
-                viewModel.forwardMessage(targetMsg, chatId, recipientId)
-                forwardTargetMessage = null
-            },
-            users = uiState.session.chatParticipants
-        )
-    }
+    // Forward picker — the chat picker the share target uses, slid in over the
+    // conversation. It owns its own visibility so it can animate back out, and
+    // its own BackHandler; the fan-out across the picked chats and its
+    // confirmation are the ViewModel's, so nothing is left here but the dismissal.
+    ForwardMessagePanel(
+        target = forwardTargetMessage,
+        chats = uiState.session.availableChats,
+        currentUserId = uiState.session.currentUserId,
+        participants = uiState.session.chatParticipants,
+        onDismiss = { forwardTargetMessage = null },
+        onForward = { message, targets ->
+            viewModel.forwardMessage(message, targets)
+            forwardTargetMessage = null
+        },
+    )
 
     // Snooze picker sheet
     snoozeTargetMessage?.let { targetMsg ->
