@@ -2,6 +2,16 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.32.0] — 2026-09-18
+
+### Changed
+
+- **"Forward to" is now the same panel as sharing, and takes several chats at once.** Forwarding a message opened a cramped list in a dialog box, while sharing something into FireStream from another app opened a proper panel — a preview of what you are sending, a search field, and a tick beside every chat. Forwarding now opens that same panel, sliding in exactly as the share one does: the message you are forwarding is shown at the top, you can search for a chat by name, tick as many as you like and send to all of them in one go, and a short confirmation names where it went. Sharing a list from the Lists tab opens the same panel too. (`HASH`)
+
+### Fixed
+
+- **A message forwarded into a group is no longer readable by only one member.** The forward was addressed to a single arbitrary member of the group rather than to the group itself, and an addressed message is encrypted for that one person's device — so in a release build everyone else in the group would have received something they could not read. A forward, a share and a list now all address a group the same way every other group message does. (`HASH`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
