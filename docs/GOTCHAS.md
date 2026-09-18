@@ -82,6 +82,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   *raw* insets (consumption only affects the padding-modifier family), hence the
   explicit `− navigationBars` subtraction there. Blanket `imePadding()` stays the rule
   for simple bottom-anchored screens (`ListDetailScreen`, `ImagePreviewScreen`).
+- **A full-screen overlay composed inside another screen does not take focus from it.**
+  An overlay that is a sibling in the same composition — `ImagePreviewScreen` and the
+  fullscreen viewers all sit next to `ChatScreen`'s Scaffold, not on the NavHost —
+  covers the screen and changes nothing about focus: the composer underneath stays
+  focused, the IME is re-shown over it when the app returns from a picker Activity,
+  and every keystroke lands in a field the user cannot see. Opening such an overlay
+  has to *take* focus, and `focusManager.clearFocus()` is not how — it leaves the
+  focused field focused whenever the window itself is not (which is also what every
+  Robolectric Compose test looks like, so the difference is testable). Request focus
+  onto a target inside the overlay instead: the field it wants typed into, or a bare
+  `Modifier.focusRequester(…).focusable()` box when it wants none. Bit us as a photo
+  caption typed into the chat composer behind the send preview.
 - **A drag sends a target, never a step worked out from `rememberUpdatedState`.** A
   `pointerInput` block reads composition state through `rememberUpdatedState`, which
   refreshes only on recomposition, and more than one pointer event can arrive before the
