@@ -84,9 +84,66 @@ internal fun deleteBeforeCursor(
     val end = selection.max.coerceIn(start, text.length)
     if (start != end) return replaceComposerRange(text, start, end, "", emojiSizes)
     if (start == 0) return ComposerEdit(text, TextRange(0), emojiSizes)
+    return replaceComposerRange(text, graphemeStartBefore(text, start), start, "", emojiSizes)
+}
+
+private const val ZERO_WIDTH_JOINER = '\u200D'
+
+private fun isRegionalIndicator(codePoint: Int) = codePoint in 0x1F1E6..0x1F1FF
+
+private fun isEmojiModifier(codePoint: Int) = codePoint in 0x1F3FB..0x1F3FF
+
+/**
+ * The start of the grapheme cluster that ends at [index] — what one backspace
+ * has to remove.
+ *
+ * [BreakIterator] supplies the boundaries, but its grapheme data is the host's
+ * JDK, and the hosts disagree about exactly the characters a chat composer is
+ * full of. JDK 17, which CI runs, breaks 👨‍👩‍👧 into three faces and two joiners,
+ * a flag into its two regional indicators and 👍🏽 into hand plus tone; JDK 21 and
+ * Android's ICU keep each as one cluster. Backspace must eat one *visible*
+ * character on all of them, so the three emoji joins are re-applied here rather
+ * than trusted to the platform. On a host that already joins them the loop finds
+ * nothing to do and leaves the boundary as it was. See docs/GOTCHAS.md.
+ */
+private fun graphemeStartBefore(text: String, index: Int): Int {
     val iterator = BreakIterator.getCharacterInstance().apply { setText(text) }
-    val boundary = iterator.preceding(start).takeIf { it != BreakIterator.DONE } ?: 0
-    return replaceComposerRange(text, boundary, start, "", emojiSizes)
+    fun boundaryBefore(at: Int) = iterator.preceding(at).takeIf { it != BreakIterator.DONE } ?: 0
+
+    var start = boundaryBefore(index)
+    while (start > 0) {
+        // A joiner belongs to the sequence: take it and the component before it.
+        if (text[start - 1] == ZERO_WIDTH_JOINER) {
+            val joined = boundaryBefore(start - 1)
+            if (joined >= start) break
+            start = joined
+            continue
+        }
+        val previous = boundaryBefore(start)
+        if (previous >= start) break
+        val codePoint = text.codePointAt(start)
+        val joinsBackwards = isEmojiModifier(codePoint) ||
+            // Regional indicators pair off from the start of their run (UAX #29
+            // GB12/GB13), so this one closes a flag only if an odd number of them
+            // precede it — otherwise it opens its own.
+            (isRegionalIndicator(codePoint) &&
+                isRegionalIndicator(text.codePointAt(previous)) &&
+                regionalIndicatorsBefore(text, start) % 2 == 1)
+        if (!joinsBackwards) break
+        start = previous
+    }
+    return start
+}
+
+/** How many regional indicators run backwards from [index] without interruption. */
+private fun regionalIndicatorsBefore(text: String, index: Int): Int {
+    var count = 0
+    var at = index
+    while (at >= 2 && isRegionalIndicator(text.codePointAt(at - 2))) {
+        count++
+        at -= 2
+    }
+    return count
 }
 
 /** Splices [replacement] into `[start, end)` and shifts the emoji-size indices to match. */

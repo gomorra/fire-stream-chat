@@ -172,6 +172,45 @@ class ComposerEditTest {
     }
 
     @Test
+    fun `backspace removes a whole flag`() {
+        // Two regional indicators, one visible character.
+        val edit = deleteBeforeCursor(
+            text = "a\uD83C\uDDE9\uD83C\uDDEA",
+            selection = TextRange(5),
+        )
+
+        assertEquals("a", edit.text)
+        assertEquals(TextRange(1), edit.cursor)
+    }
+
+    @Test
+    fun `backspace on two flags removes only the last one`() {
+        // Regional indicators pair off from the start of the run: 🇩🇪🇫🇷 is two
+        // flags, and one press must not swallow both.
+        val germany = "\uD83C\uDDE9\uD83C\uDDEA"
+        val france = "\uD83C\uDDEB\uD83C\uDDF7"
+        val edit = deleteBeforeCursor(
+            text = germany + france,
+            selection = TextRange(germany.length + france.length),
+        )
+
+        assertEquals(germany, edit.text)
+        assertEquals(TextRange(germany.length), edit.cursor)
+    }
+
+    @Test
+    fun `backspace removes a skin-toned emoji whole`() {
+        // 👍🏽 — thumbs up plus a tone modifier.
+        val edit = deleteBeforeCursor(
+            text = "a\uD83D\uDC4D\uD83C\uDFFD",
+            selection = TextRange(5),
+        )
+
+        assertEquals("a", edit.text)
+        assertEquals(TextRange(1), edit.cursor)
+    }
+
+    @Test
     fun `backspace with an open selection deletes the selection`() {
         val edit = deleteBeforeCursor(
             text = "hello world",
