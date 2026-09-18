@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.32.0] — 2026-09-18
+
+### Added
+
+- **Zooming into a photo before sending crops it to what you see.** Pinch-zooming in the send preview used to be only a way to look closer: the whole photo went out regardless, and the zoom was thrown away the moment you opened one of the editing tools. The part of the photo on screen is now what is sent, on every page of a batch, and the adjust, draw and sticker tools open on that same part rather than on the whole photo, so the view never jumps back to the full picture. The crop lands in the photo's edit history like any other edit, so undo brings the whole photo back; it stays put while you swipe to other photos and when you turn the phone, and the photo can no longer be pushed off the edge of the screen while zoomed. (`534f7ad`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
