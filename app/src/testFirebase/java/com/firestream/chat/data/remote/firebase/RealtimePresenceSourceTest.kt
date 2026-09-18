@@ -15,6 +15,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -130,6 +131,47 @@ class RealtimePresenceSourceTest {
         source.stopPresence()
 
         verify { connectedRef.removeEventListener(any<ValueEventListener>()) }
+    }
+
+    // ── Re-entry: the force-write needs a live socket ─────────────────────────
+    //
+    // `AppLifecycleObserver.onStart` and `MainActivity.onResume` both call
+    // startPresence on every foreground. Disconnected, the second call's online
+    // write would only be queued and flush — ahead of goOffline's offline write —
+    // on the next connect, showing the user online for an instant.
+
+    @Test
+    fun `startPresence re-entry before the socket is up writes nothing`() {
+        source.startPresence("uid1")
+        source.startPresence("uid1") // .info/connected has not fired yet
+
+        verify(exactly = 0) { presenceRef.setValue(any()) }
+    }
+
+    @Test
+    fun `startPresence re-entry after a disconnect writes nothing until the reconnect`() {
+        source.startPresence("uid1")
+        simulateConnected()
+        simulateDisconnected()
+
+        source.startPresence("uid1")
+        verify(exactly = 1) { presenceRef.setValue(any()) } // only the first connect's write
+
+        simulateConnected()
+        verify(exactly = 2) { presenceRef.setValue(any()) } // the listener, not the re-entry
+    }
+
+    @Test
+    fun `startPresence re-entry while connected force-writes online`() {
+        val setValueArgs = mutableListOf<Any?>()
+        every { presenceRef.setValue(any()) } answers { setValueArgs.add(firstArg()); setValueTask }
+
+        source.startPresence("uid1")
+        simulateConnected()
+        source.startPresence("uid1")
+
+        assertEquals(2, setValueArgs.size)
+        assertTrue(setValueArgs.all { (it as? Map<*, *>)?.get("isOnline") == true })
     }
 
     // ── Idempotency ───────────────────────────────────────────────────────────

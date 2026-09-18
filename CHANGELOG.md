@@ -2,6 +2,14 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.31.2] — 2026-09-18
+
+### Fixed
+
+- **The other person no longer flashes "Online" for an instant when you send them a message.** If they had opened the app on a bad connection and put it away again, their phone was left holding an "online" note it could not deliver, followed by the "offline" one; the moment a message sent to them woke their phone's connection, both notes went out one after the other and you saw them online for a blink. The "online" note is now only written over a working connection, and their phone reports itself online by itself once it reconnects. (`c02b4b4`)
+- **Someone typing to you now reads as "Online" at once.** The typing dots and the online status reach you over two separate connections that come back at their own pace, so after the other person had been away for a while their typing could show for several seconds while the top bar still said nothing. The top bar now says "Online" whenever the other person is typing, whatever the presence connection has managed to report so far. (`c02b4b4`)
+- **Typing dots no longer stay stuck when the other person's connection drops mid-typing.** Their phone tells yours when they stop typing, but that note is lost if their connection fails or the app is closed at that moment, and your chat kept showing the dots until someone sent a message. The dots now go away on their own about ten seconds after the last keystroke you were told about. (`c02b4b4`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
