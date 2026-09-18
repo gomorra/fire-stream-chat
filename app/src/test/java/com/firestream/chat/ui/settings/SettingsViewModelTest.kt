@@ -102,6 +102,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.vibrationFlow } returns flowOf(true)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(false)
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(false)
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(false)
@@ -506,6 +507,36 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { preferencesDataStore.setVideoQuality(VideoQualityOption.STANDARD) }
+    }
+
+    // ── Keep original images ────────────────────────────────────────────────────
+
+    @Test
+    fun `init reflects persisted keepOriginalImages`() = runTest {
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+
+        advanceUntilIdle()
+
+        assertTrue(vm.uiState.value.keepOriginalImages)
+    }
+
+    @Test
+    fun `keepOriginalImages defaults to false in state`() = runTest {
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.keepOriginalImages)
+    }
+
+    @Test
+    fun `setKeepOriginalImages writes the preference`() = runTest {
+        coEvery { preferencesDataStore.setKeepOriginalImages(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setKeepOriginalImages(true)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setKeepOriginalImages(true) }
     }
 
     // ── App update auto-download ────────────────────────────────────────────────

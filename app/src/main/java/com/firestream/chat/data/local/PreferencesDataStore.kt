@@ -53,6 +53,7 @@ class PreferencesDataStore @Inject constructor(
     // Storage
     private val autoDownloadKey = stringPreferencesKey("auto_download")
     private val sendImagesFullQualityKey = booleanPreferencesKey("send_images_full_quality")
+    private val keepOriginalImagesKey = booleanPreferencesKey("keep_original_images")
     private val videoQualityKey = stringPreferencesKey("video_quality")
 
     // App updates
@@ -196,6 +197,20 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setSendImagesFullQuality(fullQuality: Boolean) {
         context.dataStore.edit { prefs -> prefs[sendImagesFullQualityKey] = fullQuality }
+    }
+
+    /**
+     * Whether the local copy of an image this user sends is the untouched input
+     * rather than the encoding that went to the backend. Independent of HD: HD
+     * decides what the recipient gets, this what stays on the phone — a photo
+     * taken with the in-app camera has no other copy anywhere.
+     */
+    val keepOriginalImagesFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[keepOriginalImagesKey] ?: false
+    }
+
+    suspend fun setKeepOriginalImages(keep: Boolean) {
+        context.dataStore.edit { prefs -> prefs[keepOriginalImagesKey] = keep }
     }
 
     val videoQualityFlow: Flow<VideoQualityOption> = context.dataStore.data.map { prefs ->

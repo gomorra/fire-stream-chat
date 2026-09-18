@@ -315,6 +315,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Build tooling
 
+- **A `VirtualMachineError: Out of space in CodeCache` in a long Gradle run is the daemon, not the diff.**
+  Running the full unit suite and `assembleFirebaseDebug` in *one* invocation on a cloud
+  container (2026-09-18, ~12 min) ended with D8 failing on a third-party AAR and, on an
+  earlier attempt, `compileFirebaseDebugJavaWithJavac` dying with
+  `InternalError: NoSuchMethodException … MethodHandle.linkToStatic`. Both are the same
+  thing: the daemon JVM had exhausted its CodeCache ("for adapters" / "for method handle
+  intrinsic" in the `Caused by` chain), after which any further lambda or method-handle
+  bootstrap fails with a misleading `NoSuchMethodError`. `./gradlew --stop`, then run the
+  test task and the assemble task as two invocations — each was green on a fresh daemon.
+  A permanent `-XX:ReservedCodeCacheSize=…` in `org.gradle.jvmargs` is the real fix if it
+  recurs.
+
 - **A pre-commit hook that reads `/dev/tty` hangs, or errors, on any headless commit.**
   `.claude/hooks/ask-simplify.sh` prompts interactively ("Run /simplify before
   committing? [y/N]") before letting a `git commit` through. That's fine in a terminal
