@@ -153,6 +153,7 @@ class OutboxSenderTest {
         recordEncryptedWrites()
         every { messageSource.lastContentFor(any(), any()) } returns "preview"
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(false)
         every { preferencesDataStore.e2eEncryptionEnabledFlow } returns flowOf(true)
         // The peer keeps its identity unless a test re-registers it.
         coEvery { signalManager.isCurrentIdentity(any(), any()) } returns true
@@ -515,6 +516,114 @@ class OutboxSenderTest {
 
         coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
         assertEquals(listOf(Upload("img1", "image/jpeg", reportsProgress = true)), uploads)
+    }
+
+    // ── keep original images ────────────────────────────────────────────────
+
+    @Test
+    fun `with keep-original on, the media dir gets the input and the backend the encoding, in one persisted step`() = runTest {
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        val compressed = File.createTempFile("img_", ".jpg")
+        val sourceUri = mockk<Uri>(relaxed = true)
+        val encodedUri = mockk<Uri>(relaxed = true)
+        every { Uri.parse("content://picker/1") } returns sourceUri
+        every { Uri.fromFile(compressed) } returns encodedUri
+        store(sending("img1", MessageType.IMAGE, localUri = "content://picker/1").copy(isHd = true))
+        coEvery { imageCompressor.processImage(sourceUri, any()) } returns
+            ImageResult(compressed, width = 800, height = 600, mimeType = "image/jpeg")
+        coEvery { mediaFileManager.copyToLocal("chat1", "img1", sourceUri, "jpg") } returns File("/media/img1.jpg")
+
+        sender.send("img1")
+
+        // The encoding goes up at the row's HD setting; the input, not the encoding, is copied.
+        coVerify(exactly = 1) { imageCompressor.processImage(sourceUri, fullQuality = true) }
+        coVerify(exactly = 1) { storageSource.uploadMedia("chat1", "img1", encodedUri, "image/jpeg", any()) }
+        coVerify(exactly = 1) { mediaFileManager.copyToLocal("chat1", "img1", sourceUri, "jpg") }
+        assertEquals(listOf(Upload("img1", "image/jpeg", reportsProgress = true)), uploads)
+        // One resume point, holding the local file, the sent dimensions and the URL together, then SENT.
+        assertEquals(listOf("SENDING", "SENT"), persisted.map { it.status })
+        assertEquals("/media/img1.jpg", persisted[0].localUri)
+        assertEquals(800, persisted[0].mediaWidth)
+        assertEquals(600, persisted[0].mediaHeight)
+        assertEquals("https://storage.example/img1", persisted[0].mediaUrl)
+        assertEquals("https://storage.example/img1", writes.single().mediaUrl)
+        assertFalse("encoder output in cacheDir is cleaned up", compressed.exists())
+        assertEquals("/media/img1.jpg", stored("img1").localUri)
+        assertTrue(sender.uploadProgress.value.isEmpty())
+    }
+
+    @Test
+    fun `with keep-original on, an upload failure persists nothing, so the retry encodes and uploads again`() = runTest {
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        store(sending("img1", MessageType.IMAGE, localUri = "content://picker/1"))
+        coEvery { imageCompressor.processImage(any(), any()) } answers {
+            ImageResult(File.createTempFile("img_", ".jpg"), width = 800, height = 600, mimeType = "image/jpeg")
+        }
+        coEvery { mediaFileManager.copyToLocal(any(), any(), any(), any()) } returns File("/media/img1.jpg")
+        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } throws IOException("network down")
+
+        assertTrue(runCatching { sender.send("img1") }.exceptionOrNull() is IOException)
+
+        // Nothing half-done on the row: the plain pipeline must never find the
+        // original in the media dir looking like an encoding still to upload.
+        val afterFailure = stored("img1")
+        assertEquals(MessageStatus.SENDING, afterFailure.status)
+        assertEquals("content://picker/1", afterFailure.localUri)
+        assertNull(afterFailure.mediaWidth)
+        assertNull(afterFailure.mediaUrl)
+        assertTrue(persisted.isEmpty())
+        coVerify(exactly = 0) { mediaFileManager.copyToLocal(any(), any(), any(), any()) }
+        assertTrue(sender.uploadProgress.value.isEmpty())
+
+        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } answers {
+            uploads += Upload(secondArg(), arg(3), reportsProgress = args[4] != null)
+            "https://storage.example/img1"
+        }
+        sender.send("img1")
+
+        coVerify(exactly = 2) { imageCompressor.processImage(any(), any()) }
+        assertEquals(MessageStatus.SENT, stored("img1").status)
+        assertEquals("/media/img1.jpg", stored("img1").localUri)
+        assertTrue(writes.single().ifAbsent)
+    }
+
+    @Test
+    fun `keep-original does not apply to a row an earlier attempt already encoded into the media dir`() = runTest {
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        store(
+            sending("img1", MessageType.IMAGE, localUri = "/media/img1.jpg")
+                .copy(mediaWidth = 1024, mediaHeight = 768),
+            attempts = 1,
+        )
+
+        sender.send("img1")
+
+        // The encoding already in the media dir is what goes up; the input is long gone.
+        coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.copyToLocal(any(), any(), any(), any()) }
+        assertEquals(listOf(Upload("img1", "image/jpeg", reportsProgress = true)), uploads)
+        assertEquals(MessageStatus.SENT, stored("img1").status)
+    }
+
+    @Test
+    fun `with keep-original on, a video is untouched by the setting and still transcodes into the media dir`() = runTest {
+        // The setting names images; a video's local file stays the transcode
+        // whatever it says, so the row is prepared exactly as before.
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        val transcoded = File.createTempFile("vid_", ".mp4")
+        val thumb = File.createTempFile("thumb_", ".jpg")
+        store(sending("vid1", MessageType.VIDEO, localUri = "content://picker/2"))
+        coEvery { videoTranscoder.ensureWithinLimits(any()) } returns
+            VideoMetadata(width = 1920, height = 1080, durationMs = 12_000L, rotationDegrees = 0, sizeBytes = 5_000_000L)
+        coEvery { videoTranscoder.transcode(any(), any(), any()) } returns VideoResult(transcoded, 1280, 720, 12)
+        coEvery { videoTranscoder.extractThumbnail(any()) } returns thumb
+        coEvery { mediaFileManager.copyToLocal("chat1", "vid1", any(), "mp4") } returns File("/media/vid1.mp4")
+
+        sender.send("vid1")
+
+        coVerify(exactly = 1) { videoTranscoder.transcode(any(), any(), any()) }
+        assertEquals("/media/vid1.mp4", stored("vid1").localUri)
+        assertEquals(MessageStatus.SENT, stored("vid1").status)
     }
 
     // A forwarded photo carries the source message's upload, and may carry none

@@ -2,11 +2,28 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.31.2] — 2026-09-18
+## [UNRELEASED] [1.32.1] — 2026-09-18
 
 ### Fixed
 
 - **A caption typed for photos you have just picked lands in the caption box, not in the chat.** Picking several images from the gallery opens them for review with a caption box at the bottom, but the keyboard that came back up with it was still attached to the chat's own message box behind the review screen: what you typed appeared nowhere, and turned up in the chat's message box once the photos had gone out. The caption box now takes the keyboard the moment the review screen opens, and when no keyboard is up the screen keeps typing to itself rather than letting it through to the chat behind — without opening a keyboard over the photo you came to look at. (`4c4aaf5f`)
+
+### Added
+
+- **"Keep Original Images": your own copy of a sent photo stays untouched.** A photo taken with the camera inside the app existed nowhere but in the app's cache, so once it had been sent, the compressed version was all that was left of it. With the new Settings toggle on, the copy kept on your phone — what your own bubble and the fullscreen viewer show — is the photo exactly as it was taken or picked, while the recipient still gets the size chosen with the HD pill; HD decides only what leaves the phone. Off by default. (`2757412`)
+
+### Fixed
+
+- **The emoji size panel is always on screen, whichever emoji you hold.** Holding an emoji in the last column of the picker and dragging to resize it showed no size bar and no percentage: the panel picked the side of the emoji to sit on by counting cells from the top of the list, which is off by one from the first category heading on, so for a right-most emoji it usually chose the right and drew itself past the edge of the screen. The panel now measures itself and sits to the right of the held emoji only when it fits, and to its left otherwise, so it stays visible at every size. The fade of the other emojis in the same row counted rows the same way and now follows the row you are actually holding. (`1d1cd78b`)
+- **The other person no longer flashes "Online" for an instant when you send them a message.** If they had opened the app on a bad connection and put it away again, their phone was left holding an "online" note it could not deliver, followed by the "offline" one; the moment a message sent to them woke their phone's connection, both notes went out one after the other and you saw them online for a blink. The "online" note is now only written over a working connection, and their phone reports itself online by itself once it reconnects. (`c02b4b4`)
+- **Someone typing to you now reads as "Online" at once.** The typing dots and the online status reach you over two separate connections that come back at their own pace, so after the other person had been away for a while their typing could show for several seconds while the top bar still said nothing. The top bar now says "Online" whenever the other person is typing, whatever the presence connection has managed to report so far. (`c02b4b4`)
+- **Typing dots no longer stay stuck when the other person's connection drops mid-typing.** Their phone tells yours when they stop typing, but that note is lost if their connection fails or the app is closed at that moment, and your chat kept showing the dots until someone sent a message. The dots now go away on their own about ten seconds after the last keystroke you were told about. (`c02b4b4`)
+- **The chat no longer scrolls away while you are picking a reaction.** With the reaction bar or the emoji sheet open on a message, a new message arriving at that moment pulled the conversation down to the bottom — and since any scroll closes the reaction bar, the row of emoji you had just opened disappeared under your thumb before you could tap one. The chat now stays exactly where it is for as long as a reaction is open. The new message is not lost: it is waiting at the bottom, with the unread marker, the moment you are done. (`f704c39`)
+- **An emoji from the picker now lands where the cursor is, instead of at the end of the message.** Whatever you had written, and wherever you had tapped in it, the emoji was stuck onto the end, so putting one in the middle of a sentence meant retyping everything after it. The panel's backspace key had the same fault: it deleted the last character of the message rather than the one in front of the cursor. Both now work from the cursor — the emoji goes in where you left it, replacing the selected text if you had selected any, and backspace takes the character in front of it, a flag or a family emoji in one press. The caption under a photo you are about to send behaves the same way. (`39ebf89`, `45d26ee`)
+
+### Changed
+
+- **Search now finds parts of words, not only whole ones.** Searching in a chat, or across all of them, only ever matched complete words: while a word was still being typed the results stayed empty, and a word sitting inside a longer one — "Geschenk" in "Geburtstagsgeschenk", "Termin" in "Termine" — could not be found at all. From two letters onwards, search matches anywhere inside a word. A single letter still means the word it spells, because as a fragment it would match very nearly every message you have. Two things follow: a short search fills its page of results sooner, so "there may be more" appears more often than it did, and a search that was cut off by that limit can no longer come back empty while real matches sit further back in the chat. (`1ab4a52c`)
 
 ## [1.31.1] — 2026-09-14
 

@@ -75,6 +75,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -591,6 +593,11 @@ private fun CaptionBar(
     onSend: () -> Unit,
 ) {
     val caption = captions[captionKey].orEmpty()
+    // The caption text itself lives in [captions] (one entry per pick, saved
+    // across process death); the caret and the IME's composing region are
+    // per-page view state, so they reset when the pager moves to another pick.
+    var captionCursor by remember(captionKey) { mutableStateOf(TextRange(caption.length)) }
+    var captionComposition by remember(captionKey) { mutableStateOf<TextRange?>(null) }
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
     val emojiPanelHeightDp = run {
         val cellDp = (screenWidthDp - 30) / 8
@@ -614,8 +621,16 @@ private fun CaptionBar(
             }
 
             BasicTextField(
-                value = caption,
-                onValueChange = { captions[captionKey] = it },
+                value = buildComposerValue(
+                    annotated = AnnotatedString(caption),
+                    cursor = captionCursor,
+                    composition = captionComposition,
+                ),
+                onValueChange = { newValue ->
+                    captionCursor = newValue.selection
+                    captionComposition = newValue.composition
+                    captions[captionKey] = newValue.text
+                },
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(focusRequester)
@@ -667,14 +682,18 @@ private fun CaptionBar(
             EmojiHandlerPanel(
                 mode = EmojiMode.TEXT_INPUT,
                 recentEmojis = recentEmojis,
-                onEmojiSelected = { emoji, _ -> captions[captionKey] = caption + emoji },
+                onEmojiSelected = { emoji, _ ->
+                    // At the caret, not appended — same contract as the chat composer.
+                    val edit = insertAtCursor(caption, captionCursor, emoji)
+                    captions[captionKey] = edit.text
+                    captionCursor = edit.cursor
+                    captionComposition = null
+                },
                 onBackspace = {
-                    if (caption.isNotEmpty()) {
-                        val iter = java.text.BreakIterator.getCharacterInstance()
-                        iter.setText(caption)
-                        iter.last()
-                        captions[captionKey] = caption.substring(0, iter.previous())
-                    }
+                    val edit = deleteBeforeCursor(caption, captionCursor)
+                    captions[captionKey] = edit.text
+                    captionCursor = edit.cursor
+                    captionComposition = null
                 },
                 onRecentUsed = onEmojiUsed,
                 modifier = Modifier.height(emojiPanelHeightDp.dp)
