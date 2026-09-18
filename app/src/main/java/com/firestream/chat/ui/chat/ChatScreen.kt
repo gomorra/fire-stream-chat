@@ -736,8 +736,9 @@ fun ChatScreen(
     }
 
     // Auto-scroll to the newest message only when the user is already near it
-    // (within ~1 screen of reversed index 0). Skip until the initial scroll
-    // restore has run to avoid racing with it.
+    // (within ~1 screen of reversed index 0) and no reaction overlay is anchored
+    // to a bubble. Skip until the initial scroll restore has run to avoid racing
+    // with it. See shouldAutoScrollToNewest for the rule.
     //
     // In reverseLayout, animateScrollToItem(0) anchors the newest message at
     // the viewport's visual bottom; async image decode / link-preview load
@@ -745,10 +746,14 @@ fun ChatScreen(
     LaunchedEffect(uiState.messages.messages.size) {
         if (!initialScrollDone) return@LaunchedEffect
         if (uiState.messages.messages.isNotEmpty()) {
-            val firstVisible = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
-            val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-            val nearBottom = firstVisible <= visibleCount
-            if (nearBottom) {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            val shouldScroll = shouldAutoScrollToNewest(
+                firstVisibleIndex = visibleItems.firstOrNull()?.index ?: 0,
+                visibleItemCount = visibleItems.size,
+                reactionPickerTarget = reactionTargetMessage,
+                swipeReactTarget = swipeReactMessage,
+            )
+            if (shouldScroll) {
                 listState.animateScrollToItem(0)
             }
         }
@@ -2561,6 +2566,40 @@ private fun Modifier.imeOrPanelHeight(
     val height = maxOf(overlap, panelPx())
     val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+}
+
+/**
+ * Whether an arriving message should pull the list down to the newest bubble.
+ *
+ * Two conditions, both required:
+ *
+ * 1. **The user is already near the tail** — [firstVisibleIndex] is within one screen
+ *    of reversed index 0. Someone reading history keeps their place; the unread badge
+ *    and the scroll-to-bottom FAB tell them there is something new below.
+ * 2. **No reaction overlay is anchored to a bubble** — neither the long-press picker
+ *    sheet ([reactionPickerTarget]) nor the swipe panel ([swipeReactTarget]) is open.
+ *
+ * The second condition is why this is a function rather than an inline `nearBottom`
+ * check. A reaction overlay is positioned against one specific bubble: the swipe panel
+ * is a `Popup` laid out against its item, and ChatScreen's `isScrollInProgress`
+ * collector clears `swipeReactMessage` on *any* scroll — a programmatic
+ * `animateScrollToItem` included — so a message arriving mid-reaction used to yank the
+ * conversation down and delete the panel out from under the user's thumb. The sheet
+ * survives the scroll but leaves the user reacting to a list that just moved.
+ *
+ * Deliberately no catch-up when the overlay closes: the list stays where the user left
+ * it, and the next arriving message resumes normal following if they are still near the
+ * tail. Explicit scrolls — the user sending a message (`scrollToBottomTrigger`), the
+ * post-reaction chip reveal, tapping the FAB — are separate effects and unaffected.
+ */
+internal fun shouldAutoScrollToNewest(
+    firstVisibleIndex: Int,
+    visibleItemCount: Int,
+    reactionPickerTarget: Message?,
+    swipeReactTarget: Message?,
+): Boolean {
+    if (reactionPickerTarget != null || swipeReactTarget != null) return false
+    return firstVisibleIndex <= visibleItemCount
 }
 
 /**
