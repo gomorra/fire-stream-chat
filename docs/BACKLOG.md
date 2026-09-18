@@ -21,6 +21,21 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### "Keep Original Images" (2026-09-18)
+
+The unit tests pin the pipeline (encoding uploaded, input copied, one persist), not what
+the copy looks like on a phone. With the setting on, on a device with a second device as
+recipient:
+1. Take a photo with the in-app camera, send it Standard → your own bubble and the
+   fullscreen viewer must show it at full resolution with the right orientation (the copy
+   keeps its EXIF, the encoding never had any); the recipient's copy must be 1600 px.
+2. Same photo sent HD → the recipient's copy is full size; yours is still the untouched
+   file (compare byte sizes in Files: yours keeps the camera's EXIF block).
+3. Send a PNG or HEIC gallery pick → it must render in the bubble, the viewer and in
+   Google Photos under `Pictures/FireStream/` although its name ends in `.jpg`.
+4. Flight mode, send a photo, kill the app, go online → the retry must upload the
+   encoding, not the original (the row persists nothing until the upload is through).
+
 ### Client-set message ids and the if-absent retry (offline outbox step 1, 2026-09-11)
 
 Shipped in `68a53e75`; nothing has been on hardware. Firestore's transaction, its
