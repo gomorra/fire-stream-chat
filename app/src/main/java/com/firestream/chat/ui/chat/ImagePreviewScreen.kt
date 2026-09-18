@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.chat
 
 import android.content.Context
+import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -53,10 +54,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
@@ -67,10 +70,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -78,15 +85,21 @@ import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.AdjustImageScreen
+import com.firestream.chat.ui.chat.imageedit.CropRect
 import com.firestream.chat.ui.chat.imageedit.DrawImageScreen
+import com.firestream.chat.ui.chat.imageedit.EditFailureBanner
+import com.firestream.chat.ui.chat.imageedit.EditFlattenScrim
 import com.firestream.chat.ui.chat.imageedit.HdQualitySheet
 import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import com.firestream.chat.ui.chat.imageedit.OverlayImageScreen
+import com.firestream.chat.ui.chat.imageedit.ViewportGeometry
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
@@ -100,6 +113,19 @@ import kotlinx.coroutines.withContext
  * only inside [CaptionBar], so a keystroke invalidates the caption row rather
  * than the pager — otherwise every typed character would re-run the full-screen
  * `AsyncImage` for the current page and its neighbours.
+ *
+ * ### A zoom is a crop
+ *
+ * Pinch-zooming a page does not merely inspect the photo: what is on screen is
+ * what gets sent. The zoom is kept per displayed step in [viewports], as a
+ * frame normalized to the image so it survives a rotation and paging away,
+ * and stays a *view* until the moment it has to become pixels — pressing Send,
+ * or opening an editor, which must work on the photo the user is looking at.
+ * At that moment it is flattened through the same `rasterize` → `landEdit`
+ * path as any editor step, so it appears in the history, undo walks it back,
+ * and the page then shows the cropped step at 1x, which is the same picture the
+ * zoom was showing: nothing jumps. Everything the zoom does with the image's
+ * shape is arithmetic in `ViewportGeometry`.
  *
  * The editor rail ([ImageEditActions]) floats top-right over the photo, and the
  * history pill ([ImageEditHistory]) appears top-left only once the current item
@@ -184,7 +210,22 @@ internal fun ImagePreviewScreen(
         mutableStateOf<EditTarget?>(null)
     }
 
-    var currentPageZoomed by remember { mutableStateOf(false) }
+    // The zoom on each displayed step, as the crop it would send, keyed by the
+    // step's own URI rather than the pick's: a zoom is a statement about *this*
+    // image, and the step under the cursor changes shape when a crop lands.
+    // Absent means 1x. Saved, so a rotation restores the frame into the new box.
+    val viewports = rememberSaveable(items, saver = ViewportsSaver) {
+        mutableStateMapOf<String, CropRect>()
+    }
+    // A pan inside a zoomed image must move the image, not page away.
+    val currentPageZoomed = viewports.isZoomed(current.uri)
+
+    // Flattening a zoom into a step is a decode-and-encode and cannot be
+    // synchronous; while it runs the screen is covered exactly as an editor is
+    // during its own Done, and the failure line is the one the editors show.
+    val scope = rememberCoroutineScope()
+    var flatteningZoom by remember { mutableStateOf(false) }
+    var zoomFailed by remember { mutableStateOf(false) }
     var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
     var showHdSheet by rememberSaveable { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -240,6 +281,98 @@ internal fun ImagePreviewScreen(
         }
     }
 
+    // Read at call time, not when an editor opened: the byte budget evicts
+    // globally oldest-first, so every other page's current step has to be named
+    // or flattening this one can delete an edit on another (§3).
+    val liveSteps = { drafts.map { it.uri }.toSet() }
+
+    // Lands a flattened step on the item picked as [key], and returns the item
+    // as it now stands — or null when the page was removed from the strip in
+    // the meantime, in which case nothing can reach the step and it is
+    // collected now rather than left as an orphan in the cache. Shared by every
+    // editor and by the zoom flatten, because landing a step is the same act
+    // whichever produced it.
+    fun landStep(key: String, rasterized: Uri): PendingMedia? {
+        val index = drafts.indexOfFirst { it.originalUri.toString() == key }
+        if (index < 0) {
+            onDiscardEditSteps(listOf(rasterized.toString()))
+            return null
+        }
+        val landed = drafts[index].landEdit(rasterized)
+        drafts = drafts.toMutableList().also { it[index] = landed.item }
+        // The other half of landing an edit, and the only moment an edit file
+        // ever becomes deletable: undo cannot free the file it steps off, so a
+        // Done that skips this leaks the abandoned tail until `sweepStale`
+        // collects it 24 h later.
+        onDiscardEditSteps(landed.abandoned)
+        return landed.item
+    }
+
+    // [item] with its zoom, if any, flattened into a crop step: the item
+    // untouched when it is at 1x, or null when the flatten failed. The zoom is
+    // forgotten once it is pixels — the new step shows the same picture at 1x.
+    suspend fun flattenZoom(item: PendingMedia): PendingMedia? {
+        val key = item.uri.toString()
+        val crop = viewports[key]?.toOp() ?: return item
+        val rasterized = edit.rasterize(item.uri, listOf(crop), liveSteps()) ?: return null
+        viewports.remove(key)
+        return landStep(item.originalUri.toString(), rasterized)
+    }
+
+    // Opens [editor] on the page under the pager — on the photo as the user
+    // sees it, so a zoom is flattened first and the editor gets the crop.
+    fun openEditor(editor: Editor) {
+        val item = current
+        val key = item.originalUri.toString()
+        if (!viewports.isZoomed(item.uri)) {
+            editing = EditTarget(key = key, source = item.uri, editor = editor)
+            return
+        }
+        flatteningZoom = true
+        zoomFailed = false
+        scope.launch {
+            val cropped = flattenZoom(item)
+            flatteningZoom = false
+            if (cropped == null) {
+                zoomFailed = true
+            } else {
+                editing = EditTarget(key = key, source = cropped.uri, editor = editor)
+            }
+        }
+    }
+
+    // Hands the batch to the caller with every zoom flattened into the crop it
+    // was showing — the last zoomed state is what is sent, on every page, not
+    // only the one on screen. One failure keeps the whole batch here: sending
+    // the rest would send it without the photo the user was looking at.
+    fun sendBatch() {
+        if (flatteningZoom) return
+        flatteningZoom = true
+        zoomFailed = false
+        scope.launch {
+            // Resolve every item, not just the visible one: the pages the user
+            // is not looking at have not been through the effect above, and a
+            // vanished step must never reach the send path. Written back, so a
+            // crop below lands on the step that survived and not on a cursor
+            // pointing at nothing. Bounded by the batch size times
+            // PendingMedia.MAX_EDIT_STEPS stat calls on cacheDir.
+            val resolved = drafts.map { it.onSurvivingStep(editStepExists) }
+            drafts = resolved
+            val cropped = ArrayList<PendingMedia>(resolved.size)
+            for (item in resolved) {
+                val flattened = flattenZoom(item)
+                if (flattened == null) {
+                    flatteningZoom = false
+                    zoomFailed = true
+                    return@launch
+                }
+                cropped += flattened
+            }
+            flatteningZoom = false
+            onSend(cropped.map { it.copy(caption = captions[it.originalUri.toString()].orEmpty()) })
+        }
+    }
+
     // The editor replaces this screen's content rather than floating over it as a
     // sibling: `pendingMedia` and the caption map are remembered here and stay
     // alive either way, while a sibling overlay would leave the pager beneath it
@@ -247,28 +380,8 @@ internal fun ImagePreviewScreen(
     val editTarget = editing
     if (editTarget != null) {
         val target = editTarget
-        // Read now, not when the editor opened: the byte budget evicts globally
-        // oldest-first, so every other page's current step has to be named or
-        // flattening this one can delete an edit on another (§3).
-        val liveSteps = { drafts.map { it.uri }.toSet() }
-        // Shared by both editors, because landing a flattened step is the same
-        // act whichever screen produced it.
         val onEditDone: (Uri) -> Unit = { rasterized ->
-            val index = drafts.indexOfFirst { it.originalUri.toString() == target.key }
-            if (index >= 0) {
-                val landed = drafts[index].landEdit(rasterized)
-                drafts = drafts.toMutableList().also { it[index] = landed.item }
-                // The other half of landing an edit, and the only moment an
-                // edit file ever becomes deletable: undo cannot free the file
-                // it steps off, so a Done that skips this leaks the abandoned
-                // tail until `sweepStale` collects it 24 h later.
-                onDiscardEditSteps(landed.abandoned)
-            } else {
-                // The page was removed from the strip while the editor was
-                // open, so nothing can reach this step — collect it now
-                // rather than leaving an orphan in the cache.
-                onDiscardEditSteps(listOf(rasterized.toString()))
-            }
+            landStep(target.key, rasterized)
             editing = null
         }
 
@@ -318,26 +431,10 @@ internal fun ImagePreviewScreen(
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val item = drafts[page]
-            val isActive = page == pagerState.currentPage
             if (item.isVideo) {
                 VideoFramePreview(item)
             } else {
-                ZoomableBox(
-                    isActive = isActive,
-                    onZoomChange = { zoomed -> if (isActive) currentPageZoomed = zoomed },
-                ) { transform ->
-                    val context = LocalContext.current
-                    AsyncImage(
-                        model = remember(item.uri, item.originalMemoryCacheKey) {
-                            previewImageRequest(context, item)
-                        },
-                        contentDescription = "Image preview",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .then(transform)
-                    )
-                }
+                ImagePage(item = item, viewports = viewports)
             }
         }
 
@@ -365,27 +462,9 @@ internal fun ImagePreviewScreen(
             isHd = if (current.isVideo) null else (current.isHd ?: defaultIsHd),
             onToggleHd = { showHdSheet = true },
             showEditTools = !current.isVideo,
-            onAdjust = {
-                editing = EditTarget(
-                    key = current.originalUri.toString(),
-                    source = current.uri,
-                    editor = Editor.ADJUST,
-                )
-            },
-            onOverlay = {
-                editing = EditTarget(
-                    key = current.originalUri.toString(),
-                    source = current.uri,
-                    editor = Editor.OVERLAY,
-                )
-            },
-            onDraw = {
-                editing = EditTarget(
-                    key = current.originalUri.toString(),
-                    source = current.uri,
-                    editor = Editor.DRAW,
-                )
-            },
+            onAdjust = { openEditor(Editor.ADJUST) },
+            onOverlay = { openEditor(Editor.OVERLAY) },
+            onDraw = { openEditor(Editor.DRAW) },
             onDownload = { onDownload(current) },
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -465,6 +544,8 @@ internal fun ImagePreviewScreen(
                 )
             }
 
+            EditFailureBanner(visible = zoomFailed, message = "Couldn't apply the crop. Try again.")
+
             CaptionBar(
                 captions = captions,
                 // Keyed by the pick, not by `uri`: the displayed URI moves every
@@ -480,21 +561,7 @@ internal fun ImagePreviewScreen(
                     showEmojiSheet = !showEmojiSheet
                 },
                 onHideEmojiSheet = { showEmojiSheet = false },
-                onSend = {
-                    // Resolve every item, not just the visible one: the pages the
-                    // user is not looking at have not been through the effect
-                    // above, and a vanished step must never reach the send path.
-                    // Synchronous, unlike the effect above: the send needs the
-                    // answer now. Bounded by the batch size times
-                    // PendingMedia.MAX_EDIT_STEPS stat calls on cacheDir, which
-                    // is cheaper than the frame it would cost to defer it.
-                    onSend(
-                        drafts.map {
-                            it.onSurvivingStep(editStepExists)
-                                .copy(caption = captions[it.originalUri.toString()].orEmpty())
-                        }
-                    )
-                }
+                onSend = ::sendBatch,
             )
         }
 
@@ -509,6 +576,11 @@ internal fun ImagePreviewScreen(
                     .padding(bottom = 88.dp)
             )
         }
+
+        // Last, so it covers the rail, the strip and the send button alike: a
+        // second Send, or a removal, while a zoom is being written would land
+        // the step on the wrong list.
+        if (flatteningZoom) EditFlattenScrim()
     }
 
     if (showHdSheet && !current.isVideo) {
@@ -635,6 +707,101 @@ private fun CaptionBar(
         }
     }
 }
+
+/**
+ * One photo page: the image under a [ZoomableBox] whose zoom is the crop the
+ * page would send.
+ *
+ * The zoom surface works in screen pixels and [viewports] in fractions of the
+ * image, and the two are kept in step here. Once the box is measured and Coil
+ * has said how big the photo is — its *decoded* size, orientation applied,
+ * which is what a normalized frame has to be relative to and what the
+ * header-only probe does not know — the saved frame is put back onto the
+ * surface, and from then on every gesture writes the visible frame back.
+ *
+ * Only a gesture writes. The restore itself never does: it is contained rather
+ * than exact when the box has changed shape (`ViewportGeometry.transformFor`),
+ * and the box changes shape every time the keyboard slides over the caption
+ * field, so writing the restored frame back would widen the user's framing a
+ * little on every keystroke and never narrow it again. The frame the user
+ * last made stays the frame that is sent until they make another; while the
+ * box is the wrong shape for it the page shows that frame with some photo
+ * around it, and shows it exactly again once the box is back.
+ *
+ * A change of [PendingMedia.uri] — a step landing, an undo — starts over at 1x
+ * for the new image, on a fresh surface so not even one frame of the new step
+ * is drawn under the old zoom: [viewports] is keyed by step, and the zoom the
+ * old step had says nothing about a step of a different shape. For a crop that
+ * has just been flattened that 1x *is* the picture the zoom was showing.
+ */
+@Composable
+private fun ImagePage(item: PendingMedia, viewports: SnapshotStateMap<String, CropRect>) {
+    val key = item.uri.toString()
+    val zoom = remember(key) { ZoomableState() }
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    var contentSize by remember(key) { mutableStateOf<IntSize?>(null) }
+    val zoomed = viewports.isZoomed(item.uri)
+
+    LaunchedEffect(key, contentSize, boxSize) {
+        val content = contentSize
+        if (content == null || boxSize.width <= 0 || boxSize.height <= 0) {
+            zoom.reset()
+            return@LaunchedEffect
+        }
+        val boxWidth = boxSize.width.toFloat()
+        val boxHeight = boxSize.height.toFloat()
+        zoom.set(
+            ViewportGeometry.transformFor(
+                viewport = viewports[key] ?: CropRect.Full,
+                boxWidth = boxWidth,
+                boxHeight = boxHeight,
+                imageWidth = content.width,
+                imageHeight = content.height,
+                maxScale = ZoomableState.MAX_SCALE,
+            )
+        )
+        // The first emission is the restore just made; everything after it is
+        // a gesture.
+        snapshotFlow { zoom.transform }.drop(1).collect { transform ->
+            val visible = ViewportGeometry.visible(transform, boxWidth, boxHeight, content.width, content.height)
+            if (visible.isFull) viewports.remove(key) else viewports[key] = visible
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { boxSize = it }
+            .semantics { if (zoomed) stateDescription = "Zoomed in, sent as a crop" }
+    ) {
+        ZoomableBox(state = zoom, resetWhenInactive = false, contentSize = contentSize) { transform ->
+            val context = LocalContext.current
+            AsyncImage(
+                model = remember(item.uri, item.originalMemoryCacheKey) {
+                    previewImageRequest(context, item)
+                },
+                contentDescription = "Image preview",
+                contentScale = ContentScale.Fit,
+                // The drawable, not the painter: with crossfade on, the painter
+                // is the fade between placeholder and result and reports the
+                // larger of the two, while the crop must be normalized to the
+                // bitmap actually decoded.
+                onSuccess = { contentSize = it.result.drawable.toContentSize() },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(transform)
+            )
+        }
+    }
+}
+
+/** True when the step shown as [uri] has a zoom that would crop it. */
+private fun SnapshotStateMap<String, CropRect>.isZoomed(uri: Uri): Boolean =
+    this[uri.toString()]?.isFull == false
+
+/** A decoded drawable's size in pixels, or null when it has none to report. */
+private fun Drawable.toContentSize(): IntSize? =
+    if (intrinsicWidth >= 1 && intrinsicHeight >= 1) IntSize(intrinsicWidth, intrinsicHeight) else null
 
 /** Video page: still frame only — no inline playback, no pinch-zoom. */
 @Composable
@@ -819,6 +986,28 @@ private val CursorsSaver = listSaver<SnapshotStateMap<String, Int>, String>(
         mutableStateMapOf<String, Int>().apply {
             flat.chunked(2).forEach { pair ->
                 if (pair.size == 2) pair[1].toIntOrNull()?.let { put(pair[0], it) }
+            }
+        }
+    }
+)
+
+/**
+ * Flattens the zoom map to `[step, left, top, right, bottom]` runs. Saved, not
+ * merely remembered, because the frame is what gets sent: a rotation that
+ * forgot it would send the whole photo after the user had framed a face.
+ */
+private val ViewportsSaver = listSaver<SnapshotStateMap<String, CropRect>, Any>(
+    save = { map ->
+        map.entries.flatMap { (key, rect) -> listOf(key, rect.left, rect.top, rect.right, rect.bottom) }
+    },
+    restore = { flat ->
+        mutableStateMapOf<String, CropRect>().apply {
+            flat.chunked(5).forEach { run ->
+                val key = run.getOrNull(0) as? String
+                val edges = run.drop(1).map { it as? Float }
+                if (key != null && edges.size == 4 && edges.none { it == null }) {
+                    put(key, CropRect(edges[0]!!, edges[1]!!, edges[2]!!, edges[3]!!))
+                }
             }
         }
     }
