@@ -16,6 +16,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Typing dots no longer stay stuck when the other person's connection drops mid-typing.** Their phone tells yours when they stop typing, but that note is lost if their connection fails or the app is closed at that moment, and your chat kept showing the dots until someone sent a message. The dots now go away on their own about ten seconds after the last keystroke you were told about. (`c02b4b4`)
 - **The chat no longer scrolls away while you are picking a reaction.** With the reaction bar or the emoji sheet open on a message, a new message arriving at that moment pulled the conversation down to the bottom — and since any scroll closes the reaction bar, the row of emoji you had just opened disappeared under your thumb before you could tap one. The chat now stays exactly where it is for as long as a reaction is open. The new message is not lost: it is waiting at the bottom, with the unread marker, the moment you are done. (`f704c39`)
 
+### Changed
+
+- **Search now finds parts of words, not only whole ones.** Searching in a chat, or across all of them, only ever matched complete words: while a word was still being typed the results stayed empty, and a word sitting inside a longer one — "Geschenk" in "Geburtstagsgeschenk", "Termin" in "Termine" — could not be found at all. From two letters onwards, search matches anywhere inside a word. A single letter still means the word it spells, because as a fragment it would match very nearly every message you have. Two things follow: a short search fills its page of results sooner, so "there may be more" appears more often than it did, and a search that was cut off by that limit can no longer come back empty while real matches sit further back in the chat. (`1ab4a52c`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
