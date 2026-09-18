@@ -45,9 +45,16 @@ import javax.inject.Singleton
  * 3. **Abrupt termination** (crash, force-quit, radio loss) — the server-side
  *    `onDisconnect` registered in step 1 fires on the RTDB server and writes
  *    `isOnline=false` without any client involvement.
- * 4. **Reconnect while already tracking** (app-switcher round trip where the
- *    RTDB socket never dropped) — idempotent [startPresence] call force-writes
- *    `isOnline=true` because `.info/connected` won't re-fire.
+ * 4. **Re-entry while already tracking** (`AppLifecycleObserver.onStart` and
+ *    `MainActivity.onResume` both call [startPresence] on every foreground, and
+ *    an in-app Activity round trip resumes again) — the idempotent call
+ *    force-writes `isOnline=true` because `.info/connected` won't re-fire, but
+ *    only while the socket is up. Without a connection the write would only be
+ *    queued, and RTDB flushes queued writes in order on the next connect, so
+ *    an `online` queued here followed by `goOffline`'s `offline` made the user
+ *    flash online to everyone watching — typically the moment a push woke the
+ *    device's radio for a message sent to them. When disconnected the
+ *    `.info/connected` listener writes online itself once the socket is back.
  * 5. **Logout** — not currently handled here; signed-out users stay online in
  *    RTDB until the app is backgrounded. Tracked as a separate defect.
  *
@@ -70,6 +77,10 @@ class RealtimePresenceSource @Inject constructor(
     private var connectedListener: ValueEventListener? = null
     private var currentUserId: String? = null
 
+    /** Last value seen on `.info/connected`; false whenever no listener is registered. */
+    @Volatile
+    private var connected = false
+
     /**
      * Starts presence monitoring for [userId].
      *
@@ -84,9 +95,15 @@ class RealtimePresenceSource @Inject constructor(
     override fun startPresence(userId: String) {
         Log.d(TAG, "startPresence called for userId=$userId (current=$currentUserId, hasListener=${connectedListener != null})")
         if (currentUserId == userId && connectedListener != null) {
-            // Listener already registered — but we may have been set offline by goOffline()
-            // (e.g. app switcher round-trip). Force-write online status since .info/connected
-            // won't re-fire when the RTDB connection was never lost.
+            // Listener already registered. `.info/connected` won't re-fire while the
+            // connection holds, so refresh the online flag ourselves — but only over a
+            // live socket. Disconnected, the write would sit in RTDB's queue and flush
+            // ahead of a later `goOffline` write, showing the user online for an
+            // instant; the listener below writes online on its own once reconnected.
+            if (!connected) {
+                Log.d(TAG, "startPresence: listener exists but not connected, leaving the online write to the reconnect")
+                return
+            }
             Log.d(TAG, "startPresence: listener exists, force-writing online status")
             val presenceRef = database.getReference("presence/$userId")
             val onlineData = mapOf("isOnline" to true, "lastSeen" to ServerValue.TIMESTAMP)
@@ -109,9 +126,10 @@ class RealtimePresenceSource @Inject constructor(
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val connected = snapshot.getValue(Boolean::class.java) ?: false
-                Log.d(TAG, ".info/connected = $connected")
-                if (!connected) return
+                val isConnected = snapshot.getValue(Boolean::class.java) ?: false
+                Log.d(TAG, ".info/connected = $isConnected")
+                connected = isConnected
+                if (!isConnected) return
 
                 presenceRef.onDisconnect().setValue(offlineData)
                     .addOnSuccessListener { Log.d(TAG, "onDisconnect registered OK") }
@@ -151,6 +169,7 @@ class RealtimePresenceSource @Inject constructor(
             }
             connectedListener = null
             currentUserId = null
+            connected = false
         }
         val presenceRef = database.getReference("presence/$userId")
         presenceRef.setValue(
@@ -192,6 +211,7 @@ class RealtimePresenceSource @Inject constructor(
         }
         connectedListener = null
         currentUserId = null
+        connected = false
     }
 
     companion object {
