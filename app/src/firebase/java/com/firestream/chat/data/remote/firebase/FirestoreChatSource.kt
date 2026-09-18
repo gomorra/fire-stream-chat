@@ -20,15 +20,22 @@ import com.firestream.chat.domain.model.Message
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private const val COL_CHATS = "chats"
 private const val COL_INVITE_LINKS = "inviteLinks"
+
+/** How long a `typingUsers` entry counts as typing after the writer's last keystroke. */
+internal const val TYPING_TTL_MS = 10_000L
 
 /**
  * Firestore-backed data source for the `chats` and `inviteLinks` collections.
@@ -40,9 +47,14 @@ private const val COL_INVITE_LINKS = "inviteLinks"
  * isn't split between the two layers.
  */
 @Singleton
-class FirestoreChatSource @Inject constructor(
-    private val firestore: FirebaseFirestore
+class FirestoreChatSource internal constructor(
+    private val firestore: FirebaseFirestore,
+    private val nowMs: () -> Long,
 ) : ChatSource {
+
+    @Inject
+    constructor(firestore: FirebaseFirestore) : this(firestore, System::currentTimeMillis)
+
     // ── Observers ────────────────────────────────────────────────────────────
 
     override fun observeChatsForUser(uid: String): Flow<List<Chat>> = callbackFlow {
@@ -63,7 +75,22 @@ class FirestoreChatSource @Inject constructor(
         awaitClose { listener.remove() }
     }
 
-    override fun observeTypingUsers(chatId: String): Flow<List<String>> = callbackFlow {
+    /**
+     * The ids typing in [chatId] right now: every `typingUsers` entry younger
+     * than [TYPING_TTL_MS], re-evaluated when the oldest one ages out.
+     *
+     * The writer clears its own entry when it stops, but that write is lost
+     * when its connection drops or the app is killed mid-typing, and nothing
+     * but another change to the chat document would re-run the age filter —
+     * the reader kept showing the dots until someone sent a message. The timer
+     * bounds the stale indicator to the TTL, on this device's clock, the same
+     * clock the filter compares against.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeTypingUsers(chatId: String): Flow<List<String>> =
+        observeTypingTimestamps(chatId).flatMapLatest { entries -> liveTypingUsers(entries) }
+
+    private fun observeTypingTimestamps(chatId: String): Flow<Map<String, Long>> = callbackFlow {
         val listener: ListenerRegistration = firestore
             .collection(COL_CHATS).document(chatId)
             .addSnapshotListener { snapshot, error ->
@@ -71,17 +98,29 @@ class FirestoreChatSource @Inject constructor(
                     close(error)
                     return@addSnapshotListener
                 }
-                val typingUsers = (snapshot?.get("typingUsers") as? Map<*, *>)
+                val entries = (snapshot?.get("typingUsers") as? Map<*, *>)
                     ?.entries
-                    ?.filter { (_, v) ->
-                        val ts = v as? Long ?: return@filter false
-                        System.currentTimeMillis() - ts < 10_000
+                    ?.mapNotNull { (k, v) ->
+                        val uid = k as? String ?: return@mapNotNull null
+                        val ts = v as? Long ?: return@mapNotNull null
+                        uid to ts
                     }
-                    ?.mapNotNull { it.key as? String }
-                    ?: emptyList()
-                trySend(typingUsers)
+                    ?.toMap()
+                    ?: emptyMap()
+                trySend(entries)
             }
         awaitClose { listener.remove() }
+    }
+
+    private fun liveTypingUsers(entries: Map<String, Long>): Flow<List<String>> = flow {
+        var live = entries
+        while (true) {
+            val now = nowMs()
+            live = live.filterValues { ts -> now - ts < TYPING_TTL_MS }
+            emit(live.keys.toList())
+            val oldest = live.values.minOrNull() ?: return@flow
+            delay(TYPING_TTL_MS - (now - oldest))
+        }
     }
 
     // ── Reads ────────────────────────────────────────────────────────────────
