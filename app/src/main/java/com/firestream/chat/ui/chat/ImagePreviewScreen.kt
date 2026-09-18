@@ -11,9 +11,11 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -21,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -62,6 +65,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -115,6 +120,18 @@ import kotlinx.coroutines.withContext
  * pill for an item whose own `isHd` is still null — that is, one the user has
  * not overridden. Nothing here writes the preference back.
  *
+ * ### Opening this screen has to take focus
+ *
+ * This is an overlay inside `ChatScreen`'s composition, not a NavHost
+ * destination, so the chat composer it covers stays composed — and, coming back
+ * from the picker, still focused, with the IME re-shown over it. Being covered
+ * takes nothing away, so a caption typed here landed in a field the user cannot
+ * see, and turned up in the chat composer after the photos had gone out.
+ * Opening therefore takes focus: the caption field takes it whenever a keyboard
+ * is up, so an interrupted typing session continues where the user is looking,
+ * and with no keyboard up the screen itself takes it — enough to stop the leak,
+ * and it summons no keyboard over the photo they came here to look at.
+ *
  * ### The history is a list of files the OS may delete
  *
  * `cacheDir` can be reclaimed under storage pressure at any moment, and the
@@ -125,6 +142,7 @@ import kotlinx.coroutines.withContext
  * step and ultimately to the untouched pick. Losing undo *depth* is acceptable;
  * sending a URI that resolves to nothing is not (§4).
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ImagePreviewScreen(
     items: List<PendingMedia>,
@@ -134,6 +152,13 @@ internal fun ImagePreviewScreen(
     onSend: (List<PendingMedia>) -> Unit,
     onDownload: (PendingMedia) -> Unit,
     onDismiss: () -> Unit,
+    /**
+     * Whether a soft keyboard is on screen, which is what decides where focus
+     * goes when this screen opens (see above). A parameter rather than a plain
+     * read of the IME state so the rule can be driven from a Robolectric test,
+     * where there is no IME to show.
+     */
+    keyboardVisible: Boolean = WindowInsets.isImeVisible,
     /**
      * Everything the editor needs from the ViewModel, bundled rather than passed
      * one lambda at a time — see [ImageEditServices] for why the parameter count
@@ -190,6 +215,8 @@ internal fun ImagePreviewScreen(
     var showEmojiSheet by rememberSaveable { mutableStateOf(false) }
     var showHdSheet by rememberSaveable { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val captionFocusRequester = remember { FocusRequester() }
+    val screenFocusRequester = remember { FocusRequester() }
 
     val onRemove: (Int) -> Unit = remember(items) {
         { index ->
@@ -306,11 +333,28 @@ internal fun ImagePreviewScreen(
         return
     }
 
+    // Below the editor's early return, so both requesters are attached whenever
+    // this runs, and keyed on the keyboard rather than run once: the IME is
+    // re-shown a frame or two after the picker returns, which is after the first
+    // composition here, and an editor screen can hand focus back somewhere else
+    // entirely. With no keyboard up, focus goes to the screen itself rather than
+    // being cleared — taking it is what moves it off the composer behind, and
+    // `clearFocus` leaves that composer focused when the window is not focused.
+    LaunchedEffect(keyboardVisible) {
+        if (keyboardVisible) captionFocusRequester.requestFocus()
+        else screenFocusRequester.requestFocus()
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
             .imePadding()
+            // A focus target with nothing to type into: somewhere for focus to
+            // sit while no keyboard is up, so it is not sitting in the chat
+            // composer this screen covers.
+            .focusRequester(screenFocusRequester)
+            .focusable()
     ) {
         HorizontalPager(
             state = pagerState,
@@ -469,6 +513,7 @@ internal fun ImagePreviewScreen(
 
             CaptionBar(
                 captions = captions,
+                focusRequester = captionFocusRequester,
                 // Keyed by the pick, not by `uri`: the displayed URI moves every
                 // time an edit lands, and a caption must not move with it.
                 captionKey = current.originalUri.toString(),
@@ -536,6 +581,7 @@ internal fun ImagePreviewScreen(
 @Composable
 private fun CaptionBar(
     captions: SnapshotStateMap<String, String>,
+    focusRequester: FocusRequester,
     captionKey: String,
     isBatch: Boolean,
     itemCount: Int,
@@ -587,6 +633,7 @@ private fun CaptionBar(
                 },
                 modifier = Modifier
                     .weight(1f)
+                    .focusRequester(focusRequester)
                     .onFocusChanged { if (it.isFocused) onHideEmojiSheet() }
                     .background(
                         color = Color.White.copy(alpha = 0.15f),

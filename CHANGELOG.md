@@ -2,7 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.32.0] — 2026-09-18
+## [UNRELEASED] [1.32.1] — 2026-09-18
+
+### Fixed
+
+- **A caption typed for photos you have just picked lands in the caption box, not in the chat.** Picking several images from the gallery opens them for review with a caption box at the bottom, but the keyboard that came back up with it was still attached to the chat's own message box behind the review screen: what you typed appeared nowhere, and turned up in the chat's message box once the photos had gone out. The caption box now takes the keyboard the moment the review screen opens, and when no keyboard is up the screen keeps typing to itself rather than letting it through to the chat behind — without opening a keyboard over the photo you came to look at. (`4c4aaf5f`)
 
 ### Added
 
