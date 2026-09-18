@@ -291,6 +291,8 @@ the reaction sheet, a frozen recents order. What it cannot assert is the half th
 - **The long-press size drag still feels the same.** Hold an emoji in the composer and
   drag up: the size readout, the anchored preview panel, and the fade of the *other*
   emoji in that row. Release and confirm the emoji is inserted at the size chosen.
+  Hold one in the **last column** too: the panel must sit to the left of it and stay on
+  screen at 500%, and the fade must dim exactly that row (`EmojiGridLayout.kt`).
 - **The recents block holds still under the finger.** Tap several emoji in quick
   succession without closing the panel; the Recents row must not reorder while it is open.
   Close and reopen and confirm the new order has been picked up.
