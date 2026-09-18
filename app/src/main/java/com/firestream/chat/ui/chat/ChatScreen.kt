@@ -234,7 +234,8 @@ fun ChatScreen(
     val sendImagesFullQuality by viewModel.sendImagesFullQuality.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
     // Tracks char-index → size multiplier for emojis inserted via the picker.
-    // Indices are based on messageText.length at insertion time and cleared on send/cancel.
+    // Indices are char offsets into messageText — set at the caret on insertion,
+    // shifted by later edits, and cleared on send/cancel.
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     var inputCursor by remember { mutableStateOf(TextRange(0)) }
     // The IME's composing region, echoed back into every rebuilt TextFieldValue.
@@ -242,6 +243,18 @@ fun ChatScreen(
     // but never silently dropped on IME edits, or Compose restarts the input
     // session per keystroke (see buildComposerValue / docs/GOTCHAS.md).
     var inputComposition by remember { mutableStateOf<TextRange?>(null) }
+
+    // Applies a programmatic composer edit (emoji picker, its backspace key) to
+    // the text / cursor / emoji-size triple in one place. The composing region is
+    // dropped on purpose: a programmatic write must never echo a stale one back
+    // to the IME (see ComposerValue.buildComposerValue).
+    fun applyComposerEdit(edit: ComposerEdit) {
+        messageText = edit.text
+        inputCursor = edit.cursor
+        inputComposition = null
+        pendingEmojiSizes = edit.emojiSizes
+    }
+
     // Per-session anchor for live dictation. -1 = no active dictation session.
     // First commit sets the anchor at inputCursor.start; each subsequent partial
     // replaces text from anchor to anchor+lastLen.
@@ -736,8 +749,9 @@ fun ChatScreen(
     }
 
     // Auto-scroll to the newest message only when the user is already near it
-    // (within ~1 screen of reversed index 0). Skip until the initial scroll
-    // restore has run to avoid racing with it.
+    // (within ~1 screen of reversed index 0) and no reaction overlay is anchored
+    // to a bubble. Skip until the initial scroll restore has run to avoid racing
+    // with it. See shouldAutoScrollToNewest for the rule.
     //
     // In reverseLayout, animateScrollToItem(0) anchors the newest message at
     // the viewport's visual bottom; async image decode / link-preview load
@@ -745,10 +759,14 @@ fun ChatScreen(
     LaunchedEffect(uiState.messages.messages.size) {
         if (!initialScrollDone) return@LaunchedEffect
         if (uiState.messages.messages.isNotEmpty()) {
-            val firstVisible = listState.layoutInfo.visibleItemsInfo.firstOrNull()?.index ?: 0
-            val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-            val nearBottom = firstVisible <= visibleCount
-            if (nearBottom) {
+            val visibleItems = listState.layoutInfo.visibleItemsInfo
+            val shouldScroll = shouldAutoScrollToNewest(
+                firstVisibleIndex = visibleItems.firstOrNull()?.index ?: 0,
+                visibleItemCount = visibleItems.size,
+                reactionPickerTarget = reactionTargetMessage,
+                swipeReactTarget = swipeReactMessage,
+            )
+            if (shouldScroll) {
                 listState.animateScrollToItem(0)
             }
         }
@@ -955,7 +973,7 @@ fun ChatScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                uiState.session.isRecipientOnline -> Text(
+                                uiState.session.recipientAppearsOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
@@ -1994,26 +2012,22 @@ fun ChatScreen(
                         mode = EmojiMode.TEXT_INPUT,
                         recentEmojis = uiState.overlays.recentEmojis,
                         onEmojiSelected = { emoji, size ->
-                            val insertIdx = messageText.length
-                            messageText += emoji
-                            inputCursor = TextRange(messageText.length)
-                            inputComposition = null
-                            if (size != 1.0f) {
-                                pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
-                            }
+                            // Insert at the caret (replacing any selection), not at
+                            // the end — the picker must work mid-sentence.
+                            applyComposerEdit(
+                                insertAtCursor(
+                                    text = messageText,
+                                    selection = inputCursor,
+                                    insertion = emoji,
+                                    emojiSizes = pendingEmojiSizes,
+                                    insertionSize = size,
+                                )
+                            )
                         },
                         onBackspace = {
-                            if (messageText.isNotEmpty()) {
-                                val iter = java.text.BreakIterator.getCharacterInstance()
-                                iter.setText(messageText)
-                                iter.last()
-                                val boundary = iter.previous()
-                                val removedIdx = boundary
-                                messageText = messageText.substring(0, boundary)
-                                inputCursor = TextRange(messageText.length)
-                                inputComposition = null
-                                pendingEmojiSizes = pendingEmojiSizes - removedIdx
-                            }
+                            applyComposerEdit(
+                                deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
+                            )
                         },
                         onRecentUsed = { viewModel.addRecentEmoji(it) },
                         modifier = Modifier
@@ -2563,6 +2577,40 @@ private fun Modifier.imeOrPanelHeight(
     val height = maxOf(overlap, panelPx())
     val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
     layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+}
+
+/**
+ * Whether an arriving message should pull the list down to the newest bubble.
+ *
+ * Two conditions, both required:
+ *
+ * 1. **The user is already near the tail** — [firstVisibleIndex] is within one screen
+ *    of reversed index 0. Someone reading history keeps their place; the unread badge
+ *    and the scroll-to-bottom FAB tell them there is something new below.
+ * 2. **No reaction overlay is anchored to a bubble** — neither the long-press picker
+ *    sheet ([reactionPickerTarget]) nor the swipe panel ([swipeReactTarget]) is open.
+ *
+ * The second condition is why this is a function rather than an inline `nearBottom`
+ * check. A reaction overlay is positioned against one specific bubble: the swipe panel
+ * is a `Popup` laid out against its item, and ChatScreen's `isScrollInProgress`
+ * collector clears `swipeReactMessage` on *any* scroll — a programmatic
+ * `animateScrollToItem` included — so a message arriving mid-reaction used to yank the
+ * conversation down and delete the panel out from under the user's thumb. The sheet
+ * survives the scroll but leaves the user reacting to a list that just moved.
+ *
+ * Deliberately no catch-up when the overlay closes: the list stays where the user left
+ * it, and the next arriving message resumes normal following if they are still near the
+ * tail. Explicit scrolls — the user sending a message (`scrollToBottomTrigger`), the
+ * post-reaction chip reveal, tapping the FAB — are separate effects and unaffected.
+ */
+internal fun shouldAutoScrollToNewest(
+    firstVisibleIndex: Int,
+    visibleItemCount: Int,
+    reactionPickerTarget: Message?,
+    swipeReactTarget: Message?,
+): Boolean {
+    if (reactionPickerTarget != null || swipeReactTarget != null) return false
+    return firstVisibleIndex <= visibleItemCount
 }
 
 /**

@@ -163,6 +163,8 @@ shell existed.
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`GIF` enumerated, declared by nobody) and the `PickerSelection` a tab hands back |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiGridLayout.kt` | Pure layout arithmetic for the emoji grid — which row and column each item lands on once headers span a row, and which side of the held cell the size panel fits on |
+| `app/src/test/java/com/firestream/chat/ui/chat/picker/EmojiGridLayoutTest.kt` | That the last cell of a row is the last column, whatever headers sit above it, and that the size panel flips left rather than leave the grid |
 | `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the composer, reaction sheet and caption bar call — `EmojiMode` and the two controls that differ by host |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiSearchData.kt` | Bundled emoji → keyword table for in-panel search; no network |
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
@@ -498,7 +500,7 @@ One search, two scopes. In a chat it is an overlay owned by `ChatSearchManager` 
 | `app/src/main/java/com/firestream/chat/domain/usecase/message/SearchMessagesUseCase.kt` | The blank-query guard for both scopes (blank **and** no filter → empty) |
 | `app/src/main/java/com/firestream/chat/domain/repository/MessageRepository.kt` | `searchMessages(chatId: String?, query, filter)` — null `chatId` is global |
 | `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | The one compile-time-verified query; every clause a nullable/zero short-circuit, incl. `deletedAt IS NULL` |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Browse-mode short-circuit, whole-word pass, truncation read off the **raw** row count |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Browse-mode short-circuit, partial-word matching from `PARTIAL_MATCH_MIN_LENGTH` (single letters still pinned to the whole word), truncation read off the **raw** row count |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type rendering — media grid / icon rows / text rows; `resultLabel` is the caller's to resolve |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Chips, date-range picker, active-filter summary, `searchResultsSummary` |
 | `app/src/main/java/com/firestream/chat/ui/search/GlobalSearchScreen.kt` | The global destination: auto-focused field, chips, hint / empty / results |

@@ -29,12 +29,16 @@ import org.junit.Test
 /**
  * Truncation reporting for message search, in one chat and across all of them.
  *
- * The load-bearing case is `a page thinned by the word-boundary filter is still
- * reported as truncated`: SQLite's `LIMIT` runs *before* the whole-word pass, so
- * a capped query can hand back far fewer messages than the cap. Deriving
- * "there may be more" from the surviving count — which is what the UI did before
- * `MessageSearchResults` existed — silently presents a truncated page as an
- * exact total.
+ * The load-bearing case is `a single-letter page thinned by the word-boundary
+ * filter is still reported as truncated`: SQLite's `LIMIT` runs *before* the
+ * whole-word pass, so such a query can hand back far fewer messages than the
+ * cap. Deriving "there may be more" from the surviving count — which is what the
+ * UI did before `MessageSearchResults` existed — silently presents a truncated
+ * page as an exact total.
+ *
+ * From two characters up nothing thins the page at all (see
+ * [MessageRepositorySearchMatchingTest]), so the single-letter query is what
+ * these tests use wherever the thinning is the point.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MessageRepositorySearchTruncationTest {
@@ -95,16 +99,16 @@ class MessageRepositorySearchTruncationTest {
     }
 
     @Test
-    fun `a page thinned by the word-boundary filter is still reported as truncated`() = runTest {
-        // A full page of substring hits ("category"), of which only two are the
-        // whole word the user asked for. Eight further genuine matches, older
+    fun `a single-letter page thinned by the word-boundary filter is still reported as truncated`() = runTest {
+        // A full page of substring hits ("category"), of which only two spell the
+        // single letter the user asked for. Eight further genuine matches, older
         // than these, were never fetched — so "2 results" would be a lie.
         val returned = rows(MessageSearchLimits.TEXT) { i ->
-            if (i < 2) "the cat sat" else "category $i"
+            if (i < 2) "a cat sat" else "category $i"
         }
         stubSearch(returned)
 
-        val result = repository.searchMessages("chat1", "cat")
+        val result = repository.searchMessages("chat1", "a")
 
         assertEquals(2, result.messages.size)
         assertTrue("truncation must come off the raw row count", result.truncated)
@@ -118,6 +122,18 @@ class MessageRepositorySearchTruncationTest {
 
         assertEquals(3, result.messages.size)
         assertFalse(result.truncated)
+    }
+
+    @Test
+    fun `a full partial-match page is reported as truncated`() = runTest {
+        // Nothing thins a two-character page, so the cap is the only reason it
+        // could be short of the whole truth — and it must still say so.
+        stubSearchAtLimit(MessageSearchLimits.TEXT, rows(MessageSearchLimits.TEXT) { "category" })
+
+        val result = repository.searchMessages("chat1", "cat")
+
+        assertEquals(MessageSearchLimits.TEXT, result.messages.size)
+        assertTrue(result.truncated)
     }
 
     @Test
@@ -154,10 +170,10 @@ class MessageRepositorySearchTruncationTest {
     fun `global text search caps at GLOBAL, not the in-chat TEXT cap`() = runTest {
         stubSearchAtLimit(
             MessageSearchLimits.GLOBAL,
-            rows(MessageSearchLimits.GLOBAL) { i -> if (i < 1) "the cat sat" else "category $i" },
+            rows(MessageSearchLimits.GLOBAL) { i -> if (i < 1) "a cat sat" else "category $i" },
         )
 
-        val result = repository.searchMessages(null, "cat")
+        val result = repository.searchMessages(null, "a")
 
         assertEquals(1, result.messages.size)
         assertTrue("truncation must come off the raw row count", result.truncated)

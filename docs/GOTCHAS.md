@@ -82,6 +82,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   *raw* insets (consumption only affects the padding-modifier family), hence the
   explicit `− navigationBars` subtraction there. Blanket `imePadding()` stays the rule
   for simple bottom-anchored screens (`ListDetailScreen`, `ImagePreviewScreen`).
+- **A full-screen overlay composed inside another screen does not take focus from it.**
+  An overlay that is a sibling in the same composition — `ImagePreviewScreen` and the
+  fullscreen viewers all sit next to `ChatScreen`'s Scaffold, not on the NavHost —
+  covers the screen and changes nothing about focus: the composer underneath stays
+  focused, the IME is re-shown over it when the app returns from a picker Activity,
+  and every keystroke lands in a field the user cannot see. Opening such an overlay
+  has to *take* focus, and `focusManager.clearFocus()` is not how — it leaves the
+  focused field focused whenever the window itself is not (which is also what every
+  Robolectric Compose test looks like, so the difference is testable). Request focus
+  onto a target inside the overlay instead: the field it wants typed into, or a bare
+  `Modifier.focusRequester(…).focusable()` box when it wants none. Bit us as a photo
+  caption typed into the chat composer behind the send preview.
 - **A drag sends a target, never a step worked out from `rememberUpdatedState`.** A
   `pointerInput` block reads composition state through `rememberUpdatedState`, which
   refreshes only on recomposition, and more than one pointer event can arrive before the
@@ -151,6 +163,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `forEach { reactTo(it) }` on each emission — keep a `Map<id, snapshot>` and react
   only to deltas, even when the side effect is idempotent (binder calls etc. are not
   free).
+- **An RTDB write made without a connection is queued, and the queue flushes in order on
+  the next connect.** `setValue()` never fails for lack of a socket — it waits. So a
+  presence `online` written while disconnected, followed by `goOffline`'s `offline`, is
+  replayed as online-then-offline the moment the socket returns, which on a backgrounded
+  phone is typically when a push wakes the radio for a message sent to that user: the
+  sender saw them flash "Online". Presence writes that only make sense over a live socket
+  (the re-entry force-write in `RealtimePresenceSource.startPresence`) are gated on the
+  last `.info/connected` value; the listener itself writes online on reconnect. Regression:
+  `RealtimePresenceSourceTest.startPresence re-entry after a disconnect writes nothing until the reconnect`.
+- **A snapshot filter that depends on the clock needs its own timer.** Filtering
+  `typingUsers` by age inside the Firestore listener only re-runs when the document
+  changes, so an entry whose typing-off write never landed (writer offline or killed)
+  stayed "typing" until someone sent a message. `FirestoreChatSource.observeTypingUsers`
+  re-emits when the oldest live entry ages out (`flatMapLatest` over a `delay`ing flow),
+  on the same clock the filter uses. Regression: `FirestoreChatSourceTypingTest`.
 
 ## Room / data
 
@@ -209,6 +236,19 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Testing
 
+- **`BreakIterator`'s grapheme data is the host JDK's, and CI's JDK is not yours.**
+  `java.text.BreakIterator.getCharacterInstance()` segments by the Unicode data of
+  the JVM that runs the test: on JDK 17, which `.github/workflows/ci.yml` pins,
+  👨‍👩‍👧 is *five* clusters (three faces, two joiners), 🇩🇪 is two regional indicators
+  and 👍🏽 is hand plus tone; on JDK 21 and on Android's ICU each is one. A test
+  asserting "backspace eats one visible character" therefore passes locally on 21
+  and fails in CI on 17 — which is exactly how it bit `ComposerEditTest` on the
+  emoji-at-the-caret fix. Don't trust the platform for the emoji joins: re-apply
+  ZWJ, emoji-modifier and regional-indicator pairing yourself
+  (`ComposerValue.graphemeStartBefore`), which is a no-op where the host already
+  joins them. To reproduce a CI-only failure of this shape, run the suite against
+  the pinned JDK: `./gradlew :app:testFirebaseDebugUnitTest
+  -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64`.
 - **MockK `relaxed = true` returns a mock, not `null`, for nullable types.** A
   `Foo?`-returning stub silently defeats `?: return` guards; stub explicitly with
   `coEvery { fn(any()) } returns null` when the null path is the one under test.
@@ -299,6 +339,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   affordance; a Dismiss action alone only helps when somebody is present.
 
 ## Build tooling
+
+- **A `VirtualMachineError: Out of space in CodeCache` in a long Gradle run is the daemon, not the diff.**
+  Running the full unit suite and `assembleFirebaseDebug` in *one* invocation on a cloud
+  container (2026-09-18, ~12 min) ended with D8 failing on a third-party AAR and, on an
+  earlier attempt, `compileFirebaseDebugJavaWithJavac` dying with
+  `InternalError: NoSuchMethodException … MethodHandle.linkToStatic`. Both are the same
+  thing: the daemon JVM had exhausted its CodeCache ("for adapters" / "for method handle
+  intrinsic" in the `Caused by` chain), after which any further lambda or method-handle
+  bootstrap fails with a misleading `NoSuchMethodError`. `./gradlew --stop`, then run the
+  test task and the assemble task as two invocations — each was green on a fresh daemon.
+  A permanent `-XX:ReservedCodeCacheSize=…` in `org.gradle.jvmargs` is the real fix if it
+  recurs.
 
 - **A pre-commit hook that reads `/dev/tty` hangs, or errors, on any headless commit.**
   `.claude/hooks/ask-simplify.sh` prompts interactively ("Run /simplify before
