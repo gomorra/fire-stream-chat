@@ -224,6 +224,19 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Testing
 
+- **`BreakIterator`'s grapheme data is the host JDK's, and CI's JDK is not yours.**
+  `java.text.BreakIterator.getCharacterInstance()` segments by the Unicode data of
+  the JVM that runs the test: on JDK 17, which `.github/workflows/ci.yml` pins,
+  👨‍👩‍👧 is *five* clusters (three faces, two joiners), 🇩🇪 is two regional indicators
+  and 👍🏽 is hand plus tone; on JDK 21 and on Android's ICU each is one. A test
+  asserting "backspace eats one visible character" therefore passes locally on 21
+  and fails in CI on 17 — which is exactly how it bit `ComposerEditTest` on the
+  emoji-at-the-caret fix. Don't trust the platform for the emoji joins: re-apply
+  ZWJ, emoji-modifier and regional-indicator pairing yourself
+  (`ComposerValue.graphemeStartBefore`), which is a no-op where the host already
+  joins them. To reproduce a CI-only failure of this shape, run the suite against
+  the pinned JDK: `./gradlew :app:testFirebaseDebugUnitTest
+  -Dorg.gradle.java.home=/usr/lib/jvm/java-17-openjdk-amd64`.
 - **MockK `relaxed = true` returns a mock, not `null`, for nullable types.** A
   `Foo?`-returning stub silently defeats `?: return` guards; stub explicitly with
   `coEvery { fn(any()) } returns null` when the null path is the one under test.

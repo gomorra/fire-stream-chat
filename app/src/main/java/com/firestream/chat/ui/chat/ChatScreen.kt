@@ -234,7 +234,8 @@ fun ChatScreen(
     val sendImagesFullQuality by viewModel.sendImagesFullQuality.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
     // Tracks char-index → size multiplier for emojis inserted via the picker.
-    // Indices are based on messageText.length at insertion time and cleared on send/cancel.
+    // Indices are char offsets into messageText — set at the caret on insertion,
+    // shifted by later edits, and cleared on send/cancel.
     var pendingEmojiSizes by remember { mutableStateOf(emptyMap<Int, Float>()) }
     var inputCursor by remember { mutableStateOf(TextRange(0)) }
     // The IME's composing region, echoed back into every rebuilt TextFieldValue.
@@ -242,6 +243,18 @@ fun ChatScreen(
     // but never silently dropped on IME edits, or Compose restarts the input
     // session per keystroke (see buildComposerValue / docs/GOTCHAS.md).
     var inputComposition by remember { mutableStateOf<TextRange?>(null) }
+
+    // Applies a programmatic composer edit (emoji picker, its backspace key) to
+    // the text / cursor / emoji-size triple in one place. The composing region is
+    // dropped on purpose: a programmatic write must never echo a stale one back
+    // to the IME (see ComposerValue.buildComposerValue).
+    fun applyComposerEdit(edit: ComposerEdit) {
+        messageText = edit.text
+        inputCursor = edit.cursor
+        inputComposition = null
+        pendingEmojiSizes = edit.emojiSizes
+    }
+
     // Per-session anchor for live dictation. -1 = no active dictation session.
     // First commit sets the anchor at inputCursor.start; each subsequent partial
     // replaces text from anchor to anchor+lastLen.
@@ -1999,26 +2012,22 @@ fun ChatScreen(
                         mode = EmojiMode.TEXT_INPUT,
                         recentEmojis = uiState.overlays.recentEmojis,
                         onEmojiSelected = { emoji, size ->
-                            val insertIdx = messageText.length
-                            messageText += emoji
-                            inputCursor = TextRange(messageText.length)
-                            inputComposition = null
-                            if (size != 1.0f) {
-                                pendingEmojiSizes = pendingEmojiSizes + (insertIdx to size)
-                            }
+                            // Insert at the caret (replacing any selection), not at
+                            // the end — the picker must work mid-sentence.
+                            applyComposerEdit(
+                                insertAtCursor(
+                                    text = messageText,
+                                    selection = inputCursor,
+                                    insertion = emoji,
+                                    emojiSizes = pendingEmojiSizes,
+                                    insertionSize = size,
+                                )
+                            )
                         },
                         onBackspace = {
-                            if (messageText.isNotEmpty()) {
-                                val iter = java.text.BreakIterator.getCharacterInstance()
-                                iter.setText(messageText)
-                                iter.last()
-                                val boundary = iter.previous()
-                                val removedIdx = boundary
-                                messageText = messageText.substring(0, boundary)
-                                inputCursor = TextRange(messageText.length)
-                                inputComposition = null
-                                pendingEmojiSizes = pendingEmojiSizes - removedIdx
-                            }
+                            applyComposerEdit(
+                                deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
+                            )
                         },
                         onRecentUsed = { viewModel.addRecentEmoji(it) },
                         modifier = Modifier
