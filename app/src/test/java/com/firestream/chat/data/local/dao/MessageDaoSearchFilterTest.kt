@@ -73,6 +73,21 @@ class MessageDaoSearchFilterTest {
     }
 
     @Test
+    fun `text search matches a fragment inside a longer word`() = runTest {
+        // The SQL half of partial-word search: `LIKE '%…%'` requires no word
+        // boundary, so a compound's tail is findable. Which of these rows the
+        // repository then keeps is MessageRepositorySearchMatchingTest's.
+        dao.upsertRecords(listOf(
+            msg(id = "hit", content = "Dein Geburtstagsgeschenk ist da"),
+            msg(id = "miss", content = "nothing relevant"),
+        ))
+
+        val results = search(query = "geschenk", limit = 50)
+
+        assertEquals(listOf("hit"), results.map { it.id })
+    }
+
+    @Test
     fun `blank query with no filter returns the whole chat`() = runTest {
         dao.upsertRecords(listOf(
             msg(id = "a", content = "one"),

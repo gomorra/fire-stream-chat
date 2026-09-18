@@ -139,6 +139,15 @@ private const val PUSH_FETCH_RETRY_DELAY_MS = 2_000L
 // next update starts a fresh bubble instead of silently extending the old one.
 private const val LIST_MESSAGE_MERGE_WINDOW_MS = 10L * 60L * 1000L
 
+// From this many characters up, a search query matches *parts* of words: the
+// DAO's `LIKE '%…%'` is taken as the answer and the whole-word narrowing pass
+// is skipped. Two is the floor because a single letter as a substring matches
+// very nearly every message in the database — the cap would hand back the
+// newest rows regardless of what was typed — while two letters already carry
+// enough intent to answer mid-word, which is what makes search useful while it
+// is still being typed and what finds "Geschenk" inside "Geburtstagsgeschenk".
+private const val PARTIAL_MATCH_MIN_LENGTH = 2
+
 @Singleton
 class MessageRepositoryImpl @Inject constructor(
     private val messageDao: MessageDao,
@@ -713,7 +722,6 @@ class MessageRepositoryImpl @Inject constructor(
         return try {
             // Browse mode (blank query + an active filter) selects by chip, not
             // by text, so it takes the larger cap — see MessageSearchLimits.
-            val browsing = query.isEmpty()
             val limit = MessageSearchLimits.forScope(query, chatId)
             val rows = messageDao.searchMessages(
                 chatId = chatId,
@@ -727,20 +735,20 @@ class MessageRepositoryImpl @Inject constructor(
                 to = filter.toMs,
                 limit = limit,
             )
-            // The word-boundary pass narrows LIKE's substring match to whole
-            // words. It must not run in browse mode: there is no query to bound,
-            // and media rows carry an empty content that no regex would match.
-            val filtered = if (browsing) {
-                rows
-            } else {
+            // From PARTIAL_MATCH_MIN_LENGTH characters up, LIKE's substring
+            // match *is* the answer and every row it returned stands.
+            val filtered = if (narrowsToWholeWord(query)) {
                 val regex = wordBoundaryRegex(query)
                 rows.filter { regex.containsMatchIn(it.content) }
+            } else {
+                rows
             }
             MessageSearchResults(
                 messages = filtered.map { it.toDomain() },
-                // Off the raw row count, not `filtered`: the word-boundary pass
-                // runs after SQLite's LIMIT, so a page truncated by the cap can
-                // still come back far shorter than it. See MessageSearchResults.
+                // Off the raw row count, not `filtered`: where the narrowing pass
+                // does run, it runs after SQLite's LIMIT, so a page truncated by
+                // the cap can still come back far shorter than it. See
+                // MessageSearchResults.
                 truncated = rows.size >= limit,
             )
         } catch (e: Exception) {
@@ -757,6 +765,23 @@ class MessageRepositoryImpl @Inject constructor(
         MessageFilterType.VOICE -> MessageType.VOICE.name
         MessageFilterType.LINKS -> null
     }
+
+    /**
+     * Whether [query] still needs the whole-word pass on top of the DAO's
+     * `LIKE '%…%'` — true for a single-letter query and nothing else.
+     *
+     * A single letter is the one query a substring match cannot serve: it hits
+     * very nearly every message, so the page would be the newest `limit` rows
+     * whatever was typed. Pinned to the whole word it spells, "a" or "I" still
+     * means something. From [PARTIAL_MATCH_MIN_LENGTH] up the substring match
+     * stands — see that constant.
+     *
+     * Browse mode (an empty query behind an active chip) has no query to bound,
+     * and its media rows carry an empty `content` that no word regex would
+     * match, so it must not narrow either.
+     */
+    private fun narrowsToWholeWord(query: String): Boolean =
+        query.isNotEmpty() && query.length < PARTIAL_MATCH_MIN_LENGTH
 
     private fun wordBoundaryRegex(query: String) =
         Regex("\\b${Regex.escape(query)}\\b", RegexOption.IGNORE_CASE)

@@ -411,6 +411,13 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 - Also unconfirmed: the deferred `(chatId, timestamp)` index. Trigger to revisit is the
   Photos chip feeling sluggish on a real long chat — the browse `LIMIT` is 200
   (`MessageSearchLimits`), and raising it further means doing the index too.
+- Partial-word matching (from two characters — `PARTIAL_MATCH_MIN_LENGTH` in
+  `MessageRepositoryImpl`, shipped 2026-09-18) makes a short text query fill its page far
+  sooner, so the "there may be more" summary now appears on queries that used to report an
+  exact count. Left as is: the count is honest either way, and the text caps are the other
+  half of what keeps that index deferrable. Trigger to revisit is a two- or three-letter
+  search visibly hiding older matches on a real long chat — raising
+  `MessageSearchLimits.TEXT` / `GLOBAL` means doing the index too.
 - The "Shared Media" three-dot item now opens search pre-filtered to Photos; the standalone
   screen is deleted, so a regression here has no fallback path.
 - Confirm on device that **system back closes the search overlay** rather than the chat
