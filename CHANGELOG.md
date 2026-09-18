@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.31.2] — 2026-09-18
+
+### Fixed
+
+- **An emoji from the picker now lands where the cursor is, instead of at the end of the message.** Whatever you had written, and wherever you had tapped in it, the emoji was stuck onto the end, so putting one in the middle of a sentence meant retyping everything after it. The panel's backspace key had the same fault: it deleted the last character of the message rather than the one in front of the cursor. Both now work from the cursor — the emoji goes in where you left it, replacing the selected text if you had selected any, and backspace takes the character in front of it, a flag or a family emoji in one press. The caption under a photo you are about to send behaves the same way. (`39ebf89`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed

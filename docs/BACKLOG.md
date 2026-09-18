@@ -21,6 +21,25 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Emoji insertion at the caret (2026-09-18)
+
+Shipped in `39ebf89`. Robolectric drives the caption bar end to end, but a real IME is
+what the composer actually faces, and the caption field changed from the plain-String
+`BasicTextField` to the `TextFieldValue` one to hold a caret at all — the same conversion
+whose composing-region handling once caused a `restartInput` loop (`docs/GOTCHAS.md`).
+On a device, with Gboard and its predictive bar live:
+
+- **Mid-sentence insertion.** Type a sentence in the composer, tap between two words,
+  open the panel and pick an emoji: it lands at the caret, the caret sits after it, and
+  typing continues there. Repeat with a word selected — the emoji replaces the selection.
+- **The panel's backspace.** With the caret mid-text, the key deletes in front of it, and
+  a flag or a ZWJ family emoji goes in a single press, not code point by code point.
+- **A long-pressed size survives a later edit.** Insert an oversized emoji, then type and
+  delete text before it: the emoji must keep its size rather than hand it to a neighbour.
+- **The caption field still types normally.** In the send preview, type a caption with
+  predictive text and an autocorrect, insert an emoji mid-caption, and confirm the field
+  never loses input or flickers — that is what a restartInput loop would look like.
+
 ### Client-set message ids and the if-absent retry (offline outbox step 1, 2026-09-11)
 
 Shipped in `68a53e75`; nothing has been on hardware. Firestore's transaction, its
