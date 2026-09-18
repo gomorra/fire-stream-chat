@@ -165,9 +165,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached — including a photo whose file is gone — also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
 
-- **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so.
+- **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so. (`261704d`)
 
-- **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing.
+- **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing. (`261704d`)
 
 - **Search results named the sender by a raw account id.** Every text result in a conversation search was headed by a twelve-character fragment of the sender's internal id — `fIBTup2Ablac` — where a name belongs, which told you nothing about who wrote the message you were looking at. Results now say **You** for your own messages and the person's name for everyone else's, falling back to the group name; the same resolver now serves the reminder notifications and the `.remind` widget, which had each grown their own copy of it. (`57f7cfa`)
 
@@ -194,8 +194,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **The chat keyboard now offers a line-break key instead of a send key.** The Enter key in the message composer used to be a Send button, which meant a message could never contain a line break — pressing it fired the message off mid-thought. Enter now inserts a newline, so lists, addresses and paragraphs can be typed the way they read; sending is what the send button next to the composer has always been for. The same applies while editing a message, since it's the same field.
-- **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled".
+- **The chat keyboard now offers a line-break key instead of a send key.** The Enter key in the message composer used to be a Send button, which meant a message could never contain a line break — pressing it fired the message off mid-thought. Enter now inserts a newline, so lists, addresses and paragraphs can be typed the way they read; sending is what the send button next to the composer has always been for. The same applies while editing a message, since it's the same field. (`c9986a5`)
+
+- **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled". (`1629663`)
 
 ## [1.20.0] — 2026-07-25
 
@@ -262,7 +263,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`5815b28`)
+- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`d65b193`)
 
 ## [1.17.2] — 2026-07-23
 
@@ -286,7 +287,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`bc9d6bc`)
+- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`e6deaae`)
 
 ## [1.16.1] — 2026-07-22
 
@@ -436,7 +437,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **Update notification now taps directly into download.** Previously tapping the \"update available\" notification opened Settings at the top, requiring the user to scroll to the bottom, tap \"Check for updates\", wait for the network check, and then confirm the download. The notification now carries a `focusUpdate` flag that makes Settings auto-scroll to the update row and immediately fire the update check on arrival — the \"Update available\" dialog appears automatically and the user only needs to tap \"Update now\" to start the download. Notification copy updated from \"Open Settings → Check for updates to install\" to \"Tap to download and install\" to reflect this.
+- **Update notification now taps directly into download.** Previously tapping the "update available" notification opened Settings at the top, requiring the user to scroll to the bottom, tap "Check for updates", wait for the network check, and then confirm the download. The notification now carries a `focusUpdate` flag that makes Settings auto-scroll to the update row and immediately fire the update check on arrival — the "Update available" dialog appears automatically and the user only needs to tap "Update now" to start the download. Notification copy updated from "Open Settings → Check for updates to install" to "Tap to download and install" to reflect this.
 
 ## [1.9.3] — 2026-05-14
 
@@ -521,7 +522,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Debug builds now use the release keystore so they can self-update over release APKs.** Without a local `releaseStoreFile` in `local.properties` (or `RELEASE_STORE_FILE` in the env), debug builds previously used the auto-generated debug keystore, while release builds used the release keystore from CI. This mismatch caused the system installer to reject in-place upgrades when the APK signature changed, resulting in "App not installed" errors during self-updates. The fix makes both build types use the same release keystore when available, ensuring consistent signatures and seamless upgrades across debug and release installs. When the release keystore is not configured, both builds fall back to the debug keystore as before. (`65fa6f3`)
+- **Debug builds now use the release keystore so they can self-update over release APKs.** Without a local `releaseStoreFile` in `local.properties` (or `RELEASE_STORE_FILE` in the env), debug builds previously used the auto-generated debug keystore, while release builds used the release keystore from CI. This mismatch caused the system installer to reject in-place upgrades when the APK signature changed, resulting in "App not installed" errors during self-updates. The fix makes both build types use the same release keystore when available, ensuring consistent signatures and seamless upgrades across debug and release installs. When the release keystore is not configured, both builds fall back to the debug keystore as before. (`b3d3691`)
 
 ## [1.6.1] — 2026-05-01
 
