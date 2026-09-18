@@ -955,7 +955,7 @@ fun ChatScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                uiState.session.isRecipientOnline -> Text(
+                                uiState.session.recipientAppearsOnline -> Text(
                                     text = "Online",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.8f)
