@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.32.0] — 2026-09-18
+
+### Changed
+
+- **Search now finds parts of words, not only whole ones.** Searching in a chat, or across all of them, only ever matched complete words: while a word was still being typed the results stayed empty, and a word sitting inside a longer one — "Geschenk" in "Geburtstagsgeschenk", "Termin" in "Termine" — could not be found at all. From two letters onwards, search matches anywhere inside a word. A single letter still means the word it spells, because as a fragment it would match very nearly every message you have. Two things follow: a short search fills its page of results sooner, so "there may be more" appears more often than it did, and a search that was cut off by that limit can no longer come back empty while real matches sit further back in the chat. (`1ab4a52c`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
