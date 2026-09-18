@@ -21,6 +21,22 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Presence: no online flash on a push, "Online" while typing, stale typing bounded (2026-09-18)
+
+Shipped on `claude/chat-typing-status-delays-y9eau9`; nothing has been on hardware. RTDB's
+write queue and Firestore's listener cannot be exercised under Robolectric — the unit tests pin
+the write gating, the derived header rule and the expiry timer. Two devices, B's presence
+watched from A's open chat with B:
+1. **No flash.** B opens the app on a bad connection (airplane mode, or a hotspot with no
+   upstream) for a few seconds, backgrounds it, then A sends B a message → A's header must not
+   flick to "Online" when the push reaches B. Before, the queued online/offline pair flushed on
+   B's reconnect and A saw "Online" for an instant.
+2. **Typing shows online.** B backgrounds the app for a minute or two (so B's RTDB socket has
+   dropped), reopens the chat and starts typing at once → A's header reads "Online" no later
+   than the typing dots appear, even while B's presence flag is still on its way.
+3. **Stale typing ends.** B types, then B's connection is cut mid-typing (airplane mode) → A's
+   dots, and the "Online" they imply, disappear within about ten seconds without any further
+   message in the chat.
 ### Emoji insertion at the caret (2026-09-18)
 
 Shipped in `39ebf89`. Robolectric drives the caption bar end to end, but a real IME is
@@ -293,6 +309,8 @@ the reaction sheet, a frozen recents order. What it cannot assert is the half th
 - **The long-press size drag still feels the same.** Hold an emoji in the composer and
   drag up: the size readout, the anchored preview panel, and the fade of the *other*
   emoji in that row. Release and confirm the emoji is inserted at the size chosen.
+  Hold one in the **last column** too: the panel must sit to the left of it and stay on
+  screen at 500%, and the fade must dim exactly that row (`EmojiGridLayout.kt`).
 - **The recents block holds still under the finger.** Tap several emoji in quick
   succession without closing the panel; the Recents row must not reorder while it is open.
   Close and reopen and confirm the new order has been picked up.
