@@ -350,6 +350,27 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `./gradlew --stop` first. This repo sets it in `.claude/settings.json`; a plain
   terminal on a minimal container needs it in the shell profile. Confirmed 2026-09-09.
 
+- **A cloud container's Gradle build can die on Maven Central `429`s — serialize it, don't work around it.**
+  In a Claude-Code-on-the-web container, dependency resolution failed repeatedly with
+  `Received status code 429 from server: Too Many Requests` for `repo.maven.apache.org`,
+  on a different artifact each run (`kotlin-compose-compiler-plugin-embeddable`,
+  `hilt-compiler`, `junit`, `mockk`, …). The host is not blocked: sequential `curl` of the
+  exact same URLs returns `200` while the parallel build is being throttled, so the trigger
+  is the concurrency of Gradle's download burst through the agent proxy, not the URLs.
+  Gradle does **not** retry a `429`, and it resolves configurations lazily per task, so each
+  failed build dies at whichever configuration it reached and a plain re-run walks exactly
+  one configuration further — slow, but it does converge because every attempt keeps what it
+  already fetched. Running with `--max-workers=1 -Dorg.gradle.parallel=false` got the whole
+  gate through. Two things that mislead while diagnosing this: the same output also shows
+  `403 Forbidden` from `build-artifacts.signal.org`, which is only the fallback repo being
+  tried after Maven Central failed and is *not* the cause; and Robolectric fetches its
+  `android-all-instrumented` jar at **test runtime**, outside Gradle's resolution, so the
+  same throttle surfaces as a plain test failure
+  (`SignalManagerTest` → `AssertionError: Failed to fetch maven artifact
+  org.robolectric:android-all-instrumented:10-robolectric-5803371-i7`) that passes on the next
+  run once the 116 MB jar has landed in `~/.m2`. Confirmed 2026-09-18. Do not "fix" this by
+  editing repository lists, disabling TLS verification, or unsetting `HTTPS_PROXY`.
+
 - **`./gradlew lint` crashes on this AGP/AndroidX combination — it is not your diff.**
   Two AndroidX detectors (`NonNullableMutableLiveDataDetector` on
   `AppLifecycleObserver.kt`, `RememberInCompositionDetector` on `ArchitectureTest.kt`)
