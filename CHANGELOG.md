@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.31.2] — 2026-09-18
+
+### Fixed
+
+- **The emoji size panel is always on screen, whichever emoji you hold.** Holding an emoji in the last column of the picker and dragging to resize it showed no size bar and no percentage: the panel picked the side of the emoji to sit on by counting cells from the top of the list, which is off by one from the first category heading on, so for a right-most emoji it usually chose the right and drew itself past the edge of the screen. The panel now measures itself and sits to the right of the held emoji only when it fits, and to its left otherwise, so it stays visible at every size. The fade of the other emojis in the same row counted rows the same way and now follows the row you are actually holding.
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
