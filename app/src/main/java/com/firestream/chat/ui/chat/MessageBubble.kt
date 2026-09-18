@@ -697,7 +697,7 @@ internal fun ReplyImageThumbnail(
 // switching to the local file. stat() on a local path is cheap (<1ms warm).
 // canRead() guards against EACCES on MediaStore files written by a prior install.
 @Composable
-private fun rememberMessageImageModel(message: Message): Any? {
+internal fun rememberMessageImageModel(message: Message): Any? {
     val localUri = message.localUri
     val localFile = remember(localUri) {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
@@ -747,7 +747,7 @@ internal fun ReplyVideoThumbnail(
 // placeholder). Same synchronous exists/isFile/canRead check as
 // rememberMessageImageModel — no produceState, no cold-start spinner.
 @Composable
-private fun rememberMessageVideoThumbModel(message: Message): Any? {
+internal fun rememberMessageVideoThumbModel(message: Message): Any? {
     val localUri = message.localUri
     val context = LocalContext.current
     val localFile = remember(localUri) {

@@ -188,6 +188,21 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ---
 
+## One chat picker, three hosts
+
+**Definition.** Every "send this to a chat" surface renders `ui/components/ChatPickerPanel.kt`: the share intent (`ui/share/SharePickerScreen`), forwarding a message (`ui/chat/ForwardMessagePanel`) and sharing a list (`ui/lists/ShareListPanel`). The panel owns the bar, the search field *and the filtering behind it*, the rows, the checkboxes and the send button; the host supplies a `preview` slot for *what* is being sent, a `ChatPickerState` and a `ChatPickerCallbacks`. A host that mounts it over an existing screen goes through `ChatPickerOverlay`, which owns the slide in and out, the back press, the latched target, the search query, the ticked chats and the one-send-per-opening latch. The rules in `ui/components/ChatTargets.kt` come with it and are not to be re-derived: `Chat.pickerDisplayName` (own name → the 1:1 partner's profile name → `"Chat"`, never a raw uid), `Chat.sendRecipientId` (the other participant **only** for `ChatType.INDIVIDUAL`, `""` otherwise) and `List<Chat>.destinationLabel` (the confirmation's tail). That file holds no Compose, so a ViewModel can call it.
+
+**Use when.** Adding any surface that asks the user to choose chats to send something into. A host mounted over an existing screen passes a nullable target to `ChatPickerOverlay`; a host that is a destination of its own (the share intent) renders the panel directly. The fan-out across the picked chats belongs to the host's ViewModel or manager, not to the picker's callback — see `ChatMessageActions.forwardMessage` and `ListsViewModel.shareListToChats`.
+**Don't use when.** The question is *membership* rather than *sending* — `ui/lists/ListShareSheet` toggles which chats a list is shared with, and stays a bottom sheet.
+
+**Example.** `app/src/main/java/com/firestream/chat/ui/components/ChatPickerPanel.kt` (the panel), `ChatPickerOverlay.kt` (mounting it over a screen) and `ChatTargets.kt` (the rules); `ui/chat/ForwardMessagePanel.kt` is the canonical host — a nullable target, a preview, and nothing else.
+
+**Trap (two).** A tab of `MainScreen`'s pager that mounts the overlay must raise `onOverlayVisibleChange` so the pager locks; a panel that swallows horizontal drags itself hides the conflict from the composable that owns the pager, and forecloses any gesture the panel later wants.
+
+And computing the recipient as `participants.firstOrNull { it != currentUserId }` regardless of chat type. It reads as "the other person" and is right for a 1:1, but for a group it names one arbitrary member — and `SendTarget.of(recipientId)` takes a non-empty recipient as "encrypt to this Signal session", so in a release build the rest of the group receives something they cannot read. Debug builds send plaintext, so this is invisible until it ships. That was a live bug in the forward dialog this panel replaced.
+
+---
+
 ## When to add a new pattern here
 
 A convention belongs in this file when:

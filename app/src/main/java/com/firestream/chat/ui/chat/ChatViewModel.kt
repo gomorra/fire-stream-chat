@@ -16,6 +16,7 @@ import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.command.CommandPayload
 import com.firestream.chat.domain.command.CommandRegistry
 import com.firestream.chat.domain.model.AppError
+import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
@@ -288,8 +289,10 @@ class ChatViewModel @Inject constructor(
     fun setReplyTo(message: Message) = messageActions.setReplyTo(message)
     fun clearReplyTo() = messageActions.clearReplyTo()
     fun toggleReaction(messageId: String, emoji: String) = messageActions.toggleReaction(messageId, emoji)
-    fun forwardMessage(message: Message, targetChatId: String, targetRecipientId: String) =
-        messageActions.forwardMessage(message, targetChatId, targetRecipientId)
+    fun forwardMessage(message: Message, targets: List<Chat>) =
+        messageActions.forwardMessage(message, targets) { destination ->
+            viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent("Forwarded to $destination")) }
+        }
     fun toggleStar(message: Message) = messageActions.toggleStar(message)
     fun togglePin(messageId: String, pinned: Boolean) = messageActions.togglePin(messageId, pinned)
     fun snoozeMessage(message: Message, fireAtMs: Long) = messageActions.snoozeMessage(message, fireAtMs)

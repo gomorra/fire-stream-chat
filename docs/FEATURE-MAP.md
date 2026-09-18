@@ -199,7 +199,8 @@ Lists shared into chats as a live `LIST` message bubble. Subcollection-based ite
 | `app/src/main/java/com/firestream/chat/ui/lists/SharedListsViewModel.kt` | Per-chat list filter |
 | `app/src/main/java/com/firestream/chat/ui/lists/AvatarStack.kt` | Participant stack |
 | `app/src/main/java/com/firestream/chat/ui/lists/ListContextSheet.kt` | Context actions sheet |
-| `app/src/main/java/com/firestream/chat/ui/lists/ListShareSheet.kt` | Chat-picker for share |
+| `app/src/main/java/com/firestream/chat/ui/lists/ListShareSheet.kt` | Manage-sharing sheet (toggle a list's chats on and off) |
+| `app/src/main/java/com/firestream/chat/ui/lists/ShareListPanel.kt` | Share-to-chats panel from the Lists tab — the shared `ChatPickerPanel` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ListBubble.kt` | `LIST` message rendering |
 | `app/src/main/java/com/firestream/chat/ui/chat/CreateListSheet.kt` | Create-and-share flow from chat |
 | `app/src/test/java/com/firestream/chat/data/repository/ListRepositoryImplRaceTest.kt` | Concurrent-mutation safety |
@@ -510,6 +511,44 @@ One search, two scopes. In a chat it is an overlay owned by `ChatSearchManager` 
 | `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.SEARCH`; a global result navigates `Routes.chat(…, targetMessageId = …)` |
 
 **Entry points:** chat list magnifier → `Routes.SEARCH` → `GlobalSearchScreen` → tap a result → `Routes.chat(targetMessageId)` (media tiles included — a cross-chat fullscreen pager would need gallery args spanning chats). In a chat: the ⋮ menu's Search / Shared Media → `ChatSearchManager.openSearchWithFilter()`.
+
+---
+
+## Chat Picker (share intent / forward / share a list)
+
+One panel behind every "send this to a chat" flow. An incoming share intent, a
+message forward and sharing a list all ask the user the same question, and each
+used to answer it differently — a full screen with search and multi-select for
+the share intent, a bare `AlertDialog` list for the other two. `ChatPickerPanel`
+is that one answer: it owns the bar, the search field, the rows, the checkboxes
+and the send button; each host supplies only the preview of *what* is being sent
+and what sending means. Forward and share-a-list mount it as a slide-in overlay
+over their host (a message and a list are already in hand, so neither needs a
+route); the share intent keeps its own NavHost destination, which is where its
+content resolution lives. An overlay slides with `ScreenMotion`, the same curve and duration the NavHost
+pushes a screen with, so "the same panel" is also the same motion.
+`sendRecipientId` is the panel's load-bearing rule:
+only a 1:1 chat names a recipient, because Signal sessions are 1:1 and a group
+must go out through the plaintext branch.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/ui/components/ChatPickerPanel.kt` | The panel: bar, preview slot, search (it filters its own rows), chat rows, send button |
+| `app/src/main/java/com/firestream/chat/ui/components/ChatPickerOverlay.kt` | The panel mounted over an existing screen — slide in/out, back, the latched target, the search query, the ticked chats, one send per opening |
+| `app/src/main/java/com/firestream/chat/ui/components/ChatTargets.kt` | The pure rules, free of Compose so a ViewModel can call them: `pickerDisplayName`, `sendRecipientId`, `filterChatsByName`, `destinationLabel` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ForwardMessagePanel.kt` | "Forward to…" over the conversation; supplies the preview of the message being forwarded |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | The forward fan-out: one send per picked chat, addressed by `sendRecipientId`, then the confirmation label |
+| `app/src/main/java/com/firestream/chat/ui/lists/ShareListPanel.kt` | "Share list to…" over the Lists tab; supplies the list preview |
+| `app/src/main/java/com/firestream/chat/ui/main/MainScreen.kt` | Locks its pager while a tab has a full-screen panel over it, so a sideways drag on the panel isn't a tab swipe |
+| `app/src/main/java/com/firestream/chat/ui/components/ScreenMotion.kt` | The slide a screen arrives with, shared with `navigation/NavGraph.kt` so the overlay moves exactly as the routed panel does |
+| `app/src/main/java/com/firestream/chat/ui/share/SharePickerScreen.kt` | "Share to…" — the panel plus the shared-content preview (text + link preview, one image, many) |
+| `app/src/main/java/com/firestream/chat/ui/share/SharePickerViewModel.kt` | Chats, participant profiles, search, selection and the send fan-out for the share intent |
+| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerTargetsTest.kt` | The pure rules — group sends address nobody, no row ever shows a raw uid |
+| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerPanelUiTest.kt` | Selection-before-send, the two empty states |
+| `app/src/test/java/com/firestream/chat/ui/chat/ForwardMessagePanelUiTest.kt` | Multi-select forwarding, search keeping the ticks, one send per opening, selection reset between openings |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageActionsForwardTest.kt` | The fan-out: a group forward addressed to nobody, the confirmation, a failure reported instead |
+
+**Entry points:** long-press a message → Forward; Lists tab → long-press a list → Share; another app's share sheet → FireStream → `Routes.SHARE_PICKER`.
 
 ---
 

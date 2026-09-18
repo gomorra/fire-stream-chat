@@ -18,6 +18,7 @@ import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.list.SendListUpdateToChatsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import com.firestream.chat.ui.chat.resolveChatParticipants
+import com.firestream.chat.ui.components.destinationLabel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -246,10 +247,27 @@ class ListsViewModel @Inject constructor(
         }
     }
 
-    fun shareListToChat(listId: String, chatId: String) {
+    /**
+     * Shares [list] into every chat the picker handed over, and confirms where it
+     * went. The fan-out lives here rather than in the picker's callback so the
+     * panel hands over a list of chats and nothing else — and so the destination
+     * label is built from those chats instead of being posted in as a string.
+     */
+    fun shareListToChats(list: ListData, targets: List<Chat>) {
+        if (targets.isEmpty()) return
+        val state = _uiState.value
         viewModelScope.launch {
-            listRepository.shareListToChat(listId, chatId)
-                .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
+            val shared = targets.count { chat ->
+                listRepository.shareListToChat(list.id, chat.id)
+                    .onFailure { e -> _uiState.value = _uiState.value.copy(error = AppError.from(e)) }
+                    .isSuccess
+            }
+            if (shared > 0) {
+                val destination = targets.destinationLabel(state.currentUserId, state.chatParticipants)
+                _uiState.value = _uiState.value.copy(
+                    snackbarMessage = "\"${list.title}\" shared to $destination"
+                )
+            }
         }
     }
 

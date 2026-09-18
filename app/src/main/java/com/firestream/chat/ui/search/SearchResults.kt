@@ -53,6 +53,7 @@ import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import java.io.File
 import com.firestream.chat.domain.util.MessageUrls
+import com.firestream.chat.ui.components.placeholderLabel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -431,18 +432,3 @@ private fun SearchMediaTile(
         )
     }
 }
-
-/** What a bubble with no text says it is, so a media row isn't a blank line. */
-private val MessageType.placeholderLabel: String
-    get() = when (this) {
-        MessageType.IMAGE -> "Photo"
-        MessageType.VIDEO -> "Video"
-        MessageType.VOICE -> "Voice message"
-        MessageType.DOCUMENT -> "Document"
-        MessageType.LOCATION -> "Location"
-        MessageType.POLL -> "Poll"
-        MessageType.CALL -> "Call"
-        MessageType.LIST -> "List"
-        MessageType.TIMER -> "Timer"
-        MessageType.TEXT -> ""
-    }

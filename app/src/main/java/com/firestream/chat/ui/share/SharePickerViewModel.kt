@@ -8,13 +8,13 @@ import com.firestream.chat.data.share.ShareContentResolver
 import com.firestream.chat.data.share.SharedContentHolder
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
-import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.SharedContent
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
+import com.firestream.chat.ui.components.sendRecipientId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -30,7 +30,6 @@ enum class PreviewState { Loading, Ready, Empty, Error }
 
 data class SharePickerUiState(
     val chats: List<Chat> = emptyList(),
-    val filteredChats: List<Chat> = emptyList(),
     val selectedChatIds: Set<String> = emptySet(),
     val sharedContent: SharedContent? = null,
     val linkPreview: LinkPreview? = null,
@@ -66,7 +65,7 @@ class SharePickerViewModel @Inject constructor(
     private fun loadChats() {
         viewModelScope.launch {
             val chats = chatRepository.getChats().first()
-            _uiState.value = _uiState.value.copy(chats = chats, filteredChats = chats)
+            _uiState.value = _uiState.value.copy(chats = chats)
             loadParticipantProfiles(chats)
         }
     }
@@ -134,27 +133,9 @@ class SharePickerViewModel @Inject constructor(
         )
     }
 
+    /** The panel filters the rows itself; this only records what was typed. */
     fun onSearchQueryChange(query: String) {
-        val state = _uiState.value
-        val filtered = if (query.isBlank()) {
-            state.chats
-        } else {
-            state.chats.filter { chat ->
-                val name = chatDisplayName(chat, state.currentUserId, state.participantProfiles)
-                name.contains(query, ignoreCase = true)
-            }
-        }
-        _uiState.value = state.copy(searchQuery = query, filteredChats = filtered)
-    }
-
-    private fun chatDisplayName(
-        chat: Chat,
-        currentUserId: String,
-        profiles: Map<String, User>
-    ): String {
-        if (chat.name != null) return chat.name
-        val recipientId = chat.participants.firstOrNull { it != currentUserId } ?: return "Chat"
-        return profiles[recipientId]?.displayName?.takeIf { it.isNotBlank() } ?: recipientId
+        _uiState.value = _uiState.value.copy(searchQuery = query)
     }
 
     fun send(onDone: (singleChatId: String?, recipientId: String?) -> Unit) {
@@ -172,14 +153,7 @@ class SharePickerViewModel @Inject constructor(
             val selectedChats = state.chats.filter { it.id in state.selectedChatIds }
 
             val results: List<Result<Unit>> = selectedChats.map { chat ->
-                // Signal sessions are 1:1. Only pass a real recipientId for individual
-                // chats; group/broadcast chats must go through the plaintext branch in
-                // MessageRepositoryImpl so all participants can read the message.
-                val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
-                    chat.participants.firstOrNull { it != state.currentUserId } ?: ""
-                } else {
-                    ""
-                }
+                val recipientId = chat.sendRecipientId(state.currentUserId)
                 async { sendToChat(chat.id, recipientId, content) }
             }.awaitAll()
 
@@ -190,12 +164,7 @@ class SharePickerViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isSending = false)
                 if (selectedChats.size == 1) {
                     val chat = selectedChats[0]
-                    val recipientId = if (chat.type == ChatType.INDIVIDUAL) {
-                        chat.participants.firstOrNull { it != state.currentUserId } ?: ""
-                    } else {
-                        ""
-                    }
-                    onDone(chat.id, recipientId)
+                    onDone(chat.id, chat.sendRecipientId(state.currentUserId))
                 } else {
                     onDone(null, null)
                 }
