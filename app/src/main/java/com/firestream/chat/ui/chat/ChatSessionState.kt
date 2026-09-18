@@ -38,7 +38,22 @@ internal data class SessionState(
     // nothing in the send path reads it, the outbox job's CONNECTED constraint
     // decides when a send actually runs.
     val isOffline: Boolean = false,
-)
+) {
+    /**
+     * Whether the top bar reads "Online" for a 1:1 recipient.
+     *
+     * Presence (RTDB) and the typing indicator (the Firestore chat document)
+     * travel over two connections that reconnect on their own schedules, so the
+     * recipient's typing can land seconds before their presence flag does —
+     * dots at the bottom of the chat and no "Online" at the top. Someone typing
+     * in this chat is online whatever the presence channel has said so far, so
+     * the header follows the typing indicator as well. [typingUserIds] never
+     * contains the current user, and a group or broadcast has no single
+     * recipient whose status the header could show.
+     */
+    val recipientAppearsOnline: Boolean
+        get() = isRecipientOnline || (!isGroupChat && !isBroadcast && typingUserIds.isNotEmpty())
+}
 
 /**
  * The name to show for [senderId] in this chat.

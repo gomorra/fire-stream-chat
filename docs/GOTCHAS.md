@@ -151,6 +151,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `forEach { reactTo(it) }` on each emission — keep a `Map<id, snapshot>` and react
   only to deltas, even when the side effect is idempotent (binder calls etc. are not
   free).
+- **An RTDB write made without a connection is queued, and the queue flushes in order on
+  the next connect.** `setValue()` never fails for lack of a socket — it waits. So a
+  presence `online` written while disconnected, followed by `goOffline`'s `offline`, is
+  replayed as online-then-offline the moment the socket returns, which on a backgrounded
+  phone is typically when a push wakes the radio for a message sent to that user: the
+  sender saw them flash "Online". Presence writes that only make sense over a live socket
+  (the re-entry force-write in `RealtimePresenceSource.startPresence`) are gated on the
+  last `.info/connected` value; the listener itself writes online on reconnect. Regression:
+  `RealtimePresenceSourceTest.startPresence re-entry after a disconnect writes nothing until the reconnect`.
+- **A snapshot filter that depends on the clock needs its own timer.** Filtering
+  `typingUsers` by age inside the Firestore listener only re-runs when the document
+  changes, so an entry whose typing-off write never landed (writer offline or killed)
+  stayed "typing" until someone sent a message. `FirestoreChatSource.observeTypingUsers`
+  re-emits when the oldest live entry ages out (`flatMapLatest` over a `delay`ing flow),
+  on the same clock the filter uses. Regression: `FirestoreChatSourceTypingTest`.
 
 ## Room / data
 
