@@ -174,6 +174,28 @@ minor is enough, this is not an API break; the skill decides).
 Gate: full `:app:testFirebaseDebugUnitTest` — this is the step most likely to surface a
 surprise, so run the whole suite, not a filter.
 
+**Approach** (step-1, 2026-09-20)
+1. `minSdk = 31` in `app/build.gradle.kts:91` and `baselineprofile/build.gradle.kts:12`.
+2. Drop the four `S` branches (`ReminderAlarmScheduler:58`, `TimerAlarmScheduler:76`,
+   `SpeechRecognizerManager:46`, `ExactAlarmBanner:86`) and any `Build` import they orphan;
+   fix the two KDocs that quote `minSdk = 29` (`AndroidDateTimeDetector`, `ScaledImageDecoder`).
+3. Delete the pre-S test in `TimerAlarmSchedulerTest`; no new tests — the step removes behaviour.
+4. The `sdk = [29]` pins are 41 by now, not 26 (the outbox and image-editor plans added theirs);
+   same bulk edit, plus the quote in `docs/PATTERNS.md:125`.
+5. Found since the plan was written: a fifth `S` branch, `OutboxScheduler.runsExpedited`
+   (`:110`), with `OutboxSchedulerTest` pinning both sides. It is on the send path and outside
+   this step's file list — left as is, recorded in `TECH_DEBT.md`.
+6. Full `:app:testFirebaseDebugUnitTest`, look at any Roborazzi diff, `assembleFirebaseDebug`,
+   then `changelog-release` for the bump and the `Removed` entry. No further skills: mechanical diff.
+
+**Shipped** `f1f129f9` (2026-09-20) — tier: mid. skills: changelog-release. Reviewer models: none. CHANGELOG entry: in `f1f129f9`, its hash filled in by this commit.
+Departures (for sign-off):
+- Bump: stayed on the unreleased minor `1.34.0` (the plan's recommendation). Read literally, the skill's table makes a `!` prefix a major (`2.0.0`); an app has no API to break, so minor — change the header if you disagree.
+- 41 `sdk = [29]` pins moved, not 26; two KDocs quoting `minSdk = 29` updated too.
+- A fifth `S` branch, `OutboxScheduler.runsExpedited`, is left in place and recorded in `TECH_DEBT.md` (send path, outside this step).
+- Roborazzi: the plain test task only captures, so the gate was green regardless; `verifyRoborazziFirebaseDebug` failed on all four. The compare images show identical layout and text, only the bubble fill differs (grey → warm beige) — the baselines date from 2026-04-12 and the bubble colours changed in `97c8e79c` (2026-04-23), so this was stale before the bump. Re-recorded at API 31; verify passes now.
+- Gate: 0 failures in the full `:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug` clean.
+
 ### Step 2 — model + policy + tests (`feat(call)`, no CHANGELOG yet — nothing visible)
 Files: `domain/model/CallState.kt`, new `data/call/CallAudioRoutePolicy.kt`,
 `CallStateHolder.kt` (`updateAudioRoutes`), `CallStateHolderTest.kt`,
@@ -205,6 +227,8 @@ no logic), but a Robolectric smoke test that the sheet lists three rows when
 `availableRoutes` has three entries is cheap and welcome — follow `ChatListItemUiTest` shape.
 CHANGELOG: "**Calls can use a Bluetooth or wired headset.** …" under `Added`, and the minSdk
 line from step 1 stays under `Removed`.
+**(step-1)** A new Robolectric test pins `@Config(sdk = [31], …)` — 29 is refused now. The
+`Removed` entry already sits in the unreleased `1.34.0` section.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
@@ -218,6 +242,9 @@ line from step 1 stays under `Removed`.
   and the "show Bluetooth product name (needs `BLUETOOTH_CONNECT`)" nice-to-have.
 - `docs/GOTCHAS.md`: only if step 1 hit something non-obvious (Robolectric vs minSdk, Roborazzi
   re-render). Otherwise nothing.
+  **(step-1)** One candidate: the Roborazzi baselines are never verified by the gate (the plain
+  test task only captures), which is how they sat stale from April to this step. Robolectric
+  vs minSdk itself held no surprise.
 - `TECH_DEBT.md`: nothing expected.
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
   `docs/plans/done/` once the device pass is recorded.
