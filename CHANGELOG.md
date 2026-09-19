@@ -8,9 +8,16 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Zooming into a photo before sending crops it to what you see.** Pinch-zooming in the send preview used to be only a way to look closer: the whole photo went out regardless, and the zoom was thrown away the moment you opened one of the editing tools. The part of the photo on screen is now what is sent, on every page of a batch, and the adjust, draw and sticker tools open on that same part rather than on the whole photo, so the view never jumps back to the full picture. The crop lands in the photo's edit history like any other edit, so undo brings the whole photo back; it stays put while you swipe to other photos and when you turn the phone, and the photo can no longer be pushed off the edge of the screen while zoomed. (`534f7ad`)
 
+- **A crop-shape pill on every fullscreen photo, before any editing.** The send preview after a camera shot or a gallery pick, and the fullscreen viewer of a photo in a chat, now carry a small pill bottom-left that cycles through Free, Original, 1:1, 4:5 and 16:9. A shape other than Free draws its frame over the photo, and pinching and panning move the photo under the frame; what is inside the frame is what is sent. Opening Adjust from the preview carries the frame and the shape into its crop tool, still editable, and opening Edit from the viewer carries them into the preview. (`9e8c4d0`)
+
 ### Changed
 
 - **A zoomed photo in the fullscreen viewer stops at the edge of the screen.** Panning a zoomed photo could slide it right off the screen, leaving a black view with nothing to grab. The viewer now keeps the photo covering the screen wherever it is large enough to, and centred where it is not, the same rule the send preview uses. (`4c42e10`)
+
+### Fixed
+
+- **The send preview's controls are the same size as the viewer's.** After taking a picture, the back arrow, the HD pill and the four tool circles over the photo were 40 dp, a size of their own and short of the 48 dp a finger needs; they are now the fullscreen viewer's 36 dp circles in 48 dp touch targets, so the two screens read as one. (`9e8c4d0`)
+- **A zoomed photo in the send preview no longer re-derives its zoom on every resize.** Every change of the photo's box — the keyboard sliding over the caption field, the animation of switching to another app and back — put the zoom back from its saved frame, which for a box of another shape lands on a different scale; on a portrait photo that read as the picture pulsing. A resize now only keeps the zoom the user has within the photo's edges. This is the one mechanism found for the flashing reported after an app switch; it has not been reproduced on hardware. (`9e8c4d0`)
 
 ## [1.32.0] — 2026-09-18
 
