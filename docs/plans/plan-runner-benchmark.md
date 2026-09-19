@@ -105,8 +105,9 @@ Fixed now:
 2. Tie → fewer confirmed `high` findings, then fewer `medium`.
 3. Tie → lower total cost.
 
-The winner becomes `MODEL_MID` / `EFFORT_MID` / `ADVISOR_MID` in `scripts/run-plan.sh`; its branch is
-the one merged. If both need the human on the same step for the same reason, that is a verdict on
+The winner becomes `MODEL_MID` / `EFFORT_MID` / `ADVISOR_MID` in `scripts/run-plan.sh`, replacing the
+interim default set on 2026-09-20 (Opus at `medium`, no advisor — variant b without its advisor);
+its branch is the one merged. If both need the human on the same step for the same reason, that is a verdict on
 the plan, not on either configuration — fix the plan and do not count it.
 
 ## What this can and cannot show

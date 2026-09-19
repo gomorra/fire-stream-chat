@@ -108,7 +108,7 @@ scenario "A plain step validates" done-valid
 run
 check "exit 0"                                   "0" "$rc"
 check "events"                                   "launched result validated" "$(events mini)"
-check "one session, default config, no advisor"  "step:done-valid:high:none" "$(calls)"
+check "one session, default config, no advisor"  "step:done-valid:medium:none" "$(calls)"
 check "validated event carries the @Test delta"  "1 2" "$(jq -r 'select(.event=="validated") | "\(.tests_before) \(.tests_after)"' "$RUNS/mini.log")"
 check "the launch records the base it forked from" "$(git -C "$R" rev-parse main | cut -c1-8)" "$(jq -r 'select(.event=="launched") | .base' "$RUNS/mini.log")"
 
@@ -129,8 +129,8 @@ scenario "Still invalid after the nudge: escalate one rung, keep the failed atte
 run
 check "exit 0"                                   "0" "$rc"
 check "events"                                   "launched result nudged result escalated launched result validated" "$(events mini)"
-check "rung: high → xhigh"                       "high xhigh" "$(jq -r 'select(.event=="escalated") | "\(.from) \(.to)"' "$RUNS/mini.log")"
-check "attempt 2 ran at the higher effort"       "step:done-valid:xhigh:none" "$(sed -n '3p' "$STUB/calls")"
+check "rung: medium → high"                      "medium high" "$(jq -r 'select(.event=="escalated") | "\(.from) \(.to)"' "$RUNS/mini.log")"
+check "attempt 2 ran at the higher effort"       "step:done-valid:high:none" "$(sed -n '3p' "$STUB/calls")"
 check "attempt 2's prompt tells it what failed"  "step:done-valid" "$(cat "$STUB/saw-attempt-block")"
 check "the failed attempt's commit is kept on a branch" "1" "$(git -C "$R" branch --list 'plan-attempts/mini-step1-*' | wc -l | tr -d ' ')"
 check "the plan branch holds only attempt 2 (code + plan commit)" "2" "$(git -C "$R" rev-list --count main..plan/mini)"
@@ -158,7 +158,7 @@ check "exit 3 (blocked)"                         "3" "$rc"
 check "events"                                   "launched result escalated launched result blocked" "$(events mini)"
 requeue done-valid; run
 check "re-run: exit 0"                           "0" "$rc"
-check "re-run resumes on the rung it had reached" "step:done-valid:xhigh:none" "$(tail -1 "$STUB/calls")"
+check "re-run resumes on the rung it had reached" "step:done-valid:high:none" "$(tail -1 "$STUB/calls")"
 check "one escalation for the step across both runs" "1" "$(jq -r 'select(.event=="escalated") | .step' "$RUNS/mini.log" | wc -l | tr -d ' ')"
 requeue blocked-gate
 scenario "…and a step that escalated before, then fails again, is blocked without a third attempt" blocked-gate blocked-gate
