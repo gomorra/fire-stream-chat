@@ -408,3 +408,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   a regression. Confirmed 2026-09-08. **`lint` is deliberately not in the gate** — the
   project gate is `./gradlew test assembleDebug` (CLAUDE.md, `.github/workflows/ci.yml`),
   so don't add `lint` to CI or block a commit on it until the toolchain is bumped.
+
+- **Reference numbers bundled with a skill can be older than the live page they came from.**
+  The `claude-api` skill ships a cached copy of Anthropic's cost guide (`shared/cost-optimization.md`,
+  dated 2026-06-24). On 2026-09-19 its advice ("start with Opus", Opus matching Fable at 60% of the
+  cost, the re-run-failures dollar figures) had all been superseded on the live page by the
+  Fable 5.1 measurements — a different headline recommendation, not just different decimals. The
+  skill names its sources (`shared/live-sources.md`); before a model, effort or price decision
+  rests on a bundled number, fetch the live page and quote that, with the date. This is what
+  `docs/plans/plan-runner-benchmark.md` does.
