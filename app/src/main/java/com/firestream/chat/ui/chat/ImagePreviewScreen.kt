@@ -1,7 +1,6 @@
 package com.firestream.chat.ui.chat
 
 import android.content.Context
-import android.graphics.drawable.Drawable
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -798,10 +797,6 @@ private fun ImagePage(item: PendingMedia, viewports: SnapshotStateMap<String, Cr
 /** True when the step shown as [uri] has a zoom that would crop it. */
 private fun SnapshotStateMap<String, CropRect>.isZoomed(uri: Uri): Boolean =
     this[uri.toString()]?.isFull == false
-
-/** A decoded drawable's size in pixels, or null when it has none to report. */
-private fun Drawable.toContentSize(): IntSize? =
-    if (intrinsicWidth >= 1 && intrinsicHeight >= 1) IntSize(intrinsicWidth, intrinsicHeight) else null
 
 /** Video page: still frame only — no inline playback, no pinch-zoom. */
 @Composable

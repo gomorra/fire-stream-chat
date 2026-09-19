@@ -12,6 +12,7 @@
 // endregion
 package com.firestream.chat.ui.chat
 
+import android.graphics.drawable.Drawable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -77,6 +78,15 @@ internal class ZoomableState {
 
 @Composable
 internal fun rememberZoomableState(): ZoomableState = remember { ZoomableState() }
+
+/**
+ * A decoded drawable's size in pixels for [ZoomableBox]'s `contentSize`, or
+ * null when it has none to report. Taken from Coil's result drawable rather
+ * than its painter: with crossfade on, the painter is the fade between
+ * placeholder and result and reports the larger of the two.
+ */
+internal fun Drawable.toContentSize(): IntSize? =
+    if (intrinsicWidth >= 1 && intrinsicHeight >= 1) IntSize(intrinsicWidth, intrinsicHeight) else null
 
 /**
  * A zoom/pan surface that owns its own scale and offset and hands the resulting

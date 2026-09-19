@@ -38,6 +38,8 @@ the gesture or a real camera file. Check on a device:
 - Zoom, rotate the phone: the same part of the photo is on screen (possibly with a little more
   around it), and Send still sends the crop.
 - Zoom page 1 of a batch, switch to page 2 via the strip and back: the zoom is still there.
+- In the fullscreen viewer (a received photo), pinch and pan: the same clamp applies — the photo
+  stops at the screen edge instead of sliding off it, and a single-finger swipe at 1x still pages.
 - Airplane-mode-free failure path is hard to provoke; a rasterize failure shows "Couldn't apply the
   crop. Try again." above the caption bar and sends nothing.
 

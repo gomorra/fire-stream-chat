@@ -98,7 +98,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/EditorChrome.kt` | The shell every editor screen wears — top bar, tool button, failure banner, flatten scrim, and the colour strip shared by draw, text and shapes |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface with hoistable `ZoomableState` and an optional content-size clamp; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ViewportGeometry.kt` | Pure arithmetic between a zoom surface's `(scale, offset)` and the normalized frame of the photo it shows — the crop a zoomed preview page sends, the pan clamp, and the restore after a rotation |
-| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`) |
+| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomableBox`, pans clamped to the decoded photo) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type search-result rendering, shared by in-chat and global search — the media grid the three-dot "Shared Media" item lands in |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Search prefilter chips, date-range picker, active-filter summary — shared by both scopes |
