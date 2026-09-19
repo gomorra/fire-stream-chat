@@ -8,6 +8,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Zooming into a photo before sending crops it to what you see.** Pinch-zooming in the send preview used to be only a way to look closer: the whole photo went out regardless, and the zoom was thrown away the moment you opened one of the editing tools. The part of the photo on screen is now what is sent, on every page of a batch, and the adjust, draw and sticker tools open on that same part rather than on the whole photo, so the view never jumps back to the full picture. The crop lands in the photo's edit history like any other edit, so undo brings the whole photo back; it stays put while you swipe to other photos and when you turn the phone, and the photo can no longer be pushed off the edge of the screen while zoomed. (`534f7ad`)
 
+### Changed
+
+- **A zoomed photo in the fullscreen viewer stops at the edge of the screen.** Panning a zoomed photo could slide it right off the screen, leaving a black view with nothing to grab. The viewer now keeps the photo covering the screen wherever it is large enough to, and centred where it is not, the same rule the send preview uses. (`4c42e10`)
+
 ## [1.31.1] — 2026-09-14
 
 ### Fixed
