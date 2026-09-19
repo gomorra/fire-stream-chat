@@ -15,6 +15,9 @@ Placeholders:
   {{BASE}}          git merge-base main HEAD at launch
   {{COMMITS}}       output of `git log --oneline {{BASE}}..HEAD`, or "(none yet)"
   {{SCHEMA_PATH}}   repo-relative path of step-result.schema.json
+  {{TRIPWIRE_RULES}} the driver's diff tripwire as bullet text (lib.sh pr_tripwire_rules)
+  {{ADVISOR_BLOCK}} the "## Advisor" section when the run attaches an advisor model, else empty
+  {{ATTEMPT_BLOCK}} the "## Earlier attempt" section on an escalated re-run, else empty
 -->
 
 Implement **step {{STEP}}** of the plan `{{PLAN_PATH}}` in this worktree, on branch `{{BRANCH}}`.
@@ -31,7 +34,7 @@ Commits on this branch since it left `main` (`{{BASE}}`):
 ```
 {{COMMITS}}
 ```
-
+{{ATTEMPT_BLOCK}}
 ## Read first, in this order
 
 1. `CLAUDE.md` — build gate, post-step workflow, Key Conventions, Change Safety, Model Guidelines.
@@ -44,6 +47,14 @@ Commits on this branch since it left `main` (`{{BASE}}`):
 4. If the step touches `app/src/main/java/com/firestream/chat/ui/`, load the `app-ui-design`
    skill **before** writing any Compose code.
 
+## Approach — before the first edit
+
+Write an `**Approach**` block under your step's heading in the plan, five to ten lines: the files
+you will touch and in what order, the tests you will add, and anything in the step's spec that the
+code as it stands contradicts. If what you found contradicts a §0 decision or a §2 design point,
+stop with `needs_decision` now — before the implementation turns are spent, not after. The block
+stays in the plan, above the `**Shipped**` line, and lands with the `docs(plan):` commit.
+{{ADVISOR_BLOCK}}
 ## Skills — floor, intent, re-decision
 
 - The mandatory skills above come from the plan and are not up for evaluation. They go into
@@ -53,6 +64,9 @@ Commits on this branch since it left `main` (`{{BASE}}`):
 - **After the gate is green**, re-decide against the real diff (`git diff --stat`, paths touched,
   whether a bug fix got its regression test). You may add skills. You may drop one you added
   yourself only with a reason in `skipped`; never a mandatory one.
+- The driver re-checks your diff mechanically and rejects a `done` result that misses a skill these
+  rules require, so apply them yourself at the re-decision:
+{{TRIPWIRE_RULES}}
 - Reviewer sub-agents spawned by `/simplify` or `/code-review` must not run on a tier above
   **{{TIER}}**. Report every sub-agent's model in `reviewerModels`.
 - `/simplify` that changes code re-runs the gate before the commit. `/code-review` findings you
@@ -100,10 +114,13 @@ Rules that hold throughout:
 - Never `git push`, never touch `main`, never `./gradlew --stop`, never leave this worktree.
 - Never feed `git commit` from a HEREDOC — a repo hook blocks it and the turn is wasted. Use chained
   `-m` flags, one per paragraph.
+- One plain command per Bash call: no `for`/`while` loops, no `$(…)` or `<(…)`, no `find -exec`,
+  no `;` chains. Bash runs behind a prefix allowlist; every call of those shapes in earlier runs was
+  denied, silently, and the turn was wasted. Use the Grep and Glob tools to look across files.
 - Do not update local memory (`MEMORY.md` does not exist here); route facts to the tracked docs.
 - Do not ask questions with any tool; the decision rule above is the only way to involve the human.
 - Do not skip or delete a failing test; fix the cause. If the gate cannot be made green, end with
-  `status: blocked` and say why in `summary`.
+  `status: blocked`, `blockedKind: gate`, and say why in `summary`.
 
 ## The result
 
@@ -115,4 +132,8 @@ End with exactly one JSON object, nothing after it, valid against `{{SCHEMA_PATH
 - `skills`: `{ "intended": [...], "run": [...], "skipped": [{ "skill", "reason" }] }`
 - `reviewerModels`: one string per review skill that spawned sub-agents, e.g. `"simplify: opus, opus, sonnet"`
 - `question`: the decision text when `needs_decision`, else `null`
+- `blockedKind`: when `blocked`, one of `gate` (the work or the gate could not be finished — the
+  driver may re-run the step once at higher effort), `spec` (the step cannot be built as
+  specified), `environment` (tooling, permissions, network); else `null`
+- `advisorConsults`: how many times you consulted the advisor, or `null` when none is attached
 - `summary`: two or three sentences — what was built, what departed from the plan, what the human should look at

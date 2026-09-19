@@ -8,11 +8,16 @@
 # Contract: docs/plans/done/plan-runner.md §2.1 (Shipped / Decision blocks),
 # §2.3 (tripwire), §2.4 (Order grammar, checkpoints), §2.5 (result handling),
 # and the placeholder list at the top of scripts/plan-runner/step-prompt.md.
+# §5 (addendum) covers the tripwire's test exclusion, nudge routing, escalation and variants.
 
 # ---- tripwire thresholds (§2.3) --------------------------------------------
 PR_TRIPWIRE_LINES=600                       # changed lines above this → simplify
-PR_TRIPWIRE_PATHS='(^|/)(data/crypto|data/worker|di)/'   # any hit → code-review
+PR_TRIPWIRE_DIRS='data/crypto data/worker di'             # a changed file under any of these → code-review
+PR_TRIPWIRE_PATHS="(^|/)(${PR_TRIPWIRE_DIRS// /|})/"      # the regex and the prompt text both come from the list
 PR_TRIPWIRE_VIEWMODELS=2                    # this many *ViewModel.kt → code-review
+# Test sources never trip the path rule: a one-line `@Config` edit in SignalManagerTest.kt
+# once forced a $1.77 code-review of a minSdk bump (call-audio-routes step 1, 2026-09-14).
+PR_TRIPWIRE_SKIP='(^|/)src/(test|androidTest)/'
 # Paths whose change means the Gradle gate must be re-run by the driver.
 PR_GATE_PATHS='^(app/|baselineprofile/|gradle/|build\.gradle|settings\.gradle|gradle\.properties|gradlew)'
 
@@ -193,19 +198,37 @@ pr_cap_tier() {
 #   numstat-file: `git diff --numstat start..end`
 #   names-file:   `git diff --name-only start..end`
 pr_tripwire() {
-    local numstat=$1 names=$2 lines vms
+    local numstat=$1 names=$2 lines vms prod
     lines=$(awk '$1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { s += $1 + $2 } END { print s + 0 }' "$numstat")
     if [ "$lines" -gt "$PR_TRIPWIRE_LINES" ]; then echo simplify; fi
-    vms=$(grep -cE 'ViewModel\.kt$' "$names" || true)
-    if grep -qE "$PR_TRIPWIRE_PATHS" "$names" || [ "${vms:-0}" -ge "$PR_TRIPWIRE_VIEWMODELS" ]; then
+    prod=$(grep -vE "$PR_TRIPWIRE_SKIP" "$names" || true)       # both rules look at production sources only
+    vms=$(grep -cE 'ViewModel\.kt$' <<< "$prod" || true)
+    if grep -qE "$PR_TRIPWIRE_PATHS" <<< "$prod" || [ "${vms:-0}" -ge "$PR_TRIPWIRE_VIEWMODELS" ]; then
         echo code-review
     fi
+}
+
+# pr_tripwire_rules  → the rules above as prompt text, so a step session can apply them
+# itself instead of learning them from a rejected result. Built from the same constants.
+pr_tripwire_rules() {
+    local dirs
+    dirs="\`${PR_TRIPWIRE_DIRS// //\`, \`}/\`"
+    printf '%s\n' \
+        "  - more than $PR_TRIPWIRE_LINES changed lines (added + deleted in \`git diff --numstat\`) → \`simplify\`" \
+        "  - among the changed production files (test sources do not count): any under $dirs, or $PR_TRIPWIRE_VIEWMODELS or more \`*ViewModel.kt\` → \`code-review\`"
 }
 
 # pr_needs_gate <names-file>  → exit 0 when the diff touches something the
 # Gradle gate can see; a docs-only step does not earn a ten-minute test run.
 pr_needs_gate() {
     grep -qE "$PR_GATE_PATHS" "$1"
+}
+
+# pr_has_code <names-file>  → exit 0 when the diff changes anything that is not
+# documentation — what the judge grades. Wider than pr_needs_gate on purpose:
+# functions/ and scripts/ are code the Gradle gate cannot see.
+pr_has_code() {
+    grep -qvE '(\.md$|^docs/)' "$1"
 }
 
 # pr_union <list-a> <list-b>  → newline lists merged, deduplicated, in order.
@@ -220,6 +243,47 @@ pr_missing() {
         [ -z "$r" ] && continue
         printf '%s\n' "$run" | grep -qxF "$r" || echo "$r"
     done <<< "$req"
+}
+
+# pr_only_skill_reasons <reasons>  → exit 0 when every validation reason is a missed
+# skill. Such a result is repaired by a fresh review session on the diff, not by
+# resuming the step session and re-reading its whole context on every turn.
+pr_only_skill_reasons() {
+    local lines
+    lines=$(printf '%s\n' "$1" | grep -v '^$' || true)
+    [ -n "$lines" ] && ! grep -qvE '^required skills not run:' <<< "$lines"
+}
+
+# pr_missing_from_reasons <reasons>  → the skills a "required skills not run: a, b (…)"
+# reason names, one per line.
+pr_missing_from_reasons() {
+    pr_csv_list "$(printf '%s\n' "$1" | grep -m1 -E '^required skills not run:' \
+        | sed -E 's/^required skills not run:[[:space:]]*//; s/[[:space:]]*\(.*$//' || true)"
+}
+
+# ---- escalation and the test count -------------------------------------------
+
+# pr_next_effort <effort>  → one rung up the CLI's effort ladder; exit 1 at the top.
+pr_next_effort() {
+    case "$1" in
+        low) echo medium ;; medium) echo high ;; high) echo xhigh ;; xhigh) echo max ;;
+        *) return 1 ;;
+    esac
+}
+
+# pr_sum_counts  → stdin is one number per line (`git grep -hc`); prints the sum.
+pr_sum_counts() { awk '$1 ~ /^[0-9]+$/ { s += $1 } END { print s + 0 }'; }
+
+# ---- variants ------------------------------------------------------------------
+
+# A variant file may set these keys and nothing else — a typo must fail the launch,
+# not silently run the default configuration under the variant's name.
+PR_VARIANT_KEYS='MODEL_MAX|MODEL_STRONG|MODEL_MID|EFFORT_MAX|EFFORT_STRONG|EFFORT_MID|ADVISOR_MAX|ADVISOR_STRONG|ADVISOR_MID|JUDGE_MODEL|JUDGE_EFFORT|ESCALATE'
+
+# pr_variant_check <file>  → prints every line that is not a comment, blank, or
+# `KEY=value` with a known key and a plain value; empty output = loadable.
+pr_variant_check() {
+    grep -vE "^[[:blank:]]*(#.*)?\$|^($PR_VARIANT_KEYS)=[A-Za-z0-9._-]*([[:blank:]]+#.*)?[[:blank:]]*\$" "$1" || true   # [[:blank:]], not [[:space:]]: a CR must not pass
 }
 
 # ---- result classification (§2.5) -----------------------------------------

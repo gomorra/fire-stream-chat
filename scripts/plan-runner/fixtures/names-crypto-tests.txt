@@ -1,0 +1,3 @@
+app/src/test/java/com/firestream/chat/data/crypto/SignalManagerTest.kt
+app/src/test/java/com/firestream/chat/data/worker/OutboxWorkerTest.kt
+app/build.gradle.kts

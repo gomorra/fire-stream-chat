@@ -3,7 +3,7 @@
   "description": "The structured result every headless step session ends with. Contract: docs/plans/done/plan-runner.md §2.2. The driver (scripts/run-plan.sh) branches on `status`, enforces `skills.run` against the plan's tags and the diff tripwire, and logs the rest.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["status", "step", "commit", "skills", "reviewerModels", "question", "summary"],
+  "required": ["status", "step", "commit", "skills", "reviewerModels", "question", "summary", "blockedKind", "advisorConsults"],
   "properties": {
     "status": {
       "type": "string",
@@ -58,6 +58,16 @@
     "question": {
       "type": ["string", "null"],
       "description": "The decision the human must make, when status is needs_decision; null otherwise. The full block with options and a recommendation is in the plan under the step."
+    },
+    "blockedKind": {
+      "type": ["string", "null"],
+      "enum": ["gate", "spec", "environment", null],
+      "description": "Why, when status is blocked; null otherwise. gate: the work or the gate could not be finished at this effort — the driver may discard the attempt and re-run the step once, one effort rung up. spec: the step cannot be built as specified. environment: tooling, permissions, network, a missing SDK. Only gate is ever re-run."
+    },
+    "advisorConsults": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "How many times the session consulted its advisor model; null when no advisor was attached."
     },
     "summary": {
       "type": "string",

@@ -1,0 +1,14 @@
+{"ts":"2026-09-20T10:00:00Z","plan":"bench","variant":"b","event":"launched","step":"1","start":"abc","model":"opus","effort":"medium","advisor":"fable","attempt":1,"base":"abc12345"}
+{"ts":"2026-09-20T10:09:00Z","plan":"bench","variant":"b","event":"result","step":"1","status":"done","cost":2.5,"turns":40,"denials":[{"tool_name":"Bash"}],"consults":2}
+{"ts":"2026-09-20T10:09:30Z","plan":"bench","variant":"b","event":"review","step":"1","missing":"code-review"}
+{"ts":"2026-09-20T10:14:00Z","plan":"bench","variant":"b","event":"result","step":"1","status":"done","cost":0.75,"turns":12,"denials":[]}
+{"ts":"2026-09-20T10:15:00Z","plan":"bench","variant":"b","event":"escalated","step":"1","from":"medium","to":"high"}
+{"ts":"2026-09-20T10:15:01Z","plan":"bench","variant":"b","event":"launched","step":"1","start":"abc","model":"opus","effort":"high","advisor":"fable","attempt":2,"base":"abc12345"}
+{"ts":"2026-09-20T10:29:00Z","plan":"bench","variant":"b","event":"result","step":"1","status":"done","cost":3.25,"turns":50,"denials":[],"consults":1}
+{"ts":"2026-09-20T10:30:00Z","plan":"bench","variant":"b","event":"validated","step":"1","attempt":2,"tests_before":100,"tests_after":104,"deleted_tests":""}
+{"ts":"2026-09-20T10:34:00Z","plan":"bench","variant":"b","event":"judged","step":"1","verdict":"meets_spec","high":0,"medium":1,"low":2,"cost":1.239}
+{"ts":"2026-09-20T10:34:01Z","plan":"bench","variant":"b","event":"checkpoint","step":"1"}
+{"ts":"2026-09-20T10:40:00Z","plan":"bench","variant":"b","event":"launched","step":"2","start":"def","model":"opus","effort":"medium","advisor":"none","attempt":1,"base":"abc12345"}
+{"ts":"2026-09-20T10:50:00Z","plan":"bench","variant":"b","event":"result","step":"2","status":"blocked","cost":1,"turns":20,"denials":[]}
+{"ts":"2026-09-20T10:50:01Z","plan":"bench","variant":"b","event":"blocked","step":"2","why":"x"}
+{"ts":"2026-09-20T10:50:02Z","plan":"bench","variant":"b","event":"judge_failed","step":"2","cost":4.9,"why":"x"}

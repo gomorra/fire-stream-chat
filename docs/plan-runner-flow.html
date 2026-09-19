@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan Runner Flow</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600&display=swap">
+<style>
+  :root {
+    --ground: #F2F5F3; --surface: #FBFCFB; --ink: #17211E; --muted: #5A6B65;
+    --rule: #D3DBD7; --accent: #0B6E5B; --stop: #A8431F; --code-bg: #E7ECE9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #111917; --surface: #18221F; --ink: #E3EBE7; --muted: #93A39D;
+      --rule: #2B3833; --accent: #55C4A7; --stop: #E68C64; --code-bg: #1F2B27;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #111917; --surface: #18221F; --ink: #E3EBE7; --muted: #93A39D;
+    --rule: #2B3833; --accent: #55C4A7; --stop: #E68C64; --code-bg: #1F2B27;
+  }
+  body { background: var(--ground); color: var(--ink); font: 400 16px/1.6 "IBM Plex Sans", system-ui, sans-serif; }
+  .page { max-width: 60rem; margin-inline: auto; padding-inline: 20px; padding-block: 40px 72px; display: flex; flex-direction: column; gap: 44px; }
+  header, section { display: flex; flex-direction: column; gap: 14px; }
+  h1, h2 { font-family: "IBM Plex Sans Condensed", "IBM Plex Sans", system-ui, sans-serif; font-weight: 600; text-wrap: balance; margin: 0; letter-spacing: -0.005em; }
+  h1 { font-size: 2.1rem; line-height: 1.15; }
+  h2 { font-size: 1.35rem; line-height: 1.25; }
+  p, ul, ol { margin: 0; max-width: 68ch; }
+  ul, ol { padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+  .lede { font-size: 1.08rem; color: var(--ink); }
+  .eyebrow { font: 500 0.78rem/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+  code { font: 400 0.88em "IBM Plex Mono", ui-monospace, monospace; background: var(--code-bg); padding: 0.08em 0.35em; border-radius: 3px; }
+  figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .canvas { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; }
+  .canvas svg { display: block; min-width: 760px; max-width: 100%; height: auto; color: var(--ink); }
+  .canvas pre.mermaid { margin: 0; min-width: 640px; background: transparent; color: var(--ink); font: 400 13px/1.4 "IBM Plex Mono", ui-monospace, monospace; }
+  figcaption { color: var(--muted); font-size: 0.92rem; max-width: 72ch; }
+  svg .box { fill: var(--ground); stroke: currentColor; stroke-width: 1.2; }
+  svg .state { fill: var(--ground); stroke: var(--accent); stroke-width: 2.2; }
+  svg .t { font: 600 14px "IBM Plex Sans", system-ui, sans-serif; fill: currentColor; }
+  svg .m { font: 500 12.5px "IBM Plex Mono", ui-monospace, monospace; fill: currentColor; }
+  svg .s { font: 400 12px "IBM Plex Sans", system-ui, sans-serif; fill: var(--muted); }
+  svg .l { font: 400 12px "IBM Plex Sans", system-ui, sans-serif; fill: currentColor; }
+  svg .a { stroke: currentColor; stroke-width: 1.3; fill: none; }
+  .tablewrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-size: 0.95rem; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--rule); }
+  th { font: 500 0.76rem/1.2 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  td.code { font: 500 1rem "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.stop { color: var(--stop); }
+  td.go { color: var(--accent); }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 28px; }
+  .two > div { display: flex; flex-direction: column; gap: 10px; }
+  h3 { font: 500 0.8rem/1.2 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); margin: 0; }
+  footer { color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--rule); padding-top: 16px; }
+</style>
+<style>body { margin: 0; } img { max-width: 100%; }</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <span class="eyebrow">scripts/run-plan.sh</span>
+    <h1>How the plan runner gets a plan from step 1 to merged</h1>
+    <p class="lede">The runner is a bash loop with no model in it. It starts one fresh headless Claude session per step, believes nothing that session says until it has checked the branch itself, and stops for you in exactly three situations. Everything it knows between runs is written in the plan file.</p>
+  </header>
+
+  <section>
+    <h2>Who writes what</h2>
+    <figure>
+      <div class="canvas">
+        <svg viewBox="0 0 920 396" role="img" aria-label="Three actors and two stores. You start the driver in a terminal. The driver launches headless sessions and receives a result JSON. Sessions commit code and the Shipped block to the plan branch. The driver only reads the branch, re-runs the gate there, and writes its log to the runs directory, which report.sh reads back for you.">
+          <defs>
+            <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+          <!-- actors -->
+          <rect class="box" x="20" y="20" width="200" height="84" rx="5"/>
+          <text class="t" x="120" y="56" text-anchor="middle">You</text>
+          <text class="s" x="120" y="78" text-anchor="middle">in a terminal</text>
+          <rect class="box" x="360" y="20" width="200" height="84" rx="5"/>
+          <text class="m" x="460" y="56" text-anchor="middle">run-plan.sh</text>
+          <text class="s" x="460" y="78" text-anchor="middle">bash, no model in it</text>
+          <rect class="box" x="700" y="20" width="200" height="84" rx="5"/>
+          <text class="m" x="800" y="56" text-anchor="middle">claude -p</text>
+          <text class="s" x="800" y="78" text-anchor="middle">one fresh session per step</text>
+          <!-- you <-> driver -->
+          <line class="a" x1="220" y1="48" x2="358" y2="48" marker-end="url(#ah)"/>
+          <text class="l" x="290" y="40" text-anchor="middle">run, re-run</text>
+          <line class="a" x1="360" y1="80" x2="222" y2="80" marker-end="url(#ah)"/>
+          <text class="l" x="290" y="97" text-anchor="middle">notify, exit 0/2/3/4</text>
+          <!-- driver <-> sessions -->
+          <line class="a" x1="560" y1="48" x2="698" y2="48" marker-end="url(#ah)"/>
+          <text class="l" x="630" y="40" text-anchor="middle">prompt, model, effort</text>
+          <line class="a" x1="700" y1="80" x2="562" y2="80" marker-end="url(#ah)"/>
+          <text class="l" x="630" y="97" text-anchor="middle">result JSON</text>
+          <!-- stores -->
+          <rect class="box" x="20" y="280" width="420" height="96" rx="5"/>
+          <text class="m" x="230" y="312" text-anchor="middle">docs/plans/.runs/</text>
+          <text class="s" x="230" y="334" text-anchor="middle">gitignored, this machine only</text>
+          <text class="s" x="230" y="354" text-anchor="middle">run log, prompts, results, gate logs, judge grades</text>
+          <rect class="state" x="480" y="280" width="420" height="96" rx="5"/>
+          <text class="m" x="690" y="312" text-anchor="middle">worktree plan-&lt;run&gt; on branch plan/&lt;run&gt;</text>
+          <text class="s" x="690" y="334" text-anchor="middle">holds the plan file: its Shipped blocks are the state</text>
+          <text class="s" x="690" y="354" text-anchor="middle">merged and pushed by you, never by the runner</text>
+          <!-- vertical flows -->
+          <line class="a" x1="120" y1="280" x2="120" y2="106" marker-end="url(#ah)"/>
+          <text class="l" x="130" y="154">report.sh reads it back</text>
+          <line class="a" x1="400" y1="104" x2="400" y2="278" marker-end="url(#ah)"/>
+          <text class="l" x="390" y="220" text-anchor="end">one JSON line per event,</text>
+          <text class="l" x="390" y="237" text-anchor="end">every prompt and result kept</text>
+          <line class="a" x1="520" y1="104" x2="520" y2="278" marker-end="url(#ah)"/>
+          <text class="l" x="530" y="146">reads the Shipped blocks,</text>
+          <text class="l" x="530" y="163">re-runs the gate, checks the diff,</text>
+          <text class="l" x="530" y="180">resets it only to escalate</text>
+          <line class="a" x1="800" y1="104" x2="800" y2="278" marker-end="url(#ah)"/>
+          <text class="l" x="790" y="228" text-anchor="end">commits code + tests,</text>
+          <text class="l" x="790" y="245" text-anchor="end">then the Shipped block</text>
+        </svg>
+      </div>
+      <figcaption>Every commit on the plan branch is a session's; the driver never commits and never pushes. That split is why a run can stop anywhere and be started again: the next run reads the Shipped blocks and carries on from the first step that has none.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>The loop over the plan</h2>
+    <p>The plan's <code>Order:</code> line is the program. The driver walks its tokens left to right; <code>‖</code> is a checkpoint, a number is a step.</p>
+    <figure>
+      <div class="canvas">
+<pre class="mermaid">
+flowchart TD
+  start(["run-plan.sh plan.md --variant b"]) --> setup["load the variant file, create or reuse the worktree"]
+  setup --> byhand{"last shipped step launched by the runner but never validated?"}
+  byhand -- "yes: you finished it by hand" --> v0["validate it first"]
+  byhand -- "no" --> tok
+  v0 --> tok{"next token of the Order line"}
+  tok -- "checkpoint after a step this run shipped" --> e4(["exit 4: checkpoint"])
+  tok -- "a step" --> shipped{"Shipped block under its heading?"}
+  shipped -- "yes" --> tok
+  shipped -- "no" --> pend{"unanswered Decision needed block?"}
+  pend -- "yes" --> e2(["exit 2: needs a decision"])
+  pend -- "no" --> run[["run one step (next figure)"]]
+  run -- "validated" --> tok
+  run -- "needs_decision" --> e2
+  run -- "blocked" --> e3(["exit 3: blocked"])
+  tok -- "none left" --> e0(["exit 0: plan complete"])
+</pre>
+      </div>
+      <figcaption>A step counts as done only when a Shipped block sits under its heading in the branch's copy of the plan. <code>--from N</code> skips steps below N; <code>--dry-run</code> walks the same loop, renders every prompt and launches nothing.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>One step, including everything that can go wrong</h2>
+    <p>A step gets at most three kinds of help, each once per step, even across re-runs of the driver: a nudge, then a fresh attempt one effort rung higher, then you.</p>
+    <figure>
+      <div class="canvas">
+<pre class="mermaid">
+flowchart TD
+  L["launch a fresh session: tier's model, effort, advisor, budget"] --> K{"what came back?"}
+  K -- "budget spent, or no JSON at all" --> B(["exit 3: blocked"])
+  K -- "ended without the result object" --> N
+  K -- "a complete result" --> S{"status"}
+  S -- "needs_decision" --> D(["exit 2: needs a decision"])
+  S -- "blocked: spec or environment" --> B
+  S -- "blocked: gate" --> E
+  S -- "done" --> V["validate on the branch, trusting nothing"]
+  V --> OK{"valid?"}
+  OK -- "yes" --> T["log validated, with the test-count delta"]
+  T --> J["judge pass in a throwaway worktree, if the variant sets one"]
+  J --> X(["next token"])
+  OK -- "no" --> U{"nudge already spent?"}
+  U -- "no, and only skills are missing" --> R["fresh review session runs them on the diff"]
+  U -- "no, anything else" --> N["nudge: resume the same session with the reasons"]
+  R --> K
+  N --> K
+  U -- "yes" --> E{"first attempt, a rung left, ESCALATE=1?"}
+  E -- "no" --> B
+  E -- "yes" --> P["keep the failed attempt: branch, patch, tarball"]
+  P --> Z["reset to what attempt 1 started from, effort one rung up"]
+  Z --> L
+</pre>
+      </div>
+      <figcaption>Validate means five checks the driver runs itself: HEAD moved; the Shipped line names a commit that is on the branch; the plan file is committed; the Gradle gate, re-run by the driver, is green (skipped for a docs-only diff); and every required skill ran, where required is the step's <code>skills:</code> tag plus what the diff tripwire demands. The escalated attempt is told what failed and starts from exactly what the first attempt started from, so an uncommitted answer of yours to a decision survives the reset. A step that escalated and then blocked resumes, on your next run, at the rung it had reached. A session that ends without its result object a second time is blocked, not escalated.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>When it stops, and what it wants from you</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Exit</th><th>Means</th><th>What you do</th></tr></thead>
+        <tbody>
+          <tr><td class="code go">0</td><td>Every step is shipped on the plan branch.</td><td>Read <code>report.sh &lt;run-id&gt;</code> and the departures in the Shipped blocks, then <code>merge --ff-only</code> and push.</td></tr>
+          <tr><td class="code stop">2</td><td>A session hit something that would change a decision or the design of the plan. It wrote a Decision needed block and committed nothing.</td><td>Resume the printed session and answer, or rename the block to Decision taken in the branch's plan. Run again.</td></tr>
+          <tr><td class="code stop">3</td><td>Blocked: budget spent, no usable result, an environment or spec problem, or still failing after the nudge and the escalated attempt.</td><td>Look at the worktree. Resume the session or fix by hand, then run again; a step you finished by hand is validated before anything else.</td></tr>
+          <tr><td class="code go">4</td><td>A <code>‖</code> checkpoint after a step this run shipped.</td><td>Sign off the departures. Run again to continue.</td></tr>
+          <tr><td class="code stop">1</td><td>Usage or configuration error, or a bug in the driver itself.</td><td>Read the message. Nothing was launched, or the trap names the line.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it checks, and what it takes on a session's word</h2>
+    <div class="two">
+      <div>
+        <h3>Checked by the driver</h3>
+        <ul>
+          <li>That commits exist and the Shipped line points at one of them.</li>
+          <li>That the gate is green, by running it again in the worktree.</li>
+          <li>That the diff's size and paths got the review skills they require.</li>
+          <li>How the <code>@Test</code> count moved, and which test files were deleted.</li>
+          <li>That a hand-finished step is judged on its own Shipped line and last attempt, never on what a discarded attempt claimed.</li>
+          <li>That a variant file holds only known keys and sane values, before anything is launched.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Taken on trust</h3>
+        <ul>
+          <li>That a skill listed as run was really run.</li>
+          <li>That the step met its spec. The gate only shows nothing regressed; the judge grades this from a throwaway checkout, but nothing acts on the grade yet.</li>
+          <li>That a departure recorded for sign-off was a reasonable call. That is what the checkpoint and your read of the Shipped blocks are for.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Where a variant comes in</h2>
+    <p><code>--variant b</code> loads <code>scripts/plan-runner/variants/b.env</code> over the driver's tunables, which decide only three things per tier: model, effort, advisor. The same file can switch the judge on and escalation off. Everything the run produces is then named after <code>&lt;plan&gt;-b</code>: branch, worktree, log and result files, so two configurations of one plan sit side by side and <code>report.sh</code> can print them together. A step's own tags still win: <code>model: strong</code> keeps a step on the strong tier under every variant.</p>
+  </section>
+
+  <footer>Drawn from <code>scripts/run-plan.sh</code> and <code>scripts/plan-runner/lib.sh</code> as of 2026-09-20. The contract is <code>docs/plans/done/plan-runner.md</code>; §5 covers escalation, variants, the review session and the judge.</footer>
+</div>
+<!-- Standalone copy of the published page: opened from disk, the two flowcharts need mermaid loaded here. -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs";
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+  mermaid.initialize({ startOnLoad: true, theme: dark ? "dark" : "neutral", flowchart: { htmlLabels: true } });
+</script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+functions/index.js
+docs/CLOUD-FUNCTIONS.md

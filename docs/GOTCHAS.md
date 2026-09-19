@@ -373,6 +373,17 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   and `git mv` it back — a detour, not a design. Anything a headless session must edit belongs at
   a normal path. Interactive sessions only see a permission prompt.
 
+- **A headless session's compound shell commands are denied silently, even when every part is allowlisted.**
+  `claude -p` with a prefix allowlist (`Bash(grep *)`, `Bash(find *)`, …) refused all six compound
+  calls of the first real plan-runner step (2026-09-14): `for … do … done` loops, `for f in $(find …)`,
+  `grep … <(git diff …)`, `find … -exec grep … \;`, and a plain `ls a; ls b; echo $LANG` chain. The
+  session gets no message — `permission_denials` in the result object carries only the tool input —
+  and spends the turn, then another working around it. Widening the allowlist to `Bash(for *)` or an
+  interpreter would route around every deny rule, so the fix is on the prompt side: tell the session
+  to issue one plain command per Bash call and to use the Grep and Glob tools for anything that
+  looks across files (`scripts/plan-runner/step-prompt.md`). Interactive sessions never see this —
+  they get a permission prompt instead.
+
 - **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
   Several test names in this repo contain an em dash (e.g.
   `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),

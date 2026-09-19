@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Self-check for the plan runner: lib.sh's pure functions against fixtures/,
-# a syntax pass over run-plan.sh, and one --dry-run of the driver on the
-# fixture plan. Runs in CI (.github/workflows/plan-runner.yml) and by hand:
+# a syntax pass over run-plan.sh, --dry-runs of the driver on the fixture plan,
+# and e2e.sh (the driver's control flow against a stub claude in a scratch repo).
+# Runs in CI (.github/workflows/plan-runner.yml) and by hand:
 #   scripts/plan-runner/selfcheck.sh
 # A broken parser or tripwire must be found here, not by an unattended run.
 set -euo pipefail
@@ -102,6 +103,14 @@ check "big diff → simplify"                   "simplify" "$(lines "$(pr_tripwi
 check "small diff, plain ui → nothing"        "" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-app.txt")"
 check "crypto path → code-review"             "code-review" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-crypto.txt")"
 check "worker path → code-review"             "code-review" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-worker.txt")"
+check "crypto/worker *tests* alone → nothing (the 2026-09-14 false positive)" "" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-crypto-tests.txt")"
+check "ViewModels under src/test do not count either" "" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-test-viewmodels.txt")"
+check "rules text carries the thresholds"     "2" "$(pr_tripwire_rules | grep -cE "than $PR_TRIPWIRE_LINES changed lines|or $PR_TRIPWIRE_VIEWMODELS or more ")"
+check "rules text names every tripwire dir, from the same list as the regex" "3" "$(for d in $PR_TRIPWIRE_DIRS; do pr_tripwire_rules | grep -cF "\`$d/\`"; done | pr_sum_counts)"
+check "the regex is built from that list"     '(^|/)(data/crypto|data/worker|di)/' "$PR_TRIPWIRE_PATHS"
+check_rc "judge scope: functions/ is code the gate cannot see" 0 pr_has_code "$F/names-functions.txt"
+check_rc "judge scope: a docs-only diff is not code"           1 pr_has_code "$F/names-docs.txt"
+check_rc "…and functions/ indeed needs no Gradle gate"          1 pr_needs_gate "$F/names-functions.txt"
 check "two ViewModels → code-review"          "code-review" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-two-viewmodels.txt")"
 check "one ViewModel → nothing"               "" "$(pr_tripwire "$F/numstat-small.txt" "$F/names-one-viewmodel.txt")"
 check "big + crypto → both"                   "simplify code-review" "$(lines "$(pr_tripwire "$F/numstat-big.txt" "$F/names-crypto.txt")")"
@@ -121,6 +130,29 @@ run=$(jq -r '.structured_output.skills.run[]?' "$F/result-missing-skill.json")
 check "result missing a tagged skill"         "code-review" "$(lines "$(pr_missing "$required" "$run")")"
 check "nothing missing when all ran"          "" "$(pr_missing "$required" "$(printf 'simplify\ncode-review\n')")"
 check "empty required → nothing missing"      "" "$(pr_missing "" "$run")"
+
+echo "Nudge routing, escalation, test count"
+skills_only=$'required skills not run: code-review, simplify (floor: none; tripwire on the diff: code-review, simplify)\n'
+mixed=$'the gate is red (see x.log): FAILED\nrequired skills not run: code-review (floor: none; tripwire on the diff: code-review)\n'
+check_rc "only missed skills → fresh review session"   0 pr_only_skill_reasons "$skills_only"
+check_rc "red gate + missed skill → resume nudge"      1 pr_only_skill_reasons "$mixed"
+check_rc "no reasons → not a review case"              1 pr_only_skill_reasons ""
+check "missing skills parsed out of the reason"       "code-review simplify" "$(lines "$(pr_missing_from_reasons "$skills_only")")"
+check "missing skills parsed from a mixed reason"     "code-review" "$(lines "$(pr_missing_from_reasons "$mixed")")"
+check "effort ladder: low → medium"                   "medium" "$(pr_next_effort low)"
+check "effort ladder: xhigh → max"                    "max" "$(pr_next_effort xhigh)"
+check_rc "effort ladder: nothing above max"            1 pr_next_effort max
+check "test count sums git grep -hc output"           "18" "$(printf '6\n7\n5\n' | pr_sum_counts)"
+check "test count of no matches is 0"                 "0" "$(printf '' | pr_sum_counts)"
+
+echo "Variants"
+check "a well-formed variant file has no bad lines"   "" "$(pr_variant_check "$F/variants/ok.env")"
+check "unknown key and shell syntax are both caught"  "2" "$(pr_variant_check "$F/variants/bad.env" | wc -l | tr -d ' ')"
+printf 'MODEL_MID=opus\r\nEFFORT_MID=medium\r\n' > "$TMP/crlf.env"     # written here: a committed CRLF fixture would not survive text normalisation
+check "CRLF line endings are caught (a CR would ride into --model)" "2" "$(pr_variant_check "$TMP/crlf.env" | wc -l | tr -d ' ')"
+for v in "$HERE"/variants/*.env; do
+    check "shipped variant $(basename "$v") loads"    "" "$(pr_variant_check "$v")"
+done
 
 echo "Result classification"
 check "success + object → complete"           "complete"   "$(pr_result_kind "$F/result-complete.json")"
@@ -144,6 +176,10 @@ check "json number"                           "0.5" "$(pr_result_json "$F/result
 check "json field from an empty file → default" "[]" "$(pr_result_json "$F/result-empty.json" .permission_denials '[]')"
 check "json default is valid for --argjson"   "ok" "$(jq -nr --argjson d "$(pr_result_json "$F/result-empty.json" .permission_denials '[]')" '"ok"')"
 check "schema has no \$schema key (the CLI rejects draft URIs)" "0" "$(grep -c '"\$schema"' "$HERE/step-result.schema.json" || true)"
+check "judge schema has no \$schema key either"       "0" "$(grep -c '"\$schema"' "$HERE/judge-result.schema.json" || true)"
+check_rc "step schema is JSON"                        0 jq -e . "$HERE/step-result.schema.json"
+check_rc "judge schema is JSON"                       0 jq -e . "$HERE/judge-result.schema.json"
+check "every required result field is described"      "" "$(jq -r '.required - (.properties | keys) | .[]' "$HERE/step-result.schema.json")"
 
 echo "Checkpoints"
 check_rc "due when shipped in this run"                 0 pr_checkpoint_due "$F/run.log" 9 1
@@ -158,13 +194,21 @@ commits=$'abc1234 feat: one\n0123abc docs(plan): two'
 special='a $HOME & \\backslash "quoted" `tick` {{NOT_A_KEY}}'
 out=$(pr_render "$TPL" "PLAN_PATH=docs/plans/x.md" "PLAN_NAME=x" "STEP=2" \
     "STEP_HEADING=$h2" "TIER=strong" "TAGGED_TIER=max" "SKILLS_FLOOR=code-review, simplify" \
-    "BRANCH=plan/x" "BASE=deadbeef" "COMMITS=$commits" "SCHEMA_PATH=scripts/plan-runner/step-result.schema.json")
+    "BRANCH=plan/x" "BASE=deadbeef" "COMMITS=$commits" "SCHEMA_PATH=scripts/plan-runner/step-result.schema.json" \
+    "TRIPWIRE_RULES=$(pr_tripwire_rules)" "ADVISOR_BLOCK=" "ATTEMPT_BLOCK=")
 check "header comment stripped"               "0" "$(printf '%s' "$out" | grep -c '^<!--' || true)"
 check "every placeholder filled"              "" "$(pr_unfilled "$(printf '%s' "$out" | sed 's/{{NOT_A_KEY}}//')")"
 check "multi-line value kept"                 "2" "$(printf '%s' "$out" | grep -cE '^(abc1234 feat: one|0123abc docs\(plan\): two)$')"
 out2=$(pr_render "$TPL" "STEP=$special")
 check "special characters pass through verbatim" "1" "$(printf '%s' "$out2" | grep -cF "Implement **step $special** of" )"
 check "unfilled placeholders are reported"    "{{BASE}}" "$(pr_unfilled "$(pr_render "$TPL" "STEP=1" | grep -m1 -o '{{BASE}}')")"
+check "step prompt states the tripwire rules" "1" "$(printf '%s' "$out" | grep -c "than $PR_TRIPWIRE_LINES changed lines")"
+check "empty blocks leave one blank line, not two" "0" "$(printf '%s' "$out" | awk 'prev == "" && $0 == "" && NR > 1 { n++ } { prev = $0 } END { print n + 0 }')"
+sk=$(pr_render "$HERE/skills-prompt.md" "PLAN_PATH=docs/plans/x.md" "STEP=2" "STEP_HEADING=$h2" "BRANCH=plan/x" \
+    "START_SHA=deadbeef" "TIER=strong" "MISSING=code-review" "SCHEMA_PATH=scripts/plan-runner/step-result.schema.json")
+check "skills prompt: every placeholder filled" "" "$(pr_unfilled "$sk")"
+jp=$(pr_render "$HERE/judge-prompt.md" "PLAN_PATH=docs/plans/x.md" "STEP=2" "STEP_HEADING=$h2" "START_SHA=deadbeef" "HEAD_SHA=cafef00d")
+check "judge prompt: every placeholder filled" "" "$(pr_unfilled "$jp")"
 
 echo "Driver"
 check_rc "run-plan.sh parses"                 0 bash -n "$HERE/../run-plan.sh"
@@ -181,10 +225,42 @@ check "dry run honours the effort tag on step 6" "1" "$(printf '%s' "$dry" | gre
 check "dry run keeps xhigh when the cap lowers the model" "1" "$(printf '%s' "$dry" | grep -c 'tier strong (tagged max) → model opus, effort xhigh' || true)"
 check "dry run renders a prompt per runnable step (2, 4, 5, 6; not the pending 3)" "4" "$(ls "$TMP/runs/plan.step"*.prompt.md 2>/dev/null | wc -l)"
 check "dry run prompt has no placeholders left" "0" "$(cat "$TMP/runs/plan.step2."*.prompt.md | grep -c '{{' || true)"
+check "dry run without a variant attaches no advisor" "0" "$(printf '%s' "$dry" | grep -c -- '--advisor' || true)"
+check "dry run shows the escalation rung (sonnet/high → xhigh on step 5) and the judge" "1" "$(printf '%s' "$dry" | grep -c 'one re-run at effort xhigh | judge: off' || true)"
+dryb=$(PLAN_RUNNER_RUNS_DIR=$TMP/runs "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant b 2>"$TMP/dryb.err") || { echo "  variant dry-run exit $? — stderr:"; sed 's/^/    /' "$TMP/dryb.err"; fail=$((fail + 1)); }
+check "variant b: untagged step 5 runs opus/medium with the advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort medium, budget \$25, advisor fable' || true)"
+check "variant b: the effort tag still wins on step 6" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort low' || true)"
+check "variant b: a strong step keeps its tier and gets no advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier strong (tagged strong) → model opus, effort xhigh, budget \$12, advisor none' || true)"
+check "variant b: --advisor is passed for the mid steps only (5, 6)" "2" "$(printf '%s' "$dryb" | grep -c -- '--advisor fable' || true)"
+check "variant b: run files carry the run id" "4" "$(ls "$TMP/runs/plan-b.step"*.prompt.md 2>/dev/null | wc -l)"
+check "variant b: the prompt of a mid step has the advisor section" "1" "$(cat "$TMP/runs/plan-b.step5."*.prompt.md | grep -c '^## Advisor$' || true)"
+check "variant b: the prompt of the strong step has none" "0" "$(cat "$TMP/runs/plan-b.step2."*.prompt.md | grep -c '^## Advisor$' || true)"
+check "variant b: judge and escalation are shown" "1" "$(printf '%s' "$dryb" | grep -c 'one re-run at effort high | judge: opus/high' || true)"
+check "unknown variant exits 1"               "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --variant nope >/dev/null 2>&1; echo $?)"
+check "malformed variant file exits 1"        "1" "$(PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant bad >/dev/null 2>&1; echo $?)"
+check "fixture variant ok.env loads (ESCALATE=0 shows as blocked)" "1" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant ok 2>/dev/null | grep -c 'after a failed nudge: blocked | judge: opus/high' | sed 's/^[1-9][0-9]*$/1/')"
+check "bad --base exits 1"                    "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --base no-such-ref >/dev/null 2>&1; echo $?)"
 check "usage exits 1 without a plan"          "1" "$("$HERE/../run-plan.sh" >/dev/null 2>&1; echo $?)"
+check "--help prints the usage block with the new flags" "2" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base) ' || true)"
 check "--help exits 0"                        "0" "$("$HERE/../run-plan.sh" --help >/dev/null 2>&1; echo $?)"
 check "--from without a value exits 1"        "1" "$("$HERE/../run-plan.sh" "$PLAN" --from >/dev/null 2>&1; echo $?)"
 check "bad --cap exits 1"                     "1" "$("$HERE/../run-plan.sh" "$PLAN" --cap huge --dry-run >/dev/null 2>&1; echo $?)"
+
+echo "Report"
+rep=$(PLAN_RUNNER_RUNS_DIR=$F "$HERE/report.sh" run-bench 2>"$TMP/rep.err") || { echo "  report exit $? — stderr:"; sed 's/^/    /' "$TMP/rep.err"; fail=$((fail + 1)); }
+row() { printf '%s\n' "$rep" | awk -v s="$1" '$1 == s { $1 = $1; print }'; }
+check "step 1: last config, attempts, nudges, escalations, consults, cost, turns, denials, minutes, tests, grade" \
+    "1 opus/high+fable 2 1 1 3 6.5 102 1 30 validated 100→104 0/1/2 \$1.24" "$(row 1)"
+check "step 2: blocked, no consults reported, and the failed judge's cost is not lost" "2 opus/medium 1 0 0 - 1 20 0 - blocked - failed \$4.9" "$(row 2)"
+check "the header names the base the run forked from" "1" "$(printf '%s\n' "$rep" | grep -c '^== run-bench (base abc12345)$')"
+check "report without a run id exits 1"       "1" "$("$HERE/report.sh" >/dev/null 2>&1; echo $?)"
+
+echo "End to end"
+# The control flow no pure function reaches — nudge, review session, escalation, judge —
+# against a stub claude in a scratch repo. Its own file so it can be run alone.
+e2e_rc=0; "$HERE/e2e.sh" > "$TMP/e2e.out" 2>&1 || e2e_rc=$?
+check "e2e.sh ($(tail -1 "$TMP/e2e.out"))" "0" "$e2e_rc"
+[ "$e2e_rc" = 0 ] || grep -A2 -E '^  FAIL' "$TMP/e2e.out" | sed 's/^/    /'
 
 echo
 if [ "$fail" = 0 ]; then

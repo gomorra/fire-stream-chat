@@ -1,0 +1,37 @@
+{
+  "title": "Plan runner judge result",
+  "description": "What the read-only judge session (scripts/plan-runner/judge-prompt.md) ends with. The driver logs the counts per severity and keeps the file; nothing is acted on. Protocol: docs/plans/plan-runner-benchmark.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "findings", "testsAdequate", "summary"],
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": ["meets_spec", "gaps", "cannot_judge"],
+      "description": "gaps: at least one high finding. cannot_judge: the diff or the spec could not be read well enough to grade."
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["axis", "severity", "file", "summary"],
+        "properties": {
+          "axis": { "type": "string", "enum": ["spec", "standards"] },
+          "severity": { "type": "string", "enum": ["high", "medium", "low"] },
+          "file": { "type": ["string", "null"] },
+          "summary": { "type": "string", "minLength": 1 }
+        }
+      },
+      "description": "Only findings confirmed against the code."
+    },
+    "testsAdequate": {
+      "type": "boolean",
+      "description": "Whether the step's non-trivial logic has tests and no test was removed without cause."
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

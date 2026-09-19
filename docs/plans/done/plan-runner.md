@@ -420,3 +420,36 @@ Departures (for sign-off):
    worktree and the session id in the log.
 8. The pilot step's log shows zero `permission_denials`; any denial is an allowlist fix before the
    runner is used on a real plan.
+
+## 5. Addendum 2026-09-20 — what the first real step changed
+
+The first real step (`call-audio-routes` step 1, 2026-09-14) validated only after a nudge that cost
+as much as the step, and both real steps so far failed their first validation on a driver fault, not
+a model fault. The changes below came out of reading that run; the evidence and the discussion are
+in `docs/plans/plan-runner-benchmark.md`. Where they contradict §2 or §4 above, this section wins.
+
+| Change | Why | Where |
+|---|---|---|
+| **The tripwire looks at production sources only** (both the path rule and the ViewModel count), and the step prompt states the rules, built from the same constants as the regex. | A one-line `@Config` edit in `data/crypto/SignalManagerTest.kt` forced a `/code-review` of a minSdk bump — 49% of the step's spend — and the session had no way to know the rule existed. | `lib.sh` `PR_TRIPWIRE_SKIP`, `pr_tripwire_rules`; `step-prompt.md` |
+| **A result that is valid except for a missed skill is repaired by a fresh review session** (no advisor attached), not by resuming the step session. It spends the step's one nudge. A step finished by hand is validated on the last attempt's `done` results and its Shipped line only — never on what a discarded attempt claimed. §4 item 5 ("exactly one resume nudge") now reads "one fresh review session". | The resumed session re-read ~130k tokens of context on each of 29 turns. | `run-plan.sh` `review_nudge`; `skills-prompt.md` |
+| **Escalation.** A step that is still invalid after its nudge, or that ends `blocked` with `blockedKind: gate`, is re-run once in a fresh session one effort rung up, with what failed in its prompt. The failed attempt is kept — commits on a `plan-attempts/<run>-step<N>-<stamp>` branch, uncommitted work as a patch and a tarball in the runs dir — and the worktree is reset to the step's start commit. Never for `needs_decision`, a spent budget (§0 still holds: blocked at once), or `blockedKind` `spec` / `environment`. Once per *step*, not per invocation: a step that escalated and then blocked resumes, on the next run, at the rung it reached and has no re-run left. The reset goes back to what attempt 1 started from — uncommitted work present at launch (the human's `**Decision taken**` answer, a `needs_decision` attempt's WIP) is saved first and re-applied. `ESCALATE=0` in a variant turns it off. | "Run low, re-run the failures higher" is the cheapest policy on the effort curve, but only where a checker names the failures. | `run-plan.sh` `escalate`; result schema `blockedKind` |
+| **The driver now resets and cleans the plan worktree** (escalation only). It still never commits and never pushes. | | |
+| **Approach block.** Before the first edit the step session writes a short `**Approach**` block under its step heading, and stops with `needs_decision` there if the spec contradicts the code. | A question asked mid-step is a gap in the plan; asking it after ten turns is cheaper than after seventy. | `step-prompt.md` |
+| **Advisor.** A tier may attach `claude --advisor <model>`; the prompt then asks for two consults (after the Approach block, before the Shipped line). The result reports `advisorConsults`. | Measured by Anthropic as the multi-model shape that pays on coding; an orchestrator holding the loop is not. | tunables `ADVISOR_*`; `run-plan.sh` `advisor_block` |
+| **Variants.** `--variant NAME` loads `plan-runner/variants/NAME.env` over the tunables (known keys, plain values, no CR; models non-empty and efforts on the ladder, or exit 1) and runs on `plan/<name>-NAME` with its own worktree and log; `--base REF` pins the commit a new plan branch starts from, every `launched` event records the fork point, and `report.sh` prints it. | Two configurations of one plan, side by side, from one base. | `run-plan.sh`; `lib.sh` `pr_variant_check` |
+| **Judge.** With `JUDGE_MODEL` set, a validated step whose diff touches code is graded by a fresh read-only session on that fixed model: `/code-review` against the step's spec, findings by severity, logged and kept, never acted on. "Code" is anything that is not documentation (`pr_has_code`), so `functions/` and `scripts/` are graded although the Gradle gate cannot see them. The judge runs in a throwaway detached worktree (`.claude/worktrees/judge-<pid>`), so neither its cwd nor `git status` names the variant, and a judge that writes despite its tool list damages nothing: its grade is dropped. Nothing the judge does or fails to do stops the plan; a failed judge's cost still shows in `report.sh`. | A green gate checks that nothing regressed, not that the step met its spec. | `run-plan.sh` `judge_step`; `judge-prompt.md`; `judge-result.schema.json` |
+| **Test-count delta.** `validated` carries the `@Test` count at the step's start and end and the test files it deleted. | A green gate cannot tell a step that added tests from one that deleted them. | `run-plan.sh` `log_validated` |
+| **`report.sh <run-id>…`** prints the per-step table: config, sessions, nudges, escalations, cost, turns, denials, minutes, test delta, grade. | | `plan-runner/report.sh` |
+| **`e2e.sh`** runs the driver's control flow against a stub `claude` and a stub `gradlew` in a scratch repo; `selfcheck.sh` calls it. | The pure-function self-check could not reach nudge, escalation or judge, and both real runs had hit driver faults. The `/code-review` of this change found six more (a stale skill claim validating a hand-finished step, escalation per invocation instead of per step, the reset eating a `**Decision taken**` answer, a crash on a grade without findings, …); each has a scenario here that fails without its fix. | `plan-runner/e2e.sh` |
+
+Known limits, left as they are on purpose:
+
+- The judge's findings are not fed back to the step. During a comparison that is the point — it
+  measures what a configuration produces unaided. Turning confirmed `high` findings into a nudge is
+  the obvious next step once a default configuration is chosen.
+- An `effort: low` step on a tier with an advisor still gets the advisor, although a low-effort
+  executor is the one most likely not to consult it. Watch `advisorConsults` before adding a rule.
+- Both schemas can be checked against the CLI for free: the CLI validates `--json-schema` before it
+  validates the advisor pairing, so `claude --model opus --advisor haiku -p x --json-schema "$(cat
+  <schema>)"` ends in "cannot be used as an advisor" when the schema is accepted and in a schema
+  error when it is not — no request is made either way.
