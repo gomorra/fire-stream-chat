@@ -50,7 +50,11 @@ enum class EndReason {
     ERROR
 }
 
+/** Declared in display order — [CallUiControls.availableRoutes] is sorted by it. */
+enum class CallAudioRoute { EARPIECE, SPEAKER, BLUETOOTH, WIRED_HEADSET }
+
 data class CallUiControls(
     val isMuted: Boolean = false,
-    val isSpeakerOn: Boolean = false
+    val audioRoute: CallAudioRoute = CallAudioRoute.EARPIECE,
+    val availableRoutes: List<CallAudioRoute> = listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER),
 )

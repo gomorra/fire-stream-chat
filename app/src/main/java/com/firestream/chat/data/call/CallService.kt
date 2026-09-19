@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.data.util.ProfileImageManager
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
@@ -526,8 +527,11 @@ class CallService : Service() {
     }
 
     private fun toggleSpeaker() {
-        callStateHolder.toggleSpeaker()
-        audioManager?.isSpeakerphoneOn = callStateHolder.uiControls.value.isSpeakerOn
+        // Interim: still the binary toggle, expressed in routes. Replaced by CallAudioRouter.
+        val controls = callStateHolder.uiControls.value
+        val next = if (controls.audioRoute == CallAudioRoute.SPEAKER) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER
+        callStateHolder.updateAudioRoutes(controls.availableRoutes, next)
+        audioManager?.isSpeakerphoneOn = next == CallAudioRoute.SPEAKER
     }
 
     // ──────────────────────────────────────────────────────────────────────────

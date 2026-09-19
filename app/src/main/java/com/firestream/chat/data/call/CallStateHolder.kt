@@ -1,5 +1,6 @@
 package com.firestream.chat.data.call
 
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,8 +30,11 @@ class CallStateHolder @Inject constructor() {
         _uiControls.value = _uiControls.value.copy(isMuted = !_uiControls.value.isMuted)
     }
 
-    fun toggleSpeaker() {
-        _uiControls.value = _uiControls.value.copy(isSpeakerOn = !_uiControls.value.isSpeakerOn)
+    fun updateAudioRoutes(available: Collection<CallAudioRoute>, current: CallAudioRoute) {
+        _uiControls.value = _uiControls.value.copy(
+            audioRoute = current,
+            availableRoutes = available.distinct().sorted(),
+        )
     }
 
     fun reset() {

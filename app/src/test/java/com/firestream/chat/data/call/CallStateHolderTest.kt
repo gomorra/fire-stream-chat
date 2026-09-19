@@ -1,5 +1,6 @@
 package com.firestream.chat.data.call
 
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
@@ -42,19 +43,35 @@ class CallStateHolderTest {
     }
 
     @Test
-    fun `toggleSpeaker flips isSpeakerOn`() {
-        assertFalse(holder.uiControls.value.isSpeakerOn)
-        holder.toggleSpeaker()
-        assertTrue(holder.uiControls.value.isSpeakerOn)
-        holder.toggleSpeaker()
-        assertFalse(holder.uiControls.value.isSpeakerOn)
+    fun `updateAudioRoutes sets the route and lists routes in display order`() {
+        holder.toggleMute()
+
+        holder.updateAudioRoutes(
+            setOf(CallAudioRoute.WIRED_HEADSET, CallAudioRoute.BLUETOOTH, CallAudioRoute.SPEAKER, CallAudioRoute.EARPIECE),
+            CallAudioRoute.BLUETOOTH,
+        )
+
+        val controls = holder.uiControls.value
+        assertEquals(CallAudioRoute.BLUETOOTH, controls.audioRoute)
+        assertEquals(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER, CallAudioRoute.BLUETOOTH, CallAudioRoute.WIRED_HEADSET),
+            controls.availableRoutes,
+        )
+        assertTrue("mute is untouched", controls.isMuted)
+    }
+
+    @Test
+    fun `default controls are a phone on the earpiece`() {
+        val controls = holder.uiControls.value
+        assertEquals(CallAudioRoute.EARPIECE, controls.audioRoute)
+        assertEquals(listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER), controls.availableRoutes)
     }
 
     @Test
     fun `reset returns to Idle with default controls`() {
         holder.updateState(CallState.Connected("call1", "user2", "Alice", null, 1000L))
         holder.toggleMute()
-        holder.toggleSpeaker()
+        holder.updateAudioRoutes(listOf(CallAudioRoute.SPEAKER), CallAudioRoute.SPEAKER)
 
         holder.reset()
 
@@ -64,9 +81,9 @@ class CallStateHolderTest {
 
     @Test
     fun `updateControls sets controls directly`() {
-        holder.updateControls(CallUiControls(isMuted = true, isSpeakerOn = true))
+        holder.updateControls(CallUiControls(isMuted = true, audioRoute = CallAudioRoute.SPEAKER))
         assertTrue(holder.uiControls.value.isMuted)
-        assertTrue(holder.uiControls.value.isSpeakerOn)
+        assertEquals(CallAudioRoute.SPEAKER, holder.uiControls.value.audioRoute)
     }
 
     @Test

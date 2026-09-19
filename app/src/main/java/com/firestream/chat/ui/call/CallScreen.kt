@@ -43,6 +43,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import kotlinx.coroutines.delay
 
@@ -94,7 +95,7 @@ internal fun CallScreen(
                 remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 startTime = state.startTime,
                 isMuted = uiControls.isMuted,
-                isSpeakerOn = uiControls.isSpeakerOn,
+                isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER,
                 onHangup = viewModel::hangup,
                 onToggleMute = viewModel::toggleMute,
                 onToggleSpeaker = viewModel::toggleSpeaker
