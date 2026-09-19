@@ -21,6 +21,28 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The send preview's zoom is the crop that is sent (2026-09-18)
+
+Shipped on the `claude/edit-image-zoomed-akt4mo` branch; nothing has been on hardware. Robolectric
+covers the arithmetic and the flatten seam through Coil on a synthetic JPEG, but not the feel of
+the gesture or a real camera file. Check on a device:
+
+- Pinch and pan a photo in the send preview: the image never leaves the screen (no black past an
+  edge), and on the axis where it is smaller than the screen it stays centred. Double-tap cycles
+  3x → 6x → 1x as before.
+- Send while zoomed: the received photo is exactly what the screen showed. Try a **camera photo
+  with EXIF rotation** (portrait shot) — the crop must be of the picture as displayed, not of the
+  unrotated file.
+- Zoom, then open Adjust, Draw or Overlay: the editor opens on the cropped picture, and cancelling
+  it returns to the same picture at 1x with the history pill showing (undo walks the crop back).
+- Zoom, rotate the phone: the same part of the photo is on screen (possibly with a little more
+  around it), and Send still sends the crop.
+- Zoom page 1 of a batch, switch to page 2 via the strip and back: the zoom is still there.
+- In the fullscreen viewer (a received photo), pinch and pan: the same clamp applies — the photo
+  stops at the screen edge instead of sliding off it, and a single-finger swipe at 1x still pages.
+- Airplane-mode-free failure path is hard to provoke; a rasterize failure shows "Couldn't apply the
+  crop. Try again." above the caption bar and sends nothing.
+
 ### "Keep Original Images" (2026-09-18)
 
 The unit tests pin the pipeline (encoding uploaded, input copied, one persist), not what

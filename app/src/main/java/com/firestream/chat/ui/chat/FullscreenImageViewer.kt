@@ -49,6 +49,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import coil.compose.SubcomposeAsyncImage
 import coil.memory.MemoryCache
@@ -185,6 +186,10 @@ internal fun FullscreenImagePager(
  * The zoomable/pannable image surface for one pager page. Zoom/pan lives in the
  * shared [ZoomableBox]; this only resolves the Coil request and renders it.
  * [onTap] fires on a single tap at 1x.
+ *
+ * Once Coil has decoded the photo its size goes to the surface, which from then
+ * on clamps every pan so the photo cannot be pushed off the screen — before
+ * that there is nothing to clamp against, and a spinner does not pan.
  */
 @Composable
 private fun ZoomableImage(
@@ -195,17 +200,20 @@ private fun ZoomableImage(
     onZoomChange: (Boolean) -> Unit,
 ) {
     val request = rememberFullscreenImageRequest(imageUrl, localUri)
+    var contentSize by remember(request) { mutableStateOf<IntSize?>(null) }
 
     ZoomableBox(
         isActive = isActive,
         onZoomChange = onZoomChange,
         onTap = onTap,
+        contentSize = contentSize,
     ) { transform ->
         if (request != null) {
             SubcomposeAsyncImage(
                 model = request,
                 contentDescription = "Full screen image",
                 contentScale = ContentScale.Fit,
+                onSuccess = { contentSize = it.result.drawable.toContentSize() },
                 modifier = Modifier
                     .fillMaxSize()
                     .then(transform),
