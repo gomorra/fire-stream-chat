@@ -44,14 +44,17 @@ contain the 2026-09-20 runner changes (the step sessions read the result schema 
 BASE=$(git rev-parse main)          # write it down: __________
 scripts/run-plan.sh docs/plans/call-audio-routes.md --dry-run --variant a --base "$BASE"
 
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant a --base "$BASE"   # stops at the ‖ after step 1
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant a                  # steps 2 → 5
-
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant b --base "$BASE"
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant b
+scripts/run-plan.sh docs/plans/call-audio-routes.md --variant a --base "$BASE"   # steps 1 → 5, one command
+scripts/run-plan.sh docs/plans/call-audio-routes.md --variant b --base "$BASE"   # only after a has finished
 
 scripts/plan-runner/report.sh call-audio-routes-a call-audio-routes-b call-audio-routes
 ```
+
+The plan's `‖` after step 1 was removed on 2026-09-20 for this benchmark: a forced stop puts a
+human wait into the middle of both runs and makes the minutes meaningless, and it protects nothing
+irreversible — the runner never merges or pushes. The price: a step 1 that is wrong in a way the
+gate misses is only found at the end, after steps 2 to 5 of that variant were built on it. If a run
+does stop (exit 2 or 3), the same command without `--base` continues it.
 
 `report.sh` prints each run's base in its header — the two variants must show the same one. The
 driver warns when a variant branch is created without `--base`, and when `--base` is ignored
@@ -61,9 +64,10 @@ Spend is bounded per session, not per step: a step can at worst take two attempt
 one nudge each ($5 resume or $8 review session) and the judge ($5) — about $70. The one real step so
 far cost $3.62 all in.
 
-At the step-1 checkpoint look at the fallout as the plan asks, but change nothing on the branch —
-a hand fix is an intervention and is counted as one. If a run stops (`blocked`, `needs_decision`),
-note the time you spent and what you did, then continue the same variant.
+While a run is going, change nothing on its branch — a hand fix is an intervention and is counted
+as one. If a run stops (`blocked`, `needs_decision`), note the time you spent and what you did, then
+continue the same variant. Step 1's fallout (the version bump it chose, tests it deleted, files
+outside its scope) is read at the end, for both variants side by side.
 
 The old branch `plan/call-audio-routes` stays untouched as the reference. It is stale (it conflicts
 with main in `CHANGELOG.md`, and main has five more `sdk = [29]` test pins than it converted), so it

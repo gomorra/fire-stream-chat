@@ -5,7 +5,7 @@ picker (earpiece, speaker, Bluetooth, wired headset), and for raising `minSdk` f
 31 so the routing can use the one non-deprecated API. Written 2026-09-11 from a code read
 of `main` at `4b0e5fa3`; re-verify line numbers before editing.
 
-**Order: 1 ‖ 2 → 3 → 4 → 5** (`‖` = checkpoint, see `docs/plans/done/plan-runner.md` §2.4: the runner stops after the minSdk step for the human to look at the fallout before feature work builds on it)
+**Order: 1 → 2 → 3 → 4 → 5** (fully sequential, no checkpoint. Until 2026-09-20 a `‖` stopped the run after the minSdk step so the human could look at the fallout first; removed for the benchmark in `docs/plans/plan-runner-benchmark.md`, which measures how far a configuration gets unattended. Nothing is merged or pushed by the runner, so step 1 is reviewed at the end with the rest, with the judge's grade and the test-count delta in hand.)
 
 ## 0. Decisions (signed off 2026-09-11 — do not re-litigate)
 
