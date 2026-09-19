@@ -213,12 +213,36 @@ Tests (all pure, table-style):
 - tablet {SPEAKER} only → SPEAKER
 - `routeOf` mapping for every listed type + an unknown type → null
 
+**Approach** (step-2, 2026-09-20)
+1. `CallState.kt`: add `CallAudioRoute`, replace `isSpeakerOn` with `audioRoute` + `availableRoutes` (§2.1).
+2. New `CallAudioRoutePolicy.kt`: `resolve` + `routeOf`. The `TYPE_*` ints are private constants
+   in the file (values from `AudioDeviceInfo`), so the object has no Android import.
+3. `CallStateHolder`: `toggleSpeaker()` → `updateAudioRoutes(available, current)`.
+4. Minimal readers: `CallService.toggleSpeaker()` keeps the old `isSpeakerphoneOn` behaviour but
+   flips EARPIECE⇄SPEAKER through `updateAudioRoutes`; `CallScreen` passes
+   `audioRoute == SPEAKER` into the unchanged `ConnectedContent`. Both are replaced in steps 3/4.
+5. Tests: new `CallAudioRoutePolicyTest` (the nine cases of the spec), `CallStateHolderTest`
+   rewritten for `updateAudioRoutes`. Nothing in the code contradicts §0/§2.
+6. No further skills: small pure diff, no concurrency, under 600 lines, no tripwire path.
+
+**Shipped** `c043f36a` (2026-09-20) — tier: mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- `updateAudioRoutes` takes a `Collection` and sorts it into display order itself (enum order = display order), so the router can hand over a set.
+- `routeOf`'s `TYPE_*` values are private constants copied into the policy file; the test pins them against the real `AudioDeviceInfo` constants.
+- `resolve` returns EARPIECE for an empty `available` set (the spec does not cover it).
+- Gate: the Gradle daemon JVM crashed twice with a SIGSEGV seven seconds in (`hs_err_pid*.log`, host, not the code); the third run was green — full `:app:testFirebaseDebugUnitTest` and `assembleFirebaseDebug`.
+
 ### Step 3 — router + service wiring (`feat(call)`, no CHANGELOG yet) — skills: simplify, code-review; model: strong
 Files: new `data/call/CallAudioRouter.kt`, `CallService.kt` (§2.4), `CallViewModel.kt`
 (`selectAudioRoute`). Keep the router free of coroutines except the `MutableStateFlow`; the
 listeners write to it on the main executor. No unit test for the router (Android `AudioManager`),
 the policy test is the coverage. Run `/simplify` (concurrency trigger). Run `/code-review` on
 the step-2+3 diff before commit: this touches coroutine scoping in a foreground service.
+**(step-2)** `CallStateHolder.toggleSpeaker()` is already gone and `updateAudioRoutes(available: Collection, current)`
+exists (it sorts into display order). What is left to delete is the interim `CallService.toggleSpeaker()`
+(`isSpeakerphoneOn` via routes), `ACTION_TOGGLE_SPEAKER` and `previousSpeakerState`. The caller of
+`CallAudioRoutePolicy.resolve` owns `previousAvailable` and clears `userPick` when the result differs from it.
+`CallScreen.kt:98` derives `isSpeakerOn` from `audioRoute` for the unchanged `ConnectedContent` — step 4 replaces it.
 
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
