@@ -4,6 +4,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.onNodeWithText
+import com.firestream.chat.ui.chat.imageedit.CropAspect
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -70,6 +73,54 @@ class FullscreenOverlayControlsTest {
     }
 
     @Test
+    fun `the crop pill cycles, and edit hands the chosen shape over`() {
+        var edited: PendingCrop? = null
+        composeTestRule.setContent {
+            FullscreenImageViewer(imageUrl = null, onDismiss = {}, onEdit = { edited = it })
+        }
+
+        composeTestRule.onNodeWithText("Free").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Crop shape").performClick()
+        composeTestRule.onNodeWithContentDescription("Crop shape").performClick()
+        composeTestRule.onNodeWithText("1:1").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Edit").performClick()
+
+        assertEquals(CropAspect.SQUARE, edited?.aspect)
+    }
+
+    @Test
+    fun `a host without edit has no crop pill either`() {
+        composeTestRule.setContent {
+            FullscreenImageViewer(imageUrl = null, onDismiss = {}, onSaveToDownloads = {})
+        }
+
+        composeTestRule.onNodeWithContentDescription("Crop shape").assertDoesNotExist()
+    }
+
+    @Test
+    fun `the gallery hands edit the crop of the page on screen`() {
+        val items = listOf(
+            FullscreenMediaItem(imageUrl = null, messageId = "first"),
+            FullscreenMediaItem(imageUrl = null, messageId = "second"),
+        )
+        var edited: Pair<FullscreenMediaItem, PendingCrop>? = null
+        composeTestRule.setContent {
+            FullscreenImagePager(
+                items = items,
+                initialIndex = 1,
+                onDismiss = {},
+                onEdit = { item, crop -> edited = item to crop },
+            )
+        }
+
+        composeTestRule.onNodeWithContentDescription("Crop shape").performClick()
+        composeTestRule.onNodeWithContentDescription("Edit").performClick()
+
+        assertEquals("second", edited?.first?.messageId)
+        assertEquals(CropAspect.ORIGINAL, edited?.second?.aspect)
+    }
+
+    @Test
     fun `edit in the gallery is handed the photo on screen, not the first one`() {
         val items = listOf(
             FullscreenMediaItem(imageUrl = null, messageId = "first"),
@@ -81,7 +132,7 @@ class FullscreenOverlayControlsTest {
                 items = items,
                 initialIndex = 1,
                 onDismiss = {},
-                onEdit = { edited = it },
+                onEdit = { item, _ -> edited = item },
             )
         }
 

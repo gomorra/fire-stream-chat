@@ -122,6 +122,28 @@ internal object ViewportGeometry {
         return clamp(unclamped, boxWidth, boxHeight, imageWidth, imageHeight)
     }
 
+    /**
+     * Where [frame], a rectangle in fractions of the image, lands in box pixels
+     * under [transform] — how a crop frame is drawn over a zoomed photo. Null
+     * when nothing is drawable.
+     */
+    fun toScreen(
+        frame: CropRect,
+        transform: ZoomTransform,
+        boxWidth: Float,
+        boxHeight: Float,
+        imageWidth: Int,
+        imageHeight: Int,
+    ): ScreenRect? {
+        val drawn = drawnRect(transform, boxWidth, boxHeight, imageWidth, imageHeight) ?: return null
+        return ScreenRect(
+            left = drawn.left + frame.left * drawn.width,
+            top = drawn.top + frame.top * drawn.height,
+            right = drawn.left + frame.right * drawn.width,
+            bottom = drawn.top + frame.bottom * drawn.height,
+        )
+    }
+
     /** Where the scaled, translated image sits in box pixels, or null when nothing is drawable. */
     private fun drawnRect(
         transform: ZoomTransform,
@@ -143,4 +165,10 @@ internal object ViewportGeometry {
     }
 
     private data class DrawnRect(val left: Float, val top: Float, val width: Float, val height: Float)
+}
+
+/** A rectangle in box pixels; what [ViewportGeometry.toScreen] hands a frame overlay. */
+internal data class ScreenRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
+    val width: Float get() = right - left
+    val height: Float get() = bottom - top
 }

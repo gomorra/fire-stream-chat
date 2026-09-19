@@ -9,13 +9,16 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasStateDescription
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.doubleClick
 import com.firestream.chat.domain.util.RasterOp
+import com.firestream.chat.ui.chat.imageedit.CropAspect
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -62,17 +65,17 @@ class ImagePreviewScreenZoomTest {
     private var rasterizeFails = false
     private var sent: List<PendingMedia>? = null
 
-    private fun photo(): PendingMedia {
+    private fun photo(initialCrop: PendingCrop? = null): PendingMedia {
         val file = File(folder.root, "wide.jpg")
         file.outputStream().use { out ->
             Bitmap.createBitmap(400, 100, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.JPEG, 90, out)
         }
         pick = Uri.fromFile(file)
-        return PendingMedia(originalUri = pick, mimeType = "image/jpeg")
+        return PendingMedia(originalUri = pick, mimeType = "image/jpeg", initialCrop = initialCrop)
     }
 
-    private fun setContent(restoration: StateRestorationTester? = null) {
-        val items = listOf(photo())
+    private fun setContent(restoration: StateRestorationTester? = null, initialCrop: PendingCrop? = null) {
+        val items = listOf(photo(initialCrop))
         val content: @Composable () -> Unit = {
             MaterialTheme {
                 ImagePreviewScreen(
@@ -84,6 +87,10 @@ class ImagePreviewScreenZoomTest {
                     onDownload = {},
                     onDismiss = {},
                     edit = ImageEditServices(
+                        // Adjust draws its crop frame over a preview, so it needs one.
+                        renderPreview = { _, _, _ ->
+                            Bitmap.createBitmap(80, 20, Bitmap.Config.ARGB_8888)
+                        },
                         rasterize = { source, ops, _ ->
                             rasterizeCalls++
                             rasterizedSource = source
@@ -116,17 +123,46 @@ class ImagePreviewScreenZoomTest {
         }
     }
 
+    /** Taps the crop pill round until it reads [label]. */
+    private fun chooseShape(label: String) {
+        repeat(CropAspect.entries.size) {
+            if (composeTestRule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty()) return
+            composeTestRule.onNodeWithContentDescription("Crop shape").performClick()
+            composeTestRule.waitForIdle()
+        }
+        error("the crop pill never reached $label")
+    }
+
+    /**
+     * Waits for the page to report [state]. A shape from the pill becomes a crop
+     * only once Coil has said how big the photo is, which is off the main
+     * thread.
+     */
+    private fun awaitState(state: String) {
+        val deadline = System.currentTimeMillis() + 15_000
+        while (composeTestRule.onAllNodes(hasStateDescription(state)).fetchSemanticsNodes().isEmpty()) {
+            check(System.currentTimeMillis() < deadline) { "the page never reported \"$state\"" }
+            Thread.sleep(50)
+            composeTestRule.waitForIdle()
+        }
+    }
+
     private fun send() {
         composeTestRule.onNodeWithContentDescription("Send").performClick()
         composeTestRule.waitForIdle()
     }
 
-    private fun assertMiddleThird(op: RasterOp?) {
+    private fun assertMiddleThird(op: RasterOp?) = assertCrop(1f / 3f, 0f, 2f / 3f, 1f, op)
+
+    /** The square of a 400 × 100 photo: its middle quarter, full height. */
+    private fun assertMiddleSquare(op: RasterOp?) = assertCrop(0.375f, 0f, 0.625f, 1f, op)
+
+    private fun assertCrop(left: Float, top: Float, right: Float, bottom: Float, op: RasterOp?) {
         val crop = op as? RasterOp.Crop ?: error("expected a crop, got $op")
-        assertEquals(1f / 3f, crop.left, 0.02f)
-        assertEquals(2f / 3f, crop.right, 0.02f)
-        assertEquals(0f, crop.top, 0.02f)
-        assertEquals(1f, crop.bottom, 0.02f)
+        assertEquals("left", left, crop.left, 0.02f)
+        assertEquals("top", top, crop.top, 0.02f)
+        assertEquals("right", right, crop.right, 0.02f)
+        assertEquals("bottom", bottom, crop.bottom, 0.02f)
     }
 
     @Test
@@ -198,7 +234,67 @@ class ImagePreviewScreenZoomTest {
         assertEquals(flattened, sent?.single()?.uri)
     }
 
+    @Test
+    fun `the crop pill cycles through every shape and back to free`() {
+        setContent()
+
+        val seen = mutableListOf<String>()
+        repeat(CropAspect.entries.size) {
+            composeTestRule.onNodeWithContentDescription("Crop shape").performClick()
+            composeTestRule.waitForIdle()
+            seen += CropAspect.entries.first {
+                composeTestRule.onAllNodesWithText(it.label).fetchSemanticsNodes().isNotEmpty()
+            }.label
+        }
+
+        assertEquals(listOf("Original", "1:1", "4:5", "16:9", "Free"), seen)
+    }
+
+    @Test
+    fun `a shape from the pill is the crop that is sent, with no zoom at all`() {
+        setContent()
+        chooseShape("1:1")
+        awaitState(CROPPED)
+
+        send()
+
+        assertEquals(pick, rasterizedSource)
+        assertMiddleSquare(rasterizedOps?.single())
+        assertEquals(flattened, sent?.single()?.uri)
+    }
+
+    @Test
+    fun `adjust opens on the pending crop, and its Done is what writes it`() {
+        setContent()
+        chooseShape("1:1")
+        awaitState(CROPPED)
+
+        composeTestRule.onNodeWithContentDescription("Adjust").performClick()
+        composeTestRule.waitForIdle()
+
+        // Transferred, not flattened: nothing has been written yet, and the crop
+        // tool is open on the frame the preview had pending.
+        assertEquals(0, rasterizeCalls)
+        composeTestRule.onNodeWithContentDescription("Crop frame").assertExists()
+        composeTestRule.onNodeWithContentDescription("Apply adjustments").performClick()
+        composeTestRule.waitForIdle()
+        assertEquals(pick, rasterizedSource)
+        assertMiddleSquare(rasterizedOps?.single())
+    }
+
+    @Test
+    fun `a crop chosen in the fullscreen viewer opens the preview on it`() {
+        setContent(initialCrop = PendingCrop(aspect = CropAspect.SQUARE))
+        awaitState(CROPPED)
+
+        composeTestRule.onNodeWithText("1:1").assertExists()
+        send()
+
+        assertMiddleSquare(rasterizedOps?.single())
+    }
+
     private companion object {
         const val ZOOMED = "Zoomed in, sent as a crop"
+        const val CROPPED = "Sent as a crop"
     }
 }

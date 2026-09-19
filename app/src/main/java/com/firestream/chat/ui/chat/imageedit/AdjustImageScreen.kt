@@ -203,20 +203,31 @@ internal fun AdjustImageScreen(
      * (`docs/plans/image-editor.md` §3, Phase 2 departure 7).
      */
     liveSteps: () -> Set<Uri> = { emptySet() },
+    /**
+     * A crop to open on: the frame and shape the send preview's zoom and crop
+     * pill had pending when Adjust was chosen, so the user can refine it here
+     * rather than have it written behind their back. A full frame with a free
+     * shape opens the screen as it always did, with no tool selected.
+     */
+    initialCrop: CropRect = CropRect.Full,
+    initialAspect: CropAspect = CropAspect.FREE,
 ) {
     val density = LocalDensity.current
     val scope = rememberCoroutineScope()
 
+    val opensOnCrop = !initialCrop.isFull || initialAspect != CropAspect.FREE
     var stack by rememberSaveable(source, stateSaver = AdjustStack.StackSaver) {
         mutableStateOf(AdjustStack())
     }
-    var tool by rememberSaveable(source) { mutableStateOf(AdjustTool.NONE) }
-    var aspect by rememberSaveable(source) { mutableStateOf(CropAspect.FREE) }
+    var tool by rememberSaveable(source) {
+        mutableStateOf(if (opensOnCrop) AdjustTool.CROP else AdjustTool.NONE)
+    }
+    var aspect by rememberSaveable(source) { mutableStateOf(initialAspect) }
     // Saved, not merely remembered, for the reason the whole stack is: turning
     // the phone mid-crop must not throw the frame away, and the frame is
     // normalized to the image so it means the same thing in either orientation.
     var cropRect by rememberSaveable(source, stateSaver = CropRect.Saver) {
-        mutableStateOf(CropRect.Full)
+        mutableStateOf(initialCrop)
     }
     var angle by rememberSaveable(source) { mutableFloatStateOf(0f) }
 

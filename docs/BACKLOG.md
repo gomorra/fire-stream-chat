@@ -40,6 +40,22 @@ the gesture or a real camera file. Check on a device:
 - Zoom page 1 of a batch, switch to page 2 via the strip and back: the zoom is still there.
 - In the fullscreen viewer (a received photo), pinch and pan: the same clamp applies — the photo
   stops at the screen edge instead of sliding off it, and a single-finger swipe at 1x still pages.
+- The crop-shape pill (bottom-left, both in the send preview and in the fullscreen viewer's Edit
+  hosts): tapping cycles Free → Original → 1:1 → 4:5 → 16:9 → Free, a shape other than Free draws
+  a frame with a dim outside, and panning the zoomed photo moves the photo under the frame. Send
+  with 1:1 chosen → the received photo is square and is the framed part. Choose a shape, then
+  Adjust → the crop tool opens with that frame and that preset selected, Cancel comes back with
+  the frame still pending, Done writes it. Choose a shape in the *viewer* on a received photo,
+  then Edit → the preview opens with the pill on that shape and the frame drawn.
+- The top rail: back arrow, HD, the three editors and Save are all 36 dp circles in 48 dp
+  targets now, the viewer's size, with 8 dp between visuals; on a 360 dp-wide phone the HD pill
+  must not touch the back arrow.
+- The flash after switching apps (2026-09-19 report: zoomed in the preview, swipe to another app
+  and back, the screen flashed until back was pressed). Not reproducible on the JVM. The one
+  mechanism found — the page re-deriving its zoom from the saved frame on every box-size change,
+  which the keyboard and the app-switch animation both cause — is gone: a size change now only
+  clamps the zoom the user has. Re-test exactly that path; if it still flashes, note what flashes
+  (the photo, the keyboard, the whole screen) and whether a caption had been typed.
 - Airplane-mode-free failure path is hard to provoke; a rasterize failure shows "Couldn't apply the
   crop. Try again." above the caption bar and sends nothing.
 

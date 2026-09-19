@@ -5,6 +5,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -27,6 +29,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -56,9 +60,13 @@ import com.firestream.chat.ui.theme.FsTextMute
  * different statement from one that is merely not built yet.
  *
  * The controls are black-scrim circles rather than a bar so the photo stays
- * uncovered; the 40 dp tool circle and its 22 dp glyph match the back arrow
- * already on this screen. The history pill's buttons are 48 dp instead — see
- * [ImageEditHistory].
+ * uncovered. Every one of them is the fullscreen viewer's control — a 36 dp
+ * circle and 20 dp glyph inside a 48 dp touch target ([ScrimCircleButton]) —
+ * and the two pills are 36 dp tall inside the same 48 dp, so the preview a
+ * camera shot lands in and the viewer a received photo opens in read as one
+ * surface. They were 40 dp circles with 40 dp targets before: a different size
+ * from the viewer's, and short of the 48 dp a finger needs. The history pill's
+ * buttons are 48 dp too — see [ImageEditHistory].
  */
 @Composable
 internal fun ImageEditActions(
@@ -73,16 +81,20 @@ internal fun ImageEditActions(
 ) {
     Row(
         modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        // Each control's 48 dp target carries 6 dp of clear space either side
+        // of its 36 dp visual; overlapping neighbours by 4 dp keeps an 8 dp gap
+        // between visuals and the whole rail clear of the back arrow on a
+        // 360 dp phone. A tap in the shared strip goes to the later control.
+        horizontalArrangement = Arrangement.spacedBy((-4).dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (isHd != null) HdPill(isHd = isHd, onClick = onToggleHd)
         if (showEditTools) {
-            ScrimIconButton(Icons.Default.Crop, "Adjust", onAdjust)
-            ScrimIconButton(Icons.Outlined.EmojiEmotions, "Add stickers or text", onOverlay)
-            ScrimIconButton(Icons.Default.Edit, "Draw", onDraw)
+            ScrimCircleButton(Icons.Default.Crop, "Adjust", onAdjust)
+            ScrimCircleButton(Icons.Outlined.EmojiEmotions, "Add stickers or text", onOverlay)
+            ScrimCircleButton(Icons.Default.Edit, "Draw", onDraw)
         }
-        ScrimIconButton(Icons.Default.FileDownload, "Save to Downloads", onDownload)
+        ScrimCircleButton(Icons.Default.FileDownload, "Save to Downloads", onDownload)
     }
 }
 
@@ -137,20 +149,10 @@ internal fun ImageEditHistory(
  */
 @Composable
 private fun HdPill(isHd: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .height(40.dp)
-            .defaultMinSize(minWidth = 40.dp)
-            .background(
-                color = if (isHd) FireOrange else Color.Black.copy(alpha = 0.5f),
-                shape = RoundedCornerShape(20.dp),
-            )
-            .clickable(
-                onClickLabel = if (isHd) "Turn HD off" else "Turn HD on",
-                onClick = onClick,
-            )
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.Center,
+    ScrimPill(
+        onClickLabel = if (isHd) "Turn HD off" else "Turn HD on",
+        onClick = onClick,
+        selected = isHd,
     ) {
         Text(
             text = "HD",
@@ -162,26 +164,100 @@ private fun HdPill(isHd: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** A 40 dp scrim circle; dimmed and unclickable when [onClick] is null. */
+/**
+ * The crop-shape pill: a crop glyph and the current preset, and a tap cycles
+ * to the next. One control that cycles rather than a row of presets because
+ * it sits over the photo, and the presets are few enough that the second tap
+ * is never far away. It lives bottom-left in both the send preview and the
+ * fullscreen viewer, under the thumb and away from the top rail, which on the
+ * preview is already five controls long and has no room for a sixth beside
+ * the back arrow on a 360 dp phone. Lit like the HD pill once a shape other
+ * than Free is chosen, so an active crop is visible even before the frame is.
+ */
 @Composable
-private fun ScrimIconButton(
+internal fun CropAspectPill(aspect: CropAspect, onClick: () -> Unit) {
+    val active = aspect != CropAspect.FREE
+    ScrimPill(onClickLabel = "Next crop shape", onClick = onClick, selected = active) {
+        Icon(
+            imageVector = Icons.Default.Crop,
+            contentDescription = "Crop shape",
+            tint = if (active) Color.White else FsText,
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            text = aspect.label,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (active) Color.White else FsText,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 0.5.sp,
+        )
+    }
+}
+
+/** A 36 dp scrim pill inside a 48 dp touch target, orange when [selected]. */
+@Composable
+private fun ScrimPill(
+    onClickLabel: String,
+    onClick: () -> Unit,
+    selected: Boolean,
+    content: @Composable RowScope.() -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .height(48.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .clickable(onClickLabel = onClickLabel, onClick = onClick, role = Role.Button)
+            .padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .height(36.dp)
+                .defaultMinSize(minWidth = 36.dp)
+                .background(
+                    color = if (selected) FireOrange else Color.Black.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(18.dp),
+                )
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            content = content,
+        )
+    }
+}
+
+/**
+ * A 36 dp translucent circle drawn inside a 48 dp touch target, so the
+ * smaller visual still gets a finger-sized hit area — the one control both
+ * the fullscreen viewer and the send preview's rail are built from. Dimmed and
+ * unclickable when [onClick] is null.
+ */
+@Composable
+internal fun ScrimCircleButton(
     icon: ImageVector,
     contentDescription: String,
     onClick: (() -> Unit)?,
 ) {
-    IconButton(
-        onClick = onClick ?: {},
-        enabled = onClick != null,
+    Box(
         modifier = Modifier
-            .size(40.dp)
-            .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape),
+            .size(48.dp)
+            .clip(CircleShape)
+            .clickable(enabled = onClick != null, onClick = onClick ?: {}, role = Role.Button),
+        contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = if (onClick != null) FsText else FsTextMute,
-            modifier = Modifier.size(22.dp),
-        )
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = contentDescription,
+                tint = if (onClick != null) Color.White else FsTextMute,
+                modifier = Modifier.size(20.dp),
+            )
+        }
     }
 }
 

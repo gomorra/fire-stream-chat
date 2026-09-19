@@ -111,6 +111,20 @@ class ViewportGeometryTest {
     }
 
     @Test
+    fun `a frame lands on screen where the zoomed photo draws it`() {
+        // At 3x the photo is drawn 600 × 150 with its left edge 200 px past the
+        // box's: the middle third of the photo is the box's full width, and the
+        // photo's 150 px sit 125 px down.
+        val frame = ViewportGeometry.toScreen(
+            CropRect(1f / 3f, 0f, 2f / 3f, 1f), ZoomTransform(3f, 0f, 0f), boxWidth, boxHeight, imageWidth, imageHeight,
+        )!!
+        assertEquals(0f, frame.left, tolerance)
+        assertEquals(125f, frame.top, tolerance)
+        assertEquals(200f, frame.right, tolerance)
+        assertEquals(275f, frame.bottom, tolerance)
+    }
+
+    @Test
     fun `a full frame restores to identity`() {
         assertEquals(ZoomTransform.Identity, transformFor(CropRect.Full))
     }

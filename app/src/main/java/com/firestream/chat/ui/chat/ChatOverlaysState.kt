@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import android.net.Uri
 import androidx.compose.runtime.Immutable
 import com.firestream.chat.data.remote.LinkPreview
@@ -55,9 +56,15 @@ internal sealed interface ViewerEdit {
      * [source] is the edit-cache copy — the new batch's untouched original.
      * [placeholderKey] is the memory-cache key the viewer filed the photo on
      * screen under (`fullscreenImageCacheKey`), for the preview to draw from on
-     * its first frame; null when the viewer had nothing to show.
+     * its first frame; null when the viewer had nothing to show. [crop] is the
+     * zoom and crop shape the viewer had pending on the photo, which the
+     * preview opens on.
      */
-    data class Ready(val source: Uri, val placeholderKey: String? = null) : ViewerEdit
+    data class Ready(
+        val source: Uri,
+        val placeholderKey: String? = null,
+        val crop: PendingCrop = PendingCrop.None,
+    ) : ViewerEdit
 }
 
 internal data class OverlaysState(

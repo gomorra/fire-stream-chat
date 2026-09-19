@@ -61,7 +61,6 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.Alignment
@@ -74,7 +73,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.LocalConfiguration
@@ -83,7 +81,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
@@ -91,6 +88,8 @@ import coil.memory.MemoryCache
 import coil.request.ImageRequest
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.ui.chat.imageedit.AdjustImageScreen
+import com.firestream.chat.ui.chat.imageedit.CropAspect
+import com.firestream.chat.ui.chat.imageedit.CropAspectPill
 import com.firestream.chat.ui.chat.imageedit.CropRect
 import com.firestream.chat.ui.chat.imageedit.DrawImageScreen
 import com.firestream.chat.ui.chat.imageedit.EditFailureBanner
@@ -100,11 +99,11 @@ import com.firestream.chat.ui.chat.imageedit.ImageEditActions
 import com.firestream.chat.ui.chat.imageedit.ImageEditHistory
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import com.firestream.chat.ui.chat.imageedit.OverlayImageScreen
-import com.firestream.chat.ui.chat.imageedit.ViewportGeometry
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
+import com.firestream.chat.ui.chat.imageedit.ScrimCircleButton
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -123,15 +122,21 @@ import kotlinx.coroutines.withContext
  * ### A zoom is a crop
  *
  * Pinch-zooming a page does not merely inspect the photo: what is on screen is
- * what gets sent. The zoom is kept per displayed step in [viewports], as a
- * frame normalized to the image so it survives a rotation and paging away,
- * and stays a *view* until the moment it has to become pixels — pressing Send,
- * or opening an editor, which must work on the photo the user is looking at.
- * At that moment it is flattened through the same `rasterize` → `landEdit`
- * path as any editor step, so it appears in the history, undo walks it back,
- * and the page then shows the cropped step at 1x, which is the same picture the
- * zoom was showing: nothing jumps. Everything the zoom does with the image's
- * shape is arithmetic in `ViewportGeometry`.
+ * what gets sent, cut to whatever shape the crop pill has been cycled to. The
+ * pending crop is kept per displayed step in [crops] (`PendingCrop`: the zoom's
+ * viewport, the pill's aspect, the decoded size), normalized to the image so
+ * it survives a rotation and paging away, and stays a *view* until the moment
+ * it has to become pixels. Pressing Send flattens it through the same
+ * `rasterize` → `landEdit` path as any editor step, so it appears in the
+ * history, undo walks it back, and the page then shows the cropped step at 1x,
+ * which is the same picture the zoom was showing: nothing jumps. Opening Draw
+ * or Overlay flattens it the same way, because those screens have no frame to
+ * hold; opening Adjust *transfers* it instead — the crop tool opens with this
+ * frame and this shape, still editable, and Done is what writes it. A photo
+ * that arrived from the fullscreen viewer brings the crop chosen there with
+ * it ([PendingMedia.initialCrop]). Everything the zoom does with the image's
+ * shape is arithmetic in `ViewportGeometry`; the surface itself is
+ * [ZoomCropSurface].
  *
  * The editor rail ([ImageEditActions]) floats top-right over the photo, and the
  * history pill ([ImageEditHistory]) appears top-left only once the current item
@@ -236,15 +241,19 @@ internal fun ImagePreviewScreen(
         mutableStateOf<EditTarget?>(null)
     }
 
-    // The zoom on each displayed step, as the crop it would send, keyed by the
-    // step's own URI rather than the pick's: a zoom is a statement about *this*
-    // image, and the step under the cursor changes shape when a crop lands.
-    // Absent means 1x. Saved, so a rotation restores the frame into the new box.
-    val viewports = rememberSaveable(items, saver = ViewportsSaver) {
-        mutableStateMapOf<String, CropRect>()
+    // The pending crop on each displayed step, keyed by the step's own URI
+    // rather than the pick's: a zoom is a statement about *this* image, and the
+    // step under the cursor changes shape when a crop lands. Absent means 1x
+    // and Free. Seeded with whatever the fullscreen viewer chose before Edit,
+    // and saved, so a rotation restores the frame into the new box.
+    val crops = rememberSaveable(items, saver = CropsSaver) {
+        mutableStateMapOf<String, PendingCrop>().apply {
+            items.forEach { item -> item.initialCrop?.let { put(item.originalUri.toString(), it) } }
+        }
     }
+    val currentCrop = crops[current.uri.toString()] ?: PendingCrop.None
     // A pan inside a zoomed image must move the image, not page away.
-    val currentPageZoomed = viewports.isZoomed(current.uri)
+    val currentPageZoomed = currentCrop.isZoomed
 
     // Flattening a zoom into a step is a decode-and-encode and cannot be
     // synchronous; while it runs the screen is covered exactly as an editor is
@@ -336,24 +345,34 @@ internal fun ImagePreviewScreen(
         return landed.item
     }
 
-    // [item] with its zoom, if any, flattened into a crop step: the item
-    // untouched when it is at 1x, or null when the flatten failed. The zoom is
-    // forgotten once it is pixels — the new step shows the same picture at 1x.
+    // [item] with its pending crop, if any, flattened into a step: the item
+    // untouched when there is nothing to crop, or null when the flatten failed.
+    // The crop is forgotten once it is pixels — the new step shows the same
+    // picture at 1x.
     suspend fun flattenZoom(item: PendingMedia): PendingMedia? {
         val key = item.uri.toString()
-        val crop = viewports[key]?.toOp() ?: return item
+        val crop = crops[key]?.toOp() ?: return item
         val rasterized = edit.rasterize(item.uri, listOf(crop), liveSteps()) ?: return null
-        viewports.remove(key)
+        crops.remove(key)
         return landStep(item.originalUri.toString(), rasterized)
     }
 
     // Opens [editor] on the page under the pager — on the photo as the user
-    // sees it, so a zoom is flattened first and the editor gets the crop.
+    // sees it. Adjust has a crop tool, so the pending crop goes in as its
+    // frame and shape, still editable; Draw and Overlay have nowhere to hold
+    // a frame, so for them the crop is flattened first and they get the crop.
     fun openEditor(editor: Editor) {
         val item = current
         val key = item.originalUri.toString()
-        if (!viewports.isZoomed(item.uri)) {
-            editing = EditTarget(key = key, source = item.uri, editor = editor)
+        val pending = crops[item.uri.toString()] ?: PendingCrop.None
+        if (editor == Editor.ADJUST || !pending.hasCrop) {
+            editing = EditTarget(
+                key = key,
+                source = item.uri,
+                editor = editor,
+                crop = if (editor == Editor.ADJUST) pending.frame else CropRect.Full,
+                aspect = if (editor == Editor.ADJUST) pending.aspect else CropAspect.FREE,
+            )
             return
         }
         flatteningZoom = true
@@ -420,6 +439,8 @@ internal fun ImagePreviewScreen(
                     ?.let { it.isHd ?: defaultIsHd } ?: defaultIsHd,
                 services = edit,
                 liveSteps = liveSteps,
+                initialCrop = target.crop,
+                initialAspect = target.aspect,
                 onCancel = { editing = null },
                 onDone = onEditDone,
             )
@@ -479,26 +500,19 @@ internal fun ImagePreviewScreen(
             if (item.isVideo) {
                 VideoFramePreview(item)
             } else {
-                ImagePage(item = item, viewports = viewports)
+                ImagePage(item = item, crops = crops)
             }
         }
 
-        // Back button
-        IconButton(
-            onClick = { dismissBatch() },
+        // Back, the same control as the rail opposite; 6 dp plus the button's
+        // own 6 dp inset keeps the circle where the 8 dp padding used to put it.
+        Box(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(8.dp)
-                .size(40.dp)
-                .background(color = Color.Black.copy(alpha = 0.5f), shape = CircleShape)
+                .padding(6.dp)
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Back",
-                tint = Color.White,
-                modifier = Modifier.size(22.dp)
-            )
+            ScrimCircleButton(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = { dismissBatch() })
         }
 
         // Tools top-right, opposite the back arrow. HD and the three editor entry
@@ -514,7 +528,7 @@ internal fun ImagePreviewScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(8.dp)
+                .padding(6.dp)
         )
 
         // Hidden, not disabled, until this item actually has a step to walk back
@@ -580,6 +594,21 @@ internal fun ImagePreviewScreen(
                 .windowInsetsPadding(WindowInsets.navigationBars)
                 .fillMaxWidth()
         ) {
+            // The crop shape, bottom-left over the photo — see CropAspectPill
+            // for why it is not in the rail — and only for a photo: a video
+            // page has nothing to crop.
+            if (!current.isVideo) {
+                Box(modifier = Modifier.padding(start = 6.dp)) {
+                    CropAspectPill(
+                        aspect = currentCrop.aspect,
+                        onClick = {
+                            val key = current.uri.toString()
+                            crops[key] = (crops[key] ?: PendingCrop.None).cycleAspect()
+                        },
+                    )
+                }
+            }
+
             if (isBatch) {
                 ThumbnailStrip(
                     items = drafts,
@@ -774,72 +803,28 @@ private fun CaptionBar(
 }
 
 /**
- * One photo page: the image under a [ZoomableBox] whose zoom is the crop the
- * page would send.
- *
- * The zoom surface works in screen pixels and [viewports] in fractions of the
- * image, and the two are kept in step here. Once the box is measured and Coil
- * has said how big the photo is — its *decoded* size, orientation applied,
- * which is what a normalized frame has to be relative to and what the
- * header-only probe does not know — the saved frame is put back onto the
- * surface, and from then on every gesture writes the visible frame back.
- *
- * Only a gesture writes. The restore itself never does: it is contained rather
- * than exact when the box has changed shape (`ViewportGeometry.transformFor`),
- * and the box changes shape every time the keyboard slides over the caption
- * field, so writing the restored frame back would widen the user's framing a
- * little on every keystroke and never narrow it again. The frame the user
- * last made stays the frame that is sent until they make another; while the
- * box is the wrong shape for it the page shows that frame with some photo
- * around it, and shows it exactly again once the box is back.
- *
- * A change of [PendingMedia.uri] — a step landing, an undo — starts over at 1x
- * for the new image, on a fresh surface so not even one frame of the new step
- * is drawn under the old zoom: [viewports] is keyed by step, and the zoom the
- * old step had says nothing about a step of a different shape. For a crop that
- * has just been flattened that 1x *is* the picture the zoom was showing.
+ * One photo page: the image under a [ZoomCropSurface] whose zoom and crop
+ * shape are the crop the page would send, kept in [crops] under the step's
+ * URI. Keyed on that URI, so a step landing or an undo composes a fresh
+ * surface at 1x for the new image rather than one frame of it under the old
+ * zoom; for a crop that has just been flattened that 1x *is* the picture the
+ * zoom was showing.
  */
 @Composable
-private fun ImagePage(item: PendingMedia, viewports: SnapshotStateMap<String, CropRect>) {
+private fun ImagePage(item: PendingMedia, crops: SnapshotStateMap<String, PendingCrop>) {
     val key = item.uri.toString()
-    val zoom = remember(key) { ZoomableState() }
-    var boxSize by remember { mutableStateOf(IntSize.Zero) }
-    var contentSize by remember(key) { mutableStateOf<IntSize?>(null) }
-    val zoomed = viewports.isZoomed(item.uri)
-
-    LaunchedEffect(key, contentSize, boxSize) {
-        val content = contentSize
-        if (content == null || boxSize.width <= 0 || boxSize.height <= 0) {
-            zoom.reset()
-            return@LaunchedEffect
-        }
-        val boxWidth = boxSize.width.toFloat()
-        val boxHeight = boxSize.height.toFloat()
-        zoom.set(
-            ViewportGeometry.transformFor(
-                viewport = viewports[key] ?: CropRect.Full,
-                boxWidth = boxWidth,
-                boxHeight = boxHeight,
-                imageWidth = content.width,
-                imageHeight = content.height,
-                maxScale = ZoomableState.MAX_SCALE,
-            )
-        )
-        // The first emission is the restore just made; everything after it is
-        // a gesture.
-        snapshotFlow { zoom.transform }.drop(1).collect { transform ->
-            val visible = ViewportGeometry.visible(transform, boxWidth, boxHeight, content.width, content.height)
-            if (visible.isFull) viewports.remove(key) else viewports[key] = visible
-        }
+    val crop = crops[key] ?: PendingCrop.None
+    val state = when {
+        crop.isZoomed -> "Zoomed in, sent as a crop"
+        crop.hasCrop -> "Sent as a crop"
+        else -> null
     }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .onSizeChanged { boxSize = it }
-            .semantics { if (zoomed) stateDescription = "Zoomed in, sent as a crop" }
-    ) {
-        ZoomableBox(state = zoom, resetWhenInactive = false, contentSize = contentSize) { transform ->
+    androidx.compose.runtime.key(key) {
+        ZoomCropSurface(
+            crop = crop,
+            onCropChange = { crops[key] = it },
+            modifier = Modifier.semantics { if (state != null) stateDescription = state },
+        ) { transform, onDecoded ->
             val context = LocalContext.current
             AsyncImage(
                 model = remember(item.uri, item.originalMemoryCacheKey) {
@@ -847,11 +832,7 @@ private fun ImagePage(item: PendingMedia, viewports: SnapshotStateMap<String, Cr
                 },
                 contentDescription = "Image preview",
                 contentScale = ContentScale.Fit,
-                // The drawable, not the painter: with crossfade on, the painter
-                // is the fade between placeholder and result and reports the
-                // larger of the two, while the crop must be normalized to the
-                // bitmap actually decoded.
-                onSuccess = { contentSize = it.result.drawable.toContentSize() },
+                onSuccess = { onDecoded(it.result.drawable) },
                 modifier = Modifier
                     .fillMaxSize()
                     .then(transform)
@@ -859,10 +840,6 @@ private fun ImagePage(item: PendingMedia, viewports: SnapshotStateMap<String, Cr
         }
     }
 }
-
-/** True when the step shown as [uri] has a zoom that would crop it. */
-private fun SnapshotStateMap<String, CropRect>.isZoomed(uri: Uri): Boolean =
-    this[uri.toString()]?.isFull == false
 
 /** Video page: still frame only — no inline playback, no pinch-zoom. */
 @Composable
@@ -1007,7 +984,14 @@ private enum class Editor { ADJUST, DRAW, OVERLAY }
  * identical, and the differences (a crop frame, a stroke stack) belong to the
  * screens, which save their own.
  */
-private data class EditTarget(val key: String, val source: Uri, val editor: Editor) {
+private data class EditTarget(
+    val key: String,
+    val source: Uri,
+    val editor: Editor,
+    /** The frame and shape Adjust opens its crop tool on — the preview's pending crop, transferred. */
+    val crop: CropRect = CropRect.Full,
+    val aspect: CropAspect = CropAspect.FREE,
+) {
     companion object {
         /**
          * Saved, not merely remembered. The editor screens save their own op
@@ -1021,12 +1005,25 @@ private data class EditTarget(val key: String, val source: Uri, val editor: Edit
          */
         val Saver: Saver<EditTarget?, Any> = listSaver(
             save = { target ->
-                target?.let { listOf(it.key, it.source.toString(), it.editor.name) }.orEmpty()
+                target?.let {
+                    listOf(
+                        it.key, it.source.toString(), it.editor.name,
+                        it.crop.left, it.crop.top, it.crop.right, it.crop.bottom, it.aspect.name,
+                    )
+                }.orEmpty()
             },
             restore = { flat ->
                 val editor = Editor.entries.firstOrNull { it.name == flat.getOrNull(2) }
-                if (flat.size == 3 && editor != null) {
-                    EditTarget(flat[0], Uri.parse(flat[1]), editor)
+                val aspect = CropAspect.entries.firstOrNull { it.name == flat.getOrNull(7) }
+                val edges = flat.drop(3).take(4).map { it as? Float }
+                if (flat.size == 8 && editor != null && aspect != null && edges.none { it == null }) {
+                    EditTarget(
+                        key = flat[0] as String,
+                        source = Uri.parse(flat[1] as String),
+                        editor = editor,
+                        crop = CropRect(edges[0]!!, edges[1]!!, edges[2]!!, edges[3]!!),
+                        aspect = aspect,
+                    )
                 } else {
                     null
                 }
@@ -1053,22 +1050,18 @@ private val CursorsSaver = listSaver<SnapshotStateMap<String, Int>, String>(
 )
 
 /**
- * Flattens the zoom map to `[step, left, top, right, bottom]` runs. Saved, not
- * merely remembered, because the frame is what gets sent: a rotation that
- * forgot it would send the whole photo after the user had framed a face.
+ * Flattens the crop map to `[step, …PendingCrop.save]` runs. Saved, not merely
+ * remembered, because the crop is what gets sent: a rotation that forgot it
+ * would send the whole photo after the user had framed a face.
  */
-private val ViewportsSaver = listSaver<SnapshotStateMap<String, CropRect>, Any>(
-    save = { map ->
-        map.entries.flatMap { (key, rect) -> listOf(key, rect.left, rect.top, rect.right, rect.bottom) }
-    },
+private val CropsSaver = listSaver<SnapshotStateMap<String, PendingCrop>, Any>(
+    save = { map -> map.entries.flatMap { (key, crop) -> listOf(key) + PendingCrop.save(crop) } },
     restore = { flat ->
-        mutableStateMapOf<String, CropRect>().apply {
-            flat.chunked(5).forEach { run ->
+        mutableStateMapOf<String, PendingCrop>().apply {
+            flat.chunked(1 + PendingCrop.SAVED_FIELDS).forEach { run ->
                 val key = run.getOrNull(0) as? String
-                val edges = run.drop(1).map { it as? Float }
-                if (key != null && edges.size == 4 && edges.none { it == null }) {
-                    put(key, CropRect(edges[0]!!, edges[1]!!, edges[2]!!, edges[3]!!))
-                }
+                val crop = PendingCrop.restore(run.drop(1))
+                if (key != null && crop != null) put(key, crop)
             }
         }
     }

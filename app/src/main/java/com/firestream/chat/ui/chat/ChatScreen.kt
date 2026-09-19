@@ -149,6 +149,7 @@ import com.firestream.chat.ui.search.SearchResultList
 import com.firestream.chat.ui.search.SearchResultsSummary
 import com.firestream.chat.ui.search.searchResultsSummary
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
@@ -2284,9 +2285,10 @@ fun ChatScreen(
                     // The same gate as save: a message's photo, never a
                     // link-preview thumbnail off somebody else's web page.
                     onEdit = if (req.canSaveToDownloads) {
-                        {
+                        { crop ->
                             viewModel.editFromViewer(
-                                FullscreenMediaItem(req.imageUrl, req.localUri, req.messageId)
+                                FullscreenMediaItem(req.imageUrl, req.localUri, req.messageId),
+                                crop,
                             )
                         }
                     } else null,
@@ -2351,6 +2353,7 @@ fun ChatScreen(
                     originalUri = viewerEdit.source,
                     mimeType = "image/jpeg",
                     originalMemoryCacheKey = viewerEdit.placeholderKey,
+                    initialCrop = viewerEdit.crop.takeIf { it != PendingCrop.None },
                 )
             )
             viewerUnderPreview = fullscreenImage != null || searchGalleryIndex != null
