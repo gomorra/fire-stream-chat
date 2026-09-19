@@ -188,6 +188,29 @@ internal object CropGeometry {
     }
 
     /**
+     * The largest frame with [aspect]'s ratio that fits inside [within], centred
+     * on it — how the fullscreen crop pill turns "what the zoom shows" into a
+     * frame of a chosen shape without asking the user to drag anything.
+     *
+     * [within] itself for [CropAspect.FREE], and for a photo whose size is not
+     * known yet, since a ratio cannot be normalized without it.
+     */
+    fun fitInside(aspect: CropAspect, within: CropRect, imageWidth: Int, imageHeight: Int): CropRect {
+        val ratio = normalizedRatio(aspect, imageWidth, imageHeight) ?: return within
+        if (within.width <= 0f || within.height <= 0f) return within
+        val width: Float
+        val height: Float
+        if (within.width / within.height > ratio) {
+            height = within.height
+            width = height * ratio
+        } else {
+            width = within.width
+            height = width / ratio
+        }
+        return centeredOn(within.centerX, within.centerY, width, height)
+    }
+
+    /**
      * The frame after [handle] is dragged to ([x], [y]) in normalized space.
      *
      * The opposite corner — or, for a side grip, the opposite side — is the

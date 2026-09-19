@@ -91,6 +91,27 @@ class CropGeometryTest {
     // ── Aspect ratios cross two spaces ────────────────────────────────────────
 
     @Test
+    fun `fitting an aspect inside a frame is limited by the frame's shorter side`() {
+        val (width, height) = landscape
+        // A 1:1 crop of a 4000 × 3000 photo is 0.75 wide per 1 tall in fractions.
+        // Inside the middle 0.5 × 0.5 of the photo (2000 × 1500 px) a square is
+        // 1500 px: 0.375 wide, 0.5 tall, centred.
+        val within = CropRect(0.25f, 0.25f, 0.75f, 0.75f)
+        val fitted = CropGeometry.fitInside(CropAspect.SQUARE, within, width, height)
+        assertEquals(0.3125f, fitted.left, 0.001f)
+        assertEquals(0.25f, fitted.top, 0.001f)
+        assertEquals(0.6875f, fitted.right, 0.001f)
+        assertEquals(0.75f, fitted.bottom, 0.001f)
+    }
+
+    @Test
+    fun `fitting free or an unknown size gives the frame back`() {
+        val within = CropRect(0.25f, 0.25f, 0.75f, 0.75f)
+        assertEquals(within, CropGeometry.fitInside(CropAspect.FREE, within, 4000, 3000))
+        assertEquals(within, CropGeometry.fitInside(CropAspect.SQUARE, within, 0, 0))
+    }
+
+    @Test
     fun `a square crop of a landscape photo is not a square frame`() {
         // The frame is normalized to the image, so a 1:1 *output* on a 4:3 photo
         // is a frame three-quarters as wide as it is tall. Treating the two

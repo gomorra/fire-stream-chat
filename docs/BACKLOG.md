@@ -21,6 +21,29 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The crop-shape pill, the preview rail's sizes, and the flash after an app switch (2026-09-19)
+
+Shipped on `claude/edit-image-zoomed-akt4mo`; nothing has been on hardware. Robolectric drives
+the pill and the transfer into Adjust through Coil on a synthetic JPEG, but not the frame's look
+over a real photo nor the feel of moving the photo under it. Check on a device:
+
+- The crop-shape pill (bottom-left, in the send preview and in the fullscreen viewer of a chat
+  photo): tapping cycles Free → Original → 1:1 → 4:5 → 16:9 → Free, a shape other than Free draws
+  a frame with a dim outside, and panning the zoomed photo moves the photo under the frame. Send
+  with 1:1 chosen → the received photo is square and is the framed part. Choose a shape, then
+  Adjust → the crop tool opens with that frame and that preset selected, Cancel comes back with
+  the frame still pending, Done writes it. Choose a shape in the *viewer* on a received photo,
+  then Edit → the preview opens with the pill on that shape and the frame drawn.
+- The top rail: back arrow, HD, the three editors and Save are all 36 dp circles in 48 dp
+  targets now, the viewer's size, with 8 dp between visuals; on a 360 dp-wide phone the HD pill
+  must not touch the back arrow.
+- The flash after switching apps (2026-09-19 report: zoomed in the preview, swipe to another app
+  and back, the screen flashed until back was pressed). Not reproducible on the JVM. The one
+  mechanism found — the page re-deriving its zoom from the saved frame on every box-size change,
+  which the keyboard and the app-switch animation both cause — is gone: a size change now only
+  clamps the zoom the user has. Re-test exactly that path; if it still flashes, note what flashes
+  (the photo, the keyboard, the whole screen) and whether a caption had been typed.
+
 
 ### "Keep Original Images" (2026-09-18)
 

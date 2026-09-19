@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import java.io.File
 import javax.inject.Inject
 
@@ -497,7 +498,7 @@ class ChatViewModel @Inject constructor(
      * glitch. That leaves one narrow edge: a back press inside those
      * milliseconds closes the viewer, and the preview opens over the chat anyway.
      */
-    internal fun editFromViewer(item: FullscreenMediaItem) {
+    internal fun editFromViewer(item: FullscreenMediaItem, crop: PendingCrop = PendingCrop.None) {
         if (viewerEditJob?.isActive == true) return
         val generation = ++viewerEditGeneration
         // What the viewer has on screen — so the preview can draw the same bitmap
@@ -512,6 +513,7 @@ class ChatViewModel @Inject constructor(
                     ViewerEdit.Ready(
                         source = imageEditRasterizer.importSource(file),
                         placeholderKey = shown?.let(::fullscreenImageCacheKey),
+                        crop = crop,
                     )
                 )
             } catch (e: CancellationException) {

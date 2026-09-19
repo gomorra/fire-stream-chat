@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 
 /**
  * One picked-but-not-yet-sent media item, queued in [ImagePreviewScreen].
@@ -52,6 +53,15 @@ internal data class PendingMedia(
      * `previewImageRequest` ignores it once an edit has replaced the original.
      */
     val originalMemoryCacheKey: String? = null,
+    /**
+     * The crop the fullscreen viewer had pending when Edit was pressed — its
+     * zoom and crop shape, normalized to the same pixels [originalUri] is a copy
+     * of — so the preview opens on the crop the user framed while looking at
+     * the received photo. Presentation state like [originalMemoryCacheKey]:
+     * the preview seeds its own saved crop map from it and it is not saved
+     * here. Null for a gallery or camera pick.
+     */
+    val initialCrop: PendingCrop? = null,
 ) {
     val isVideo: Boolean get() = mimeType.startsWith("video/")
 

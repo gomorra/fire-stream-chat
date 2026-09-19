@@ -39,6 +39,8 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
+import com.firestream.chat.ui.chat.imageedit.CropAspect
+import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
@@ -140,6 +142,17 @@ class ChatViewModelViewerEditTest {
     @Test
     fun `nothing is being edited by default`() {
         assertNull(buildViewModel().viewerEdit())
+    }
+
+    @Test
+    fun `the crop pending in the viewer rides along to the preview`() = runTest {
+        val local = tmp.newFile("m1.jpg").apply { writeText("jpeg") }
+        val viewModel = buildViewModel()
+        val crop = PendingCrop(aspect = CropAspect.SQUARE)
+
+        viewModel.editFromViewer(FullscreenMediaItem(remoteUrl, local.path, "m1"), crop)
+
+        assertEquals(ViewerEdit.Ready(imported, fullscreenImageCacheKey(local), crop), viewModel.viewerEdit())
     }
 
     @Test
