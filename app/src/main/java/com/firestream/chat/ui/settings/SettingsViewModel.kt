@@ -70,6 +70,7 @@ data class SettingsUiState(
     val cacheSize: Long = 0L,
     val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
     val sendImagesFullQuality: Boolean = false,
+    val keepOriginalImages: Boolean = false,
     val videoQuality: VideoQualityOption = VideoQualityOption.STANDARD,
     // Chat
     val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
@@ -181,6 +182,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            preferencesDataStore.keepOriginalImagesFlow.collect { enabled ->
+                _uiState.value = _uiState.value.copy(keepOriginalImages = enabled)
+            }
+        }
+        viewModelScope.launch {
             preferencesDataStore.videoQualityFlow.collect { option ->
                 _uiState.value = _uiState.value.copy(videoQuality = option)
             }
@@ -249,6 +255,10 @@ class SettingsViewModel @Inject constructor(
 
     fun setSendImagesFullQuality(enabled: Boolean) {
         viewModelScope.launch { preferencesDataStore.setSendImagesFullQuality(enabled) }
+    }
+
+    fun setKeepOriginalImages(enabled: Boolean) {
+        viewModelScope.launch { preferencesDataStore.setKeepOriginalImages(enabled) }
     }
 
     fun setVideoQuality(option: VideoQualityOption) {

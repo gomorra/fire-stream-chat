@@ -34,7 +34,7 @@ import org.robolectric.annotation.GraphicsMode
  * it. What it still cannot answer is whether the stroke lands **where the finger
  * was on a real screen** and whether the flattened JPEG redacts what the preview
  * showed as covered; those are hardware questions and the plan makes an
- * on-device pass part of this phase (`.claude/plans/image-editor.md` §3).
+ * on-device pass part of this phase (`docs/plans/image-editor.md` §3).
  *
  * The arithmetic under the gesture is pinned one layer down, in
  * `StrokeGeometryTest`, and the flatten in `ImageEditRasterizerTest`.

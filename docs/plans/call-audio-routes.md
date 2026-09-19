@@ -5,7 +5,7 @@ picker (earpiece, speaker, Bluetooth, wired headset), and for raising `minSdk` f
 31 so the routing can use the one non-deprecated API. Written 2026-09-11 from a code read
 of `main` at `4b0e5fa3`; re-verify line numbers before editing.
 
-**Order: 1 ‖ 2 → 3 → 4 → 5** (`‖` = checkpoint, see `.claude/plans/plan-runner.md` §2.4: the runner stops after the minSdk step for the human to look at the fallout before feature work builds on it)
+**Order: 1 ‖ 2 → 3 → 4 → 5** (`‖` = checkpoint, see `docs/plans/done/plan-runner.md` §2.4: the runner stops after the minSdk step for the human to look at the fallout before feature work builds on it)
 
 ## 0. Decisions (signed off 2026-09-11 — do not re-litigate)
 
@@ -220,7 +220,7 @@ line from step 1 stays under `Removed`.
   re-render). Otherwise nothing.
 - `TECH_DEBT.md`: nothing expected.
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
-  `.claude/plans/done/` once the device pass is recorded.
+  `docs/plans/done/` once the device pass is recorded.
 
 ## 4. Traps (read before step 3)
 

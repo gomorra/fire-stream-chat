@@ -100,14 +100,14 @@ The concrete implementation resolving the Repository Interfaces.
 - **Local Sources**: Room handles the reactive caching. The app primarily drives the UI from Room via `Flow`. Two databases live side by side: `AppDatabase` (`fire_stream_chat.db`) for application data and `SignalDatabase` (`signal.db`) for Signal Protocol key material — splitting them means destructive schema migrations on application data cannot wipe cryptographic state.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firestore, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: `SignalManager` and `SignalProtocolStoreImpl` orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
-- **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). `MediaBackfillWorker` (WorkManager) downloads whatever media has no local copy, respecting `AutoDownloadOption` and network constraints — daily as periodic work, on demand from Settings, and as the one-time run `MediaBackfillScheduler` queues when an auto-download fails, so a photo received while offline lands once there is a network again without the chat being opened (the push reconcile, `MessageRepository.reconcileFromPush`, is what gets such a message into Room in the first place).
+- **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). Under the "Keep Original Images" preference `OutboxSender` uploads the encoding but copies the untouched input into the media dir as the message's local file, in one persisted step. `MediaBackfillWorker` (WorkManager) downloads whatever media has no local copy, respecting `AutoDownloadOption` and network constraints — daily as periodic work, on demand from Settings, and as the one-time run `MediaBackfillScheduler` queues when an auto-download fails, so a photo received while offline lands once there is a network again without the chat being opened (the push reconcile, `MessageRepository.reconcileFromPush`, is what gets such a message into Room in the first place).
 - **Call Infrastructure**: `CallService` (foreground service) owns the WebRTC peer connection lifecycle. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
 
 ### 3.3 UI / Presentation Layer
 
 - **ViewModels**: Maintain view state (`StateFlow` of `UiState` data classes). Handle user intents and translate UI actions into domain use case executions.
 - **Jetpack Compose Screens**: Declarative, composable functions rendering UI strictly based on the provided immutable `UiState`.
-- **ChatScreen** is split into 22 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardChatPicker`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference. The search-results and filter-chip rendering lives in `ui/search/` instead, because global search renders the same way.
+- **ChatScreen** is split into 22 focused files (`MessageBubble`, `VoiceMessagePlayer`, `LinkPreviewCard`, `FullscreenImageViewer`, `ImagePreviewScreen`, `ForwardMessagePanel`, `EmojiHandlerPanel`, `EmojiSearchData`, `PollBubble`, `CreatePollSheet`, `ListBubble`, `CreateListSheet`, `ChatUtils`, `MessageInfoScreen`, `ChatScreen`, `ChatViewModel`, plus 6 manager classes — `ChatPollManager`, `ChatSearchManager`, `ChatMessageActions`, `ChatMessageSender`, `ChatMessageLoader`, `ChatInfoManager`), all with `internal` visibility. `ChatViewModel` is a thin orchestrator (~220 lines) that constructs and delegates to the 6 managers; all managers share a single `MutableStateFlow<ChatUiState>` reference. The search-results and filter-chip rendering lives in `ui/search/` instead, because global search renders the same way.
 - **Bottom navigation**: `MainScreen` (`ui/main/`) hosts a `HorizontalPager` with three tabs — Chats, Calls, and Lists. `BottomNavBar` and the swipe gesture live exclusively in `MainScreen`; individual tab screens (`ChatListScreen`, `CallsScreen`, `ListsScreen`) do **not** own the nav bar. The `CHAT_LIST` NavHost route renders `MainScreen`; the Calls and Lists tabs are internal pager state, not NavHost destinations.
 
 ---
@@ -466,14 +466,16 @@ com.firestream.chat/
 │   │                            # MessageBubble, VoiceMessagePlayer, LinkPreviewCard,
 │   │                            # FullscreenImageViewer, ImagePreviewScreen,
 │   │                            # ZoomableBox, PendingMedia,
-│   │                            # ForwardChatPicker, LocationPickerSheet,
+│   │                            # ForwardMessagePanel, LocationPickerSheet,
 │   │                            # EmojiHandlerPanel, EmojiSearchData, SwipeReactionPanel,
 │   │                            # PollBubble, CreatePollSheet, ListBubble, CreateListSheet,
 │   │                            # MessageInfoScreen, ChatUtils, BubbleTailShape,
 │   │                            # MentionFormatter, MessageGrouping
 │   ├── chatlist/                # ChatListScreen, ChatListViewModel, ChatListItem,
 │   │                            # ArchivedChatsScreen
-│   ├── components/              # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator
+│   ├── components/              # UserAvatar, ImagePicker, SkeletonLoading, TypingIndicator,
+│   │                            # ChatPickerPanel / ChatPickerOverlay / ChatTargets
+│   │                            # (the shared "send this to a chat" panel and its rules)
 │   ├── contacts/                # ContactsScreen, ContactsViewModel
 │   ├── group/                   # CreateGroupScreen, CreateGroupViewModel,
 │   │                            # GroupSettingsScreen, GroupSettingsViewModel,
@@ -481,7 +483,7 @@ com.firestream.chat/
 │   ├── lists/                   # ListsScreen, ListsViewModel, ListDetailScreen,
 │   │                            # ListDetailViewModel, SharedListsScreen,
 │   │                            # SharedListsViewModel, AvatarStack,
-│   │                            # ListContextSheet, ListShareSheet
+│   │                            # ListContextSheet, ListShareSheet, ShareListPanel
 │   ├── main/                    # MainScreen (HorizontalPager — Chats/Calls/Lists tabs),
 │   │                            # BottomNavBar
 │   ├── profile/                 # ProfileScreen, ProfileViewModel

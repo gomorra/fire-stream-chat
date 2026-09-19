@@ -15,12 +15,10 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -42,18 +40,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.toSize
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -66,6 +64,8 @@ private const val RECENTS_MAX_ROWS = 3
 private const val SIZE_MIN = 0.8f
 private const val SIZE_MAX = 5.0f
 private const val SIZE_DEFAULT = 1.0f
+// Gap between the held cell and the size panel beside it
+private val SIZE_PANEL_GAP = 8.dp
 
 // ---------------------------------------------------------------------------
 // Grid item model for the flat LazyVerticalGrid
@@ -246,8 +246,7 @@ private val STATIC_CATEGORY_GRID: List<GridItem> = buildList {
 private data class SizePickerState(
     val gridItemIndex: Int,      // index in gridItems list
     val emoji: String,
-    val columnIndex: Int,        // 0-7 within the row
-    val cellOffset: Offset,      // position of the pressed cell relative to grid
+    val cellBounds: Rect,        // bounds of the pressed cell relative to the grid
     val sizeMultiplier: Float = SIZE_DEFAULT
 )
 
@@ -262,7 +261,7 @@ private data class SizePickerState(
  * Content only: the search field, the tab island and the delete button belong to
  * [PickerPanel], and [query] arrives from it already scoped to this tab. What
  * stays here is what is genuinely about emoji and would leak into the sticker
- * tab if the shell owned it (`.claude/plans/image-editor.md` §4):
+ * tab if the shell owned it (`docs/plans/image-editor.md` §4):
  *
  * - **The frozen recents order.** [recentEmojis] is snapshotted once per
  *   composition of this tab, so the grid never reorders under the user's finger
@@ -318,8 +317,17 @@ internal fun EmojiTab(
     // Long-press size picker state — null means picker is hidden
     var sizePicker by remember { mutableStateOf<SizePickerState?>(null) }
 
-    // Track cell positions so the size slider can anchor to the pressed cell
-    val cellPositions = remember { mutableMapOf<Int, Offset>() }
+    // Track cell bounds so the size slider can anchor to the pressed cell
+    val cellBounds = remember { mutableMapOf<Int, Rect>() }
+
+    // Which row each grid item is laid out on. Headers span the full row and
+    // categories do not pad out their last row, so this cannot be `index / GRID_COLUMNS`.
+    val cellRows = remember(gridItems) {
+        layoutGridCells(
+            spans = gridItems.map { if (it is GridItem.Header) GRID_COLUMNS else 1 },
+            columns = GRID_COLUMNS,
+        ).map { it.row }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         val hasEmojiResults = remember(gridItems) { gridItems.any { it is GridItem.Emoji } }
@@ -354,8 +362,8 @@ internal fun EmojiTab(
                             is GridItem.Emoji -> {
                                 val sp = sizePicker
                                 // Siblings in the same row as the held cell fade out
-                                val heldRow = sp?.let { sp.gridItemIndex / GRID_COLUMNS }
-                                val thisRow = index / GRID_COLUMNS
+                                val heldRow = sp?.let { cellRows.getOrNull(it.gridItemIndex) }
+                                val thisRow = cellRows[index]
                                 val isSiblingFaded = sp != null &&
                                     thisRow == heldRow &&
                                     index != sp.gridItemIndex
@@ -370,18 +378,16 @@ internal fun EmojiTab(
                                     modifier = Modifier
                                         .alpha(alpha)
                                         .onGloballyPositioned { coords ->
-                                            cellPositions[index] = coords.positionInParent()
+                                            cellBounds[index] =
+                                                Rect(coords.positionInParent(), coords.size.toSize())
                                         }
                                         .pointerInput(item.emoji) {
                                             detectDragGesturesAfterLongPress(
                                                 onDragStart = { _ ->
-                                                    val pos = cellPositions[index] ?: Offset.Zero
-                                                    val colIdx = index % GRID_COLUMNS
                                                     sizePicker = SizePickerState(
                                                         gridItemIndex = index,
                                                         emoji = item.emoji,
-                                                        columnIndex = colIdx,
-                                                        cellOffset = pos
+                                                        cellBounds = cellBounds[index] ?: Rect.Zero
                                                     )
                                                 },
                                                 onDrag = { _, dragAmount ->
@@ -422,8 +428,7 @@ internal fun EmojiTab(
                     SizePickerOverlay(
                         emoji = sp.emoji,
                         sizeMultiplier = sp.sizeMultiplier,
-                        anchorOffset = sp.cellOffset,
-                        showOnRight = sp.columnIndex < GRID_COLUMNS - 1
+                        cellBounds = sp.cellBounds
                     )
                 }
             }
@@ -448,30 +453,38 @@ internal fun EmojiTab(
 // Size picker overlay
 // ===========================================================================
 
+/**
+ * The size readout beside the held cell.
+ *
+ * Placed in the same pass that measures it: to the right of the cell when the
+ * whole panel fits inside the grid, otherwise to its left — see
+ * [sizePickerPanelX] — with its bottom on the cell's top so it grows upward as
+ * the emoji does. Measuring first is what keeps a cell in the last column from
+ * ever drawing the panel off the edge of the screen, whatever the emoji's size.
+ */
 @Composable
 private fun SizePickerOverlay(
     emoji: String,
     sizeMultiplier: Float,
-    anchorOffset: Offset,
-    showOnRight: Boolean
+    cellBounds: Rect
 ) {
     val pct = ((sizeMultiplier - SIZE_MIN) / (SIZE_MAX - SIZE_MIN)).coerceIn(0f, 1f)
     val displaySize = (22 * sizeMultiplier).sp
-
-    val density = androidx.compose.ui.platform.LocalDensity.current
-    val xOffset = with(density) {
-        if (showOnRight) (anchorOffset.x + 56.dp.toPx()).roundToInt()
-        else (anchorOffset.x - 120.dp.toPx()).roundToInt()
-    }
-    // Anchor the bottom of the panel at the cell's top so it grows upward as emoji size increases
-    val bottomAnchor = with(density) { anchorOffset.y.roundToInt() }
-    var panelHeight by remember { mutableStateOf(0) }
+    val gap = with(LocalDensity.current) { SIZE_PANEL_GAP.roundToPx() }
 
     Box(
-        modifier = Modifier
-            .offset { IntOffset(xOffset, bottomAnchor - panelHeight) }
-            .wrapContentSize()
-            .onSizeChanged { panelHeight = it.height }
+        modifier = Modifier.layout { measurable, constraints ->
+            val panel = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+            val x = sizePickerPanelX(
+                cellLeft = cellBounds.left.roundToInt(),
+                cellRight = cellBounds.right.roundToInt(),
+                panelWidth = panel.width,
+                gridWidth = constraints.maxWidth,
+                gap = gap,
+            )
+            val y = cellBounds.top.roundToInt() - panel.height
+            layout(panel.width, panel.height) { panel.place(x, y) }
+        }
     ) {
         Surface(
             shape = RoundedCornerShape(12.dp),

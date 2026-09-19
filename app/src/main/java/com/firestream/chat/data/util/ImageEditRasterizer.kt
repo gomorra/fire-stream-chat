@@ -53,7 +53,7 @@ import kotlin.math.ceil
  *
  * ### Why one class owns all of it
  *
- * Edits **rasterize per editor screen** (`.claude/plans/image-editor.md` §2.1):
+ * Edits **rasterize per editor screen** (`docs/plans/image-editor.md` §2.1):
  * pressing Done flattens that screen's layer into a new JPEG in
  * `cacheDir/edits/` and hands the URI back, so the chain of files *is* the undo
  * history and the send pipeline never learns that editing exists. That makes
@@ -71,7 +71,7 @@ import kotlin.math.ceil
  * genuinely needs the platform: decode, encode, the cache lifecycle, the
  * limiter permit and the header probe. So this class is the single
  * `UI_ALLOWED_DATA_IMPORTS` entry the editor spends, and only the hosting
- * ViewModel needs even that (`.claude/plans/image-editor.md` §2.2).
+ * ViewModel needs even that (`docs/plans/image-editor.md` §2.2).
  *
  * ### What it deliberately does not do
  *
@@ -245,7 +245,7 @@ class ImageEditRasterizer @Inject constructor(
     /**
      * Copies [source] — a photo that has already been sent — into the edit
      * cache and returns the copy's URI, to be the untouched original of a new
-     * batch (`.claude/plans/image-editor.md` §2.6: editing a sent photo sends a
+     * batch (`docs/plans/image-editor.md` §2.6: editing a sent photo sends a
      * new one).
      *
      * A copy rather than [source] itself, because `PendingMedia.originalUri` is

@@ -43,6 +43,56 @@ the gesture or a real camera file. Check on a device:
 - Airplane-mode-free failure path is hard to provoke; a rasterize failure shows "Couldn't apply the
   crop. Try again." above the caption bar and sends nothing.
 
+### "Keep Original Images" (2026-09-18)
+
+The unit tests pin the pipeline (encoding uploaded, input copied, one persist), not what
+the copy looks like on a phone. With the setting on, on a device with a second device as
+recipient:
+1. Take a photo with the in-app camera, send it Standard → your own bubble and the
+   fullscreen viewer must show it at full resolution with the right orientation (the copy
+   keeps its EXIF, the encoding never had any); the recipient's copy must be 1600 px.
+2. Same photo sent HD → the recipient's copy is full size; yours is still the untouched
+   file (compare byte sizes in Files: yours keeps the camera's EXIF block).
+3. Send a PNG or HEIC gallery pick → it must render in the bubble, the viewer and in
+   Google Photos under `Pictures/FireStream/` although its name ends in `.jpg`.
+4. Flight mode, send a photo, kill the app, go online → the retry must upload the
+   encoding, not the original (the row persists nothing until the upload is through).
+
+### Presence: no online flash on a push, "Online" while typing, stale typing bounded (2026-09-18)
+
+Shipped on `claude/chat-typing-status-delays-y9eau9`; nothing has been on hardware. RTDB's
+write queue and Firestore's listener cannot be exercised under Robolectric — the unit tests pin
+the write gating, the derived header rule and the expiry timer. Two devices, B's presence
+watched from A's open chat with B:
+1. **No flash.** B opens the app on a bad connection (airplane mode, or a hotspot with no
+   upstream) for a few seconds, backgrounds it, then A sends B a message → A's header must not
+   flick to "Online" when the push reaches B. Before, the queued online/offline pair flushed on
+   B's reconnect and A saw "Online" for an instant.
+2. **Typing shows online.** B backgrounds the app for a minute or two (so B's RTDB socket has
+   dropped), reopens the chat and starts typing at once → A's header reads "Online" no later
+   than the typing dots appear, even while B's presence flag is still on its way.
+3. **Stale typing ends.** B types, then B's connection is cut mid-typing (airplane mode) → A's
+   dots, and the "Online" they imply, disappear within about ten seconds without any further
+   message in the chat.
+### Emoji insertion at the caret (2026-09-18)
+
+Shipped in `39ebf89`. Robolectric drives the caption bar end to end, but a real IME is
+what the composer actually faces, and the caption field changed from the plain-String
+`BasicTextField` to the `TextFieldValue` one to hold a caret at all — the same conversion
+whose composing-region handling once caused a `restartInput` loop (`docs/GOTCHAS.md`).
+On a device, with Gboard and its predictive bar live:
+
+- **Mid-sentence insertion.** Type a sentence in the composer, tap between two words,
+  open the panel and pick an emoji: it lands at the caret, the caret sits after it, and
+  typing continues there. Repeat with a word selected — the emoji replaces the selection.
+- **The panel's backspace.** With the caret mid-text, the key deletes in front of it, and
+  a flag or a ZWJ family emoji goes in a single press, not code point by code point.
+- **A long-pressed size survives a later edit.** Insert an oversized emoji, then type and
+  delete text before it: the emoji must keep its size rather than hand it to a neighbour.
+- **The caption field still types normally.** In the send preview, type a caption with
+  predictive text and an autocorrect, insert an emoji mid-caption, and confirm the field
+  never loses input or flickers — that is what a restartInput loop would look like.
+
 ### Client-set message ids and the if-absent retry (offline outbox step 1, 2026-09-11)
 
 Shipped in `68a53e75`; nothing has been on hardware. Firestore's transaction, its
@@ -89,7 +139,7 @@ Four open items from the step-4 reviews also belong to that check, two of them b
 pre-key replenishment (one fixed-id pre-key, replenished only after a successful decrypt),
 the double decrypt between the chat-list sync and the open chat, the stale-bundle race when
 a peer re-registers, and the lock tests' 300 ms window
-(`.claude/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
+(`docs/plans/offline-outbox.md`, "Before end-to-end encryption is switched on").
 
 ### Newer-only chat preview and send timestamps (offline outbox step 5, 2026-09-11)
 
@@ -296,6 +346,8 @@ the reaction sheet, a frozen recents order. What it cannot assert is the half th
 - **The long-press size drag still feels the same.** Hold an emoji in the composer and
   drag up: the size readout, the anchored preview panel, and the fade of the *other*
   emoji in that row. Release and confirm the emoji is inserted at the size chosen.
+  Hold one in the **last column** too: the panel must sit to the left of it and stay on
+  screen at 500%, and the fade must dim exactly that row (`EmojiGridLayout.kt`).
 - **The recents block holds still under the finger.** Tap several emoji in quick
   succession without closing the panel; the Recents row must not reorder while it is open.
   Close and reopen and confirm the new order has been picked up.
@@ -433,6 +485,13 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 - Also unconfirmed: the deferred `(chatId, timestamp)` index. Trigger to revisit is the
   Photos chip feeling sluggish on a real long chat — the browse `LIMIT` is 200
   (`MessageSearchLimits`), and raising it further means doing the index too.
+- Partial-word matching (from two characters — `PARTIAL_MATCH_MIN_LENGTH` in
+  `MessageRepositoryImpl`, shipped 2026-09-18) makes a short text query fill its page far
+  sooner, so the "there may be more" summary now appears on queries that used to report an
+  exact count. Left as is: the count is honest either way, and the text caps are the other
+  half of what keeps that index deferrable. Trigger to revisit is a two- or three-letter
+  search visibly hiding older matches on a real long chat — raising
+  `MessageSearchLimits.TEXT` / `GLOBAL` means doing the index too.
 - The "Shared Media" three-dot item now opens search pre-filtered to Photos; the standalone
   screen is deleted, so a regression here has no fallback path.
 - Confirm on device that **system back closes the search overlay** rather than the chat
@@ -574,7 +633,7 @@ data-model change, and the provider decision a GIF forces:
   **shipped with the editor in Phase 5b**, because it is flattened into the JPEG.
 - **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
   impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
-  one frame and a worse sticker (`.claude/plans/image-editor.md` §2.8).
+  one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
 - **The provider-privacy decision, already made and written down:** sending a Giphy URL
   makes the recipient's device fetch from Giphy, which tells a third party who received
   what and hollows out the Signal-Protocol story. For this app only downloading the bytes
@@ -611,7 +670,7 @@ data-model change, and the provider decision a GIF forces:
 - Files: `data/crypto/SignalManager.kt`, new `ui/settings/LinkedDevicesScreen.kt`
 
 ### Offline resilience — what is left after the outbox (6.3)
-- The durable outbox itself shipped in step 6 of `.claude/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
+- The durable outbox itself shipped in step 6 of `docs/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
 - The plan is complete: the "Waiting for network…" hint (step 7) and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry) shipped — see *Pending on-device verification* above.
 - The message-info sheet still says "Message not delivered" for a message the worker failed because the recipient is blocked; a "you can't message this user" line needs a failure reason on the row.
 - A process killed mid-download after a push (the handler's budget ran out) re-queues nothing; if the daily backfill turns out too slow for that case on hardware, the push reconcile could queue the backfill run up front for a media message instead of only on failure.
@@ -671,7 +730,7 @@ Less-specified than the items above — kept because the thinking is worth not r
 - **Compact/comfortable density toggle** — spacious vs. compact chat layouts
 - **Animated transitions** — shared element transitions between chat list and chat detail
 - **Haptic feedback** — subtle vibrations on message send, reactions, and gestures
-- **Save from the profile's shared-media gallery** — it shows the same chat photos as the chat's own gallery, which has Save to Downloads, but offers no save. Needs `MediaFileManager` and a snackbar channel in `ProfileViewModel`; found in the image editor's Phase 6 download-button audit and deliberately left out of that commit (`.claude/plans/image-editor.md`, Phase 6)
+- **Save from the profile's shared-media gallery** — it shows the same chat photos as the chat's own gallery, which has Save to Downloads, but offers no save. Needs `MediaFileManager` and a snackbar channel in `ProfileViewModel`; found in the image editor's Phase 6 download-button audit and deliberately left out of that commit (`docs/plans/image-editor.md`, Phase 6)
 
 ### AI-powered features
 - **Smart replies** — contextual quick responses based on incoming messages

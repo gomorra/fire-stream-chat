@@ -71,7 +71,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.ui.chat.CreateListSheet
-import com.firestream.chat.ui.chat.ForwardChatPicker
 import com.firestream.chat.ui.components.SkeletonChatListItem
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -84,14 +83,17 @@ internal fun ListsScreen(
     onListCreated: (listId: String) -> Unit = {},
     deletedListTitle: String? = null,
     onDeletedListTitleConsumed: () -> Unit = {},
+    // Raised while the share panel covers this page, so MainScreen can lock its
+    // pager — a sideways drag on the panel must not flip to the next tab.
+    onOverlayVisibleChange: (Boolean) -> Unit = {},
     viewModel: ListsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
     var showCreateSheet by remember { mutableStateOf(false) }
     var showSortMenu by remember { mutableStateOf(false) }
     var selectedListForAction by remember { mutableStateOf<ListData?>(null) }
-    var showSharePicker by remember { mutableStateOf(false) }
-    var shareListId by remember { mutableStateOf("") }
+    var shareTargetList by remember { mutableStateOf<ListData?>(null) }
+    LaunchedEffect(shareTargetList) { onOverlayVisibleChange(shareTargetList != null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     val searchFocusRequester = remember { FocusRequester() }
@@ -123,165 +125,184 @@ internal fun ListsScreen(
         }
     }
 
-    Scaffold(
-        modifier = Modifier.semantics { testTagsAsResourceId = true },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
-            TopAppBar(
-                title = { Text("Lists") },
-                windowInsets = WindowInsets(0, 0, 0, 0),
-                actions = {
-                    IconButton(onClick = { viewModel.toggleSearchBar() }) {
-                        Icon(
-                            Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
-                    IconButton(onClick = { showSortMenu = true }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Sort,
-                            contentDescription = "Sort",
-                            tint = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showSortMenu,
-                        onDismissRequest = { showSortMenu = false }
-                    ) {
-                        Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
-                            ListSortOption.entries.forEachIndexed { index, option ->
-                                FilledTonalButton(
-                                    onClick = {
-                                        viewModel.setSortOption(option)
-                                        showSortMenu = false
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .then(if (index > 0) Modifier.padding(top = 4.dp) else Modifier)
-                                ) {
-                                    if (uiState.sortOption == option) {
-                                        Icon(Icons.Default.Check, null, modifier = Modifier.padding(end = 4.dp))
+    // The Lists tab is a pager page, so the share panel has to be an explicit
+    // sibling of the Scaffold inside one Box — laid out over it, not after it.
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.semantics { testTagsAsResourceId = true },
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                TopAppBar(
+                    title = { Text("Lists") },
+                    windowInsets = WindowInsets(0, 0, 0, 0),
+                    actions = {
+                        IconButton(onClick = { viewModel.toggleSearchBar() }) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = "Search",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                        IconButton(onClick = { showSortMenu = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = "Sort",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false }
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)) {
+                                ListSortOption.entries.forEachIndexed { index, option ->
+                                    FilledTonalButton(
+                                        onClick = {
+                                            viewModel.setSortOption(option)
+                                            showSortMenu = false
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .then(if (index > 0) Modifier.padding(top = 4.dp) else Modifier)
+                                    ) {
+                                        if (uiState.sortOption == option) {
+                                            Icon(Icons.Default.Check, null, modifier = Modifier.padding(end = 4.dp))
+                                        }
+                                        Text(option.displayName)
                                     }
-                                    Text(option.displayName)
                                 }
                             }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground
-                )
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showCreateSheet = true }) {
-                Icon(Icons.Default.Add, contentDescription = "New List")
-            }
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-        ) {
-            AnimatedVisibility(
-                visible = uiState.isSearchBarVisible,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
-            ) {
-                SearchBar(
-                    inputField = {
-                        SearchBarDefaults.InputField(
-                            query = uiState.searchQuery,
-                            onQueryChange = viewModel::onSearchQueryChange,
-                            onSearch = {},
-                            expanded = false,
-                            onExpandedChange = {},
-                            placeholder = { Text("Search lists…") },
-                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-                            trailingIcon = {
-                                if (uiState.searchQuery.isNotEmpty()) {
-                                    IconButton(onClick = viewModel::clearSearch) {
-                                        Icon(Icons.Default.Close, contentDescription = "Clear")
-                                    }
-                                }
-                            },
-                            modifier = Modifier.focusRequester(searchFocusRequester)
-                        )
                     },
-                    expanded = false,
-                    onExpandedChange = {},
-                    windowInsets = WindowInsets(0),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
-                ) {}
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.onBackground
+                    )
+                )
+            },
+            floatingActionButton = {
+                FloatingActionButton(onClick = { showCreateSheet = true }) {
+                    Icon(Icons.Default.Add, contentDescription = "New List")
+                }
             }
-
-            PullToRefreshBox(
-                isRefreshing = uiState.isRefreshing,
-                onRefresh = { viewModel.refresh() },
-                modifier = Modifier.fillMaxSize()
+        ) { padding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
             ) {
-                when {
-                    uiState.isLoading -> {
-                        Column { repeat(8) { SkeletonChatListItem() } }
-                    }
-                    uiState.lists.isEmpty() && uiState.searchQuery.isNotEmpty() -> {
-                        Text(
-                            text = "No lists found",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.align(Alignment.Center)
-                        )
-                    }
-                    uiState.lists.isEmpty() -> {
-                        Column(
-                            modifier = Modifier.align(Alignment.Center),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Checklist,
-                                contentDescription = null,
-                                modifier = Modifier.size(64.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                AnimatedVisibility(
+                    visible = uiState.isSearchBarVisible,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    SearchBar(
+                        inputField = {
+                            SearchBarDefaults.InputField(
+                                query = uiState.searchQuery,
+                                onQueryChange = viewModel::onSearchQueryChange,
+                                onSearch = {},
+                                expanded = false,
+                                onExpandedChange = {},
+                                placeholder = { Text("Search lists…") },
+                                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                                trailingIcon = {
+                                    if (uiState.searchQuery.isNotEmpty()) {
+                                        IconButton(onClick = viewModel::clearSearch) {
+                                            Icon(Icons.Default.Close, contentDescription = "Clear")
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.focusRequester(searchFocusRequester)
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                        },
+                        expanded = false,
+                        onExpandedChange = {},
+                        windowInsets = WindowInsets(0),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 0.dp)
+                    ) {}
+                }
+
+                PullToRefreshBox(
+                    isRefreshing = uiState.isRefreshing,
+                    onRefresh = { viewModel.refresh() },
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    when {
+                        uiState.isLoading -> {
+                            Column { repeat(8) { SkeletonChatListItem() } }
+                        }
+                        uiState.lists.isEmpty() && uiState.searchQuery.isNotEmpty() -> {
                             Text(
-                                text = "No lists yet",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                            )
-                            Text(
-                                text = "Tap + to create one",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                text = "No lists found",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.align(Alignment.Center)
                             )
                         }
-                    }
-                    else -> {
-                        LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            items(uiState.lists, key = { it.id }) { listData ->
-                                ListRow(
-                                    listData = listData,
-                                    participants = uiState.participantAvatars[listData.id] ?: emptyList(),
-                                    isPinned = uiState.isPinned(listData),
-                                    onClick = { onListClick(listData.id) },
-                                    onLongClick = {
-                                        selectedListForAction = listData
-                                        viewModel.loadHistory(listData.id)
-                                    },
-                                    modifier = Modifier.testTag("list_row")
+                        uiState.lists.isEmpty() -> {
+                            Column(
+                                modifier = Modifier.align(Alignment.Center),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Checklist,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(64.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                                 )
-                                HorizontalDivider()
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    text = "No lists yet",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                                )
+                                Text(
+                                    text = "Tap + to create one",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                                )
+                            }
+                        }
+                        else -> {
+                            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                                items(uiState.lists, key = { it.id }) { listData ->
+                                    ListRow(
+                                        listData = listData,
+                                        participants = uiState.participantAvatars[listData.id] ?: emptyList(),
+                                        isPinned = uiState.isPinned(listData),
+                                        onClick = { onListClick(listData.id) },
+                                        onLongClick = {
+                                            selectedListForAction = listData
+                                            viewModel.loadHistory(listData.id)
+                                        },
+                                        modifier = Modifier.testTag("list_row")
+                                    )
+                                    HorizontalDivider()
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
+        // The chat picker the share target and message forwarding use, slid in
+        // over the tab. It owns its own visibility so it can animate back out;
+        // the fan-out across the picked chats is the ViewModel's.
+        ShareListPanel(
+            target = shareTargetList,
+            chats = uiState.chats,
+            currentUserId = uiState.currentUserId,
+            participants = uiState.chatParticipants,
+            onDismiss = { shareTargetList = null },
+            onShare = { listData, targets ->
+                viewModel.shareListToChats(listData, targets)
+                shareTargetList = null
+            },
+        )
     }
 
     if (showCreateSheet) {
@@ -307,8 +328,7 @@ internal fun ListsScreen(
                 viewModel.clearSelectedList()
             },
             onShare = {
-                shareListId = listData.id
-                showSharePicker = true
+                shareTargetList = listData
                 selectedListForAction = null
                 viewModel.clearSelectedList()
             },
@@ -330,18 +350,6 @@ internal fun ListsScreen(
         )
     }
 
-    if (showSharePicker) {
-        ForwardChatPicker(
-            chats = uiState.chats,
-            currentUserId = uiState.currentUserId,
-            onDismiss = { showSharePicker = false },
-            onForward = { chatId, _ ->
-                viewModel.shareListToChat(shareListId, chatId)
-                showSharePicker = false
-            },
-            users = uiState.chatParticipants
-        )
-    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -365,11 +373,7 @@ private fun ListRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
-            imageVector = when (listData.type) {
-                ListType.CHECKLIST -> Icons.Default.Checklist
-                ListType.SHOPPING -> Icons.Default.ShoppingCart
-                ListType.GENERIC -> Icons.AutoMirrored.Filled.List
-            },
+            imageVector = listData.typeIcon,
             contentDescription = null,
             modifier = Modifier.size(40.dp),
             tint = MaterialTheme.colorScheme.primary
@@ -384,16 +388,8 @@ private fun ListRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
-            val itemCount = listData.itemCount
-            val checkedCount = listData.checkedCount
-            val subtitle = when (listData.type) {
-                ListType.CHECKLIST, ListType.SHOPPING ->
-                    "$checkedCount/$itemCount checked"
-                ListType.GENERIC ->
-                    "$itemCount item${if (itemCount != 1) "s" else ""}"
-            }
             Text(
-                text = subtitle,
+                text = listData.summaryLine,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

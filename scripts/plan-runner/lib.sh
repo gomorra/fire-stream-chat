@@ -5,7 +5,7 @@
 # so the parser, the tripwire and the result classifier can be tested without
 # a session.
 #
-# Contract: .claude/plans/plan-runner.md §2.1 (Shipped / Decision blocks),
+# Contract: docs/plans/done/plan-runner.md §2.1 (Shipped / Decision blocks),
 # §2.3 (tripwire), §2.4 (Order grammar, checkpoints), §2.5 (result handling),
 # and the placeholder list at the top of scripts/plan-runner/step-prompt.md.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Plan runner — runs a multi-step plan unattended, one fresh headless Claude
 # session per step, in a dedicated worktree. Design and contract:
-# .claude/plans/plan-runner.md. Run it from a terminal, not from inside a
+# docs/plans/done/plan-runner.md. Run it from a terminal, not from inside a
 # Claude session.
 #
 #   scripts/run-plan.sh <plan.md> [--from N] [--dry-run] [--cap max|strong|mid] [--budget USD]
@@ -11,7 +11,7 @@
 #
 # The runner never commits and never pushes. Every commit on plan/<name> is a
 # step session's. State lives in the plan file (**Shipped** blocks) and in the
-# gitignored run log .claude/plans/.runs/<name>.log (one JSON object per line).
+# gitignored run log docs/plans/.runs/<name>.log (one JSON object per line).
 set -Eeuo pipefail
 # A driver crash must not look like a decision (2) or a block (3): report and exit 1.
 trap 'echo "plan-runner: internal error at line $LINENO (exit $?) — this is a driver bug, not a step result" >&2; exit 1' ERR
@@ -79,7 +79,7 @@ PLAN_REL=${PLAN_ABS#"$ROOT"/}
 NAME=$(basename "$PLAN_ABS" .md)
 BRANCH=plan/$NAME
 WT=$ROOT/.claude/worktrees/plan-$NAME
-RUNS=${PLAN_RUNNER_RUNS_DIR:-$ROOT/.claude/plans/.runs}   # override for the self-check
+RUNS=${PLAN_RUNNER_RUNS_DIR:-$ROOT/docs/plans/.runs}   # override for the self-check
 LOG=$RUNS/$NAME.log
 mkdir -p "$RUNS"
 
@@ -318,7 +318,7 @@ run_step() {
     fi
     RESULT_FILE=$RUNS/$NAME.step$STEP.$stamp.result.json
     log launched --arg step "$STEP" --arg start "$START_SHA" --arg tier "$TIER" --arg tagged "$TAGGED_TIER" \
-        --arg model "$MODEL" --arg budget "$BUDGET" --arg prompt "$(rel "$prompt_file")"
+        --arg model "$MODEL" --arg effort "$EFFORT" --arg budget "$BUDGET" --arg prompt "$(rel "$prompt_file")"
     say "step $STEP → $MODEL/$EFFORT, budget \$$BUDGET, floor $(pr_join "$FLOOR" none)"
     run_claude "$RESULT_FILE" "$prompt"
     SESSION_ID=$(result_get .session_id)

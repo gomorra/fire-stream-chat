@@ -7,7 +7,7 @@ import com.firestream.chat.domain.util.OverlayContent
  * what each of its hosts can actually do.
  *
  * The island of tabs in [PickerPanel] is **declared by the host**, not fixed
- * (`.claude/plans/image-editor.md` §2.8): the composer offers emoji, the
+ * (`docs/plans/image-editor.md` §2.8): the composer offers emoji, the
  * reaction sheet offers emoji, and the image editor offers emoji, stickers,
  * text and shapes. A host that declares one tab renders no island at all, so
  * nothing ever ships greyed-out and unreachable.

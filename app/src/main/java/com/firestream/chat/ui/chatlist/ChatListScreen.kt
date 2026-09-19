@@ -69,6 +69,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
 import com.firestream.chat.ui.chat.FullscreenImageViewer
+import com.firestream.chat.ui.components.sendRecipientId
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -234,7 +235,7 @@ fun ChatListScreen(
                                     currentUserId = uiState.currentUserId,
                                     contacts = uiState.contacts,
                                     onlineUserIds = uiState.onlineUserIds,
-                                    onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                    onClick = { onChatClick(chat.id, chat.sendRecipientId(uiState.currentUserId)) },
                                     onAvatarClick = { openAvatarFullscreen(chat) },
                                     onDelete = { viewModel.requestDeleteChat(chat.id) },
                                     onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -255,7 +256,7 @@ fun ChatListScreen(
                                 currentUserId = uiState.currentUserId,
                                 contacts = uiState.contacts,
                                 onlineUserIds = uiState.onlineUserIds,
-                                onClick = { onChatClick(chat.id, chat.recipientId(uiState.currentUserId)) },
+                                onClick = { onChatClick(chat.id, chat.sendRecipientId(uiState.currentUserId)) },
                                 onAvatarClick = { openAvatarFullscreen(chat) },
                                 onDelete = { viewModel.requestDeleteChat(chat.id) },
                                 onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -435,8 +436,3 @@ private fun MuteDialog(
         }
     )
 }
-
-private fun Chat.recipientId(currentUserId: String): String =
-    if (type == ChatType.INDIVIDUAL) participants.firstOrNull { it != currentUserId } ?: ""
-    else ""
-

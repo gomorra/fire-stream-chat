@@ -9,7 +9,7 @@
 # Headless guard: a plan-runner step session (PLAN_RUNNER=1, exported by
 # scripts/run-plan.sh) or any session without a terminal has nobody to answer
 # the prompt below — reading /dev/tty would hang the commit forever. Let it
-# through untouched. See .claude/plans/plan-runner.md §2.7.
+# through untouched. See docs/plans/done/plan-runner.md §2.7.
 if [ "${PLAN_RUNNER:-}" = 1 ] || ! { : < /dev/tty; } 2>/dev/null; then
     exit 0
 fi

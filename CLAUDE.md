@@ -113,11 +113,11 @@ Do not reimplement either with a custom review prompt.
 ### Token efficiency
 
 - When a plan file exists with specific file paths, read those files directly instead of launching Explore agents. Only explore when the plan lacks sufficient detail.
-- When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `.claude/plans/...`") to avoid redundant exploration.
+- When starting a session for a planned step, reference the plan file path (e.g., "implement step 5.2 per `docs/plans/...`") to avoid redundant exploration.
 
 ### Plan runner
 
-Multi-step plans run unattended with `scripts/run-plan.sh <plan-path> [--from N] [--dry-run] [--cap <tier>]` from a terminal (not from inside a Claude session). One fresh headless session per step in a dedicated worktree on `plan/<name>`; the plan file is the state — a step is done when a `**Shipped**` block sits under its heading, written by the step session in a `docs(plan):` commit after its green code commit. The driver stops for `needs_decision` (resume the printed session to answer), `blocked`, and every `‖` checkpoint; it never pushes. A plan finished partly by hand needs `**Shipped**` lines for its done steps or `--from N` — always `--dry-run` first. Contract and design: `.claude/plans/plan-runner.md`; result schema and prompt template: `scripts/plan-runner/`.
+Multi-step plans run unattended with `scripts/run-plan.sh <plan-path> [--from N] [--dry-run] [--cap <tier>]` from a terminal (not from inside a Claude session). One fresh headless session per step in a dedicated worktree on `plan/<name>`; the plan file is the state — a step is done when a `**Shipped**` block sits under its heading, written by the step session in a `docs(plan):` commit after its green code commit. The driver stops for `needs_decision` (resume the printed session to answer), `blocked`, and every `‖` checkpoint; it never pushes. A plan finished partly by hand needs `**Shipped**` lines for its done steps or `--from N` — always `--dry-run` first. Contract and design: `docs/plans/done/plan-runner.md`; result schema and prompt template: `scripts/plan-runner/`.
 
 ## Architecture
 
@@ -167,6 +167,7 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 - **`FlavorBootstrap` for flavor-specific eager init** — per-flavor `Application.onCreate` work binds into a Hilt `Set<FlavorBootstrap>`; never branch on `BuildConfig.FLAVOR` in `app/src/main/`. → [PATTERNS.md#flavor-specific-eager-init-via-flavorbootstrap](docs/PATTERNS.md#flavor-specific-eager-init-via-flavorbootstrap)
 - **Image edits rasterize per screen** — each editor screen flattens its layer to a new JPEG in `cacheDir/edits/`; the chain of files is the undo history and overlay geometry is normalized to the image. → [PATTERNS.md#image-edits-rasterize-per-screen-overlay-geometry-is-normalized](docs/PATTERNS.md#image-edits-rasterize-per-screen-overlay-geometry-is-normalized)
 - **`MediaProcessingLimiter` owns the concurrency bound** — decode/compress/transcode is capped process-wide at 2; batch callers own *ordering* only, never their own semaphore. → [PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering](docs/PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering)
+- **One chat picker, three hosts** — every "send this to a chat" surface renders `ChatPickerPanel`; a send is addressed to a recipient only in a 1:1 (`sendRecipientId`), never in a group. → [PATTERNS.md#one-chat-picker-three-hosts](docs/PATTERNS.md#one-chat-picker-three-hosts)
 - **Sends are idempotent by client id and drained by `OutboxWorker`** — a retryable send is a `SENDING` row plus one unique work per message id; the repository stops at `OutboxScheduler.enqueue`, a queued row is only ever written by a `MessageRecord` upsert, a column update or the worker, and nothing flips `SENDING` to `FAILED` for looking old. → [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](docs/PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker)
 
 ### Discovery & maintenance
@@ -181,7 +182,7 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
   - host-specific (JDK path, emulator flag, device serial, keystore location) → local memory **only** — committing it would mislead a cloud sandbox.
 
   The `.claude/hooks/promote-memory.sh` PostToolUse hook raises this question automatically on any write into the store; it is a reminder, not a gate.
-- **Plans** — in-flight plans live in `.claude/plans/`; shipped plans archive to `.claude/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
+- **Plans** — in-flight plans live in `docs/plans/`; shipped plans archive to `docs/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
 - **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
 
 ## Navigation

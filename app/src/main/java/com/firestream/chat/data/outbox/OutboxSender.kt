@@ -3,8 +3,10 @@
 //   backend — compress / transcode, video thumbnail, upload, encrypt once, the
 //   write, the SENT transaction and the chat preview. Reads the row and skips
 //   every step it already records, so a first attempt and a retry run the same
-//   code. Covers TEXT, IMAGE, VIDEO, DOCUMENT, VOICE, LOCATION (SENDABLE_TYPES),
-//   and the tombstone of a row deleted while it was queued.
+//   code. Which file the media dir keeps for an image — the encoding, or under
+//   "Keep Original Images" the input — is decided here too. Covers TEXT, IMAGE,
+//   VIDEO, DOCUMENT, VOICE, LOCATION (SENDABLE_TYPES), and the tombstone of a
+//   row deleted while it was queued.
 // Owns: uploadProgress (MessageRepository re-exposes it); the outbox columns on
 //   MessageEntity — the attempt count, the stored ciphertext — and the if-absent
 //   decision the count drives; one in-process lock per message id, so a REPLACE
@@ -18,7 +20,7 @@
 // Don't put here: validation, the optimistic insert, staging the input, the
 //   block check and FAILED marking — they stay in MessageRepositoryImpl and
 //   OutboxWorker, where a definite block and an unanswerable block check part
-//   ways (.claude/plans/offline-outbox.md §2.5). The encrypt-or-plaintext
+//   ways (docs/plans/offline-outbox.md §2.5). The encrypt-or-plaintext
 //   decision — MessageWriter. No semaphore of its own either —
 //   "MediaProcessingLimiter owns the concurrency bound" (docs/PATTERNS.md).
 // endregion
@@ -244,6 +246,14 @@ class OutboxSender @Inject constructor(
         // want a local file the row may not have.
         if (stored.mediaUrl != null) return stored
         var row = stored
+        // Decided only for a row no attempt has encoded yet: one an earlier run
+        // compressed into the media dir finishes as it began, whatever the
+        // preference says now, so the local file and the upload never disagree.
+        if (row.type == MessageType.IMAGE && row.mediaWidth == null &&
+            preferencesDataStore.keepOriginalImagesFlow.first()
+        ) {
+            return uploadKeepingOriginal(row)
+        }
         if (row.type in LOCAL_FILE_TYPES && row.mediaWidth == null) {
             row = persist(encodeToLocalFile(row))
         }
@@ -297,19 +307,60 @@ class OutboxSender @Inject constructor(
         )
     }
 
+    /**
+     * The "Keep Original Images" send: the backend gets the encoding at the row's
+     * HD setting, the media dir — what this user's own bubble shows and what the
+     * SENT row keeps — the untouched input.
+     *
+     * One step, persisted only once the upload is through, rather than the plain
+     * pipeline's encode-then-upload with a resume point between. A persisted
+     * half — the original as the local file, no dimensions yet — would look to
+     * the plain pipeline like an input still to encode, and since `copyToLocal`
+     * never overwrites, a re-attempt under a toggled-off preference would upload
+     * the original. Persisting nothing means a re-attempt starts over; the
+     * encode is deterministic and the upload idempotent by storage id. (The copy
+     * itself lands before the persist, so the same mix-up needs the process to
+     * die in that gap *and* the preference to flip before the retry.)
+     */
+    private suspend fun uploadKeepingOriginal(row: Message): Message {
+        val source = localUriOf(row)
+        val encoded = imageCompressor.processImage(source, row.isHd)
+        val mediaUrl = try {
+            upload(row, Uri.fromFile(encoded.file), LocalFormat.JPEG.mimeType)
+        } finally {
+            encoded.file.delete()
+        }
+        // The input as it is, whatever it is: the media dir names every image
+        // `.jpg`, and every decoder here sniffs the bytes, so a PNG or HEIC pick
+        // still renders — only its name says jpg.
+        val localFile = mediaFileManager.copyToLocal(row.chatId, row.id, source, LocalFormat.JPEG.extension)
+        return persist(
+            row.copy(
+                localUri = localFile.absolutePath,
+                mediaWidth = encoded.width,
+                mediaHeight = encoded.height,
+                mediaUrl = mediaUrl,
+            )
+        )
+    }
+
     /** Uploads the row's local file unless an earlier attempt already did, then persists `mediaUrl`. */
     private suspend fun uploadIfNeeded(row: Message, mimeType: String): Message {
         if (row.mediaUrl != null) return row
+        return persist(row.copy(mediaUrl = upload(row, localUriOf(row), mimeType)))
+    }
+
+    /** Uploads [uri] under the row's id, publishing progress for every type but voice, and returns the URL. */
+    private suspend fun upload(row: Message, uri: Uri, mimeType: String): String {
         // Voice sends have never reported upload progress.
         val onProgress: ((Float) -> Unit)? = if (row.type == MessageType.VOICE) null else { progress ->
             _uploadProgress.update { it + (row.id to progress) }
         }
-        val mediaUrl = try {
-            storageSource.uploadMedia(row.chatId, row.id, localUriOf(row), mimeType, onProgress)
+        return try {
+            storageSource.uploadMedia(row.chatId, row.id, uri, mimeType, onProgress)
         } finally {
             _uploadProgress.update { it - row.id }
         }
-        return persist(row.copy(mediaUrl = mediaUrl))
     }
 
     /** Writes a finished step back to Room so the next attempt resumes after it. */

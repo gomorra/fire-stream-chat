@@ -7,7 +7,11 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -42,6 +46,13 @@ internal fun MainScreen(
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
 
+    // A tab that has put a full-screen panel over itself (the Lists tab's chat
+    // picker) locks the pager: the panel covers the page, so a sideways drag on
+    // it would otherwise flip to the next tab and leave the panel open on top of
+    // it. The pager is this screen's, so the lock is too — a tab swallowing the
+    // drags itself would hide the conflict from the one composable that owns it.
+    var tabOverlayOpen by remember { mutableStateOf(false) }
+
     // Restore the last-selected tab on first composition. DataStore is async,
     // so we read once and scroll instead of blocking initial render — the
     // CHAT_LIST route enter animation hides the brief first frame on page 0.
@@ -70,6 +81,7 @@ internal fun MainScreen(
     ) { padding ->
         HorizontalPager(
             state = pagerState,
+            userScrollEnabled = !tabOverlayOpen,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
@@ -89,7 +101,8 @@ internal fun MainScreen(
                     onListClick = onListClick,
                     onListCreated = onListCreated,
                     deletedListTitle = deletedListTitle,
-                    onDeletedListTitleConsumed = onDeletedListTitleConsumed
+                    onDeletedListTitleConsumed = onDeletedListTitleConsumed,
+                    onOverlayVisibleChange = { tabOverlayOpen = it },
                 )
             }
         }

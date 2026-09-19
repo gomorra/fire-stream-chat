@@ -22,7 +22,6 @@
 package com.firestream.chat.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -61,13 +60,13 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.reminders.ScheduledRemindersScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
+import com.firestream.chat.ui.components.SCREEN_SLIDE_DURATION_MS
+import com.firestream.chat.ui.components.ScreenSlideEasing
 import kotlinx.coroutines.flow.first
 
-// iOS spring-style easing (equivalent to UIView.animate defaultCurve). Shared by all
-// four NavHost transition lambdas so the bezier is allocated once at file init, not
-// on every navigation event.
-private val NavSlideEasing = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
-private const val NAV_SLIDE_DURATION_MS = 500
+// The curve and the standard duration are ui/components/ScreenMotion.kt's, so a
+// panel slid over a screen (the chat picker) moves exactly as a pushed one.
+private const val NAV_SLIDE_DURATION_MS = SCREEN_SLIDE_DURATION_MS
 private const val NAV_SLIDE_DURATION_MS_SLOW = 600
 // Launch-restore navigations cross-fade quickly instead of sliding — fast
 // enough to read as "the app opened here", not as a navigation.
@@ -285,26 +284,26 @@ fun FireStreamNavGraph(
             if (isLaunchRestore()) fadeIn(tween(LAUNCH_RESTORE_FADE_MS))
             else slideInHorizontally(
                 initialOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = ScreenSlideEasing)
             )
         },
         exitTransition = {
             if (isLaunchRestore()) fadeOut(tween(LAUNCH_RESTORE_FADE_MS))
             else slideOutHorizontally(
                 targetOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = ScreenSlideEasing)
             )
         },
         popEnterTransition = {
             slideInHorizontally(
                 initialOffsetX = { fullWidth -> -(fullWidth / 3) },
-                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = ScreenSlideEasing)
             )
         },
         popExitTransition = {
             slideOutHorizontally(
                 targetOffsetX = { fullWidth -> fullWidth },
-                animationSpec = tween(navSlideDuration(), easing = NavSlideEasing)
+                animationSpec = tween(navSlideDuration(), easing = ScreenSlideEasing)
             )
         }
     ) {

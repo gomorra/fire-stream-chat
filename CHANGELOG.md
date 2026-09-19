@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.32.0] — 2026-09-18
+## [UNRELEASED] [1.33.0] — 2026-09-19
 
 ### Added
 
@@ -11,6 +11,36 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Changed
 
 - **A zoomed photo in the fullscreen viewer stops at the edge of the screen.** Panning a zoomed photo could slide it right off the screen, leaving a black view with nothing to grab. The viewer now keeps the photo covering the screen wherever it is large enough to, and centred where it is not, the same rule the send preview uses. (`4c42e10`)
+
+## [1.32.0] — 2026-09-18
+
+### Added
+
+- **"Keep Original Images": your own copy of a sent photo stays untouched.** A photo taken with the camera inside the app existed nowhere but in the app's cache, so once it had been sent, the compressed version was all that was left of it. With the new Settings toggle on, the copy kept on your phone — what your own bubble and the fullscreen viewer show — is the photo exactly as it was taken or picked, while the recipient still gets the size chosen with the HD pill; HD decides only what leaves the phone. Off by default. (`2757412`)
+
+### Changed
+
+- **"Forward to" is now the same panel as sharing, and takes several chats at once.** Forwarding a message opened a cramped list in a dialog box, while sharing something into FireStream from another app opened a proper panel — a preview of what you are sending, a search field, and a tick beside every chat. Forwarding now opens that same panel, sliding in exactly as the share one does: the message you are forwarding is shown at the top, you can search for a chat by name, tick as many as you like and send to all of them in one go, and a short confirmation names where it went. Sharing a list from the Lists tab opens the same panel too. (`4ac396a`)
+
+- **Search now finds parts of words, not only whole ones.** Searching in a chat, or across all of them, only ever matched complete words: while a word was still being typed the results stayed empty, and a word sitting inside a longer one — "Geschenk" in "Geburtstagsgeschenk", "Termin" in "Termine" — could not be found at all. From two letters onwards, search matches anywhere inside a word. A single letter still means the word it spells, because as a fragment it would match very nearly every message you have. Two things follow: a short search fills its page of results sooner, so "there may be more" appears more often than it did, and a search that was cut off by that limit can no longer come back empty while real matches sit further back in the chat. (`1ab4a52c`)
+
+### Fixed
+
+- **A message forwarded into a group is no longer readable by only one member.** The forward was addressed to a single arbitrary member of the group rather than to the group itself, and an addressed message is encrypted for that one person's device — so in a release build everyone else in the group would have received something they could not read. A forward, a share and a list now all address a group the same way every other group message does. (`4ac396a`)
+
+- **A caption typed for photos you have just picked lands in the caption box, not in the chat.** Picking several images from the gallery opens them for review with a caption box at the bottom, but the keyboard that came back up with it was still attached to the chat's own message box behind the review screen: what you typed appeared nowhere, and turned up in the chat's message box once the photos had gone out. The caption box now takes the keyboard the moment the review screen opens, and when no keyboard is up the screen keeps typing to itself rather than letting it through to the chat behind — without opening a keyboard over the photo you came to look at. (`4c4aaf5f`)
+
+- **The emoji size panel is always on screen, whichever emoji you hold.** Holding an emoji in the last column of the picker and dragging to resize it showed no size bar and no percentage: the panel picked the side of the emoji to sit on by counting cells from the top of the list, which is off by one from the first category heading on, so for a right-most emoji it usually chose the right and drew itself past the edge of the screen. The panel now measures itself and sits to the right of the held emoji only when it fits, and to its left otherwise, so it stays visible at every size. The fade of the other emojis in the same row counted rows the same way and now follows the row you are actually holding. (`1d1cd78b`)
+
+- **The other person no longer flashes "Online" for an instant when you send them a message.** If they had opened the app on a bad connection and put it away again, their phone was left holding an "online" note it could not deliver, followed by the "offline" one; the moment a message sent to them woke their phone's connection, both notes went out one after the other and you saw them online for a blink. The "online" note is now only written over a working connection, and their phone reports itself online by itself once it reconnects. (`c02b4b4`)
+
+- **Someone typing to you now reads as "Online" at once.** The typing dots and the online status reach you over two separate connections that come back at their own pace, so after the other person had been away for a while their typing could show for several seconds while the top bar still said nothing. The top bar now says "Online" whenever the other person is typing, whatever the presence connection has managed to report so far. (`c02b4b4`)
+
+- **Typing dots no longer stay stuck when the other person's connection drops mid-typing.** Their phone tells yours when they stop typing, but that note is lost if their connection fails or the app is closed at that moment, and your chat kept showing the dots until someone sent a message. The dots now go away on their own about ten seconds after the last keystroke you were told about. (`c02b4b4`)
+
+- **The chat no longer scrolls away while you are picking a reaction.** With the reaction bar or the emoji sheet open on a message, a new message arriving at that moment pulled the conversation down to the bottom — and since any scroll closes the reaction bar, the row of emoji you had just opened disappeared under your thumb before you could tap one. The chat now stays exactly where it is for as long as a reaction is open. The new message is not lost: it is waiting at the bottom, with the unread marker, the moment you are done. (`f704c39`)
+
+- **An emoji from the picker now lands where the cursor is, instead of at the end of the message.** Whatever you had written, and wherever you had tapped in it, the emoji was stuck onto the end, so putting one in the middle of a sentence meant retyping everything after it. The panel's backspace key had the same fault: it deleted the last character of the message rather than the one in front of the cursor. Both now work from the cursor — the emoji goes in where you left it, replacing the selected text if you had selected any, and backspace takes the character in front of it, a flag or a family emoji in one press. The caption under a photo you are about to send behaves the same way. (`39ebf89`, `45d26ee`)
 
 ## [1.31.1] — 2026-09-14
 
@@ -142,9 +172,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **A deleted photo could have come back as a thumbnail in a media browse.** Deleting a message blanks its text but keeps the file reference, which was invisible to a text search and would not have been to a filter-only one. Search now excludes deleted messages outright, so what it can return matches what the conversation actually shows. Tapping a result that can no longer be reached — including a photo whose file is gone — also says so and keeps your results, rather than doing nothing at all. (`56cb67a`)
 
-- **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so.
+- **Search result counts could be presented as exact when they weren't.** Search fetches a capped page and then narrows it to whole-word matches, so a search for "cat" in a chat full of "category" could fill its page with near-misses, show the two real hits as "2 results", and never fetch the older ones. The count now reports truncation from the layer that saw the full page, so a capped search says so. (`261704d`)
 
-- **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing.
+- **Back out of a search, not out of the conversation.** With search open — including the media grid "Shared Media" now opens — the system back button closed the chat entirely, since search is an overlay rather than a screen of its own. It closes the search and leaves you where you were. An empty result also takes the whole pane now, instead of a one-line note above the conversation that made "Shared Media" in a chat with no photos look like it had done nothing. (`261704d`)
 
 - **Search results named the sender by a raw account id.** Every text result in a conversation search was headed by a twelve-character fragment of the sender's internal id — `fIBTup2Ablac` — where a name belongs, which told you nothing about who wrote the message you were looking at. Results now say **You** for your own messages and the person's name for everyone else's, falling back to the group name; the same resolver now serves the reminder notifications and the `.remind` widget, which had each grown their own copy of it. (`57f7cfa`)
 
@@ -171,8 +201,9 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **The chat keyboard now offers a line-break key instead of a send key.** The Enter key in the message composer used to be a Send button, which meant a message could never contain a line break — pressing it fired the message off mid-thought. Enter now inserts a newline, so lists, addresses and paragraphs can be typed the way they read; sending is what the send button next to the composer has always been for. The same applies while editing a message, since it's the same field.
-- **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled".
+- **The chat keyboard now offers a line-break key instead of a send key.** The Enter key in the message composer used to be a Send button, which meant a message could never contain a line break — pressing it fired the message off mid-thought. Enter now inserts a newline, so lists, addresses and paragraphs can be typed the way they read; sending is what the send button next to the composer has always been for. The same applies while editing a message, since it's the same field. (`c9986a5`)
+
+- **The long-press "Snooze" entry is now called "Reminder".** Every other surface of this feature already said *reminder* — the entry that replaces it once one is pending reads "Cancel reminder", the picker that opens is headed "Remind me…", the composer command is `.remind`, and the list in Settings is "Scheduled Reminders". Only the entry that starts the whole flow said "Snooze", which made it read like a separate feature. The two follow-on mentions moved with it: the empty Scheduled Reminders screen now points at "Reminder", and the Settings subtitle says "Message reminders you've scheduled". (`1629663`)
 
 ## [1.20.0] — 2026-07-25
 
@@ -239,7 +270,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`5815b28`)
+- **Profile Shared Media thumbnails no longer go black.** The Shared Media section on the user profile / chat-detail screen (reached by tapping a chat's avatar/name) had its own grid that still used the plain decode path, so its tiles for large old images stayed black even after the standalone Shared Media screen was fixed. Both grids now render through one shared `SharedMediaTile` composable that decodes via Android's `ImageDecoder`, so the two look identical and neither goes black. A shared video keeps showing its thumbnail (the decoder falls back to Coil's default for video sources). (`d65b193`)
 
 ## [1.17.2] — 2026-07-23
 
@@ -263,7 +294,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`bc9d6bc`)
+- **Shared Media thumbnails no longer go black.** In a chat's Shared Media gallery, some tiles — mostly large, older images sent before on-send compression — rendered as solid black even though tapping opened the correct full image. The grid handed full-resolution images to Coil with hardware bitmaps enabled, and a fast-scrolled 3-wide grid exhausted the process hardware-bitmap budget. Grid tiles now decode with hardware bitmaps disabled (still downsampled to tile size), prefer the already-downloaded on-disk copy when present, and show a broken-image icon instead of black if a load genuinely fails. (`e6deaae`)
 
 ## [1.16.1] — 2026-07-22
 
@@ -413,7 +444,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **Update notification now taps directly into download.** Previously tapping the \"update available\" notification opened Settings at the top, requiring the user to scroll to the bottom, tap \"Check for updates\", wait for the network check, and then confirm the download. The notification now carries a `focusUpdate` flag that makes Settings auto-scroll to the update row and immediately fire the update check on arrival — the \"Update available\" dialog appears automatically and the user only needs to tap \"Update now\" to start the download. Notification copy updated from \"Open Settings → Check for updates to install\" to \"Tap to download and install\" to reflect this.
+- **Update notification now taps directly into download.** Previously tapping the "update available" notification opened Settings at the top, requiring the user to scroll to the bottom, tap "Check for updates", wait for the network check, and then confirm the download. The notification now carries a `focusUpdate` flag that makes Settings auto-scroll to the update row and immediately fire the update check on arrival — the "Update available" dialog appears automatically and the user only needs to tap "Update now" to start the download. Notification copy updated from "Open Settings → Check for updates to install" to "Tap to download and install" to reflect this.
 
 ## [1.9.3] — 2026-05-14
 
@@ -498,7 +529,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Debug builds now use the release keystore so they can self-update over release APKs.** Without a local `releaseStoreFile` in `local.properties` (or `RELEASE_STORE_FILE` in the env), debug builds previously used the auto-generated debug keystore, while release builds used the release keystore from CI. This mismatch caused the system installer to reject in-place upgrades when the APK signature changed, resulting in "App not installed" errors during self-updates. The fix makes both build types use the same release keystore when available, ensuring consistent signatures and seamless upgrades across debug and release installs. When the release keystore is not configured, both builds fall back to the debug keystore as before. (`65fa6f3`)
+- **Debug builds now use the release keystore so they can self-update over release APKs.** Without a local `releaseStoreFile` in `local.properties` (or `RELEASE_STORE_FILE` in the env), debug builds previously used the auto-generated debug keystore, while release builds used the release keystore from CI. This mismatch caused the system installer to reject in-place upgrades when the APK signature changed, resulting in "App not installed" errors during self-updates. The fix makes both build types use the same release keystore when available, ensuring consistent signatures and seamless upgrades across debug and release installs. When the release keystore is not configured, both builds fall back to the debug keystore as before. (`b3d3691`)
 
 ## [1.6.1] — 2026-05-01
 

@@ -17,7 +17,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **When to revisit.** The next time someone is actively debugging E2E decryption on a real device with encryption re-enabled (recall `BuildConfig.DEBUG` disables Signal in debug builds), or when we gain integration tests that exercise the full snapshot → decrypt → Room pipeline. Don't take this on as a standalone "cleanup" task.
 
-**Related:** finding #2 from the April 2026 audit at `/root/.claude/plans/graceful-mixing-plum.md`.
+**Related:** finding #2 from the April 2026 audit at `/root/docs/plans/graceful-mixing-plum.md`.
 
 ---
 
@@ -177,7 +177,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **The smell.** `ChatViewModel.ensureLocalCopiesIfBrowsingMedia` fires `messageRepository.ensureLocalCopiesForChat(chatId)` on `@ApplicationScope` the first time a Photos or Videos chip activates in a chat. That call deliberately **bypasses the auto-download preference** and downloads every not-yet-local image, video and document in the chat. Before the search merge it took navigating to a dedicated Shared Media screen; now an idle chip tap while text-searching starts it, on a metered connection, with no way to cancel — it is on the application scope precisely so it survives the user leaving.
 
-**Why we haven't changed it.** It is what makes the browse worth opening: the grid fetches these files over the network to render them anyway, so without the backfill every re-entry re-downloads the same remote-only media. That was the original rationale in `SharedMediaViewModel`, and the chat-search-filters plan carried it over deliberately (`.claude/plans/done/chat-search-filters.md`, step 6). Narrowing it to the explicit "Shared Media" entry point would leave the chip-opened browse — now the *primary* way in — re-downloading forever, which is the bug the backfill exists to prevent. It is also once-per-ViewModel, so it cannot loop.
+**Why we haven't changed it.** It is what makes the browse worth opening: the grid fetches these files over the network to render them anyway, so without the backfill every re-entry re-downloads the same remote-only media. That was the original rationale in `SharedMediaViewModel`, and the chat-search-filters plan carried it over deliberately (`docs/plans/done/chat-search-filters.md`, step 6). Narrowing it to the explicit "Shared Media" entry point would leave the chip-opened browse — now the *primary* way in — re-downloading forever, which is the bug the backfill exists to prevent. It is also once-per-ViewModel, so it cannot loop.
 
 **When to revisit.** If a real device on a metered connection shows this costing meaningful data, or if the auto-download preference gains a "never, and mean it" setting. The honest fix is probably to gate the backfill on the browse actually rendering results, or to scope it to the filtered result set rather than the whole chat, rather than to move where it fires. Raised by the code-review pass on `56cb67a`…`261704d` (2026-09-07).
 
@@ -195,7 +195,9 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ### "What is this chat called" has three divergent copies
 
-**The smell.** Resolving a chat's display name — 1:1 → the other participant's contact name, else `chat.name`, else a fallback — is written three times, and the three already disagree. `ui/chatlist/ChatListItem.kt` does `?: chat.name ?: "Chat"` with no blank check, so a chat whose `name` is `""` renders an empty row. `ui/search/GlobalSearchLabels.kt`'s `Chat?.displayTitle` adds `takeIf { it.isNotBlank() }` and is the only one with unit tests. `ui/share/SharePickerViewModel.kt`'s `chatDisplayName` prefers `chat.name` *first* and falls back to a raw uid. The underlying "other participant of a 1:1" expression (`participants.firstOrNull { it != currentUserId }`) is hand-rolled ~15 more times across `ui/` — `ForwardChatPicker`, `ListShareSheet`, `ArchivedChatsScreen`, `ChatListScreen`, `SharePickerViewModel`.
+**The smell.** Resolving a chat's display name — 1:1 → the other participant's contact name, else `chat.name`, else a fallback — is written three times, and the three already disagree. `ui/chatlist/ChatListItem.kt` does `?: chat.name ?: "Chat"` with no blank check, so a chat whose `name` is `""` renders an empty row. `ui/search/GlobalSearchLabels.kt`'s `Chat?.displayTitle` adds `takeIf { it.isNotBlank() }` and is the only one with unit tests. The underlying "other participant of a 1:1" expression (`participants.firstOrNull { it != currentUserId }`) is hand-rolled ~15 more times across `ui/` — `ListShareSheet`, `ArchivedChatsScreen`, `ChatListScreen`, `ChatUtils`, `CallsViewModel`.
+
+**Partly resolved (2026-09-18).** The chat-picker unification collapsed the three picker copies — the share screen, the forward dialog and the Lists share dialog — into `Chat.pickerDisplayName` in `ui/components/ChatPickerPanel.kt`, which is name → 1:1 profile name → `"Chat"`, blank-checked and unit-tested. That also retired the raw-uid fallback `SharePickerViewModel` had. `ChatListItem` and `GlobalSearchLabels` still have their own, and `ChatListItem`'s blank-`name` hole is still open.
 
 **Why we haven't fixed it.** The global-search change (2026-09-08) consolidated the two copies it introduced into one `otherParticipant` helper inside `ui/search/`, but going further means one shared helper — `ui/components/`, or a `Chat` extension — that `ui/chatlist`, `ui/share` and `ui/search` all call. That is a refactor across three feature packages with no test coverage on two of them, landed on top of an already cross-cutting diff; doing it as a drive-by inside the search commit would have made a reviewable change unreviewable. The three call sites are also not quite the same function: `SharePickerViewModel` keys on `User`, the other two on `Contact`.
 
@@ -217,7 +219,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **The smell.** `ImageEditGeometry.WORKING_MAX_DIMENSION` decodes every edit pass at 4096 px on the long edge, so an HD send of a photo the user *edited* carries less detail than an HD send of the same photo untouched — which keeps its full resolution through `ImageCompressor`. Two images that look identical in the preview leave the device at different resolutions, and nothing in the UI says so.
 
-**Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `.claude/plans/image-editor.md` §2.1 weighed and rejected for this feature.
+**Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `docs/plans/image-editor.md` §2.1 weighed and rejected for this feature.
 
 **When to revisit.** If generational quality loss or the ceiling turns out to be visible in practice — the trigger §5 of the plan records for reopening the accumulated-`ImageEdit` decision. Revisit the two together, never separately: raising the ceiling without changing the model just moves the OOM. Landed with Phase 2 of the image editor (2026-09-09).
 
@@ -249,7 +251,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ## PocketBase v0 walking-skeleton — follow-ups
 
-The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `.claude/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
+The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `docs/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
 
 ### PocketBase push: automate FCM access-token refresh
 
@@ -361,11 +363,23 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### The "who is this send addressed to" rule is enforced by a UI helper, not by the send API
+
+**The smell.** `MessageRepository`'s six send entry points take `recipientId: String`, and the emptiness of that string *is* the crypto decision: `SendTarget.of("")` means "plaintext, everyone in the chat can read it", anything else means "encrypt to this Signal session". The invariant is documented in a `@param` on `sendMessage` — "callers must pass an empty string… passing an arbitrary group member as the recipient will encrypt the message for that single member" — and the chat-picker work (2026-09-18) landed after exactly that paragraph had been disobeyed by the forward dialog. The fix made every picker go through one `Chat.sendRecipientId`, but that is a UI helper: ~25 call sites across `ChatMessageSender`, `ChatMessageActions`, `ChatViewModel`, `ChatScreen` and `SharePickerViewModel` still pass a bare `String`, and `sendVoiceMessage`, `sendLocationMessage` and `retryFailedMessage` have no equivalent guard at all. The next caller that forgets rebuilds the same release-only encryption bug.
+
+**Why we haven't fixed it.** Making it unrepresentable means changing the repository API — either resolving `SendTarget` inside `MessageRepositoryImpl` from `chatId` (it already injects `ChatDao`, so `recipientId` could leave the signature entirely, at the cost of a read on the send path) or lifting `SendTarget` into `domain/` and taking that instead of a `String`. Both touch every send path, the outbox row construction and the block check, which is a change of its own shape — not something to land inside a picker-consolidation diff. Raised by the altitude reviewer on that diff.
+
+**When to revisit.** The next time a send entry point is added or `SendTarget` is touched — a seventh `recipientId: String` parameter is the trigger. Do it as a repository change with the encryption tests (`MessageRepositoryForwardTest`, `MessageRepositoryBlockTest`) extended to cover a group target on every path.
+
+---
+
 ### "Who is the other participant" is reimplemented at ~11 call sites
 
-**The smell.** `participants.filter { it != currentUserId }` (or `.firstOrNull { … }`) appears independently in at least `ChatUtils.kt:106`, `ChatListViewModel.kt:122`, `CallsViewModel.kt:76`, `ListShareSheet.kt:57/91`, `ForwardChatPicker.kt:48`, and now `BootRestoreLogic.resolveOtherUserId`. Flagged by the altitude reviewer during the timer-alarm work (2026-07-25). The copies do not agree on group chats: every prior one takes `firstOrNull` (an arbitrary "other" member), while the new one takes `singleOrNull` (null unless it's genuinely 1:1). That divergence is deliberate where it landed — a deep link needs the *real* 1:1 partner, and `firstOrNull` on a group would produce a wrong-but-plausible sender id that navigates to the wrong place — but it does mean the codebase now answers the same question two ways.
+**The smell.** `participants.filter { it != currentUserId }` (or `.firstOrNull { … }`) appears independently in at least `ChatUtils.kt:106`, `ChatListViewModel.kt:122`, `CallsViewModel.kt:76`, `ListShareSheet.kt:57/91`, and `BootRestoreLogic.resolveOtherUserId`. Flagged by the altitude reviewer during the timer-alarm work (2026-07-25). The copies do not agree on group chats: every prior one takes `firstOrNull` (an arbitrary "other" member), while the new one takes `singleOrNull` (null unless it's genuinely 1:1). That divergence is deliberate where it landed — a deep link needs the *real* 1:1 partner, and `firstOrNull` on a group would produce a wrong-but-plausible sender id that navigates to the wrong place — but it does mean the codebase now answers the same question two ways.
 
 **Why we're not fixing it now.** The right form is one `Chat.otherParticipantId(currentUserId)` on the domain model with the group semantics decided once. That is a ~11-site refactor spanning ViewModels, UI pickers, and data — well outside the timer diff that surfaced it, and each site needs a judgement call about which semantics it actually wanted, which is exactly the kind of thing that goes wrong when done in bulk without per-site review.
+
+**Partly resolved (2026-09-18) — and one of those bugs did land.** Every chat picker now goes through `Chat.sendRecipientId(currentUserId)` in `ui/components/ChatPickerPanel.kt`, which answers with the other participant **only for `INDIVIDUAL`** and with `""` otherwise. The forward dialog's copy had taken `firstOrNull` regardless of chat type, so forwarding into a group addressed the send to one arbitrary member — in a release build, encrypting it to that member's Signal session alone. `ChatListScreen`'s byte-identical private copy went with it. The helper lives in `ui/components/ChatTargets.kt` (Compose-free, so a ViewModel can call it) rather than on the domain model, because the deeper fix is the repository API above, not another domain extension; the remaining call sites — `ChatUtils`, `CallsViewModel`, `ChatListViewModel`, `ListShareSheet`, `GlobalSearchLabels`, and `ChatListScreen`'s nullable avatar lookup — still hand-roll it. `ui/lists/ListShareSheet` is the one that also still resolves a display name its own way (no blank check), so the two Lists dialogs can disagree about what a chat is called.
 
 **When to revisit.** Next time a bug is traced to one of these copies, or when group-chat support in calls/deep-links is next touched. Do it as its own change with each call site re-decided explicitly, not as a drive-by.
 
@@ -403,7 +417,7 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ### The image editor's resize presets cannot exceed `ImageCompressor.MAX_DIMENSION`
 
-**The smell.** `.claude/plans/image-editor.md` §2.5 says "an explicit resize wins. If the
+**The smell.** `docs/plans/image-editor.md` §2.5 says "an explicit resize wins. If the
 user sets an output long edge in the adjust screen, that is the resolution; HD then governs
 only the encode quality (100 vs 80), not a second downscale." Nothing carries that choice
 into the send: `MessageRepositoryImpl.sendMediaMessage` calls

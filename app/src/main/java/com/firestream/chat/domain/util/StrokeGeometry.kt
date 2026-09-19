@@ -36,7 +36,7 @@ interface PathSink {
  * face on screen and missed it in the JPEG, which is a privacy failure. So the
  * numbers live here, in one place, as pure functions a JVM test can pin down —
  * the same seam and the same reason as `ImageFitMapper` and `CropGeometry`
- * (`.claude/plans/image-editor.md` §2.3, §3 Phase 3 departure 1).
+ * (`docs/plans/image-editor.md` §2.3, §3 Phase 3 departure 1).
  *
  * It sits in `domain/` rather than beside either renderer because both need it
  * and `ArchitectureTest` forbids `data → ui`: a helper in `ui/chat/imageedit/`

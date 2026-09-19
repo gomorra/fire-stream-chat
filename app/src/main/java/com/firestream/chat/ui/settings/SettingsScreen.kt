@@ -46,6 +46,7 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.outlined.Notifications as OutlinedNotifications
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RemoveRedEye
 import androidx.compose.material.icons.filled.Replay
 import androidx.compose.material.icons.filled.ScreenLockPortrait
@@ -404,6 +405,14 @@ fun SettingsScreen(
                 subtitle = "Send images without compression (larger file size)",
                 checked = uiState.sendImagesFullQuality,
                 onCheckedChange = { viewModel.setSendImagesFullQuality(it) }
+            )
+
+            SettingsToggleItem(
+                icon = Icons.Default.PhotoLibrary,
+                title = "Keep Original Images",
+                subtitle = "Your copy of every image you send stays untouched; recipients get the quality chosen with HD",
+                checked = uiState.keepOriginalImages,
+                onCheckedChange = { viewModel.setKeepOriginalImages(it) }
             )
 
             val videoQualityLabel = when (uiState.videoQuality) {

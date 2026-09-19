@@ -38,7 +38,7 @@ import org.robolectric.annotation.GraphicsMode
  * is checked one layer down, in `CropGeometryTest`, precisely because
  * Robolectric renders a composable without ever moving a pointer across it —
  * and the rest of it needs hardware, which is why the plan makes an on-device
- * pass part of the phase (`.claude/plans/image-editor.md` §3).
+ * pass part of the phase (`docs/plans/image-editor.md` §3).
  *
  * What *is* checkable here is the contract around the gesture: which ops reach
  * the rasterizer, when the flatten is skipped entirely, and which of the history

@@ -62,7 +62,7 @@ System `SpeechRecognizer` powering the composer mic button. Language picker in S
 
 Local-first image send: compress → store locally → display immediately → upload with progress → backfill on first launch.
 
-Editing sits *before* that pipeline and leaves it untouched: each editor screen rasterizes its layer into a new JPEG in `cacheDir/edits/` and `PendingMedia` points at the newest one, so `sendMediaMessage` receives a different URI and is otherwise unaware editing exists (`.claude/plans/image-editor.md` §2.1).
+Editing sits *before* that pipeline and leaves it untouched: each editor screen rasterizes its layer into a new JPEG in `cacheDir/edits/` and `PendingMedia` points at the newest one, so `sendMediaMessage` receives a different URI and is otherwise unaware editing exists (`docs/plans/image-editor.md` §2.1).
 
 | File | Role |
 |---|---|
@@ -138,7 +138,7 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 
 **Second entry point — a photo already sent:** `FullscreenImagePager` / `FullscreenImageViewer` (Edit, beside Save and Close) → `ChatViewModel.editFromViewer()` → `MediaFileManager.downloadAndSave()` only if there is no readable local file → `ImageEditRasterizer.importSource()` copies it into `cacheDir/edits/sources/` → `OverlaysState.viewerEdit = Ready(uri)` → `ChatScreen` consumes it into a one-item `pendingMedia` (carrying the viewer's memory-cache key as the preview's placeholder) and closes the viewer only once the preview has faded in over it (`OnEnterSettled`) → the same `ImagePreviewScreen` path as above. The copy, not the message's own file, is the batch's `originalUri`, and the result is a new message.
 
-The `ui/chat/imageedit/` package is Phases 1–4 of [`.claude/plans/image-editor.md`](../.claude/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below), 5b added the overlay screen and its three editor-only tabs, and Phase 6 added the entry from the fullscreen viewer above.
+The `ui/chat/imageedit/` package is Phases 1–4 of [`docs/plans/image-editor.md`](../docs/plans/image-editor.md) — the toolbar shell and per-image HD (1), the rasterizer and the fit mapper (2), the adjust screen (3) and the draw screen (4). Phase 5a extracted the shared picker into its own cross-cutting feature (see *Emoji / Sticker Picker* below), 5b added the overlay screen and its three editor-only tabs, and Phase 6 added the entry from the fullscreen viewer above.
 
 ---
 
@@ -149,7 +149,7 @@ a detail of any screen. `PickerPanel` owns the chrome — a search control, an i
 tabs, a delete button for the host's selection — and **implements no content**: what a tab
 shows is the host's business, so a tab's own state stays with the host that has it.
 
-**The island's tabs are declared by the host** (`.claude/plans/image-editor.md` §2.8), and
+**The island's tabs are declared by the host** (`docs/plans/image-editor.md` §2.8), and
 a host that declares one tab renders no island at all — so nothing ever ships greyed-out
 and unreachable, and the three pre-existing hosts look exactly as they did before the
 shell existed.
@@ -166,6 +166,8 @@ shell existed.
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`GIF` enumerated, declared by nobody) and the `PickerSelection` a tab hands back |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiGridLayout.kt` | Pure layout arithmetic for the emoji grid — which row and column each item lands on once headers span a row, and which side of the held cell the size panel fits on |
+| `app/src/test/java/com/firestream/chat/ui/chat/picker/EmojiGridLayoutTest.kt` | That the last cell of a row is the last column, whatever headers sit above it, and that the size panel flips left rather than leave the grid |
 | `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the composer, reaction sheet and caption bar call — `EmojiMode` and the two controls that differ by host |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiSearchData.kt` | Bundled emoji → keyword table for in-panel search; no network |
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
@@ -200,7 +202,8 @@ Lists shared into chats as a live `LIST` message bubble. Subcollection-based ite
 | `app/src/main/java/com/firestream/chat/ui/lists/SharedListsViewModel.kt` | Per-chat list filter |
 | `app/src/main/java/com/firestream/chat/ui/lists/AvatarStack.kt` | Participant stack |
 | `app/src/main/java/com/firestream/chat/ui/lists/ListContextSheet.kt` | Context actions sheet |
-| `app/src/main/java/com/firestream/chat/ui/lists/ListShareSheet.kt` | Chat-picker for share |
+| `app/src/main/java/com/firestream/chat/ui/lists/ListShareSheet.kt` | Manage-sharing sheet (toggle a list's chats on and off) |
+| `app/src/main/java/com/firestream/chat/ui/lists/ShareListPanel.kt` | Share-to-chats panel from the Lists tab — the shared `ChatPickerPanel` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ListBubble.kt` | `LIST` message rendering |
 | `app/src/main/java/com/firestream/chat/ui/chat/CreateListSheet.kt` | Create-and-share flow from chat |
 | `app/src/test/java/com/firestream/chat/data/repository/ListRepositoryImplRaceTest.kt` | Concurrent-mutation safety |
@@ -253,7 +256,7 @@ RTDB-backed presence with a Cloud Function mirror to Firestore.
 
 ## Offline Outbox (queued, idempotent sends)
 
-A retryable send — text, photo, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it. The row is the queue: it survives leaving the chat, process death and reboot, every attempt resumes from what the row already records, and the client-generated id is at once the Room key, the Firestore document id and the Storage object name, so a lost acknowledgement can never produce a second copy. Design and decisions: `.claude/plans/offline-outbox.md`; the convention: [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker).
+A retryable send — text, photo, video, document, voice note, location, forward — is a `SENDING` row in `messages` plus one unique WorkManager job named after it. The row is the queue: it survives leaving the chat, process death and reboot, every attempt resumes from what the row already records, and the client-generated id is at once the Room key, the Firestore document id and the Storage object name, so a lost acknowledgement can never produce a second copy. Design and decisions: `docs/plans/offline-outbox.md`; the convention: [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker).
 
 | File | Role |
 |---|---|
@@ -500,7 +503,7 @@ One search, two scopes. In a chat it is an overlay owned by `ChatSearchManager` 
 | `app/src/main/java/com/firestream/chat/domain/usecase/message/SearchMessagesUseCase.kt` | The blank-query guard for both scopes (blank **and** no filter → empty) |
 | `app/src/main/java/com/firestream/chat/domain/repository/MessageRepository.kt` | `searchMessages(chatId: String?, query, filter)` — null `chatId` is global |
 | `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | The one compile-time-verified query; every clause a nullable/zero short-circuit, incl. `deletedAt IS NULL` |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Browse-mode short-circuit, whole-word pass, truncation read off the **raw** row count |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | Browse-mode short-circuit, partial-word matching from `PARTIAL_MATCH_MIN_LENGTH` (single letters still pinned to the whole word), truncation read off the **raw** row count |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type rendering — media grid / icon rows / text rows; `resultLabel` is the caller's to resolve |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Chips, date-range picker, active-filter summary, `searchResultsSummary` |
 | `app/src/main/java/com/firestream/chat/ui/search/GlobalSearchScreen.kt` | The global destination: auto-focused field, chips, hint / empty / results |
@@ -511,6 +514,44 @@ One search, two scopes. In a chat it is an overlay owned by `ChatSearchManager` 
 | `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.SEARCH`; a global result navigates `Routes.chat(…, targetMessageId = …)` |
 
 **Entry points:** chat list magnifier → `Routes.SEARCH` → `GlobalSearchScreen` → tap a result → `Routes.chat(targetMessageId)` (media tiles included — a cross-chat fullscreen pager would need gallery args spanning chats). In a chat: the ⋮ menu's Search / Shared Media → `ChatSearchManager.openSearchWithFilter()`.
+
+---
+
+## Chat Picker (share intent / forward / share a list)
+
+One panel behind every "send this to a chat" flow. An incoming share intent, a
+message forward and sharing a list all ask the user the same question, and each
+used to answer it differently — a full screen with search and multi-select for
+the share intent, a bare `AlertDialog` list for the other two. `ChatPickerPanel`
+is that one answer: it owns the bar, the search field, the rows, the checkboxes
+and the send button; each host supplies only the preview of *what* is being sent
+and what sending means. Forward and share-a-list mount it as a slide-in overlay
+over their host (a message and a list are already in hand, so neither needs a
+route); the share intent keeps its own NavHost destination, which is where its
+content resolution lives. An overlay slides with `ScreenMotion`, the same curve and duration the NavHost
+pushes a screen with, so "the same panel" is also the same motion.
+`sendRecipientId` is the panel's load-bearing rule:
+only a 1:1 chat names a recipient, because Signal sessions are 1:1 and a group
+must go out through the plaintext branch.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/ui/components/ChatPickerPanel.kt` | The panel: bar, preview slot, search (it filters its own rows), chat rows, send button |
+| `app/src/main/java/com/firestream/chat/ui/components/ChatPickerOverlay.kt` | The panel mounted over an existing screen — slide in/out, back, the latched target, the search query, the ticked chats, one send per opening |
+| `app/src/main/java/com/firestream/chat/ui/components/ChatTargets.kt` | The pure rules, free of Compose so a ViewModel can call them: `pickerDisplayName`, `sendRecipientId`, `filterChatsByName`, `destinationLabel` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ForwardMessagePanel.kt` | "Forward to…" over the conversation; supplies the preview of the message being forwarded |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | The forward fan-out: one send per picked chat, addressed by `sendRecipientId`, then the confirmation label |
+| `app/src/main/java/com/firestream/chat/ui/lists/ShareListPanel.kt` | "Share list to…" over the Lists tab; supplies the list preview |
+| `app/src/main/java/com/firestream/chat/ui/main/MainScreen.kt` | Locks its pager while a tab has a full-screen panel over it, so a sideways drag on the panel isn't a tab swipe |
+| `app/src/main/java/com/firestream/chat/ui/components/ScreenMotion.kt` | The slide a screen arrives with, shared with `navigation/NavGraph.kt` so the overlay moves exactly as the routed panel does |
+| `app/src/main/java/com/firestream/chat/ui/share/SharePickerScreen.kt` | "Share to…" — the panel plus the shared-content preview (text + link preview, one image, many) |
+| `app/src/main/java/com/firestream/chat/ui/share/SharePickerViewModel.kt` | Chats, participant profiles, search, selection and the send fan-out for the share intent |
+| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerTargetsTest.kt` | The pure rules — group sends address nobody, no row ever shows a raw uid |
+| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerPanelUiTest.kt` | Selection-before-send, the two empty states |
+| `app/src/test/java/com/firestream/chat/ui/chat/ForwardMessagePanelUiTest.kt` | Multi-select forwarding, search keeping the ticks, one send per opening, selection reset between openings |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageActionsForwardTest.kt` | The fan-out: a group forward addressed to nobody, the confirmation, a failure reported instead |
+
+**Entry points:** long-press a message → Forward; Lists tab → long-press a list → Share; another app's share sheet → FireStream → `Routes.SHARE_PICKER`.
 
 ---
 

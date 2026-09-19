@@ -18,7 +18,7 @@ import kotlin.math.sin
  * Android type anywhere in it, so both the editor screens that *build* ops and
  * the data-layer rasterizer that *applies* them can depend on it without the UI
  * reaching into `data/` (`ArchitectureTest`, and
- * `.claude/plans/image-editor.md` §2.2). Keeping it here is what lets the
+ * `docs/plans/image-editor.md` §2.2). Keeping it here is what lets the
  * editor screens import their geometry freely while `ImageEditRasterizer`
  * stays the single allowlisted platform adapter.
  */
@@ -37,7 +37,7 @@ sealed interface RasterOp {
      *
      * The auto-crop is not a separate step the user can forget. It was chosen
      * over expanding the bounds and offering an explicit "auto crop" button
-     * (`.claude/plans/image-editor.md` §3, decided 2026-09-09) precisely
+     * (`docs/plans/image-editor.md` §3, decided 2026-09-09) precisely
      * because that alternative has a failure mode this one cannot have:
      * straighten, miss the button, press Done, and send a photo with black
      * corners. What it costs is pixels — [straightenScale] says how many — and
@@ -97,7 +97,7 @@ sealed interface RasterOp {
      * ### Blur is pixelation, and irreversibly so
      *
      * A downscale-then-nearest-upscale copy, not a gaussian
-     * (`.claude/plans/image-editor.md` §3, Phase 4): it is cheaper, it reads
+     * (`docs/plans/image-editor.md` §3, Phase 4): it is cheaper, it reads
      * unambiguously as *redacted*, and — the part that matters when someone is
      * hiding a face or a bank card — the detail is genuinely gone from the
      * output rather than merely smeared. The tool is still labelled "Blur".
@@ -142,7 +142,7 @@ sealed interface RasterOp {
  * base size that is itself a fraction of the image's long edge
  * ([OverlayGeometry.BASE_SIZE]) — so nothing here is a pixel count, and a
  * placement made on a 1600 px preview lands identically in a 4096 px flatten.
- * The same reason [StrokePoint] is normalized (`.claude/plans/image-editor.md`
+ * The same reason [StrokePoint] is normalized (`docs/plans/image-editor.md`
  * §2.3), and the same reason both survive a device rotation.
  *
  * [rotationDegrees] is clockwise, `0` upright, and is what the rotate handle
@@ -161,7 +161,7 @@ data class ImageOverlay(
  *
  * Four kinds, one manipulation. Drag, scale, rotate, z-order and delete are the
  * same machinery whichever of these is selected, which is why the editor has
- * one overlay screen rather than four (`.claude/plans/image-editor.md` §3
+ * one overlay screen rather than four (`docs/plans/image-editor.md` §3
  * Phase 5) — the kinds differ only in how they are *painted*.
  */
 sealed interface OverlayContent {
@@ -226,7 +226,7 @@ enum class StrokeTool {
  * One sample along a stroke, as a fraction of the image it was drawn on.
  *
  * Normalized for the reason all overlay geometry is
- * (`.claude/plans/image-editor.md` §2.3): the point means "40% across this
+ * (`docs/plans/image-editor.md` §2.3): the point means "40% across this
  * photo", not "212 px into the canvas I happened to be laid out in", so a
  * stroke survives a device rotation, a screen-size change and the jump from the
  * editor's preview-sized bitmap to the full-resolution flatten without drifting.
