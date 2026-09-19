@@ -1,39 +1,37 @@
 name: Claude Code Review
 
-# SWITCHED OFF 2026-09-19 — manual dispatch only, and not to be trusted until
-# the permissions below are fixed.
+# Fixed 2026-09-19. From 2026-07 to 2026-09 this workflow ran 34 times and posted
+# nothing, while exiting `success` every time — a green check certifying nothing.
+# Two missing arguments, both load-bearing per the action's own docs:
 #
-# Across 34 runs this workflow never posted a single finding. The `permissions`
-# block grants `pull-requests: read` / `issues: read` — no write anywhere — and
-# `claude_args` passes no tool allowlist, so the agent read the diff, formed an
-# opinion, was blocked from posting it, and the job still exited `success`
-# (PR #57: 9 turns, $1.28, `permission_denials_count: 18`; PR #60: 2 turns,
-# 18 s, no tool call at all). A green "Claude Code Review" check that certifies
-# nothing reads as coverage it never had.
+#   1. `--comment` in `prompt`. Without it Claude writes its findings to the
+#      workflow run log and posts nothing to the PR.
+#   2. `--allowedTools` in `claude_args`. The action starts the MCP server that
+#      posts inline comments ONLY when --allowedTools names it; the skill's own
+#      `allowed-tools` frontmatter is not enough. This is what the PR #57 run's
+#      `permission_denials_count: 18` was.
 #
-# Before switching it back on: grant `pull-requests: write`, pass a tool
-# allowlist in `claude_args`, add `synchronize` to the trigger types so fixes
-# pushed after opening are reviewed too — and confirm a run actually posts
-# before trusting the check. Rationale, what switching it off costs, and the
-# alternative (making /code-review mandatory on the crypto, sync and build-file
-# paths) are in TECH_DEBT.md.
+# The read-only `permissions` block below is NOT the fault and matches the
+# documented example: the action authenticates as the Claude GitHub App through
+# OIDC (`id-token: write`), whose write access is separate from GITHUB_TOKEN.
+#
+# Keep both arguments. If an edit drops either, this goes back to burning
+# $0.15–$1.28 per PR for silence — the tell is "No buffered inline comments" in
+# the run log under a green check. Verify a run actually posts before trusting
+# this check again. Background: docs/GOTCHAS.md, "Build tooling".
 
 on:
-  workflow_dispatch:
-
-  # The automatic trigger, disabled. Restore it together with the permissions
-  # fix above, not before.
-  #
-  # pull_request:
-  #   # Review once per PR — NOT on every pushed commit (no `synchronize`),
-  #   # which is what made this workflow burn tokens.
-  #   types: [opened, reopened, ready_for_review]
-  #   # Skip PRs that only touch docs or test sources (incl. flavor variants).
-  #   paths-ignore:
-  #     - '**/*.md'
-  #     - 'docs/**'
-  #     - 'app/src/test*/**'
-  #     - 'app/src/androidTest*/**'
+  pull_request:
+    # `synchronize` included so a fix pushed after opening is reviewed too. The
+    # action skips drafts, closed PRs, PRs it judges trivial, and PRs that
+    # already carry a Claude comment, which bounds the per-push cost.
+    types: [opened, reopened, ready_for_review, synchronize]
+    # Skip PRs that only touch docs or test sources (incl. flavor variants).
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'app/src/test*/**'
+      - 'app/src/androidTest*/**'
 
 jobs:
   claude-review:
@@ -65,8 +63,12 @@ jobs:
           plugins: 'code-review@claude-code-plugins'
           # `medium` effort keeps findings high-confidence and cheaper than the
           # default; Sonnet costs far fewer tokens per run than an uncapped Opus.
-          prompt: '/code-review:code-review medium ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-          claude_args: '--model claude-sonnet-5'
+          prompt: '/code-review:code-review --comment medium ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # The allowedTools line is what starts the inline-comment MCP server
+          # — see the header. Do not drop it.
+          claude_args: |
+            --model claude-sonnet-5
+            --allowedTools "mcp__github_inline_comment__create_inline_comment"
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 

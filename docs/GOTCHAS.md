@@ -340,6 +340,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Build tooling
 
+- **A `claude-code-action` review workflow can run, cost money and post nothing — under a
+  green check.** `.github/workflows/claude-code-review.yml` ran 34 times between 2026-07 and
+  2026-09 without posting a single finding, exiting `success` every time. Two arguments are
+  load-bearing and neither is optional: `--comment` in `prompt` (without it Claude writes the
+  review to the workflow run log and posts nothing to the PR), and `--allowedTools
+  "mcp__github_inline_comment__create_inline_comment"` in `claude_args` — the action starts the
+  inline-comment MCP server *only* when `--allowedTools` names that tool, and the review skill's
+  own `allowed-tools` frontmatter does not count. Without the second the agent reviews the diff
+  and is then denied the tool that would post it: the PR #57 run recorded 9 turns, $1.28 and
+  `permission_denials_count: 18`, and posted nothing. The `permissions:` block is a red herring —
+  the documented example is read-only too, because the action authenticates as the Claude GitHub
+  App over OIDC (`id-token: write`), separately from `GITHUB_TOKEN`. The tell in a run log is
+  `No buffered inline comments` beside a `success` conclusion. Never trust a review check until
+  you have seen it post on a real PR. Confirmed 2026-09-19 against the action's docs.
+
 - **A `VirtualMachineError: Out of space in CodeCache` in a long Gradle run is the daemon, not the diff.**
   Running the full unit suite and `assembleFirebaseDebug` in *one* invocation on a cloud
   container (2026-09-18, ~12 min) ended with D8 failing on a third-party AAR and, on an
