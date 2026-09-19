@@ -1,16 +1,39 @@
 name: Claude Code Review
 
+# SWITCHED OFF 2026-09-19 — manual dispatch only, and not to be trusted until
+# the permissions below are fixed.
+#
+# Across 34 runs this workflow never posted a single finding. The `permissions`
+# block grants `pull-requests: read` / `issues: read` — no write anywhere — and
+# `claude_args` passes no tool allowlist, so the agent read the diff, formed an
+# opinion, was blocked from posting it, and the job still exited `success`
+# (PR #57: 9 turns, $1.28, `permission_denials_count: 18`; PR #60: 2 turns,
+# 18 s, no tool call at all). A green "Claude Code Review" check that certifies
+# nothing reads as coverage it never had.
+#
+# Before switching it back on: grant `pull-requests: write`, pass a tool
+# allowlist in `claude_args`, add `synchronize` to the trigger types so fixes
+# pushed after opening are reviewed too — and confirm a run actually posts
+# before trusting the check. Rationale, what switching it off costs, and the
+# alternative (making /code-review mandatory on the crypto, sync and build-file
+# paths) are in TECH_DEBT.md.
+
 on:
-  pull_request:
-    # Review once per PR — NOT on every pushed commit (no `synchronize`),
-    # which is what made this workflow burn tokens.
-    types: [opened, reopened, ready_for_review]
-    # Skip PRs that only touch docs or test sources (incl. flavor variants).
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - 'app/src/test*/**'
-      - 'app/src/androidTest*/**'
+  workflow_dispatch:
+
+  # The automatic trigger, disabled. Restore it together with the permissions
+  # fix above, not before.
+  #
+  # pull_request:
+  #   # Review once per PR — NOT on every pushed commit (no `synchronize`),
+  #   # which is what made this workflow burn tokens.
+  #   types: [opened, reopened, ready_for_review]
+  #   # Skip PRs that only touch docs or test sources (incl. flavor variants).
+  #   paths-ignore:
+  #     - '**/*.md'
+  #     - 'docs/**'
+  #     - 'app/src/test*/**'
+  #     - 'app/src/androidTest*/**'
 
 jobs:
   claude-review:

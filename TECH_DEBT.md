@@ -249,6 +249,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The `Claude Code Review` CI workflow — switched off rather than repaired
+
+**The smell.** `.github/workflows/claude-code-review.yml` ran an independent review agent on every non-doc PR, and across 34 runs it never posted a single finding. PRs sampled from both eras (#38, #45, #55, #56, #57, #60, #64) carry no review, no inline comment and no issue comment, and both job logs inspected end in `No buffered inline comments`. The run on #57 spent 9 turns and $1.28 and recorded `permission_denials_count: 18`; the run on #60 gave up after 2 turns, 18 s and $0.15 without a single tool call. The workflow granted `pull-requests: read` and `issues: read` — no write anywhere — and passed no tool allowlist in `claude_args`, so the agent read the diff, formed an opinion, was blocked from posting it, and exited `success`. A green check that certifies nothing is worse than no check, so the workflow was switched off (2026-09-19): the file stays in the repo on `workflow_dispatch` only, with the fix list in its header and the `pull_request` trigger commented out beneath it.
+
+**Why we're not fixing it.** Repairing it is small — `pull-requests: write`, an allowlist, and one verified run that actually posts — but it was declined in favour of switching the workflow off, which stops the misleading check at once and keeps the thing inspectable for whoever picks it up. The cost is real and worth naming: this was the only review pass independent of the session that wrote the code. What remains before a merge is `./gradlew test assembleDebug` (mechanical: compiles and runs tests, blind to intent and to a diff carrying something unrelated), `/simplify` (quality only — explicitly not a bug hunt) and `/code-review` (judgment-gated, not mandatory), the latter two run by the authoring session on its own framing. The defect class that slips past that gate is on record: four unrelated changes to `app/build.gradle.kts` swept in by a `git add -A` — `compileSdk`/`targetSdk` 35→36 and a hard-coded `versionCode 725`, below the 726 already installed — which made the release APK refuse to install while tests stayed green throughout. Two further gaps the workflow had anyway: it fired only on `opened`, so any fix pushed afterwards was never reviewed, and a good share of work reaches `main` with no PR at all.
+
+**When to revisit.** When a defect of that shape lands again, or when PRs start coming from anyone but the repo owner. Two ways back, in order of preference: make `/code-review` mandatory rather than judgment-gated on the Signal/crypto, outbox/sync, coroutine-scoping and build-file paths — it demonstrably produces findings, several entries in this file cite its passes — or re-enable the workflow — uncomment its `pull_request` trigger, grant `pull-requests: write`, pass a tool allowlist and add `synchronize` to `types:` — and confirm a run actually posts before trusting the check.
+
+---
+
 ## PocketBase v0 walking-skeleton — follow-ups
 
 The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. The plan that built it is at `docs/plans/we-researched-together-that-woolly-curry.md`. These are the conscious gaps to revisit when the variant gets real users.
