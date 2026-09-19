@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
  * it as it composes.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class SearchResultListUiTest {
 
     @get:Rule

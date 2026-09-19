@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.34.0] — 2026-09-19
+## [UNRELEASED] [1.34.0] — 2026-09-20
 
 ### Added
 
@@ -12,6 +12,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **The send preview's controls are the same size as the viewer's.** After taking a picture, the back arrow, the HD pill and the four tool circles over the photo were 40 dp, a size of their own and short of the 48 dp a finger needs; they are now the fullscreen viewer's 36 dp circles in 48 dp touch targets, so the two screens read as one. (`9e8c4d0`)
 - **A zoomed photo in the send preview no longer re-derives its zoom on every resize.** Every change of the photo's box — the keyboard sliding over the caption field, the animation of switching to another app and back — put the zoom back from its saved frame, which for a box of another shape lands on a different scale; on a portrait photo that read as the picture pulsing. A resize now only keeps the zoom the user has within the photo's edges. This is the one mechanism found for the flashing reported after an app switch; it has not been reproduced on hardware. (`9e8c4d0`)
+
+### Removed
+
+- **Android 10 and 11 are no longer supported.** The app now needs Android 12 (API 31) or newer; a phone on an older version keeps working on the build it has, but cannot install this one. Routing call audio to a Bluetooth or wired headset, which comes next, rests on an audio API that only exists from Android 12 on, and carrying the older, deprecated mechanism alongside it was not worth it for two OS versions. (`HASH_PENDING`)
 
 ## [1.33.0] — 2026-09-19
 

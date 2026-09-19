@@ -24,7 +24,6 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import com.firestream.chat.domain.model.Reminder
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -54,8 +53,7 @@ class ReminderAlarmScheduler @Inject constructor(
             flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         ) ?: return ReminderScheduleOutcome.INEXACT_FALLBACK
 
-        val canExact =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+        val canExact = alarmManager.canScheduleExactAlarms()
         return if (canExact) {
             alarmManager.setExactAndAllowWhileIdle(
                 AlarmManager.RTC_WAKEUP,

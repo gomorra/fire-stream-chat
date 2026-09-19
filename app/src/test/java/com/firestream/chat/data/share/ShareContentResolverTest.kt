@@ -27,7 +27,7 @@ import java.io.IOException
  * guards against.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ShareContentResolverTest {
 
     @get:Rule

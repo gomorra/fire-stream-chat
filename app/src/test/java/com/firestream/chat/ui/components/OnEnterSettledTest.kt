@@ -30,7 +30,7 @@ import org.robolectric.annotation.Config
  * rotation case and gets its own test.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class OnEnterSettledTest {
 
     @get:Rule

@@ -32,7 +32,7 @@ import org.robolectric.annotation.Config
  * Only the SENT transaction and the acknowledged-echo heal clear the outbox.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class MessageDaoOutboxColumnsTest {
 
     private lateinit var db: AppDatabase

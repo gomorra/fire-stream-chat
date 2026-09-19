@@ -103,6 +103,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `OutboxScheduler.runsExpedited` still branches on API 31
+
+**The smell.** `runsExpedited(sdkInt, uploads)` is `sdkInt >= S || uploads`. Since `minSdk` went to 31 the left side is always true on a device, so every outbox job is expedited and the `uploads` parameter no longer decides anything there. `OutboxSchedulerTest` still pins both sides, and its plain-JVM cases run with `SDK_INT == 0`, i.e. on the branch no device can take.
+
+**Why we haven't fixed it.** The minSdk bump (call-audio-routes step 1) was a mechanical build change; this is the send path, and collapsing the rule also means rewriting the scheduler tests that lean on the below-31 side and re-checking what `OutboxWorker.getForegroundInfo` still owes. The dead branch is harmless.
+
+**When to revisit.** The next change to `OutboxScheduler.enqueue` or to the worker's foreground handling.
+
+---
+
 ### Three per-key mutex variants
 
 **The smell.** `ListRepositoryImpl.mutexFor` (`ConcurrentHashMap<String, Mutex>`, never evicted), `SignalManager.sessionLock` (same shape) and `data/util/KeyedMutex` (ref-counted, evicted when unused — `OutboxSender`'s per-message lock) all implement "one lock per key". The first two are fine for a bounded key space; `KeyedMutex` exists because message ids are not bounded.

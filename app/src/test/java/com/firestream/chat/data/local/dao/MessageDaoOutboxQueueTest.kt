@@ -29,7 +29,7 @@ import org.robolectric.annotation.Config
  * the echo-dedupe lookup that must still match a row the give-up turned FAILED.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class MessageDaoOutboxQueueTest {
 
     private lateinit var db: AppDatabase
