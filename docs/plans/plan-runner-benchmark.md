@@ -40,15 +40,21 @@ Run the variants one after the other, never at the same time — Gradle daemons 
 worktrees and concurrent gates distort the minutes. Both start from the same commit, which must
 contain the 2026-09-20 runner changes (the step sessions read the result schema from their worktree).
 
-```bash
-BASE=$(git rev-parse main)          # write it down: __________
-scripts/run-plan.sh docs/plans/call-audio-routes.md --dry-run --variant a --base "$BASE"
+Pin the base once, as a branch — it survives a closed terminal, needs no shell variable (the
+commands below are the same in fish, bash and zsh), and unlike a tag it does not feed
+`git describe`, which `versionName` is derived from:
 
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant a --base "$BASE"   # steps 1 → 5, one command
-scripts/run-plan.sh docs/plans/call-audio-routes.md --variant b --base "$BASE"   # only after a has finished
+```
+git branch plan-base/call-audio-routes main
+scripts/run-plan.sh docs/plans/call-audio-routes.md --dry-run --variant a --base plan-base/call-audio-routes
+
+scripts/run-plan.sh docs/plans/call-audio-routes.md --variant a --base plan-base/call-audio-routes   # steps 1 → 5, one command
+scripts/run-plan.sh docs/plans/call-audio-routes.md --variant b --base plan-base/call-audio-routes   # only after a has finished
 
 scripts/plan-runner/report.sh call-audio-routes-a call-audio-routes-b call-audio-routes
 ```
+
+Delete the branch when the benchmark is decided (`git branch -d plan-base/call-audio-routes`).
 
 The plan's `‖` after step 1 was removed on 2026-09-20 for this benchmark: a forced stop puts a
 human wait into the middle of both runs and makes the minutes meaningless, and it protects nothing
