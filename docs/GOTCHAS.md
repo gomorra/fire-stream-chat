@@ -360,8 +360,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   intrinsic" in the `Caused by` chain), after which any further lambda or method-handle
   bootstrap fails with a misleading `NoSuchMethodError`. `./gradlew --stop`, then run the
   test task and the assemble task as two invocations — each was green on a fresh daemon.
-  A permanent `-XX:ReservedCodeCacheSize=…` in `org.gradle.jvmargs` is the real fix if it
-  recurs.
+  It recurred on 2026-09-20 on a developer host: the plan runner's gate (both tasks, one
+  invocation, a daemon shared across worktrees) died in `dexBuilderFirebaseDebug` right
+  after a step session had seen the same command green. The repo's `org.gradle.jvmargs`
+  now carries `-XX:ReservedCodeCacheSize=512m` — but a `~/.gradle/gradle.properties`
+  `org.gradle.jvmargs` line **replaces** the project's wholesale, so a host that sets its
+  own needs the flag there too, or it keeps the 48 MB C1-only default.
 
 - **A pre-commit hook that reads `/dev/tty` hangs, or errors, on any headless commit.**
   `.claude/hooks/ask-simplify.sh` prompts interactively ("Run /simplify before
