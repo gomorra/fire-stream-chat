@@ -174,6 +174,27 @@ minor is enough, this is not an API break; the skill decides).
 Gate: full `:app:testFirebaseDebugUnitTest` — this is the step most likely to surface a
 surprise, so run the whole suite, not a filter.
 
+**Approach**
+- Order: both `build.gradle.kts` (`minSdk = 31`) → the four `S` branches (`ReminderAlarmScheduler`,
+  `TimerAlarmScheduler`, `SpeechRecognizerManager`, `ExactAlarmBanner`) plus any import they orphan →
+  the two KDoc mentions of `minSdk = 29` (`AndroidDateTimeDetector`, `ScaledImageDecoder`) →
+  delete the pre-S test in `TimerAlarmSchedulerTest` → `sed` the `sdk = [29]` pins → `docs/PATTERNS.md:125`.
+- The code has moved since §1: there are **41** `sdk = [29]` pins, not 26 (same sed covers them), and a
+  **fifth** `>= S` branch, `OutboxScheduler.runsExpedited(sdkInt, uploads)` (`:110`). That one is left
+  alone: it is the sync path, a pure function with its own test, outside this step's file list, and
+  correct as it stands at minSdk 31 (always expedited). Recorded in `TECH_DEBT.md`.
+- No new tests: the step removes branches; the full suite on API 31 is the coverage.
+- Roborazzi: run the suite, look at any diff image before regenerating the four PNGs.
+- Further skills beyond `changelog-release`: none — mechanical, no concurrency/crypto/DI.
+
+**Shipped** `361ff604` (2026-09-20) — tier: mid. skills: changelog-release. Reviewer models: none.
+Departures (for sign-off):
+- **Major bump, not minor:** the UNRELEASED section went 1.34.0 → **2.0.0**. The plan recommended minor and left it to the skill; the skill's table (and the CHANGELOG's own header) maps a `!` / `BREAKING CHANGE` commit to major, and an updater that can no longer install on Android 10/11 is a real break. Downgrade the header by hand if 1.35.0 is preferred — nothing else depends on it.
+- 41 `sdk = [29]` pins moved, not 26 (the suite grew since §1). Full suite green on API 31 at the first run.
+- **The four snapshot PNGs were re-recorded, and the diff was not API-31 noise.** The plain test task never compares screenshots (no Roborazzi verify flag in the gate), so `verifyRoborazziFirebaseDebug` was run by hand: all four failed on the bubble *colour* (grey → warm beige), shape and text position identical. The baselines date from `317d9f5a` (2026-04-12) and the bubble colours changed in `97c8e79c` / `28b7c022` after that — they were stale before this step. Re-recorded on API 31, verify green. Worth a look at the four images; whether verify belongs in the gate is a separate question (see `docs/GOTCHAS.md`).
+- A fifth `>= S` branch, `OutboxScheduler.runsExpedited`, was left as is (sync path, outside the file list) and catalogued in `TECH_DEBT.md`.
+- Also updated: `CLAUDE.md`'s `minSdk` line and two KDoc mentions of `minSdk = 29` (`AndroidDateTimeDetector`, `ScaledImageDecoder`). The CHANGELOG entry's hash was added in the `docs(plan):` commit, since the entry rides in the commit it names.
+
 ### Step 2 — model + policy + tests (`feat(call)`, no CHANGELOG yet — nothing visible)
 Files: `domain/model/CallState.kt`, new `data/call/CallAudioRoutePolicy.kt`,
 `CallStateHolder.kt` (`updateAudioRoutes`), `CallStateHolderTest.kt`,
@@ -205,6 +226,8 @@ no logic), but a Robolectric smoke test that the sheet lists three rows when
 `availableRoutes` has three entries is cheap and welcome — follow `ChatListItemUiTest` shape.
 CHANGELOG: "**Calls can use a Bluetooth or wired headset.** …" under `Added`, and the minSdk
 line from step 1 stays under `Removed`.
+**(step-1)** The UNRELEASED section is already `[2.0.0]` (major, from the minSdk break), so this
+`feat` appends to it without a further bump. New Robolectric tests pin `sdk = [31]` — 29 no longer runs.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
@@ -217,7 +240,9 @@ line from step 1 stays under `Removed`.
 - `docs/BACKLOG.md` § Rich Media & Communication: option B (core-telecom) entry with its trigger,
   and the "show Bluetooth product name (needs `BLUETOOTH_CONNECT`)" nice-to-have.
 - `docs/GOTCHAS.md`: only if step 1 hit something non-obvious (Robolectric vs minSdk, Roborazzi
-  re-render). Otherwise nothing.
+  re-render). Otherwise nothing. **(step-1)** Robolectric vs minSdk surfaced nothing. The Roborazzi
+  finding (the test task records nothing and compares nothing without the verify task) is already
+  in `docs/GOTCHAS.md`, written by step 1.
 - `TECH_DEBT.md`: nothing expected.
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
   `docs/plans/done/` once the device pass is recorded.

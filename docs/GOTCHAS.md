@@ -236,6 +236,17 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Testing
 
+- **The gate never compares a Roborazzi screenshot — a green suite says nothing about
+  the PNGs.** `captureRoboImage` is a no-op under the plain
+  `:app:testFirebaseDebugUnitTest` task; pixels are only compared by
+  `:app:verifyRoborazziFirebaseDebug` (and only written by `recordRoborazzi…`), and
+  neither is in `ci.yml` nor the post-step gate. The four `MessageBubbleScreenshotTest`
+  baselines sat stale for five months after the bubble colours changed and every run
+  stayed green; it only showed when the minSdk-31 step ran verify by hand. When a
+  change could move bubble rendering, run
+  `./gradlew :app:verifyRoborazziFirebaseDebug --tests "*MessageBubbleScreenshotTest"`
+  yourself and read `app/build/outputs/roborazzi/*_compare.png`.
+
 - **`BreakIterator`'s grapheme data is the host JDK's, and CI's JDK is not yours.**
   `java.text.BreakIterator.getCharacterInstance()` segments by the Unicode data of
   the JVM that runs the test: on JDK 17, which `.github/workflows/ci.yml` pins,
