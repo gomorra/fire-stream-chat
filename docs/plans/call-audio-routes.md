@@ -480,6 +480,70 @@ Departures (for sign-off):
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
   `docs/plans/done/` once the device pass is recorded.
 
+**Approach**
+1. `docs/FEATURE-MAP.md` § Voice Call — add the eight files the four steps created
+   (`CallAudioRoutePolicy.kt`, `CallAudioRouter.kt`, `ProximityLock.kt`,
+   `ui/call/CallAudioRouteSheet.kt`, and the four tests
+   `CallAudioRoutePolicyTest`, `CallAudioRouterTest`, `ProximityLockTest`,
+   `CallAudioRouteUiTest`), rewrite the stale `CallControlButton.kt` row to
+   "Mute / hang up / route control", and refresh `last-verified` to 2026-09-20.
+   All eight paths verified present on disk before the edit.
+2. `docs/BACKLOG.md` § Pending on-device verification — new item at the top of the section
+   with the five checks (a)–(e) the step lists, stating the emulator has no BT stack.
+3. `docs/BACKLOG.md` § Rich Media & Communication — a new "Call audio routing follow-ups"
+   item carrying §0's two deferrals: option B (core-telecom) with its trigger, and the
+   Bluetooth product name behind `BLUETOOTH_CONNECT`.
+4. `.claude/skills/app-ui-design/SKILL.md:49` — `sdk = [29]` → `sdk = [31]`. The file is
+   git-tracked; if the write is denied here too, that is the one thing this step cannot land
+   and it is reported as a departure, not a block.
+5. Beyond the step's list, three docs describe a control that no longer exists (found by
+   grepping `speaker` / `bluetooth` / `headset` across `docs/`): `docs/SPEC.md:53`
+   ("toggle speakerphone"), `docs/ARCHITECTURE.md` §12's `data/call` and `ui/call` package
+   lines (four new files missing), and §5's *Call Architecture Details*, which never mentions
+   who owns the audio session. All three are corrected here — a docs step is judged on whether
+   the docs match the code. `docs/TESTING.md` says nothing about calls and `docs/BACKLOG.md`
+   carried no Bluetooth-in-calls item to prune. Nothing in `docs/PATTERNS.md` /
+   `docs/GOTCHAS.md` / the UI skill claims `ModalBottomSheet` is untestable under Robolectric,
+   so step 4's note routes nowhere.
+6. Nothing owed to `docs/GOTCHAS.md` or `TECH_DEBT.md` (both annotations above say so; steps
+   2–4 added none). No local-memory write: a runner session has no memory store. The plan is
+   **not** moved to `docs/plans/done/` — its own text gates that on the device pass, which is
+   exactly what item 2 above schedules.
+7. Gate: docs-only diff, no production code, so `:app:testFirebaseDebugUnitTest` +
+   `assembleFirebaseDebug` are run once as the standing gate and nothing more; no test is added,
+   no CHANGELOG entry (docs-only is on `changelog-release`'s skip list), commit prefix `docs`.
+
+Nothing in the repo contradicts the step's spec.
+
+**Shipped** `5032dd91` (2026-09-20) — tier: mid, tagged mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- **`.claude/skills/app-ui-design/SKILL.md:49` is still stale** — the write was denied here exactly
+  as it was for step 1, and per the runner's rules it was attempted once, not worked around. The
+  change a human must make by hand is one line: `@Config(sdk = [29], application = …)` →
+  `@Config(sdk = [31], application = …)`. Left as is, the next Robolectric Compose test anyone
+  writes from that skill gets a pin below `minSdk` and will not boot.
+- **Four files beyond the step's list**, all found by grepping `docs/` for the control that no
+  longer exists: `docs/SPEC.md:53` said in-call controls were "mute and toggle speakerphone";
+  `docs/ARCHITECTURE.md` §12's `data/call` and `ui/call` package lines were missing the four new
+  files, and §5 *Call Architecture Details* never said who owns the audio session — it now names
+  `startAudioSession()`/`stopAudioSession()`, the policy, and the proximity rule (method names
+  verified against `CallService.kt:590/626`). `FEATURE-MAP`'s `CallService.kt` role line gained
+  the audio session for the same reason. A docs step is judged on whether the docs match the code.
+- **The on-device list is longer than the step's (a)–(e).** (d) now says the Bluetooth check mark
+  lags the tap by up to ~1 s and that this is the SCO link coming up, **not** a bug to file — §4
+  warns about exactly that non-bug. A new (f) covers the wired/USB-C headset, which none of (a)–(e)
+  exercised, and records that an A2DP-only headphone correctly never appears as a route.
+- **Nothing owed to `docs/GOTCHAS.md`, `docs/PATTERNS.md` or `TECH_DEBT.md`.** Checked rather than
+  assumed: `docs/TESTING.md` says nothing about calls; `docs/BACKLOG.md` carried no
+  Bluetooth-in-calls item to prune; and nothing in `PATTERNS.md`/`GOTCHAS.md`/the UI skill claims a
+  `ModalBottomSheet` is untestable under Robolectric, so step 4's note about being the first such
+  test corrects no written claim and routes nowhere.
+- No CHANGELOG entry and no version bump (docs-only is on `changelog-release`'s skip list), no test
+  added, and no skill triggered by the diff: 95 changed lines, no production file at all.
+- The plan is **not** moved to `docs/plans/done/`. Its own step-5 text gates that on the device
+  pass, which is what the new BACKLOG item schedules. Local memory was not touched: a runner
+  session has no store, and every fact here went to a tracked doc.
+
 ## 4. Traps (read before step 3)
 
 - `setCommunicationDevice()` returns `false` and does nothing if the device is not in
