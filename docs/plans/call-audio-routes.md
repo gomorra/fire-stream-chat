@@ -244,6 +244,34 @@ exists (it sorts into display order). What is left to delete is the interim `Cal
 `CallAudioRoutePolicy.resolve` owns `previousAvailable` and clears `userPick` when the result differs from it.
 `CallScreen.kt:98` derives `isSpeakerOn` from `audioRoute` for the unchanged `ConnectedContent` — step 4 replaces it.
 
+**Approach** (step-3, 2026-09-20)
+1. New `CallAudioRouter.kt` (§2.3): `start` / `select` / `stop` + `state: StateFlow<RouteState>`, no coroutines.
+   `select` is "record the pick, re-run the policy" — rule 2 honours it, and a vanished route falls through by itself.
+   The service calls it from three threads (WebRTC signaling, main, IO) and the listeners from main, so its
+   methods are `@Synchronized` and a `started` flag drops callbacks that were already queued at `stop()`.
+2. Contradiction in the spec, settled inside the router: §2.2 feeds the policy `current` = what the OS reports,
+   §4 says the OS lags a Bluetooth request by ~1 s *and* that the registration callback re-runs the policy.
+   Together rule 3 would pull a ramping Bluetooth request back to the earpiece. The router therefore feeds the
+   policy its last **requested** route; the OS-reported route only drives `state.current` (UI + proximity), as §2.3 wants.
+3. `CallService` (§2.4): `ACTION_SELECT_AUDIO_ROUTE` + `EXTRA_AUDIO_ROUTE`, router started in `requestAudioFocus()`
+   after the mode, stopped in `abandonAudioFocus()` before it; collector job on `serviceScope`, cancelled in
+   `cleanup()`; proximity follows `state.current`; `toggleSpeaker`, `ACTION_TOGGLE_SPEAKER`, `previousSpeakerState` deleted.
+   `requestAudioFocus()` runs on CONNECTED *and* COMPLETED today — it gets a guard so the router starts once.
+4. `CallViewModel.selectAudioRoute(route)`; `CallScreen` keeps the binary toggle through it until step 4.
+5. Tests: none new (spec: no router test, `CallService` is untestable); the policy test is the coverage.
+6. Skills: simplify + code-review (the floor). Nothing further — no UI work, no CHANGELOG in this step.
+
+**Shipped** `1061526f` (2026-09-20) — tier: strong, tagged strong. skills: simplify, code-review. Reviewer models: simplify: sonnet, opus, sonnet, opus; code-review: opus, opus.
+Departures (for sign-off):
+- The policy's `current` is the router's last **requested** route, not the OS-reported one (Approach item 2; the policy KDoc says so now). `state.current` is still the OS's route, as §2.3 wants. §2.2's signature is unchanged.
+- A router test exists after all (`CallAudioRouterTest`, Robolectric + a mocked `AudioManager`, 8 cases): `/code-review` found two sequencing bugs the policy test cannot reach, and both got their regression test before the fix. (1) A refused `setCommunicationDevice` had already advanced `previousAvailable` and cleared the pick, so a headset refused once could never preempt again — now nothing is committed on a refusal. (2) The OS reporting a `null` communication device left `state.current` (and the proximity lock) stale — now it re-applies the route.
+- The proximity wake lock is a local of the route collector job (`try`/`finally`), not a service field with acquire/release functions, and that one job runs on `Dispatchers.Main.immediate` instead of the scope's IO pool, so the release is not queued behind sync work after a hangup. `/simplify` and `/code-review` between them; the first draft was a lock plus an `isActive` check.
+- `requestAudioFocus()` ran on CONNECTED *and* COMPLETED and saved `MODE_IN_COMMUNICATION` as the mode to restore on the second pass. It now sits behind the existing `callConnectedAt == null` first-connect check. No regression test (`CallService` is untestable); `abandonAudioFocus()` also skips the mode restore when focus was never requested.
+- `CallService.sendAction` grew an `extras` lambda; `selectAudioRoute(context, route)` is built on it. `select()` is "record the pick, re-run the policy", with a `force` flag so a tap re-applies a route the OS dropped by itself.
+- Skipped review findings: moving the router's three fields into the pure policy as a state type (would rewrite §2.2's "one object, one function"; the router test covers the sequences instead); binder calls on the main thread in `select`/`stop` (same shape as before); the display order being sorted in both the router and `CallStateHolder`.
+- Outside the step, recorded in `TECH_DEBT.md`: `cleanup()` can run on two threads at once, and `CallStateHolder.reset()` has no production caller.
+- Gate: full `:app:testFirebaseDebugUnitTest` green, `assembleFirebaseDebug` clean. Nothing on a device — Bluetooth cannot be tried on the emulator (step 5's checklist).
+
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
 state wants a shared helper. Load `app-ui-design` first. Compose test not required (UI-only,
@@ -253,10 +281,20 @@ CHANGELOG: "**Calls can use a Bluetooth or wired headset.** …" under `Added`, 
 line from step 1 stays under `Removed`.
 **(step-1)** A new Robolectric test pins `@Config(sdk = [31], …)` — 29 is refused now. The
 `Removed` entry already sits in the unreleased `1.34.0` section.
+**(step-3)** `CallViewModel.selectAudioRoute(route)` exists. `CallScreen.kt:98–105` still feeds the unchanged
+`ConnectedContent` an `isSpeakerOn` and an interim `onToggleSpeaker` lambda that flips EARPIECE⇄SPEAKER through it —
+both go. The route shown must stay `uiControls.audioRoute` (the OS's route): do not set it from the tap, it lags a
+Bluetooth pick by about a second on purpose (§4).
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
   `CallAudioRoutePolicyTest.kt`; refresh `last-verified`.
+  **(step-3)** Also `CallAudioRouterTest.kt`.
+  **(step-3 /code-review)** `docs/DOMAIN-MODELS.md:180` still shows `CallUiControls(isMuted, isSpeakerOn)` —
+  update it to `audioRoute` / `availableRoutes` and add `CallAudioRoute`.
+  **(step-3)** Device checklist, two more: (f) after a call that reached COMPLETED, the audio mode is back to
+  normal (media volume keys, not call volume); (g) on speaker the screen stays on near the face, and it is
+  released promptly after hangup with the phone still at the ear.
 - `docs/BACKLOG.md` § Pending on-device verification: Bluetooth path is **untestable on the
   emulator** (no BT stack). Needs the phone + a headset: (a) headset connected before the
   call → audio on headset from first second, (b) connect mid-call → auto-switch, (c) disconnect
