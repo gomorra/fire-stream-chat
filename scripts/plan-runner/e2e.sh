@@ -43,7 +43,7 @@ echo "$kind:$beh:$(grep -c '^\*\*Decision taken\*\*' "$PLAN" || true)" >> "$STUB
 code() { # code <path>  → one production file and one test, committed
     mkdir -p "$(dirname "$1")" app/src/test/java/x
     echo "// $beh $RANDOM" >> "$1"; printf '    @Test fun t%s() {}\n' "$RANDOM" >> app/src/test/java/x/SeedTest.kt
-    git add "$1" app/src/test; git commit -qm "feat(x): $beh"
+    git add -A -- . ":(exclude)$PLAN"; git commit -qm "feat(x): $beh"     # -A: a blocked attempt's leftovers are this session's to settle
 }
 ship() { # ship <skills>  → Shipped line naming the last code commit, committed
     local h; h=$(git log --format=%h -1 -- app)
@@ -52,7 +52,7 @@ ship() { # ship <skills>  → Shipped line naming the last code commit, committe
 }
 result() { # result <status> <blockedKind|null> <run-json>
     local kindjson=null; [ "$2" = null ] || kindjson="\"$2\""
-    printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-%s-%s","num_turns":5,"total_cost_usd":1.5,"permission_denials":[],"modelUsage":{"stub-model":{"costUSD":1.5}},"structured_output":{"status":"%s","step":1,"commit":%s,"skills":{"intended":[],"run":%s,"skipped":[]},"reviewerModels":[],"question":null,"blockedKind":%s,"advisorConsults":null,"summary":"%s"}}\n' \
+    printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-%s-%s","num_turns":5,"total_cost_usd":1.5,"permission_denials":[],"modelUsage":{"stub-model":{"costUSD":1.5}},"structured_output":{"status":"%s","step":"1","commit":%s,"skills":{"intended":[],"run":%s,"skipped":[]},"reviewerModels":[],"question":null,"blockedKind":%s,"advisorConsults":null,"summary":"%s"}}\n' \
         "$kind" "$beh" "$1" "$( [ "$1" = done ] && printf '"%s"' "$(git log --format=%h -1 -- app 2>/dev/null || echo 0000000)" || echo null)" "$3" "$kindjson" "$beh"
 }
 case "$beh" in
@@ -66,6 +66,9 @@ case "$beh" in
     judge-nofindings) printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-judge","total_cost_usd":0.5,"structured_output":{"verdict":"cannot_judge","testsAdequate":true,"summary":"x"}}\n' ;;
     done-gate-red)   code app/src/main/java/x/ui/Screen.kt; ship none; echo red > "$STUB/gate"; result done null '[]' ;;
     noop-done)       result done null '[]' ;;
+    done-stray)      code app/src/main/java/x/ui/Screen.kt; ship none; echo scratch > stray.txt; echo wip >> README.md; result done null '[]' ;;
+    tidy)            rm -f stray.txt; git checkout -q -- README.md; result done null '[]' ;;
+    no-result)       printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-%s-noresult","total_cost_usd":1,"structured_output":null}\n' "$kind" ;;
     blocked-gate)    echo wip >> README.md; echo scratch > leftover.txt; result blocked gate '[]' ;;
     blocked-env)     result blocked environment '[]' ;;
     review-ok)       sed -i 's/skills: none\./skills: code-review./' "$PLAN"; git add "$PLAN"; git commit -qm "docs(plan): review"; result done null '["code-review"]' ;;
@@ -128,6 +131,24 @@ run
 check "exit 0"                                   "0" "$rc"
 check "events"                                   "launched result nudged result validated" "$(events mini)"
 check "second call is a resume"                  "nudge" "$(sed -n '2p' "$STUB/calls" | cut -d: -f1)"
+
+scenario "A done step that leaves the worktree dirty is nudged to clean up" done-stray tidy
+run
+check "exit 0"                                   "0" "$rc"
+check "events"                                   "launched result nudged result validated" "$(events mini)"
+check "the nudge names the stray files"          "1" "$(jq -r 'select(.event=="nudged") | .reasons' "$RUNS/mini.log" | grep -c 'not clean.*README.md,stray.txt')"
+check "the plan worktree is clean afterwards"    "" "$(git -C "$(WT mini)" status --porcelain)"
+
+scenario "No result object: nudged, and escalated when the nudge ends the same way" no-result no-result done-valid
+run
+check "exit 0"                                   "0" "$rc"
+check "events"                                   "launched result nudged result escalated launched result validated" "$(events mini)"
+check "attempt 2 ran one rung up"                "step:done-valid:high:none" "$(sed -n '3p' "$STUB/calls")"
+requeue
+scenario "…and blocked when the escalated attempt has no result either, after its own nudge" no-result no-result no-result no-result
+run
+check "exit 3 (blocked)"                         "3" "$rc"
+check "events"                                   "launched result nudged result escalated launched result nudged result blocked" "$(events mini)"
 
 scenario "Only a missed skill: a fresh review session, not a resume" done-valid-di review-ok
 run
@@ -247,6 +268,22 @@ check "bad effort in a variant: exit 1, plain message" "1 0" "$rc $(grep -c 'int
 sed -i 's/^### Step 1 — Only step.*/&  — effort: infinite/' "$R/docs/plans/mini.md"; git -C "$R" commit -qam "bad tag"
 run
 check "bad effort tag in the plan: exit 1, plain message" "1 0" "$rc $(grep -c 'internal error' "$TMP/err" || true)"
+
+scenario "The plan-differs warning fires on an edit in the main tree, not on the branch's own Shipped block" done-valid
+run; requeue; run
+check "second run: nothing to do, exit 0"        "0" "$rc"
+check "…and no warning, though the branch's copy has a Shipped block main's lacks" "0" "$(grep -c 'warning:' "$TMP/err" || true)"
+echo "an afterthought" >> "$R/docs/plans/mini.md"; run
+check "an edit in the main tree is warned about" "1" "$(grep -c 'warning: docs/plans/mini.md changed in the main tree' "$TMP/err" || true)"
+
+scenario "A missing tool is an environment error (exit 1), not a driver bug or a blocked step" done-valid
+BARE=$TMP/bare-$n; mkdir -p "$BARE"
+for t in bash env git dirname grep awk sed cat; do ln -s "$(command -v "$t")" "$BARE/$t"; done
+rc=0; PATH=$BARE PLAN_RUNNER_RUNS_DIR=$RUNS "$R/scripts/run-plan.sh" "$R/docs/plans/mini.md" > "$TMP/out" 2> "$TMP/err" || rc=$?
+check "no jq: exit 1, named, no 'internal error'" "1 1 0" "$rc $(grep -c "'jq' is not on PATH" "$TMP/err" || true) $(grep -c 'internal error' "$TMP/err" || true)"
+ln -s "$(command -v jq)" "$BARE/jq"
+rc=0; PATH=$BARE PLAN_RUNNER_RUNS_DIR=$RUNS "$R/scripts/run-plan.sh" "$R/docs/plans/mini.md" > "$TMP/out" 2> "$TMP/err" || rc=$?
+check "no claude: exit 1, named, nothing launched" "1 1 0" "$rc $(grep -c "'claude' is not on PATH" "$TMP/err" || true) $(wc -l < "$STUB/calls" | tr -d ' ')"
 
 scenario "--base starts the plan branch from the named commit" done-valid
 base=$(git -C "$R" rev-parse HEAD); echo later >> "$R/README.md"; git -C "$R" commit -qam later

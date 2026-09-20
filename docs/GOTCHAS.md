@@ -21,6 +21,17 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   at EOF. Line comments (`//`) are unaffected. Bit us writing the share-sheet
   mime-normalisation KDoc; say "a wildcard" in prose instead.
 
+- **One SpanStyle per code point splits a multi-character emoji.** Compose breaks
+  text shaping at every span boundary, so styling ❤, U+FE0F, the joiner and 🔥
+  as four adjacent spans renders the heart on fire as a heart *plus* a flame —
+  even when all four carry the same `fontSize`. Same for the family faces, a
+  skin-toned hand, a flag and a keycap. Any regex that drives per-emoji styling
+  has to match the whole sequence (base + modifiers, repeated across joiners),
+  not one code point at a time; `EMOJI_REGEX` in `ui/chat/ChatUtils.kt` is the
+  shape. A per-emoji size map keyed by char index has the same requirement from
+  the other side: keyed at the sequence start, it only reaches the first code
+  point and sizes the halves differently. Fixed in `d175db8e`.
+
 - **Composable param-count ceiling (~15).** ART rejects composables with too many
   explicit params with a `VerifyError` **on first render**, not at compile time.
   Collapse callbacks into an `@Immutable *Callbacks` data class (see

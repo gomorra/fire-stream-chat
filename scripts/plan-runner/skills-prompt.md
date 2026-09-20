@@ -35,6 +35,6 @@ chains; the allowlist denies those silently.
 
 End with exactly one JSON object, nothing after it, valid against `{{SCHEMA_PATH}}`: `status`
 `done` (or `blocked` with a `blockedKind` when the gate cannot be made green again), `step`
-{{STEP}}, `commit` the hash the `**Shipped**` line names, `skills.run` the skills you ran here,
+`"{{STEP}}"` (a string), `commit` the hash the `**Shipped**` line names, `skills.run` the skills you ran here,
 `reviewerModels`, `question` and `advisorConsults` `null` unless they apply, and a `summary` of
 what the review found and what you changed.

@@ -21,6 +21,15 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Multi-character emoji render as one glyph (2026-09-20)
+
+`d175db8e` made `EMOJI_REGEX` match whole emoji sequences so `addEmojiSpans` stops splitting
+them. The JVM tests prove the span ranges; only a device proves the glyph. In a chat, from the
+emoji panel: pick ❤️‍🔥, 👨‍👩‍👧, 👍🏽, 🇺🇸 and 1️⃣ — each must show as **one** glyph in the composer,
+in the sent bubble, and in an emoji-only bubble (the large size path). Long-press-drag one of
+them to a bigger size and the whole glyph must scale, not just its first half. Backspace over
+each must delete the whole emoji in one press.
+
 ### Call audio routes — Bluetooth and wired headsets (2026-09-20)
 
 Shipped on `plan/call-audio-routes-b` (`eb241341`, `81fab393`, `b1fbb029`); nothing has been on
