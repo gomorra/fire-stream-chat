@@ -12,6 +12,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Calls can use a Bluetooth or wired headset.** A voice call had only two places to play: the earpiece and the speaker. A connected headset was simply unreachable, because Android will not move call audio to one unless the app asks. It asks now. A headset that is already connected when the call starts takes the audio from the first second, one connected mid-call takes over the way it does in the stock dialer, and unplugging it drops back to the earpiece rather than announcing the rest of the call to the room. The speaker button on the call screen has become the route control: with nothing but the earpiece and the speaker to choose from it still toggles between them on a tap, and once a third route exists it opens a small sheet listing them with the one currently playing checked. The check follows the audio rather than the tap, so on Bluetooth it moves the moment the headset actually takes over, about a second later. (`b1fbb029`)
 
+## [1.34.0] — 2026-09-19
+
+### Added
+
 - **A crop-shape pill on every fullscreen photo, before any editing.** The send preview after a camera shot or a gallery pick, and the fullscreen viewer of a photo in a chat, now carry a small pill bottom-left that cycles through Free, Original, 1:1, 4:5 and 16:9. A shape other than Free draws its frame over the photo, and pinching and panning move the photo under the frame; what is inside the frame is what is sent. Opening Adjust from the preview carries the frame and the shape into its crop tool, still editable, and opening Edit from the viewer carries them into the preview. (`9e8c4d0`)
 
 ### Fixed
