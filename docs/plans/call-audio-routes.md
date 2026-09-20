@@ -244,6 +244,41 @@ exists (it sorts into display order). What is left to delete is the interim `Cal
 `CallAudioRoutePolicy.resolve` owns `previousAvailable` and clears `userPick` when the result differs from it.
 `CallScreen.kt:98` derives `isSpeakerOn` from `audioRoute` for the unchanged `ConnectedContent` — step 4 replaces it.
 
+**Approach** (step-3, 2026-09-20)
+1. New `data/call/CallAudioRouter.kt`: `CallRouteState(available, current)` + the wrapper.
+   `start`/`select`/`stop`/the two listeners all go through the object's monitor — `start()` is
+   reached from `onIceConnectionChange`, i.e. WebRTC's signalling thread, not main, so §2.3's
+   "no coroutines" cannot also mean "no synchronisation". `current` is always read back from
+   `audioManager.communicationDevice`, never from the requested route.
+2. Constructor takes `AudioManager` + one main-`Handler`; the listener `Executor` is derived from
+   it (`registerAudioDeviceCallback` wants a Handler, `addOnCommunicationDeviceChangedListener` an
+   Executor — one "main" for both).
+3. `CallService`: `ACTION_TOGGLE_SPEAKER` → `ACTION_SELECT_AUDIO_ROUTE` + `EXTRA_AUDIO_ROUTE`,
+   drop `toggleSpeaker()` and `previousSpeakerState`, drop the unconditional wake-lock acquire at
+   `:475`. `startRouting()`/`stopRouting()` sit inside `requestAudioFocus()`/`abandonAudioFocus()`;
+   both they and the collector body are `@Synchronized` on the service and gated on one
+   `routingActive` flag, so a collector emission in flight cannot re-acquire the wake lock after
+   cleanup has released it.
+4. `CallViewModel`: `selectAudioRoute(route)`. `toggleSpeaker()` stays for one step as a two-line
+   shim over it so step 3 writes no Compose — `CallScreen` is step 4's.
+5. Tests: the plan says none for the router, but it is a small state machine and `AudioManager`
+   mocks fine under `isReturnDefaultValues = true`. New `CallAudioRouterTest` drives the two
+   listeners directly (start → apply, mid-call headset preempts a pick and clears it, disconnect
+   → earpiece, re-query before select, idempotent stop). Dropped without ceremony if the mock
+   fights the framework stubs.
+6. Gate, then the tagged `/simplify` and `/code-review`. Nothing found contradicts §0 or §2.
+
+**Shipped** `bb0ba755` (2026-09-20) — tier: strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- **`CallRouteState.current` is nullable**, where §2.3 writes `RouteState(available: List, current: CallAudioRoute)`. Both `/simplify` altitude passes called the non-null field the reason the wrapper had to publish a *guess* — the one thing §2.3's own sentence forbids ("`current` comes from the listener … **not** from the requested route"). Null now means "the OS names no route calls can use", and a route is never published unless it is in `available`. `CallStateHolder.updateAudioRoutes` absorbs the null and keeps the displayed route, so `CallUiControls.audioRoute` stays non-null per §2.1. `available` is a `Set`, not a `List` — step 2's shipped `updateAudioRoutes(Collection, …)` sorts it.
+- **`/code-review` found a real defect**, fixed here with three regression tests: a headset disconnect the OS reports as "no communication device" used to leave the vanished route published, which inverted §4's last trap — the proximity lock stayed released while the audio was already back on the earpiece. A second writer had the same hole (`onCommunicationDeviceChanged` beating `onAudioDevicesAdded`); `publish()` is now the only writer of `_state`.
+- **Unrequested fix, no regression test possible**: `requestAudioFocus()` gained a re-entry guard. ICE reports CONNECTED *and* COMPLETED into one branch, so the second pass saved `MODE_IN_COMMUNICATION` as `previousAudioMode` and the phone never left communication mode after a call. Pre-existing, on the path this step rewrites. `CallService` has no JVM test (Android `Service` + WebRTC), so this one is argued, not pinned — **the item to check hardest on device**.
+- **Concurrency beyond §2.4**: the audio session is claimed on WebRTC's signalling thread and released from `serviceScope`, so mode, focus, the collector job and the wake lock are guarded by one private `audioLock` (not the `Service` monitor, which is publicly lockable). Lock order is always service → router; the router never calls back synchronously.
+- A router unit test exists although this step said none (`CallAudioRouterTest`, 11 cases, MockK over `AudioManager`). `parseCallAudioRoute` went into `data/util/EnumParsers.kt` with the other Intent-carried enum parsers, and `CallViewModel.toggleSpeaker()` stayed one more step as a shim so step 3 wrote no Compose — step 4's section now says to delete it.
+- Declined, with reasons: dropping `start()`'s explicit `refresh()` (contradicts §2.3 and would make initial routing wait on a main-thread hop); reusing the device list across `applyRoute` (erodes §4 trap 1's re-query guarantee for one binder call on a human-speed event); importing `AudioDeviceInfo` into the policy (reverses step 2's signed-off Android-free decision); extracting `ProximityLock` / `CallAudioSession` now (recorded in `TECH_DEBT.md`, with the `ProximityLock` half marked as the one to do first).
+- Outside this plan's scope, recorded in `docs/BACKLOG.md`: `CallStateHolder.reset()` is never called in `app/src/main/`, so `CallUiControls` outlives its call — mute a call and the next one opens muted. Widened, not caused, by this step.
+- Gate: full `:app:testFirebaseDebugUnitTest` (173 classes, 0 failures) and `assembleFirebaseDebug`, both clean. Host trouble, not code: a shared-cache `dagger-spi-2.53.1.jar` was unreadable (EIO) mid-step and the session later died of host memory corruption; the jar was gone after the reboot and the gate above is a full clean run since.
+
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
 state wants a shared helper. Load `app-ui-design` first. Compose test not required (UI-only,
@@ -253,10 +288,24 @@ CHANGELOG: "**Calls can use a Bluetooth or wired headset.** …" under `Added`, 
 line from step 1 stays under `Removed`.
 **(step-1)** A new Robolectric test pins `@Config(sdk = [31], …)` — 29 is refused now. The
 `Removed` entry already sits in the unreleased `1.34.0` section.
+**(step-3)** Delete `CallViewModel.toggleSpeaker()` — step 3 kept it as a two-line shim over
+`selectAudioRoute(route)` so that step 3 wrote no Compose, and `CallScreen.kt:98`/`:101` still feed
+it. `ConnectedContent` then takes `audioRoute` / `availableRoutes` / `onSelectRoute` per §2.5 and
+`viewModel::selectAudioRoute` is the only caller left; nothing else references `toggleSpeaker`.
+`availableRoutes` can be briefly **empty** (between `CallState.Connected` and the router's first
+emission, and if the OS reports no communication devices at all), so the `size <= 2` branch must be
+the one that handles it — never index into the list or assume EARPIECE is present.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
   `CallAudioRoutePolicyTest.kt`; refresh `last-verified`.
+  **(step-3 /code-review)** Add `CallAudioRouterTest.kt` to that list too — step 3 wrote one
+  although this plan said it would not. `CallRouteState` lives in `CallAudioRouter.kt`, so it needs
+  no row of its own.
+- **(step-3 /code-review)** `docs/BACKLOG.md` § Rich Media & Communication already carries the
+  "Call UI controls survive the call they belong to" entry step 3's review added
+  (`CallStateHolder.reset()` is never called in `app/src/main/`). Leave it where it is; it is not
+  part of this plan's scope and must not be folded into the on-device checklist.
 - `docs/BACKLOG.md` § Pending on-device verification: Bluetooth path is **untestable on the
   emulator** (no BT stack). Needs the phone + a headset: (a) headset connected before the
   call → audio on headset from first second, (b) connect mid-call → auto-switch, (c) disconnect
