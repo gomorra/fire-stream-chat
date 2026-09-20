@@ -122,7 +122,7 @@ When adding a new convention, append a section here in the same shape: **definit
 **Example.** `app/src/test/java/com/firestream/chat/ui/chatlist/ChatListItemUiTest.kt:31` — the canonical shape; its own KDoc names it "the Robolectric + createComposeRule pattern for future UI tests". `ui/chat/MessageBubbleSmokeTest.kt:32` is the render-every-variant smoke form that guards the composable param-count `VerifyError` ceiling.
 
 **Trap.** Three, all non-obvious:
-1. The annotations are load-bearing: `@Config(sdk = [29], application = android.app.Application::class)`. Drop the `application` override and Robolectric boots the Hilt application class — the test then fails in DI, nowhere near the composable you were testing.
+1. The annotations are load-bearing: `@Config(sdk = [31], application = android.app.Application::class)`. The sdk must not be below the manifest `minSdk` (31 since 2026-09-20) — Robolectric refuses to boot a lower one. Drop the `application` override and Robolectric boots the Hilt application class — the test then fails in DI, nowhere near the composable you were testing.
 2. The `androidTestImplementation` espresso and `compose-ui-test-junit4` deps *are* declared (`app/build.gradle.kts:495`). They are unused scaffolding; their presence is not evidence that instrumentation testing is the convention here.
 3. Unit tests are debug-only on purpose (`app/build.gradle.kts:248`) — these tests depend on `ui-test-manifest`'s ComponentActivity, which is wired as `debugImplementation`, so a release unit-test variant cannot compile. Don't "fix" that by re-enabling it.
 

@@ -2,7 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.34.0] — 2026-09-19
+## [UNRELEASED] [2.0.0] — 2026-09-20
+
+### Removed
+
+- **Android 10 and 11 are no longer supported.** The app now requires Android 12 or newer. A phone on Android 10 or 11 keeps the version it has — it will not receive this or any later update, and the APK will refuse to install on it. The reason is the call audio work that follows: routing a call to a Bluetooth or wired headset has exactly one API that is not deprecated, and it arrived in Android 12. Supporting the older two would have meant a second, fragile routing path alongside it for a shrinking share of devices. Dropping them also retires the version checks around exact alarms and on-device dictation, which are now simply always available.
 
 ### Added
 

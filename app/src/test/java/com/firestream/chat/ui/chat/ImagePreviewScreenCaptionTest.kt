@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
  * the panel reads has to be the one the text field writes.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ImagePreviewScreenCaptionTest {
 
     @get:Rule

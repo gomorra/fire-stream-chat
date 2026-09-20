@@ -30,7 +30,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(RobolectricTestRunner::class)
 // Stub Application to bypass FireStreamApp's Hilt + Firebase init.
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ChatListItemUiTest {
 
     @get:Rule

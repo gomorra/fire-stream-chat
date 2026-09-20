@@ -25,7 +25,7 @@ import org.robolectric.annotation.Config
  * MessageRepositoryReceiptOrderTest.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class MessageDaoReceiptTest {
 
     private lateinit var db: AppDatabase

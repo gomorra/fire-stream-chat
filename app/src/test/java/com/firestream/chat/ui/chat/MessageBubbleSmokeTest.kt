@@ -30,7 +30,7 @@ import java.io.File
  * Covers TC-01 (chat opens without crash) and TC-02 (VerifyError regression).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class MessageBubbleSmokeTest {
 
     @get:Rule

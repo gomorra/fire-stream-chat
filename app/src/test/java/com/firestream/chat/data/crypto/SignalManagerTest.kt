@@ -49,7 +49,7 @@ private const val LOCK_WAIT_MS = 2_000L
  * through [FakeKeyServer]. Robolectric supplies `android.util.Base64`.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class SignalManagerTest {
 
     private val keyServer = FakeKeyServer()

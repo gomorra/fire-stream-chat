@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  * showed a message that was not the newest in the chat.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class ChatDaoLastMessageTest {
 
     private lateinit var db: AppDatabase

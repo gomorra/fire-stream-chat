@@ -30,7 +30,7 @@ import org.robolectric.annotation.Config
  * is handed to it.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ForwardMessagePanelUiTest {
 
     @get:Rule

@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
  * all the controls need underneath them.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class FullscreenOverlayControlsTest {
 
     @get:Rule

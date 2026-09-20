@@ -2,7 +2,6 @@ package com.firestream.chat.ui.chat
 
 import android.content.Intent
 import android.net.Uri
-import android.os.Build
 import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -83,13 +82,11 @@ internal fun ExactAlarmBanner(
                 TextButton(onClick = onDismiss) { Text("Not now") }
                 TextButton(onClick = {
                     onDismiss()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                            data = Uri.fromParts("package", context.packageName, null)
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        runCatching { context.startActivity(intent) }
+                    val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.fromParts("package", context.packageName, null)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     }
+                    runCatching { context.startActivity(intent) }
                 }) { Text("Allow") }
             }
         }

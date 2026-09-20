@@ -22,7 +22,7 @@ import org.robolectric.annotation.Config
  * offers, and which end of the history the undo/redo buttons disable at.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ImageEditToolbarUiTest {
 
     @get:Rule
