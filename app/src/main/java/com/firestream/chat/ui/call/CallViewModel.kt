@@ -27,13 +27,4 @@ class CallViewModel @Inject constructor(
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
 
     fun selectAudioRoute(route: CallAudioRoute) = CallService.selectAudioRoute(context, route)
-
-    /** Interim: the binary speaker button until the route picker lands. Delete with it. */
-    fun toggleSpeaker() = selectAudioRoute(
-        if (uiControls.value.audioRoute == CallAudioRoute.SPEAKER) {
-            CallAudioRoute.EARPIECE
-        } else {
-            CallAudioRoute.SPEAKER
-        }
-    )
 }
