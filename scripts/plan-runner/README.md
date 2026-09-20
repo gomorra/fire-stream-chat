@@ -5,7 +5,7 @@ session per step, checks the branch itself before it believes a result, and stop
 three situations. Contract and rationale: `docs/plans/done/plan-runner.md` (§5 for escalation,
 variants, the review session and the judge). Keep the two diagrams below in step with
 `handle_result` and the main loop when either changes. The same diagrams, with a who-writes-what
-figure and the exit-code table, are a standalone page: `docs/plan-runner-flow.html` (open it in a
+figure and the exit-code table, are a standalone page: `flow.html` next to this file (open it in a
 browser; it loads mermaid and its fonts from a CDN).
 
 ## The loop over the plan
@@ -84,3 +84,5 @@ the step met its spec — the judge grades that, nothing acts on the grade yet.
 | `report.sh` | Per-step table from one or more run logs. |
 | `selfcheck.sh`, `fixtures/` | Pure-function and dry-run checks; runs in CI. |
 | `e2e.sh` | The driver's control flow against a stub `claude` and `gradlew` in a scratch repo; called by `selfcheck.sh`. |
+| `benchmark.md` | The 2026-09-20 configuration benchmark: protocol, results of every arm, the hand-read of the judge's findings, and the decision behind the mid-tier default. Raw run data stays in the gitignored `docs/plans/.runs/`. |
+| `flow.html` | The two flow diagrams below plus a who-writes-what figure and the exit-code table, as a standalone page. |

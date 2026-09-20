@@ -416,4 +416,4 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   Fable 5.1 measurements — a different headline recommendation, not just different decimals. The
   skill names its sources (`shared/live-sources.md`); before a model, effort or price decision
   rests on a bundled number, fetch the live page and quote that, with the date. This is what
-  `docs/plans/plan-runner-benchmark.md` does.
+  `scripts/plan-runner/benchmark.md` does.

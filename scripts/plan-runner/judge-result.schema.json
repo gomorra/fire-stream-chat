@@ -1,6 +1,6 @@
 {
   "title": "Plan runner judge result",
-  "description": "What the read-only judge session (scripts/plan-runner/judge-prompt.md) ends with. The driver logs the counts per severity and keeps the file; nothing is acted on. Protocol: docs/plans/plan-runner-benchmark.md.",
+  "description": "What the read-only judge session (scripts/plan-runner/judge-prompt.md) ends with. The driver logs the counts per severity and keeps the file; nothing is acted on. Protocol: scripts/plan-runner/benchmark.md.",
   "type": "object",
   "additionalProperties": false,
   "required": ["verdict", "findings", "testsAdequate", "summary"],

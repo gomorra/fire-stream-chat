@@ -426,7 +426,7 @@ Departures (for sign-off):
 The first real step (`call-audio-routes` step 1, 2026-09-14) validated only after a nudge that cost
 as much as the step, and both real steps so far failed their first validation on a driver fault, not
 a model fault. The changes below came out of reading that run; the evidence and the discussion are
-in `docs/plans/plan-runner-benchmark.md`. Where they contradict §2 or §4 above, this section wins.
+in `scripts/plan-runner/benchmark.md`. Where they contradict §2 or §4 above, this section wins.
 
 | Change | Why | Where |
 |---|---|---|

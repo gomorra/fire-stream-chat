@@ -1,7 +1,7 @@
 <!--
 Prompt template for the judge pass (scripts/run-plan.sh, judge_step): after a step validates, a
 fresh read-only session on a fixed model grades the step's diff against its spec. It is a
-measuring instrument for comparing run configurations (docs/plans/plan-runner-benchmark.md), not
+measuring instrument for comparing run configurations (scripts/plan-runner/benchmark.md), not
 a repair step: it changes nothing and its findings are logged, not acted on. Only runs when the
 variant sets JUDGE_MODEL, and only for steps whose diff the gate can see.
 

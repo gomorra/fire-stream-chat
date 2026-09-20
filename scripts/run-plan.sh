@@ -30,7 +30,7 @@ trap 'echo "plan-runner: internal error at line $LINENO (exit $?) — this is a 
 # A --variant file may override the keys lib.sh's PR_VARIANT_KEYS lists, nothing else.
 MODEL_MAX=fable;     EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
 MODEL_STRONG=opus;   EFFORT_STRONG=xhigh; ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
-MODEL_MID=fable;     EFFORT_MID=medium;   ADVISOR_MID=''       # set 2026-09-20 by docs/plans/plan-runner-benchmark.md; variants/mid-opus-high.env is the fallback when the account's Fable share is used up
+MODEL_MID=fable;     EFFORT_MID=medium;   ADVISOR_MID=''       # set 2026-09-20 by scripts/plan-runner/benchmark.md; variants/mid-opus-high.env is the fallback when the account's Fable share is used up
 JUDGE_MODEL='';      JUDGE_EFFORT=high    # '' = no judge pass; see plan-runner/judge-prompt.md
 ESCALATE=1                 # 1 = a step that stays invalid after its nudge is re-run once, one effort rung up
 DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
