@@ -235,7 +235,7 @@ User-visible changes are tracked in `CHANGELOG.md` (Keep a Changelog format). Th
 
 **Skip for:** doc-only, test-only, refactors with no user-visible effect, CI/tooling changes.
 
-**Version bumps, CHANGELOG section placement, and cutting a release** (tagging, `versionName` derivation, the CI gates) live in the `changelog-release` skill — invoke it when a commit needs a bump decision or when cutting a release. Rule of thumb: any commit that lands a CHANGELOG entry gets a version bump, severity following the conventional-commit prefix (`feat:` minor, `fix:`/`refactor:` patch, `feat!:` major).
+**Version bumps, CHANGELOG section placement, and cutting a release** (tagging, `versionName` derivation, the CI gates) live in the `changelog-release` skill — invoke it when a commit needs a bump decision or when cutting a release. Rule of thumb: any commit that lands a CHANGELOG entry gets a version bump, severity following the conventional-commit prefix (`feat:` minor, `fix:`/`refactor:` patch, `feat!:` major — but a `!` on a build or platform-floor change such as a `minSdk` raise is minor; major is for a break in the app's own data or protocol).
 
 **`versionCode` is auto-derived** from `git rev-list --count HEAD` at Gradle configure time — never edit it by hand. Same with `versionName` (from `git describe --tags`), `BuildConfig.GIT_SHA`, and `COMMIT_TIMESTAMP`.
 
