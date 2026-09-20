@@ -174,6 +174,39 @@ minor is enough, this is not an API break; the skill decides).
 Gate: full `:app:testFirebaseDebugUnitTest` — this is the step most likely to surface a
 surprise, so run the whole suite, not a filter.
 
+**Approach**
+1. `app/build.gradle.kts:91` and `baselineprofile/build.gradle.kts:12` → `minSdk = 31`.
+2. Delete the four version branches, all still at the lines §1 names: `SpeechRecognizerManager.kt:46`
+   (`isOnDeviceAvailable` becomes the bare call), `ReminderAlarmScheduler.kt:58` and
+   `TimerAlarmScheduler.kt:76` (`canExact = alarmManager.canScheduleExactAlarms()`),
+   `ExactAlarmBanner.kt:86` (the settings intent runs unconditionally). Unused `android.os.Build`
+   imports go with them.
+3. Delete `TimerAlarmSchedulerTest` "pre-S devices skip the canScheduleExactAlarms check entirely"
+   (`:100`) and its now-unused `ReflectionHelpers`/`Build` imports. No test is added: this step
+   removes behaviour, it adds none.
+4. Bulk `sed` `sdk = [29]` → `sdk = [31]` over `app/src/test`. Correction to §1: it is **39 files**,
+   not 26 — the count grew with the outbox and image-editor work. Then `docs/PATTERNS.md:125`
+   (the quoted annotation) and `CLAUDE.md:61` (`minSdk = 29` in Build & Run).
+5. Gate: full `:app:testFirebaseDebugUnitTest`, then `assembleFirebaseDebug`. Roborazzi baselines
+   are re-checked by that run; regenerate the four PNGs only if the diff is antialias noise.
+6. `changelog-release` for the bump, then the `Removed` entry and the two commits.
+
+Nothing in the code contradicts the step's spec. Two things it does not mention, both left alone
+deliberately: `OutboxScheduler.runsExpedited(sdkInt, uploads)` (`:110`) is a *pure* helper taking
+the SDK as a parameter, not a branch on `Build.VERSION` — with minSdk 31 its `sdkInt >= S` arm is
+always true on a real device, but it and its test stay, and the dead arm goes to `TECH_DEBT.md`
+rather than into this diff; and the `Build.VERSION_CODES.TIRAMISU`/`UPSIDE_DOWN_CAKE` branches
+(MainActivity, CallService, ShareContentResolver, MessageBubble, SettingsScreen, ChatScreen,
+WorkerForeground) are above 31 and unaffected.
+
+**Shipped** `3b30b8f7` (2026-09-20) — tier: mid, tagged mid. skills: changelog-release, app-ui-design. Reviewer models: none.
+Departures (for sign-off):
+- §1 says 26 Robolectric tests pin `sdk = [29]`; it is 39 files. All converted, suite green at 1584 tests.
+- The bump is **major, 2.0.0**, not the minor §3 recommended. `changelog-release` maps the `!` in `chore(build)!` to major, and the break is real for a user: an Android 10/11 phone can no longer install the APK at all. The `[UNRELEASED] [1.34.0]` section was promoted in place to `[UNRELEASED] [2.0.0] — 2026-09-20`. The entry itself is in the code commit `3b30b8f7`; only its `` (`3b30b8f7`) `` hash suffix — unknowable before the commit existed — was appended in the `docs(plan)` commit.
+- `./gradlew :app:verifyRoborazziFirebaseDebug` fails on all four `MessageBubbleScreenshotTest` baselines — **pre-existing, not the SDK bump**: the recorded PNGs show an orange own-bubble, a colour `Color.kt` has not produced since the warm-neutral redesign (`SentBubble = 0xFFE0DDD6 // NOT orange`). Recorded once in `317d9f5a` and never re-recorded; no gate runs `verifyRoborazzi`, so it rotted unseen. The PNGs are **left untouched** — re-recording would bless four unreviewed images — and the finding is in `TECH_DEBT.md` with its revisit trigger. §2.6's "regenerate if it is antialias noise" did not apply.
+- Beyond the step's file list: `CLAUDE.md:61` (`minSdk = 29` in Build & Run) and `TECH_DEBT.md` — one new entry (the stale Roborazzi baselines) plus a parenthetical correcting the existing WorkManager-latency entry, which described API 29/30 send behaviour that can no longer occur. `.claude/skills/app-ui-design/SKILL.md:49` also quotes the dead `sdk = [29]` pin but the session was denied write permission under `.claude/` — flagged on step 5.
+- No test added: the step only removes behaviour. Neither `simplify` (74 changed lines) nor `code-review` (no `data/crypto`, `data/worker`, `di/`, no ViewModel) was triggered by the diff.
+
 ### Step 2 — model + policy + tests (`feat(call)`, no CHANGELOG yet — nothing visible)
 Files: `domain/model/CallState.kt`, new `data/call/CallAudioRoutePolicy.kt`,
 `CallStateHolder.kt` (`updateAudioRoutes`), `CallStateHolderTest.kt`,
@@ -205,6 +238,9 @@ no logic), but a Robolectric smoke test that the sheet lists three rows when
 `availableRoutes` has three entries is cheap and welcome — follow `ChatListItemUiTest` shape.
 CHANGELOG: "**Calls can use a Bluetooth or wired headset.** …" under `Added`, and the minSdk
 line from step 1 stays under `Removed`.
+**(step-1)** That section is now `## [UNRELEASED] [2.0.0] — 2026-09-20` — step 1 took the major
+bump (see its Shipped departures), so this step appends to it and does **not** raise the version
+again. Any Robolectric test this step adds pins `@Config(sdk = [31], …)`, not `[29]`.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
@@ -218,7 +254,18 @@ line from step 1 stays under `Removed`.
   and the "show Bluetooth product name (needs `BLUETOOTH_CONNECT`)" nice-to-have.
 - `docs/GOTCHAS.md`: only if step 1 hit something non-obvious (Robolectric vs minSdk, Roborazzi
   re-render). Otherwise nothing.
+  **(step-1)** Nothing owed here: the Robolectric-sdk-≥-minSdk rule went into the existing
+  `docs/PATTERNS.md` trap it belongs to, and the Roborazzi finding into `TECH_DEBT.md`.
 - `TECH_DEBT.md`: nothing expected.
+  **(step-1)** Already landed in `3b30b8f7`: one new entry for the stale Roborazzi baselines (see
+  the step-1 Shipped departures), plus a parenthetical on the existing WorkManager-latency entry
+  noting the now-unreachable arm of `OutboxScheduler.runsExpedited`. Nothing more owed unless
+  steps 2–4 add their own.
+- **(step-1)** `.claude/skills/app-ui-design/SKILL.md:49` still quotes `@Config(sdk = [29], …)` as
+  the shape for a new Robolectric Compose test — that pin no longer boots. The step-1 session was
+  denied write permission under `.claude/`, so it must be changed to `[31]` here, by hand or by a
+  session that can write there. Left stale it will reintroduce a failing pin in the next UI test
+  anyone writes.
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
   `docs/plans/done/` once the device pass is recorded.
 
