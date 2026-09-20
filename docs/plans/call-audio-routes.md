@@ -287,6 +287,75 @@ the step-2+3 diff before commit: this touches coroutine scoping in a foreground 
   (`:528`, now toggling EARPIECE⇄SPEAKER through `updateAudioRoutes` **and** still writing
   `isSpeakerphoneOn`), and `previousSpeakerState`. `CallStateHolder.updateAudioRoutes` already exists.
 
+**Approach**
+1. New `data/call/CallAudioRouter.kt` — `RouteState`, a `MutableStateFlow`, the two listeners, and
+   `start()` / `select()` / `stop()`, each `synchronized` over the `previousAvailable` + `userPick`
+   bookkeeping (they are read-modify-written from the main executor *and* from the WebRTC and
+   service threads). `setCommunicationDevice` is always given a device re-queried in the same
+   critical section (§4 trap 1); `current` comes only from `OnCommunicationDeviceChangedListener`.
+2. `CallService.kt` — `ACTION_SELECT_AUDIO_ROUTE` + `EXTRA_AUDIO_ROUTE`, a `sendSelectRoute()`
+   companion helper (today's `sendAction` carries no extras); router construction, `state`
+   collector and proximity rule inside the renamed `startAudioSession()` /
+   `stopAudioSession()`; delete `toggleSpeaker()`, `ACTION_TOGGLE_SPEAKER`, `previousSpeakerState`
+   and the unconditional `acquireProximityWakeLock()` at ICE-CONNECTED.
+3. `CallViewModel.kt` — `toggleSpeaker()` → `selectAudioRoute(route: CallAudioRoute)`.
+4. `CallScreen.kt` — callsite only: `onToggleSpeaker` becomes a lambda that picks the other of
+   EARPIECE/SPEAKER. `ConnectedContent` keeps its 9 params; the route button and sheet are step 4's.
+5. Tests: new `CallAudioRouterTest.kt`. **Departure from the step's "no unit test for the router"**:
+   `unitTests.isReturnDefaultValues = true` (`app/build.gradle.kts:231`) plus MockK over
+   `AudioManager`/`AudioDeviceInfo`/`Handler` makes the router testable as plain JUnit, no
+   Robolectric — the bookkeeping this step adds (pick clearing, `previousAvailable` advance,
+   idempotent start/stop) is exactly what the policy test cannot reach.
+6. Gate: `:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`, then `/simplify` +
+   `/code-review` over the step-2+3 diff.
+
+Two things the code contradicts, both handled here rather than escalated: `requestAudioFocus()` runs
+on **both** ICE CONNECTED and COMPLETED, so today it overwrites `previousAudioMode` with
+`MODE_IN_COMMUNICATION` (pre-existing leak of the call audio mode) and would start a second router
+and a second collector — `startAudioSession()` becomes idempotent, and so does `CallAudioRouter.start()`.
+And §2.3's "constructed with `AudioManager` + main `Executor`" cannot be literal:
+`registerAudioDeviceCallback` takes a `Handler`, not an `Executor`, so the router takes the main
+`Handler` and derives the executor from it — one parameter, and the two listeners are guaranteed the
+same thread.
+
+**Shipped** `81fab393` (2026-09-20) — tier: strong, tagged strong. skills: simplify, code-review, app-ui-design. Reviewer models: simplify: sonnet (reuse), opus (simplification), opus (efficiency), opus (altitude); code-review: opus (standards), opus (spec).
+Departures (for sign-off):
+- **New file not in the step's list: `data/call/ProximityLock.kt` + `ProximityLockTest.kt`.** §2.4 only
+  asked the collector to call `acquire`/`releaseProximityWakeLock`. `/simplify`'s altitude agent
+  showed why that is the wrong owner: those two methods are unsynchronized, and the collector runs on
+  `serviceScope` (IO) while teardown arrives from the main and WebRTC threads, so the rule "proximity
+  follows the playing route" was safe only by caller discipline and was untestable. The lock now owns
+  its own monitor and latches on `shutdown()`. Annotated on step 5 for `FEATURE-MAP`.
+- **Two bugs fixed that the step did not name.** (a) `requestAudioFocus()` ran on both ICE CONNECTED
+  *and* COMPLETED, so the second run saved `MODE_IN_COMMUNICATION` as the mode to restore after the
+  call and would now also have leaked a second router, a second listener pair and a second collector;
+  `startAudioSession()` is idempotent, and it and `stopAudioSession()` are mutually exclusive under
+  `audioSessionLock` so that hanging up as ICE connects cannot interleave into a half-started session.
+  (b) The proximity wake lock's re-acquire guard tested nullness, so a call outliving the 1-hour
+  `acquire()` timeout lost screen blanking permanently; it tests `isHeld` now, with a regression test.
+  Neither is testable end-to-end on the JVM (Android `Service`), which is why (a) has no test of its own.
+- **§2.3's `Executor` is a `Handler`.** `registerAudioDeviceCallback` has no `Executor` overload, so
+  the router takes the main-looper `Handler` and derives the listener executor from it.
+- **Unit tests for the router, which the step declined.** `unitTests.isReturnDefaultValues` plus MockK
+  over `AudioManager`/`AudioDeviceInfo`/`Handler` makes it plain-JUnit testable with no Robolectric.
+  14 router cases + 7 proximity cases, covering exactly what the policy test cannot see: which device
+  object is handed to `setCommunicationDevice`, when a user pick is spent, start/stop idempotency.
+- **`RouteState.current` and `CallStateHolder.updateAudioRoutes`'s `current` are nullable.** Both
+  review axes caught the same defect: publishing `EARPIECE` as a placeholder claims the OS reported a
+  route it has not, which on a tablet publishes a current route absent from `available`, and lets the
+  policy's rule 3 pin a route the device never reached. Null now means "not reported yet"; the UI keeps
+  the route it is showing, and only the proximity rule reads the null as EARPIECE — deliberately, so an
+  ordinary call still blanks the screen from the first second the way it always did, even if the OS
+  never calls back because the earpiece was already selected.
+- **Declined, with the reason in `TECH_DEBT.md`:** the router holds its monitor across AudioService
+  binder calls. Narrowing it re-opens the read-modify-write race it exists for; the real fix is moving
+  the router onto the main looper, which is not this step.
+- **Not applied from `/code-review`:** its suggestion to fold rule 1's pick-clearing into the policy by
+  returning a `Resolution` — that changes §2.2's `resolve(...): CallAudioRoute` signature, a §2 design
+  point, and the step-2 annotation explicitly assigns the side effect to the router. Also not applied:
+  posting `startAudioSession()` to the main looper to keep binder calls off the WebRTC thread, which
+  would let teardown overtake it.
+
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
 state wants a shared helper. Load `app-ui-design` first. Compose test not required (UI-only,
@@ -301,10 +370,25 @@ again. Any Robolectric test this step adds pins `@Config(sdk = [31], …)`, not 
 `isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER`. That derived line, the
 `isSpeakerOn`/`onToggleSpeaker` params and the third `CallControlButton` are what this step replaces
 with `audioRoute` / `availableRoutes` / `onSelectRoute`.
+**(step-3)** The ViewModel method is now `selectAudioRoute(route: CallAudioRoute)` — `toggleSpeaker()`
+is gone. `CallScreen.kt` hoists `val isSpeakerOn` above `ConnectedContent` and passes an
+`onToggleSpeaker` lambda that calls `selectAudioRoute(EARPIECE or SPEAKER)`; both the val and the
+lambda are what §2.5's route button replaces.
+**(step-3 /code-review)** Two things the route button must survive, neither true before step 3:
+- `availableRoutes` is now whatever the OS actually offers and **can be empty** (`CallUiControls`'
+  two-route default only holds until the first `updateAudioRoutes`). `size <= 2` must therefore be
+  the direct-toggle branch including at size 0 and 1 — do not index into the list.
+- `audioRoute` lags a tap by up to ~1 s on Bluetooth (it is the OS's reported route, not the pick,
+  §2.3). The button must render `audioRoute` and never latch the tapped route optimistically; the
+  sheet's check mark moves when the audio does. `audioRoute` may also briefly be a route that is
+  not in `availableRoutes`, so do not assert membership.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
   `CallAudioRoutePolicyTest.kt`; refresh `last-verified`.
+  **(step-3)** Three more files than that list names: `ProximityLock.kt` (new, see the step-3
+  Shipped departures), `CallAudioRouterTest.kt` and `ProximityLockTest.kt`. The existing
+  `CallControlButton.kt | Mute / speaker control` row is stale from step 4 onwards.
 - `docs/BACKLOG.md` § Pending on-device verification: Bluetooth path is **untestable on the
   emulator** (no BT stack). Needs the phone + a headset: (a) headset connected before the
   call → audio on headset from first second, (b) connect mid-call → auto-switch, (c) disconnect
@@ -317,6 +401,8 @@ with `audioRoute` / `availableRoutes` / `onSelectRoute`.
   **(step-1)** Nothing owed here: the Robolectric-sdk-≥-minSdk rule went into the existing
   `docs/PATTERNS.md` trap it belongs to, and the Roborazzi finding into `TECH_DEBT.md`.
 - `TECH_DEBT.md`: nothing expected.
+  **(step-3)** One entry landed with step 3: `CallAudioRouter` holds its monitor across AudioService
+  binder calls (declined, with the main-looper fix as its revisit shape).
   **(step-1)** Already landed in `3b30b8f7`: one new entry for the stale Roborazzi baselines (see
   the step-1 Shipped departures), plus a parenthetical on the existing WorkManager-latency entry
   noting the now-unreachable arm of `OutboxScheduler.runsExpedited`. Nothing more owed unless
