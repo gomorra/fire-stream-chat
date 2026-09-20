@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.data.util.ProfileImageManager
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
@@ -525,9 +526,12 @@ class CallService : Service() {
         localAudioTrack?.setEnabled(!callStateHolder.uiControls.value.isMuted)
     }
 
+    // Interim: still the binary speaker toggle, expressed in routes. CallAudioRouter replaces it.
     private fun toggleSpeaker() {
-        callStateHolder.toggleSpeaker()
-        audioManager?.isSpeakerphoneOn = callStateHolder.uiControls.value.isSpeakerOn
+        val controls = callStateHolder.uiControls.value
+        val route = if (controls.audioRoute == CallAudioRoute.SPEAKER) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER
+        callStateHolder.updateAudioRoutes(controls.availableRoutes, route)
+        audioManager?.isSpeakerphoneOn = route == CallAudioRoute.SPEAKER
     }
 
     // ──────────────────────────────────────────────────────────────────────────
