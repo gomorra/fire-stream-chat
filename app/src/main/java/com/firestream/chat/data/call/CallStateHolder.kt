@@ -6,6 +6,7 @@ import com.firestream.chat.domain.model.CallUiControls
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,15 +27,17 @@ class CallStateHolder @Inject constructor() {
         _uiControls.value = controls
     }
 
+    // Both mutate one slice of the same value: toggleMute() from the service's main thread,
+    // updateAudioRoutes() from the route collector on Dispatchers.IO. Read-modify-write via
+    // `.value =` would let one drop the other's field.
     fun toggleMute() {
-        _uiControls.value = _uiControls.value.copy(isMuted = !_uiControls.value.isMuted)
+        _uiControls.update { it.copy(isMuted = !it.isMuted) }
     }
 
     fun updateAudioRoutes(available: Collection<CallAudioRoute>, current: CallAudioRoute) {
-        _uiControls.value = _uiControls.value.copy(
-            audioRoute = current,
-            availableRoutes = available.distinct().sorted(),
-        )
+        _uiControls.update {
+            it.copy(audioRoute = current, availableRoutes = available.distinct().sorted())
+        }
     }
 
     fun reset() {

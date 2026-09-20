@@ -295,6 +295,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 
 ## Platform / dependencies
 
+- **A null `Handler` does not mean "the main Looper".** `AudioManager.registerAudioDeviceCallback`
+  (and the other framework APIs that take a nullable `Handler`) resolves it as
+  `Looper.myLooper() ?: Looper.getMainLooper()` — the *calling* thread first, main only as a
+  fallback. `CallAudioRouter.start()` is reached from a Looper-less WebRTC thread, so the null
+  form happened to land on main, by accident, and would have silently moved to whatever thread a
+  later caller ran on. Pass `Handler(Looper.getMainLooper())` explicitly whenever the callback
+  thread matters. Found by `/code-review` on the call-audio-routes step 3, 2026-09-20.
 - **Media3 is pinned to 1.9.0.** 1.10.x raises the minimum `compileSdk` to 36; this
   project is `compileSdk 35` on AGP 8.7.3 (AAR-metadata errors otherwise). Revisit on
   the next AGP/compileSdk upgrade.

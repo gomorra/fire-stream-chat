@@ -502,6 +502,38 @@ twin together, never one alone.
 
 ---
 
+### `CallService` integrates the call's audio session by hand, in a comment-documented order
+
+**The smell.** After the audio-route work (`docs/plans/call-audio-routes.md` step 3),
+`CallService` is the integrator of five audio concerns — audio-mode save/restore, focus
+request/abandon, `CallAudioRouter.start/stop`, the route collector, and the proximity wake
+lock — bound by three ordering rules that live only as comments: `router.start()` after
+`MODE_IN_COMMUNICATION` (`requestAudioFocus`), `router.stop()` before the mode restore
+(`abandonAudioFocus`), and `stopAudioRouting()` before `abandonAudioFocus()` (`cleanup`).
+`requestAudioFocus()` is a misnomer by now: it sets the mode, takes focus, starts the router
+and launches a collector. Raised by `/simplify`'s altitude pass, 2026-09-20.
+
+A related, smaller one from the same pass: the proximity lock's real predicate is "the call
+is live **and** the OS route is EARPIECE", but only the second half is expressed as a
+condition — the first half is the `routingActive` gate plus the deliberate decision that
+`CallAudioRouter.stop()` does not reset its `_state`. A second collector on `router.state`
+would inherit that unwritten teardown obligation.
+
+**Why we haven't fixed it.** The plan's §2.4 specifies this wiring line by line, and it is
+what steps 4 and 5 build on; restructuring it mid-plan would invalidate the step the human
+still has to sign off. The dangerous half — a route emission outliving `cleanup()` and
+acquiring an orphaned one-hour wake lock — is fixed properly, under a lock, rather than
+papered over.
+
+**When to revisit.** When a third concern joins the call's audio session (ringtone routing
+for incoming calls is the obvious candidate, and is named as out of scope in §0), or when
+option B (core-telecom, `docs/BACKLOG.md`) is taken up — either forces the seam anyway. The
+shape to aim for is one `CallAudioSession` with `enter()`/`exit()` owning mode + focus +
+routing internally, and proximity derived from `combine(callState, router.state)` rather
+than from where the collector happens to be cancelled.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.
