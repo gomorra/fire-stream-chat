@@ -98,7 +98,11 @@ internal fun CallScreen(
                 isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER,
                 onHangup = viewModel::hangup,
                 onToggleMute = viewModel::toggleMute,
-                onToggleSpeaker = viewModel::toggleSpeaker
+                // Interim binary toggle over the route API; step 4 brings the route button.
+                onToggleSpeaker = {
+                    val onSpeaker = uiControls.audioRoute == CallAudioRoute.SPEAKER
+                    viewModel.selectAudioRoute(if (onSpeaker) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER)
+                }
             )
             is CallState.Ended -> EndedContent()
             CallState.Idle -> {}

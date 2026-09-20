@@ -113,6 +113,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `CallService.cleanup()` can run on two threads at once, and call controls never reset
+
+**The smell.** `cleanup()` is reached from the main thread (`hangup`, `onDestroy`), the IO scope (ring timeout, the signaling collector's "ended"/"declined") and the WebRTC signaling thread (ICE `FAILED`), with no ordering between them: a remote hangup racing a local one can `close()` the peer connection and `dispose()` the factory twice. Only the audio half (`requestAudioFocus` / `abandonAudioFocus`, behind `audioLock`) is serialized. Separately, nothing in production calls `CallStateHolder.reset()`, so `isMuted` and the last audio route survive into the next call's first frames while the new audio track starts unmuted.
+
+**Why we haven't fixed it.** Found by the `/code-review` of call-audio-routes step 3, which only owned the audio routing. `CallService` has no tests (an Android `Service` around WebRTC), so serializing teardown — one confined dispatcher for every state change is the likely shape — wants a harness first, not a drive-by lock.
+
+**When to revisit.** A crash report from `PeerConnection.close` / `dispose`, a "muted but the button says unmuted" report, or the core-telecom rework (option B in the call-audio-routes plan, §0), which restructures the service anyway.
+
+---
+
 ### Three per-key mutex variants
 
 **The smell.** `ListRepositoryImpl.mutexFor` (`ConcurrentHashMap<String, Mutex>`, never evicted), `SignalManager.sessionLock` (same shape) and `data/util/KeyedMutex` (ref-counted, evicted when unused — `OutboxSender`'s per-message lock) all implement "one lock per key". The first two are fine for a bounded key space; `KeyedMutex` exists because message ids are not bounded.

@@ -50,8 +50,10 @@ class CallService : Service() {
         const val ACTION_DECLINE = "com.firestream.chat.call.DECLINE"
         const val ACTION_HANGUP = "com.firestream.chat.call.HANGUP"
         const val ACTION_TOGGLE_MUTE = "com.firestream.chat.call.TOGGLE_MUTE"
-        const val ACTION_TOGGLE_SPEAKER = "com.firestream.chat.call.TOGGLE_SPEAKER"
+        const val ACTION_SELECT_AUDIO_ROUTE = "com.firestream.chat.call.SELECT_AUDIO_ROUTE"
 
+        /** A [CallAudioRoute] `name`, carried by [ACTION_SELECT_AUDIO_ROUTE]. */
+        const val EXTRA_AUDIO_ROUTE = "audio_route"
         const val EXTRA_CALL_ID = "call_id"
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_REMOTE_USER_ID = "remote_user_id"
@@ -97,12 +99,16 @@ class CallService : Service() {
             context.startForegroundService(intent)
         }
 
-        fun sendAction(context: Context, action: String) {
+        fun sendAction(context: Context, action: String, extras: Intent.() -> Unit = {}) {
             val intent = Intent(context, CallService::class.java).apply {
                 this.action = action
+                extras()
             }
             context.startService(intent)
         }
+
+        fun selectAudioRoute(context: Context, route: CallAudioRoute) =
+            sendAction(context, ACTION_SELECT_AUDIO_ROUTE) { putExtra(EXTRA_AUDIO_ROUTE, route.name) }
     }
 
     @Inject lateinit var callRepository: CallRepository
@@ -131,10 +137,13 @@ class CallService : Service() {
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
-    private var proximityWakeLock: PowerManager.WakeLock? = null
+    private val audioRouter by lazy { CallAudioRouter(getSystemService(AudioManager::class.java), mainExecutor) }
+    private var audioRouteJob: Job? = null
 
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
-    private var previousSpeakerState: Boolean = false
+
+    // Audio setup runs on the WebRTC signaling thread, teardown on whichever thread ends the call.
+    private val audioLock = Any()
 
     // Track ICE candidates we've already processed to avoid duplicates
     private val processedIceCandidates = mutableSetOf<String>()
@@ -168,7 +177,9 @@ class CallService : Service() {
             ACTION_DECLINE -> declineIncomingCall()
             ACTION_HANGUP -> hangup()
             ACTION_TOGGLE_MUTE -> toggleMute()
-            ACTION_TOGGLE_SPEAKER -> toggleSpeaker()
+            ACTION_SELECT_AUDIO_ROUTE -> intent.getStringExtra(EXTRA_AUDIO_ROUTE)
+                ?.let { name -> CallAudioRoute.entries.firstOrNull { it.name == name } }
+                ?.let(audioRouter::select)
         }
         return START_NOT_STICKY
     }
@@ -470,9 +481,11 @@ class CallService : Service() {
                 PeerConnection.IceConnectionState.CONNECTED,
                 PeerConnection.IceConnectionState.COMPLETED -> {
                     ringTimeoutJob?.cancel()
-                    if (callConnectedAt == null) callConnectedAt = System.currentTimeMillis()
-                    requestAudioFocus()
-                    acquireProximityWakeLock()
+                    // ICE reports CONNECTED and then COMPLETED; the audio session starts once.
+                    if (callConnectedAt == null) {
+                        callConnectedAt = System.currentTimeMillis()
+                        requestAudioFocus()
+                    }
                     callStateHolder.updateState(
                         CallState.Connected(
                             callId,
@@ -526,14 +539,6 @@ class CallService : Service() {
         localAudioTrack?.setEnabled(!callStateHolder.uiControls.value.isMuted)
     }
 
-    private fun toggleSpeaker() {
-        // Interim: still the binary toggle, expressed in routes. Replaced by CallAudioRouter.
-        val controls = callStateHolder.uiControls.value
-        val next = if (controls.audioRoute == CallAudioRoute.SPEAKER) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER
-        callStateHolder.updateAudioRoutes(controls.availableRoutes, next)
-        audioManager?.isSpeakerphoneOn = next == CallAudioRoute.SPEAKER
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     // Timeout
     // ──────────────────────────────────────────────────────────────────────────
@@ -554,10 +559,9 @@ class CallService : Service() {
     // Audio Focus & Proximity
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun requestAudioFocus() {
+    private fun requestAudioFocus(): Unit = synchronized(audioLock) {
         val am = audioManager ?: return
         previousAudioMode = am.mode
-        previousSpeakerState = am.isSpeakerphoneOn
 
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
@@ -570,31 +574,50 @@ class CallService : Service() {
             )
             .build()
         am.requestAudioFocus(audioFocusRequest!!)
+
+        // The router needs the communication mode to be set already.
+        audioRouter.start()
+        audioRouteJob = launchAudioRouteCollector()
     }
 
-    private fun abandonAudioFocus() {
+    private fun abandonAudioFocus(): Unit = synchronized(audioLock) {
+        audioRouteJob?.cancel()
+        audioRouteJob = null
+        // Before the mode is restored, and on every exit path: a communication device left
+        // selected keeps the next media app on the SCO link.
+        audioRouter.stop()
+
         val am = audioManager ?: return
-        audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+        val request = audioFocusRequest ?: return
+        am.abandonAudioFocusRequest(request)
         am.mode = previousAudioMode
-        am.isSpeakerphoneOn = previousSpeakerState
         audioFocusRequest = null
     }
 
-    private fun acquireProximityWakeLock() {
-        if (proximityWakeLock != null) return
-        val pm = getSystemService(PowerManager::class.java)
-        proximityWakeLock = pm.newWakeLock(
-            PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
-            "firestream:call_proximity"
-        )
-        proximityWakeLock?.acquire(60 * 60 * 1000L) // 1 hour max
-    }
-
-    private fun releaseProximityWakeLock() {
-        proximityWakeLock?.let {
-            if (it.isHeld) it.release()
+    /**
+     * Mirrors the router into [CallStateHolder] and owns the proximity wake lock, which exists
+     * only inside this job — nothing else can take it back once the job is cancelled, and the
+     * job's end releases it. On the main dispatcher, not the scope's IO pool: the release follows
+     * the cancel by one main-loop turn instead of queueing behind sync and media work, and the
+     * body does nothing that blocks.
+     */
+    private fun launchAudioRouteCollector(): Job = serviceScope.launch(Dispatchers.Main.immediate) {
+        val proximityWakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "firestream:call_proximity")
+        try {
+            audioRouter.state.collect { state ->
+                callStateHolder.updateAudioRoutes(state.available, state.current)
+                // Follows the route the OS reports, not the pick: the screen must not blank
+                // while a Bluetooth link is still coming up and the audio is on the earpiece.
+                if (state.current == CallAudioRoute.EARPIECE) {
+                    if (!proximityWakeLock.isHeld) proximityWakeLock.acquire(60 * 60 * 1000L) // 1 hour max
+                } else if (proximityWakeLock.isHeld) {
+                    proximityWakeLock.release()
+                }
+            }
+        } finally {
+            if (proximityWakeLock.isHeld) proximityWakeLock.release()
         }
-        proximityWakeLock = null
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -647,7 +670,6 @@ class CallService : Service() {
         webRtcFactory = null
 
         abandonAudioFocus()
-        releaseProximityWakeLock()
 
         processedIceCandidates.clear()
         currentCallId = null

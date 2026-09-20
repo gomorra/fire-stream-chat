@@ -27,7 +27,10 @@ object CallAudioRoutePolicy {
     )
 
     /**
-     * @param current what the OS reports as active, null before the first pick
+     * @param current the route in effect or still being established — the last one asked of the
+     *   OS, not the one it reports: Bluetooth lags a request by about a second, and resolving
+     *   against the reported route inside that window would undo the request. Null before the
+     *   first pick.
      * @param userPick the last explicit tap, null = none. The caller clears it when the
      *   result differs from it (a newly connected headset preempts the pick).
      */
