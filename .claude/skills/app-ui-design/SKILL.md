@@ -46,7 +46,7 @@ These are not open design questions. Extend them; don't start a parallel system.
 
 ## Finishing
 
-1. **Write a Robolectric Compose test** when the change carries logic or adds a composable variant — `app/src/test/`, `@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`, `@Config(sdk = [29], application = android.app.Application::class)`. Canonical shape: `ui/chatlist/ChatListItemUiTest.kt`. There is no `androidTest/` source set. Skip tests for pure visual tweaks; a bug fix always gets its regression test first.
+1. **Write a Robolectric Compose test** when the change carries logic or adds a composable variant — `app/src/test/`, `@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`, `@Config(sdk = [31], application = android.app.Application::class)`. Canonical shape: `ui/chatlist/ChatListItemUiTest.kt`. There is no `androidTest/` source set. Skip tests for pure visual tweaks; a bug fix always gets its regression test first.
 2. `./gradlew test` then `./gradlew assembleDebug` — both green before committing.
 3. Commit immediately once green, code and tests together.
 4. User-visible? Add a `CHANGELOG.md` entry under the `[UNRELEASED]` header and take the version bump (`changelog-release` skill).

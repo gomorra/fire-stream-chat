@@ -177,7 +177,14 @@ sealed interface CallState {
 enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
 
 // In-call UI controls (exposed by CallStateHolder)
-data class CallUiControls(val isMuted: Boolean, val isSpeakerOn: Boolean)
+// Where call audio plays. The router (data/call/CallAudioRouter) publishes what the OS reports.
+enum class CallAudioRoute { EARPIECE, SPEAKER, BLUETOOTH, WIRED_HEADSET }
+
+data class CallUiControls(
+    val isMuted: Boolean,
+    val audioRoute: CallAudioRoute,            // the route the OS reports, not the last tap
+    val availableRoutes: List<CallAudioRoute>  // display order; two or fewer → the button toggles
+)
 ```
 
 ### SdpData / IceCandidateData / CallSignalingData

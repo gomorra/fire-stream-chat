@@ -144,7 +144,9 @@ class CallService : Service() {
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
-    private var audioRouter: CallAudioRouter? = null
+    // Written under audioSessionLock, but read without it by selectAudioRoute() on the main thread:
+    // taking the lock there would park the main thread behind startAudioSession()'s binder calls.
+    @Volatile private var audioRouter: CallAudioRouter? = null
     private var proximityLock: ProximityLock? = null
 
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
@@ -152,7 +154,9 @@ class CallService : Service() {
     /**
      * Guards the audio-session fields above ([audioFocusRequest], [audioRouter], [proximityLock],
      * [routeJob], [previousAudioMode]) — they are written from the WebRTC signaling thread and from
-     * both teardown threads. Only ever held by [startAudioSession] / [stopAudioSession], which take
+     * both teardown threads. [audioRouter] has one lock-free reader, [selectAudioRoute], and is
+     * volatile for it; a tap that lands on a router already stopped is a no-op inside the router.
+     * Only ever held by [startAudioSession] / [stopAudioSession], which take
      * the router's and the proximity lock's monitors under it, never the other way round.
      */
     private val audioSessionLock = Any()
