@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.data.util.ProfileImageManager
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
@@ -525,9 +526,17 @@ class CallService : Service() {
         localAudioTrack?.setEnabled(!callStateHolder.uiControls.value.isMuted)
     }
 
+    // Step 3 replaces this with ACTION_SELECT_AUDIO_ROUTE and a CallAudioRouter; until then it
+    // keeps today's earpiece/speaker toggle, expressed on the new route model.
     private fun toggleSpeaker() {
-        callStateHolder.toggleSpeaker()
-        audioManager?.isSpeakerphoneOn = callStateHolder.uiControls.value.isSpeakerOn
+        val controls = callStateHolder.uiControls.value
+        val next = if (controls.audioRoute == CallAudioRoute.SPEAKER) {
+            CallAudioRoute.EARPIECE
+        } else {
+            CallAudioRoute.SPEAKER
+        }
+        callStateHolder.updateAudioRoutes(controls.availableRoutes, next)
+        audioManager?.isSpeakerphoneOn = next == CallAudioRoute.SPEAKER
     }
 
     // ──────────────────────────────────────────────────────────────────────────
