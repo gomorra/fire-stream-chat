@@ -144,7 +144,6 @@ run
 check "exit 0"                                   "0" "$rc"
 check "events"                                   "launched result nudged result escalated launched result validated" "$(events mini)"
 check "attempt 2 ran one rung up"                "step:done-valid:high:none" "$(sed -n '3p' "$STUB/calls")"
-requeue
 scenario "…and blocked when the escalated attempt has no result either, after its own nudge" no-result no-result no-result no-result
 run
 check "exit 3 (blocked)"                         "3" "$rc"
