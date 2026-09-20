@@ -59,6 +59,23 @@ class CallStateHolderTest {
     }
 
     @Test
+    fun `updateAudioRoutes with no reported route keeps the displayed one`() {
+        holder.updateAudioRoutes(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER, CallAudioRoute.BLUETOOTH),
+            CallAudioRoute.BLUETOOTH
+        )
+
+        // The OS stopped reporting a communication device; the list still updates.
+        holder.updateAudioRoutes(listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER), null)
+
+        assertEquals(CallAudioRoute.BLUETOOTH, holder.uiControls.value.audioRoute)
+        assertEquals(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER),
+            holder.uiControls.value.availableRoutes
+        )
+    }
+
+    @Test
     fun `updateAudioRoutes leaves the mute state alone`() {
         holder.toggleMute()
 

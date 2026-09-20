@@ -8,7 +8,9 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.data.util.ProfileImageManager
@@ -50,13 +52,14 @@ class CallService : Service() {
         const val ACTION_DECLINE = "com.firestream.chat.call.DECLINE"
         const val ACTION_HANGUP = "com.firestream.chat.call.HANGUP"
         const val ACTION_TOGGLE_MUTE = "com.firestream.chat.call.TOGGLE_MUTE"
-        const val ACTION_TOGGLE_SPEAKER = "com.firestream.chat.call.TOGGLE_SPEAKER"
+        const val ACTION_SELECT_AUDIO_ROUTE = "com.firestream.chat.call.SELECT_AUDIO_ROUTE"
 
         const val EXTRA_CALL_ID = "call_id"
         const val EXTRA_CHAT_ID = "chat_id"
         const val EXTRA_REMOTE_USER_ID = "remote_user_id"
         const val EXTRA_REMOTE_NAME = "remote_name"
         const val EXTRA_REMOTE_AVATAR_URL = "remote_avatar_url"
+        const val EXTRA_AUDIO_ROUTE = "audio_route"
 
         private const val TAG = "CallService"
         private const val RING_TIMEOUT_MS = 30_000L
@@ -103,6 +106,15 @@ class CallService : Service() {
             }
             context.startService(intent)
         }
+
+        /** Ask the ongoing call to move its audio to [route]. No-op if no call is running. */
+        fun sendSelectAudioRoute(context: Context, route: CallAudioRoute) {
+            val intent = Intent(context, CallService::class.java).apply {
+                action = ACTION_SELECT_AUDIO_ROUTE
+                putExtra(EXTRA_AUDIO_ROUTE, route.name)
+            }
+            context.startService(intent)
+        }
     }
 
     @Inject lateinit var callRepository: CallRepository
@@ -128,13 +140,22 @@ class CallService : Service() {
     private var ringTimeoutJob: Job? = null
     private var signalingJob: Job? = null
     private var iceCandidateJob: Job? = null
+    private var routeJob: Job? = null
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
-    private var proximityWakeLock: PowerManager.WakeLock? = null
+    private var audioRouter: CallAudioRouter? = null
+    private var proximityLock: ProximityLock? = null
 
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
-    private var previousSpeakerState: Boolean = false
+
+    /**
+     * Guards the audio-session fields above ([audioFocusRequest], [audioRouter], [proximityLock],
+     * [routeJob], [previousAudioMode]) — they are written from the WebRTC signaling thread and from
+     * both teardown threads. Only ever held by [startAudioSession] / [stopAudioSession], which take
+     * the router's and the proximity lock's monitors under it, never the other way round.
+     */
+    private val audioSessionLock = Any()
 
     // Track ICE candidates we've already processed to avoid duplicates
     private val processedIceCandidates = mutableSetOf<String>()
@@ -168,7 +189,7 @@ class CallService : Service() {
             ACTION_DECLINE -> declineIncomingCall()
             ACTION_HANGUP -> hangup()
             ACTION_TOGGLE_MUTE -> toggleMute()
-            ACTION_TOGGLE_SPEAKER -> toggleSpeaker()
+            ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
         }
         return START_NOT_STICKY
     }
@@ -471,8 +492,9 @@ class CallService : Service() {
                 PeerConnection.IceConnectionState.COMPLETED -> {
                     ringTimeoutJob?.cancel()
                     if (callConnectedAt == null) callConnectedAt = System.currentTimeMillis()
-                    requestAudioFocus()
-                    acquireProximityWakeLock()
+                    // The proximity lock is not taken here: it follows the audio route, and
+                    // startAudioSession's collector applies it as soon as the OS reports one.
+                    startAudioSession()
                     callStateHolder.updateState(
                         CallState.Connected(
                             callId,
@@ -526,17 +548,13 @@ class CallService : Service() {
         localAudioTrack?.setEnabled(!callStateHolder.uiControls.value.isMuted)
     }
 
-    // Step 3 replaces this with ACTION_SELECT_AUDIO_ROUTE and a CallAudioRouter; until then it
-    // keeps today's earpiece/speaker toggle, expressed on the new route model.
-    private fun toggleSpeaker() {
-        val controls = callStateHolder.uiControls.value
-        val next = if (controls.audioRoute == CallAudioRoute.SPEAKER) {
-            CallAudioRoute.EARPIECE
-        } else {
-            CallAudioRoute.SPEAKER
+    private fun selectAudioRoute(routeName: String?) {
+        val route = CallAudioRoute.entries.firstOrNull { it.name == routeName }
+        if (route == null) {
+            Log.w(TAG, "Ignoring audio-route request for unknown route '$routeName'")
+            return
         }
-        callStateHolder.updateAudioRoutes(controls.availableRoutes, next)
-        audioManager?.isSpeakerphoneOn = next == CallAudioRoute.SPEAKER
+        audioRouter?.select(route)
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -556,14 +574,24 @@ class CallService : Service() {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Audio Focus & Proximity
+    // Audio Session — focus, mode, routing, proximity
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun requestAudioFocus() {
+    /**
+     * Take audio focus, switch the device into communication mode, and start routing. Idempotent:
+     * ICE reports CONNECTED and then COMPLETED, and a second run would both overwrite
+     * [previousAudioMode] with `MODE_IN_COMMUNICATION` and leak a second router and collector.
+     *
+     * Runs under [audioSessionLock] because it is called from the WebRTC signaling thread while
+     * [stopAudioSession] arrives from the main thread (`ACTION_HANGUP`) and from [serviceScope]:
+     * hanging up as ICE connects must not interleave into a half-started session that nothing
+     * then tears down.
+     */
+    private fun startAudioSession() = synchronized(audioSessionLock) {
         val am = audioManager ?: return
-        previousAudioMode = am.mode
-        previousSpeakerState = am.isSpeakerphoneOn
+        if (audioFocusRequest != null) return
 
+        previousAudioMode = am.mode
         am.mode = AudioManager.MODE_IN_COMMUNICATION
 
         audioFocusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
@@ -575,31 +603,41 @@ class CallService : Service() {
             )
             .build()
         am.requestAudioFocus(audioFocusRequest!!)
+
+        // Only now, in MODE_IN_COMMUNICATION, does the OS list communication devices.
+        val router = CallAudioRouter(am, Handler(Looper.getMainLooper()))
+        val proximity = ProximityLock(getSystemService(PowerManager::class.java))
+        audioRouter = router
+        proximityLock = proximity
+        router.start()
+
+        routeJob = serviceScope.launch {
+            router.state.collect { routeState ->
+                callStateHolder.updateAudioRoutes(routeState.available, routeState.current)
+                // Before the OS names a route the audio is on the earpiece — that is what
+                // MODE_IN_COMMUNICATION starts on — so the lock is taken as it always was, and
+                // released the moment a headset or the speaker is reported.
+                proximity.follow(routeState.current ?: CallAudioRoute.EARPIECE)
+            }
+        }
     }
 
-    private fun abandonAudioFocus() {
+    /** Undo [startAudioSession], in the reverse order: proximity, routing, focus, mode. */
+    private fun stopAudioSession() = synchronized(audioSessionLock) {
+        // Latches before routeJob is cancelled: cancellation is cooperative, so a collector body
+        // already running could otherwise re-acquire the lock after the call is gone.
+        proximityLock?.shutdown()
+        proximityLock = null
+        routeJob?.cancel()
+        routeJob = null
+        // Hands the device back before the mode is restored, or the next media app inherits SCO.
+        audioRouter?.stop()
+        audioRouter = null
+
         val am = audioManager ?: return
         audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
         am.mode = previousAudioMode
-        am.isSpeakerphoneOn = previousSpeakerState
         audioFocusRequest = null
-    }
-
-    private fun acquireProximityWakeLock() {
-        if (proximityWakeLock != null) return
-        val pm = getSystemService(PowerManager::class.java)
-        proximityWakeLock = pm.newWakeLock(
-            PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK,
-            "firestream:call_proximity"
-        )
-        proximityWakeLock?.acquire(60 * 60 * 1000L) // 1 hour max
-    }
-
-    private fun releaseProximityWakeLock() {
-        proximityWakeLock?.let {
-            if (it.isHeld) it.release()
-        }
-        proximityWakeLock = null
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -651,8 +689,7 @@ class CallService : Service() {
         webRtcFactory?.dispose()
         webRtcFactory = null
 
-        abandonAudioFocus()
-        releaseProximityWakeLock()
+        stopAudioSession()
 
         processedIceCandidates.clear()
         currentCallId = null

@@ -235,6 +235,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `CallAudioRouter` holds its monitor across AudioService binder calls
+
+**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run make their `AudioManager` calls — `availableCommunicationDevices`, `setCommunicationDevice`, `clearCommunicationDevice`, and both un/register calls — inside `synchronized(lock)`, while the two listeners it registers fire on the main looper and block on that same monitor. A slow AudioService round-trip, made from the WebRTC signaling thread, therefore stalls the main thread for its duration. The lock strictly only needs to guard the four routing fields (`started`, `previousAvailable`, `userPick`, `currentRoute`).
+
+**Why we haven't fixed it.** Narrowing it means copying the fields out, dropping the monitor, calling into `AudioManager`, and re-taking it to publish — which re-opens exactly the read-modify-write races the lock exists for (a device-list callback landing between the query and the `setCommunicationDevice`, so the route is chosen from one device list and applied to another). The calls held under the lock are single binder round-trips on a path that runs a handful of times per call, and `docs/plans/call-audio-routes.md` §4 rules out the retry/polling logic that would make them slow.
+
+**When to revisit.** If an ANR trace or a jank report ever points at `CallAudioRouter`'s monitor on the main thread — then the fix is to move the whole router onto the main looper (the listeners are already there) and drop the lock entirely, rather than to narrow it.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

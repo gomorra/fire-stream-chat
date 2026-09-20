@@ -89,17 +89,26 @@ internal fun CallScreen(
                 remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 onHangup = viewModel::hangup
             )
-            is CallState.Connected -> ConnectedContent(
-                remoteName = state.remoteName,
-                remoteAvatarUrl = state.remoteAvatarUrl,
-                remoteLocalAvatarPath = state.remoteLocalAvatarPath,
-                startTime = state.startTime,
-                isMuted = uiControls.isMuted,
-                isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER,
-                onHangup = viewModel::hangup,
-                onToggleMute = viewModel::toggleMute,
-                onToggleSpeaker = viewModel::toggleSpeaker
-            )
+            is CallState.Connected -> {
+                val isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER
+                ConnectedContent(
+                    remoteName = state.remoteName,
+                    remoteAvatarUrl = state.remoteAvatarUrl,
+                    remoteLocalAvatarPath = state.remoteLocalAvatarPath,
+                    startTime = state.startTime,
+                    isMuted = uiControls.isMuted,
+                    isSpeakerOn = isSpeakerOn,
+                    onHangup = viewModel::hangup,
+                    onToggleMute = viewModel::toggleMute,
+                    // Step 4 turns this button into the route picker; until then a tap is the
+                    // two-route special case of selecting a route.
+                    onToggleSpeaker = {
+                        viewModel.selectAudioRoute(
+                            if (isSpeakerOn) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER
+                        )
+                    }
+                )
+            }
             is CallState.Ended -> EndedContent()
             CallState.Idle -> {}
         }

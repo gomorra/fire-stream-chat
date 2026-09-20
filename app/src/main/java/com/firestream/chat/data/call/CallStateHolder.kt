@@ -30,9 +30,16 @@ class CallStateHolder @Inject constructor() {
         _uiControls.value = _uiControls.value.copy(isMuted = !_uiControls.value.isMuted)
     }
 
-    /** Publish the routes the OS offers and the one it is actually playing through. Leaves mute alone. */
-    fun updateAudioRoutes(available: List<CallAudioRoute>, current: CallAudioRoute) {
-        _uiControls.value = _uiControls.value.copy(audioRoute = current, availableRoutes = available)
+    /**
+     * Publish the routes the OS offers and the one it is actually playing through. A null [current]
+     * means the OS has not reported a route yet, and leaves the displayed one alone rather than
+     * guessing. Leaves mute alone either way.
+     */
+    fun updateAudioRoutes(available: List<CallAudioRoute>, current: CallAudioRoute?) {
+        _uiControls.value = _uiControls.value.copy(
+            audioRoute = current ?: _uiControls.value.audioRoute,
+            availableRoutes = available
+        )
     }
 
     fun reset() {
