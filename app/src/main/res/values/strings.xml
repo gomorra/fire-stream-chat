@@ -39,4 +39,10 @@
     <string name="reply_preview_photo">Photo</string>
     <string name="reply_preview_video">Video</string>
     <string name="attachment_record_video">Record video</string>
+    <string name="call_route_earpiece">Phone</string>
+    <string name="call_route_speaker">Speaker</string>
+    <string name="call_route_bluetooth">Bluetooth</string>
+    <string name="call_route_wired">Headphones</string>
+    <string name="call_route_sheet_title">Call audio</string>
+    <string name="call_route_button">Call audio: %1$s</string>
 </resources>

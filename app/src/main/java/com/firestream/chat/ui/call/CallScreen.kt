@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -89,26 +88,18 @@ internal fun CallScreen(
                 remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 onHangup = viewModel::hangup
             )
-            is CallState.Connected -> {
-                val isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER
-                ConnectedContent(
-                    remoteName = state.remoteName,
-                    remoteAvatarUrl = state.remoteAvatarUrl,
-                    remoteLocalAvatarPath = state.remoteLocalAvatarPath,
-                    startTime = state.startTime,
-                    isMuted = uiControls.isMuted,
-                    isSpeakerOn = isSpeakerOn,
-                    onHangup = viewModel::hangup,
-                    onToggleMute = viewModel::toggleMute,
-                    // Step 4 turns this button into the route picker; until then a tap is the
-                    // two-route special case of selecting a route.
-                    onToggleSpeaker = {
-                        viewModel.selectAudioRoute(
-                            if (isSpeakerOn) CallAudioRoute.EARPIECE else CallAudioRoute.SPEAKER
-                        )
-                    }
-                )
-            }
+            is CallState.Connected -> ConnectedContent(
+                remoteName = state.remoteName,
+                remoteAvatarUrl = state.remoteAvatarUrl,
+                remoteLocalAvatarPath = state.remoteLocalAvatarPath,
+                startTime = state.startTime,
+                isMuted = uiControls.isMuted,
+                audioRoute = uiControls.audioRoute,
+                availableRoutes = uiControls.availableRoutes,
+                onHangup = viewModel::hangup,
+                onToggleMute = viewModel::toggleMute,
+                onSelectRoute = viewModel::selectAudioRoute
+            )
             is CallState.Ended -> EndedContent()
             CallState.Idle -> {}
         }
@@ -228,10 +219,11 @@ private fun ConnectedContent(
     remoteLocalAvatarPath: String?,
     startTime: Long,
     isMuted: Boolean,
-    isSpeakerOn: Boolean,
+    audioRoute: CallAudioRoute,
+    availableRoutes: List<CallAudioRoute>,
     onHangup: () -> Unit,
     onToggleMute: () -> Unit,
-    onToggleSpeaker: () -> Unit
+    onSelectRoute: (CallAudioRoute) -> Unit
 ) {
     var elapsed by remember { mutableLongStateOf(0L) }
     LaunchedEffect(startTime) {
@@ -272,12 +264,10 @@ private fun ConnectedContent(
                 iconTint = Color.White,
                 size = 72.dp
             )
-            CallControlButton(
-                icon = Icons.Default.VolumeUp,
-                contentDescription = if (isSpeakerOn) "Disable speaker" else "Enable speaker",
-                onClick = onToggleSpeaker,
-                backgroundColor = if (isSpeakerOn) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
-                iconTint = if (isSpeakerOn) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurface
+            CallAudioRouteButton(
+                audioRoute = audioRoute,
+                availableRoutes = availableRoutes,
+                onSelectRoute = onSelectRoute
             )
         }
     }
