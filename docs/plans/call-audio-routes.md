@@ -213,12 +213,38 @@ Tests (all pure, table-style):
 - tablet {SPEAKER} only → SPEAKER
 - `routeOf` mapping for every listed type + an unknown type → null
 
+**Approach**
+- Order: `CallState.kt` (enum + new `CallUiControls`) → new `CallAudioRoutePolicy.kt` (`resolve` + `routeOf`,
+  device types as private `Int` constants so the file stays Android-free) → `CallStateHolder`
+  (`toggleSpeaker()` out, `updateAudioRoutes(available, current)` in) → the two readers.
+- Reader rewrites, behaviour-preserving: `CallService.toggleSpeaker()` flips EARPIECE⇄SPEAKER through
+  `updateAudioRoutes` and still drives `isSpeakerphoneOn` (step 3 replaces it); `CallScreen` derives
+  `isSpeakerOn = audioRoute == SPEAKER` at the call site, `ConnectedContent` untouched (step 4).
+- Tests: new `CallAudioRoutePolicyTest` (every case in the list above + `routeOf`, with the constants
+  pinned against `AudioDeviceInfo`'s documented values); `CallStateHolderTest` swaps the `toggleSpeaker`
+  test for `updateAudioRoutes` and keeps `reset` / `updateControls`.
+- Nothing in the code contradicts §0 or §2. Line numbers in §1 still hold (`CallService.kt:528`).
+- Further skills: none — pure function + a data class, no concurrency/crypto/DI, well under 600 lines.
+
+**Shipped** `e4ec15db` (2026-09-20) — tier: mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- `CallStateHolder.updateAudioRoutes` sorts and de-duplicates `available` into display order itself (enum order), so the router can pass routes in device order.
+- `CallStateHolder.toggleSpeaker()` is gone already (§2.4 lists it under step 3): `CallUiControls` lost the boolean it flipped. `CallService.toggleSpeaker()` keeps today's behaviour through `updateAudioRoutes` + `isSpeakerphoneOn` until step 3.
+- Four policy tests beyond the list: wired present at start, no pick + unchanged list stays put, one of two headsets leaving falls to the other, BT disconnect with BT as the explicit pick. `routeOf` constants are private `Int`s in the policy, pinned against `AudioDeviceInfo.TYPE_*` by the test.
+- `resolve` on an empty `available` set returns EARPIECE (the spec leaves it open); the router should treat that as "nothing to select".
+
 ### Step 3 — router + service wiring (`feat(call)`, no CHANGELOG yet) — skills: simplify, code-review; model: strong
 Files: new `data/call/CallAudioRouter.kt`, `CallService.kt` (§2.4), `CallViewModel.kt`
 (`selectAudioRoute`). Keep the router free of coroutines except the `MutableStateFlow`; the
 listeners write to it on the main executor. No unit test for the router (Android `AudioManager`),
 the policy test is the coverage. Run `/simplify` (concurrency trigger). Run `/code-review` on
 the step-2+3 diff before commit: this touches coroutine scoping in a foreground service.
+**(step-2)** `CallStateHolder.toggleSpeaker()` is already deleted and `updateAudioRoutes` exists (it sorts
+and de-duplicates). Still to remove here: the interim `CallService.toggleSpeaker()` (flips
+EARPIECE⇄SPEAKER and sets `isSpeakerphoneOn`), `ACTION_TOGGLE_SPEAKER`, `previousSpeakerState`.
+The router keeps `previousAvailable` between policy runs (empty before the first) and nulls `userPick`
+when `resolve` returns something else; an empty `available` set resolves to EARPIECE, which no device
+maps to — skip `setCommunicationDevice` then. `CallScreen` still takes `isSpeakerOn`, derived at the call site (step 4).
 
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
