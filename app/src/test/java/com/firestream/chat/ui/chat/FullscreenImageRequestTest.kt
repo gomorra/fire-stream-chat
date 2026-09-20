@@ -25,7 +25,7 @@ import java.io.File
  * (the copy), so under Coil's default keys nothing was cached for it.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class FullscreenImageRequestTest {
 
     @get:Rule

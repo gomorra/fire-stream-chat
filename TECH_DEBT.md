@@ -41,6 +41,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `OutboxScheduler.runsExpedited` — the API-level half of the rule is dead at minSdk 31
+
+**The smell.** `runsExpedited(sdkInt, uploads)` is `sdkInt >= S || uploads`. Since minSdk moved to 31 (call-audio-routes step 1) the first operand is always true on a device, so every send is expedited and both the `uploads` parameter of the rule and `OutboxSchedulerTest`'s "below API 31" cases describe a device that can no longer install the app.
+
+**Why we haven't fixed it.** The minSdk step was a mechanical build change and this is the sync path: the function is pure, tested, and correct as it stands. Collapsing it also touches the `uploads` plumbing through `enqueue` / `retryNow` and `MessageEntity.needsUpload`, which still has a second reader (the worker's foreground promotion) — worth its own look rather than a drive-by.
+
+**When to revisit.** The next change to `OutboxScheduler`, or when the API 29/30 wording in the entry above is cleaned up.
+
+---
+
 ### `ChatScreen.kt` — split into `ChatTopBar` / `ChatInputBar` / `ChatAttachmentSheet` / `ChatMessageList`
 
 **The smell.** `app/src/main/java/com/firestream/chat/ui/chat/ChatScreen.kt` is ~1400 lines with the `ChatScreen` composable itself spanning lines 145–1366 (~1220 lines). 135 imports. Everything — top bar, reply preview, reactions popup, search UI, attachment bottom sheet, input bar, message list — is inline in one function.

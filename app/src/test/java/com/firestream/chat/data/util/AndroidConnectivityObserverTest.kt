@@ -28,7 +28,7 @@ import org.robolectric.shadows.ShadowNetworkCapabilities
  * callback directly — that is exactly the edge the production code owns.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class AndroidConnectivityObserverTest {
 
     private lateinit var connectivityManager: ConnectivityManager

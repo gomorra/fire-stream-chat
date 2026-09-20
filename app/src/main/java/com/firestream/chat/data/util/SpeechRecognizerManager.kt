@@ -2,7 +2,6 @@ package com.firestream.chat.data.util
 
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -42,10 +41,7 @@ class SpeechRecognizerManager @Inject constructor(
     // the result is stable for the process lifetime.
     val isAvailable: Boolean by lazy { SpeechRecognizer.isRecognitionAvailable(context) }
 
-    val isOnDeviceAvailable: Boolean by lazy {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-            SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-    }
+    val isOnDeviceAvailable: Boolean by lazy { SpeechRecognizer.isOnDeviceRecognitionAvailable(context) }
 
     internal fun listen(languageTag: String): Flow<DictationEvent> = callbackFlow {
         if (!isAvailable) {

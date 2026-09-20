@@ -33,7 +33,7 @@ import kotlin.math.roundToInt
  *
  * Scoped per-request via [coil.request.ImageRequest.Builder.decoderFactory] so
  * only the grid uses it; avatars, message bubbles, and the fullscreen viewer keep
- * Coil's defaults. Available unconditionally at this app's `minSdk = 29`.
+ * Coil's defaults. Available unconditionally at this app's `minSdk = 31`.
  */
 class ScaledImageDecoder(
     private val source: ImageSource,

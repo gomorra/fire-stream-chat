@@ -16,7 +16,7 @@ import javax.inject.Singleton
 /**
  * Best-effort [DateTimeDetector] backed by Android's on-device
  * [TextClassifier] (`android.view.textclassifier`, stable since API 28 — well
- * within this app's `minSdk = 29`).
+ * within this app's `minSdk = 31`).
  *
  * ### What TextClassifier actually gives us
  * [TextClassifier.generateLinks] reliably tells us *where* a date/time
