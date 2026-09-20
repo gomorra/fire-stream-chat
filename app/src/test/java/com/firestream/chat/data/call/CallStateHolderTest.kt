@@ -61,6 +61,19 @@ class CallStateHolderTest {
     }
 
     @Test
+    fun `a null route updates the available set and leaves the displayed route alone`() {
+        holder.updateAudioRoutes(setOf(CallAudioRoute.EARPIECE, CallAudioRoute.BLUETOOTH), CallAudioRoute.BLUETOOTH)
+
+        // The headset is unplugged: the OS names no route calls can use until its replacement is
+        // selected. Showing the earpiece before the audio is on it would be a guess.
+        holder.updateAudioRoutes(setOf(CallAudioRoute.EARPIECE), null)
+
+        val controls = holder.uiControls.value
+        assertEquals(CallAudioRoute.BLUETOOTH, controls.audioRoute)
+        assertEquals(listOf(CallAudioRoute.EARPIECE), controls.availableRoutes)
+    }
+
+    @Test
     fun `default controls are a phone on the earpiece`() {
         val controls = holder.uiControls.value
         assertEquals(CallAudioRoute.EARPIECE, controls.audioRoute)

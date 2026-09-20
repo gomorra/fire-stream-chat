@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,5 +25,15 @@ class CallViewModel @Inject constructor(
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
     fun hangup() = CallService.sendAction(context, CallService.ACTION_HANGUP)
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
-    fun toggleSpeaker() = CallService.sendAction(context, CallService.ACTION_TOGGLE_SPEAKER)
+
+    fun selectAudioRoute(route: CallAudioRoute) = CallService.selectAudioRoute(context, route)
+
+    /** Interim: the binary speaker button until the route picker lands. Delete with it. */
+    fun toggleSpeaker() = selectAudioRoute(
+        if (uiControls.value.audioRoute == CallAudioRoute.SPEAKER) {
+            CallAudioRoute.EARPIECE
+        } else {
+            CallAudioRoute.SPEAKER
+        }
+    )
 }

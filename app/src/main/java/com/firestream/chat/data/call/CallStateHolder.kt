@@ -30,9 +30,14 @@ class CallStateHolder @Inject constructor() {
         _uiControls.value = _uiControls.value.copy(isMuted = !_uiControls.value.isMuted)
     }
 
-    fun updateAudioRoutes(available: Collection<CallAudioRoute>, current: CallAudioRoute) {
+    /**
+     * A null [current] means the OS has not named a route calls can use yet (the beat after a
+     * headset is unplugged, a cellular call holding the device). The available set still updates;
+     * the displayed route stays where it was rather than flickering to a guess.
+     */
+    fun updateAudioRoutes(available: Collection<CallAudioRoute>, current: CallAudioRoute?) {
         _uiControls.value = _uiControls.value.copy(
-            audioRoute = current,
+            audioRoute = current ?: _uiControls.value.audioRoute,
             availableRoutes = available.distinct().sorted(),
         )
     }

@@ -1,6 +1,7 @@
 package com.firestream.chat.data.util
 
 import android.util.Log
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -9,10 +10,12 @@ import com.firestream.chat.domain.model.TimerState
 
 private const val TAG = "EnumParsers"
 
-// Unknown enum values from the backend (or stale local rows) map to safe
-// defaults instead of crashing, but each one is logged so schema drift
-// surfaces in logcat instead of being silently masked. Single source of
-// truth for the raw-string → enum defaults used by the message mappers.
+// Unknown enum values map to safe defaults instead of crashing, but each one is
+// logged so schema drift surfaces in logcat instead of being silently masked.
+// Single source of truth for the raw-string → enum defaults at every boundary an
+// enum name crosses as text: documents from the backend, stale local rows, and
+// Intent extras this app wrote itself (a PendingIntent armed by an older build,
+// or an action delivered to a service that outlived an app update).
 
 internal fun parseMessageType(raw: String): MessageType =
     runCatching { MessageType.valueOf(raw) }.getOrElse {
@@ -24,6 +27,13 @@ internal fun parseMessageStatus(raw: String): MessageStatus =
     runCatching { MessageStatus.valueOf(raw) }.getOrElse {
         Log.w(TAG, "Unknown message status '$raw' — defaulting to SENT")
         MessageStatus.SENT
+    }
+
+/** Null means "ignore this selection" — an unknown route must not move a live call's audio. */
+internal fun parseCallAudioRoute(raw: String): CallAudioRoute? =
+    runCatching { CallAudioRoute.valueOf(raw) }.getOrElse {
+        Log.w(TAG, "Unknown call audio route '$raw' — ignoring the selection")
+        null
     }
 
 internal fun parseTimerState(raw: String): TimerState? =

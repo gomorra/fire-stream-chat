@@ -654,6 +654,21 @@ data-model change, and the provider decision a GIF forces:
 - Cloud storage integration (Google Drive picker)
 - Files: `ui/chat/ChatScreen.kt`, `ui/chat/MessageBubble.kt`
 
+### Call UI controls survive the call they belong to
+- `CallStateHolder.reset()` exists but **nothing in `app/src/main/` ever calls it** (only tests
+  do), so `CallUiControls` is process-lifetime state: mute a call and the next call's screen opens
+  showing muted while the fresh `localAudioTrack` is enabled. Found reviewing the audio-route work
+  (2026-09-20), which widens the stale set to `audioRoute` + `availableRoutes` — after a Bluetooth
+  call, the next call's route button can show Bluetooth for the fraction of a second between
+  `CallState.Connected` and the router's first emission.
+- Not a one-liner: `cleanup()` runs immediately after `updateState(CallState.Ended(…))`, and
+  `reset()` also clears `callState`, which would wipe `Ended` before `CallScreen`'s
+  `LaunchedEffect` can run its 1.5 s delay and call `onFinish()` — so the screen would never
+  dismiss. Needs a controls-only reset (or for `CallUiControls` to be reset when a call *starts*,
+  which also fixes it for a process that never saw the previous call end).
+- Files: `data/call/CallStateHolder.kt`, `data/call/CallService.kt` (`cleanup()`,
+  `startOutgoingCall`/`startIncomingCall`), `ui/call/CallScreen.kt`
+
 ---
 
 ## Platform & Reliability

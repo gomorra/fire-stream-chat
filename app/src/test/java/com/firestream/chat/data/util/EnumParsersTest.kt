@@ -1,5 +1,6 @@
 package com.firestream.chat.data.util
 
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -84,6 +85,21 @@ class EnumParsersTest {
     @Test
     fun `unknown timer state defaults to null`() {
         assertNull(parseTimerState("EXPLODED"))
+    }
+
+    @Test
+    fun `a call audio route parses from the name the intent extra carries`() {
+        assertEquals(CallAudioRoute.BLUETOOTH, parseCallAudioRoute("BLUETOOTH"))
+        assertEquals(CallAudioRoute.WIRED_HEADSET, parseCallAudioRoute("WIRED_HEADSET"))
+    }
+
+    @Test
+    fun `an unknown call audio route is null so a live call's audio does not move`() {
+        // Every route name on the wire was written by this app's own companion helper, so an
+        // unrecognised one means a version skew across an app update with the service still
+        // running. Ignoring the tap beats routing the call somewhere nobody asked for.
+        assertNull(parseCallAudioRoute("HEADPHONES"))
+        assertNull(parseCallAudioRoute(""))
     }
 
     @Test

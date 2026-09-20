@@ -502,6 +502,43 @@ twin together, never one alone.
 
 ---
 
+### `CallService` owns the call's audio session in six fields instead of one collaborator
+
+**The smell.** After the audio-route work (`docs/plans/call-audio-routes.md` step 3), one
+concern — "this call's audio" — is spread over `audioManager`, `audioFocusRequest`,
+`previousAudioMode`, `audioRouter`, `audioRouteJob` and `proximityWakeLock` in `CallService`,
+plus `requestAudioFocus()` / `abandonAudioFocus()`, whose names no longer say that they also
+start and stop routing. The ordering invariant that matters on hardware —
+`clearCommunicationDevice()` before the mode is restored, or the next media app is stuck on the
+8 kHz SCO link — is spread across `cleanup()` → `abandonAudioFocus()` → `stopRouting()` and held
+together by comments. `CallAudioRouter.started` and `CallService.audioRouteJob != null` are the
+same fact tracked twice. Separately, the proximity wake lock is now a pure function of the
+current route (earpiece ⇒ held) but its `PowerManager` plumbing, `isHeld` dance and one-hour
+timeout still live in the service, where that rule cannot be unit-tested.
+
+**Why we haven't fixed it.** Both fixes are new classes — a `CallAudioSession` in `data/call`
+owning mode + focus + router + proximity behind `start()` / `stop()` / `select(route)`, and a
+`ProximityLock(powerManager)` with a single `follow(route: CallAudioRoute?)` — and step 3's file
+list is the router plus the wiring. The invariant is currently guarded by a private `audioLock`
+held across `requestAudioFocus` / `abandonAudioFocus` / `onAudioRouteChanged`, and is correct; the
+cost is that it is guarded by reading three methods rather than by a test. `CallService` has no
+test at all (Android `Service` + WebRTC, untestable on the JVM), which is exactly what the
+extraction would change. Raised by `/simplify`'s altitude pass, 2026-09-20.
+
+The `ProximityLock` half got more valuable in that same step: "earpiece ⇒ held" is now a pure
+function of one nullable route (unknown releases, like any non-earpiece route), so it is a class
+with one testable method — while three of the four private helpers under `audioLock` exist only to
+keep that function honest. It is the half to do first, and it no longer needs `CallAudioSession`
+to go with it.
+
+**When to revisit.** When the on-device Bluetooth pass (`docs/BACKLOG.md`) finds an exit-path
+bug — audio stuck on SCO after hangup, a wake lock held into the next call, the phone left in
+`MODE_IN_COMMUNICATION` — or when anything else needs to own the audio session (a second call,
+the Telecom/core-telecom option B in `docs/BACKLOG.md`). Extract `ProximityLock` first: it is
+small, it is the part with a testable rule, and it does not touch the ordering invariant.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.
