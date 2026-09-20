@@ -119,7 +119,7 @@ Every step session ends with a JSON object validated by `--json-schema` (`script
 ```json
 {
   "status": "done | needs_decision | blocked",
-  "step": 5,
+  "step": "5",
   "commit": "sha or null",
   "skills": {
     "intended": ["code-review"],

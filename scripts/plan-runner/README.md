@@ -42,7 +42,7 @@ nudge, then a fresh attempt one effort rung higher, then the human.
 flowchart TD
   L["launch a fresh session: tier's model, effort, advisor, budget"] --> K{"what came back?"}
   K -- "budget spent, or no JSON at all" --> B(["exit 3: blocked"])
-  K -- "ended without the result object" --> N
+  K -- "ended without the result object" --> U
   K -- "a complete result" --> S{"status"}
   S -- "needs_decision" --> D(["exit 2: needs a decision"])
   S -- "blocked: spec or environment" --> B
@@ -64,8 +64,8 @@ flowchart TD
   Z --> L
 ```
 
-*Validate* is five checks the driver runs itself: HEAD moved; the `**Shipped**` line names a commit
-on the branch; the plan file is committed; the Gradle gate, re-run by the driver, is green (skipped
+*Validate* is six checks the driver runs itself: HEAD moved; the `**Shipped**` line names a commit
+on the branch; the plan file is committed; nothing else is left uncommitted or untracked; the Gradle gate, re-run by the driver, is green (skipped
 for a docs-only diff); every required skill ran — the step's `skills:` tag plus what the diff
 tripwire demands. What it takes on a session's word: that a skill listed as run was run, and that
 the step met its spec — the judge grades that, nothing acts on the grade yet.

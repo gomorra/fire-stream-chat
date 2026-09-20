@@ -11,9 +11,9 @@
       "description": "done: the step's code commit and its docs(plan) commit are on the branch. needs_decision: a **Decision needed** block is written under the step, nothing committed. blocked: the gate could not be made green, or the step cannot be built as specified; nothing committed unless noted in summary."
     },
     "step": {
-      "type": "integer",
-      "minimum": 1,
-      "description": "The step number from the plan's Order line."
+      "type": "string",
+      "pattern": "^[0-9]+[a-z]?$",
+      "description": "The step id as the plan's Order line writes it: \"5\", \"5a\"."
     },
     "commit": {
       "type": ["string", "null"],

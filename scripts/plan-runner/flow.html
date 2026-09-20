@@ -160,7 +160,7 @@ flowchart TD
 flowchart TD
   L["launch a fresh session: tier's model, effort, advisor, budget"] --> K{"what came back?"}
   K -- "budget spent, or no JSON at all" --> B(["exit 3: blocked"])
-  K -- "ended without the result object" --> N
+  K -- "ended without the result object" --> U
   K -- "a complete result" --> S{"status"}
   S -- "needs_decision" --> D(["exit 2: needs a decision"])
   S -- "blocked: spec or environment" --> B
@@ -182,7 +182,7 @@ flowchart TD
   Z --> L
 </pre>
       </div>
-      <figcaption>Validate means five checks the driver runs itself: HEAD moved; the Shipped line names a commit that is on the branch; the plan file is committed; the Gradle gate, re-run by the driver, is green (skipped for a docs-only diff); and every required skill ran, where required is the step's <code>skills:</code> tag plus what the diff tripwire demands. The escalated attempt is told what failed and starts from exactly what the first attempt started from, so an uncommitted answer of yours to a decision survives the reset. A step that escalated and then blocked resumes, on your next run, at the rung it had reached. A session that ends without its result object a second time is blocked, not escalated.</figcaption>
+      <figcaption>Validate means six checks the driver runs itself: HEAD moved; the Shipped line names a commit that is on the branch; the plan file is committed; nothing else is left uncommitted or untracked; the Gradle gate, re-run by the driver, is green (skipped for a docs-only diff); and every required skill ran, where required is the step's <code>skills:</code> tag plus what the diff tripwire demands. The escalated attempt is told what failed and starts from exactly what the first attempt started from, so an uncommitted answer of yours to a decision survives the reset. A step that escalated and then blocked resumes, on your next run, at the rung it had reached. A session that ends without its result object is nudged like an invalid one, and escalated if it does so again.</figcaption>
     </figure>
   </section>
 

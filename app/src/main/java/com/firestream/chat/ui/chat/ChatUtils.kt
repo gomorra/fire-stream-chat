@@ -15,14 +15,32 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
-// Matches emoji characters on JVM. Supplementary-plane emoji (U+1Fxxx) must use
-// \x{HHHH} syntax because Java's regex engine matches code points, not surrogate pairs.
+// Matches whole emoji *sequences* on the JVM. Supplementary-plane emoji (U+1Fxxx)
+// must use \x{HHHH} syntax because Java's regex engine matches code points, not
+// surrogate pairs.
+//
+// Matching per code point is not good enough: [addEmojiSpans] adds one span per
+// match, and Compose breaks text shaping at every span boundary, so a sequence
+// split across several spans renders as its separate components — ❤️‍🔥 as ❤️ plus 🔥,
+// 👨‍👩‍👧 as three faces. A per-sequence multiplier would also land on the first
+// code point only, sizing the halves differently. So a match is one grapheme:
+// a base character plus its modifiers, repeated across zero or more joiners.
+private const val EMOJI_BASE =
+    "[\\x{1F000}-\\x{1FFFF}" + // Supplementary-plane emoji (faces, flags, objects, etc.)
+    "\\u2600-\\u27BF"         + // Misc symbols (☀ ★ ✉ etc.)
+    "\\u2300-\\u23FF"         + // Misc technical (⏰ ⌚ ✂ etc.)
+    "\\u2B00-\\u2BFF]"          // Misc arrows/symbols (⬛ ⬜ ⬅ etc.)
+
+// Variation-selector-16 and the skin-tone modifiers bind to the base before them.
+private const val EMOJI_MODIFIERS = "[\\uFE0F\\x{1F3FB}-\\x{1F3FF}]*"
+
+private const val EMOJI_SEQUENCE = "$EMOJI_BASE$EMOJI_MODIFIERS(?:\\u200D$EMOJI_BASE$EMOJI_MODIFIERS)*"
+
 private val EMOJI_REGEX = Regex(
-    "[\\x{1F000}-\\x{1FFFF}]"      + // Supplementary-plane emoji (faces, flags, objects, etc.)
-    "|[\\u2600-\\u27BF]"            + // Misc symbols (☀ ★ ✉ etc.)
-    "|[\\u2300-\\u23FF]"            + // Misc technical (⏰ ⌚ ✂ etc.)
-    "|[\\u2B00-\\u2BFF]"            + // Misc arrows/symbols (⬛ ⬜ ⬅ etc.)
-    "|\\u200D|\\uFE0F|\\u20E3"       // ZWJ, variation-selector-16, combining keycap
+    "[0-9#*]\\uFE0F?\\u20E3"              + // Keycaps (1️⃣ #️⃣ …) — the digit is part of the glyph
+    "|[\\x{1F1E6}-\\x{1F1FF}]{2}"         + // Flags: a regional-indicator pair is one glyph
+    "|$EMOJI_SEQUENCE"                     +
+    "|\\u200D|\\uFE0F|\\u20E3"              // Orphaned joiner/selector/keycap, so isEmojiOnly still strips them
 )
 
 /** Returns true when [text] contains only emoji characters and whitespace. */

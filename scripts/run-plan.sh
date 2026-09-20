@@ -25,6 +25,10 @@
 set -Eeuo pipefail
 # A driver crash must not look like a decision (2) or a block (3): report and exit 1.
 trap 'echo "plan-runner: internal error at line $LINENO (exit $?) — this is a driver bug, not a step result" >&2; exit 1' ERR
+# A missing tool must read as an environment error: without jq the first `log` trips the trap above.
+for cmd in git jq; do
+    command -v "$cmd" >/dev/null 2>&1 || { echo "plan-runner: '$cmd' is not on PATH" >&2; exit 1; }
+done
 
 # ---- tunables (the only place model ids and effort levels live) -------------
 # A --variant file may override the keys lib.sh's PR_VARIANT_KEYS lists, nothing else.
@@ -104,6 +108,8 @@ case "$CAP" in ''|max|strong|mid) ;; *) echo "--cap wants max|strong|mid" >&2; e
 [[ "$FROM" =~ ^[0-9]+$ ]] || { echo "--from wants a step number" >&2; exit 1; }
 [[ -z "$TO" || "$TO" =~ ^[0-9]+$ ]] || { echo "--to wants a step number" >&2; exit 1; }
 [ -z "$TO" ] || [ "$TO" -ge "$FROM" ] || { echo "--to $TO is before --from $FROM" >&2; exit 1; }
+# Without this a missing CLI ends every launch as exit 3 "blocked", with a resume hint for a session that never was.
+[ "$DRY_RUN" = 1 ] || command -v claude >/dev/null 2>&1 || { echo "plan-runner: 'claude' is not on PATH" >&2; exit 1; }
 if [ -n "$VARIANT" ]; then
     [[ "$VARIANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "--variant wants a lowercase name (a-z, 0-9, -)" >&2; exit 1; }
     VARIANT_FILE=$VARIANTS/$VARIANT.env
@@ -289,7 +295,7 @@ note_run_skills() {
 
 # validate_step → prints reasons (empty = valid). Uses START_SHA, RUN_SKILLS, FLOOR.
 validate_step() {
-    local reasons='' commit head numstat names required run missing gate_log
+    local reasons='' commit head numstat names required run missing gate_log stray
     head=$(wt_git rev-parse HEAD)
     if [ "$head" = "$START_SHA" ]; then reasons+="HEAD did not move — nothing was committed"$'\n'; fi
     if ! pr_step_shipped "$PLAN_WT" "$STEP"; then
@@ -303,6 +309,10 @@ validate_step() {
         fi
     fi
     if [ -n "$(wt_git status --porcelain -- "$PLAN_REL")" ]; then reasons+="$PLAN_REL has uncommitted changes — the Shipped block must be committed"$'\n'; fi
+    # Before the gate, which writes into the tree: what a `done` step leaves uncommitted, the
+    # next step's session inherits as if it were meant for it.
+    stray=$(wt_git status --porcelain -- . ":(exclude)$PLAN_REL" | awk 'NR <= 5 { sub(/^.. /, ""); print }' | paste -sd, - || true)
+    if [ -n "$stray" ]; then reasons+="the worktree is not clean — commit what belongs to the step, remove the rest: $stray"$'\n'; fi
     numstat=$(mktemp); names=$(mktemp)
     wt_git diff --numstat "$START_SHA..HEAD" > "$numstat"; wt_git diff --name-only "$START_SHA..HEAD" > "$names"
     if pr_needs_gate "$names"; then
@@ -386,7 +396,8 @@ review_nudge() {
 # effort rung up with <why> in its prompt. "Run low, re-run the failures higher" is the cheapest
 # policy on the effort curve, but only where a checker names the failures — so this follows a
 # red gate or a failed validation, never a needs_decision, a spent budget, or a `blocked`
-# that is not `gate`. Sets RESULT_FILE / SESSION_ID to the new attempt's.
+# that is not `gate`. The one exception names nothing: a session that ends without its result
+# object a second time, nudge spent — the ladder is nudge, re-run, human, on every path. Sets RESULT_FILE / SESSION_ID to the new attempt's.
 escalate() {
     local why=$1 next keep stamp excerpt gate_log untracked
     [ "$ESCALATE" = 1 ] && [ "$ATTEMPT" = 1 ] || stop_blocked "$why"
@@ -490,7 +501,11 @@ handle_result() {
             budget) stop_blocked "budget or turn limit exhausted ($(result_get .subtype)) — not resumed" ;;
             failed) stop_blocked "session ended without a usable result ($(result_get .subtype); stderr in $(rel "$RESULT_FILE").stderr)" ;;
             incomplete)
-                nudge "Your session ended without the JSON result object the prompt requires. If the step is done, report it; if not, finish it first."
+                if [ "$NUDGED" = 1 ]; then
+                    escalate "the session ended without the JSON result object, and its one nudge was already spent"
+                else
+                    nudge "Your session ended without the JSON result object the prompt requires. If the step is done, report it; if not, finish it first."
+                fi
                 continue ;;
         esac
         case "$(result_get .structured_output.status)" in
@@ -607,8 +622,9 @@ if [ "$DRY_RUN" = 0 ]; then
     ensure_worktree
     PLAN_WT=$WT/$PLAN_REL
     [ -f "$PLAN_WT" ] || { echo "plan-runner: $PLAN_REL is not on $BRANCH — commit the plan on main first, then merge main into $BRANCH or recreate the worktree" >&2; exit 1; }
-    if ! cmp -s "$PLAN_ABS" "$PLAN_WT"; then
-        say "warning: $PLAN_REL differs between main's tree and the branch — the branch's copy ($(rel "$WT")/$PLAN_REL) is the one the runner reads"
+    # Not a cmp with the branch's copy: that differs from the first **Shipped** block on.
+    if ! git -C "$ROOT" diff --quiet "$(wt_git merge-base main HEAD)" -- "$PLAN_REL" 2>/dev/null; then
+        say "warning: $PLAN_REL changed in the main tree since $BRANCH forked from (or last merged) main — the runner reads the branch's copy ($(rel "$WT")/$PLAN_REL); merge main into $BRANCH to pick the change up"
     fi
     behind=$(git -C "$ROOT" rev-list --count "$BRANCH..main" 2>/dev/null || echo 0)
     [ "$behind" = 0 ] || say "note: $BRANCH is $behind commit(s) behind main"

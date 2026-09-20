@@ -122,6 +122,9 @@ Rules that hold throughout:
   notification. This session is headless — the moment a turn
   ends it is asked for its result, so a gate left running in the background can only be reported
   as `blocked`, and the step is thrown away.
+- A `done` step leaves a clean worktree: nothing uncommitted, nothing untracked — that includes
+  whatever was already lying there when you started. The driver checks `git status`, and what it
+  finds the next step's session would inherit.
 - Do not update local memory (`MEMORY.md` does not exist here); route facts to the tracked docs.
 - Do not ask questions with any tool; the decision rule above is the only way to involve the human.
 - Do not skip or delete a failing test; fix the cause. If the gate cannot be made green, end with
@@ -132,7 +135,7 @@ Rules that hold throughout:
 End with exactly one JSON object, nothing after it, valid against `{{SCHEMA_PATH}}`:
 
 - `status`: `done` | `needs_decision` | `blocked`
-- `step`: {{STEP}}
+- `step`: `"{{STEP}}"` — a string
 - `commit`: the code commit's hash when `done`, else `null`
 - `skills`: `{ "intended": [...], "run": [...], "skipped": [{ "skill", "reason" }] }`
 - `reviewerModels`: one string per review skill that spawned sub-agents, e.g. `"simplify: opus, opus, sonnet"`

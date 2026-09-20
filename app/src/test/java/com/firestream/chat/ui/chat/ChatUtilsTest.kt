@@ -84,4 +84,69 @@ class ChatUtilsTest {
         val spans = result.spanStyles
         assertEquals("Expected no spans for plain text", 0, spans.size)
     }
+
+    // --- ZWJ / multi-code-point sequences must stay ONE span ---------------
+    // Compose breaks text shaping at every span boundary, so a sequence split
+    // across several spans renders as its components: ❤️‍🔥 as ❤️ + 🔥.
+
+    @Test
+    fun `addEmojiSpans keeps a ZWJ sequence in one span`() {
+        // Heart on fire: U+2764 U+FE0F U+200D U+1F525
+        val source = "\u2764\uFE0F\u200D\uD83D\uDD25"
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals("Expected one span for the whole sequence", 1, result.spanStyles.size)
+        assertEquals(0, result.spanStyles[0].start)
+        assertEquals(source.length, result.spanStyles[0].end)
+    }
+
+    @Test
+    fun `addEmojiSpans keeps a family ZWJ sequence in one span`() {
+        val source = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67"
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(source.length, result.spanStyles[0].end)
+    }
+
+    @Test
+    fun `addEmojiSpans keeps a skin-toned emoji in one span`() {
+        val source = "\uD83D\uDC4D\uD83C\uDFFD"  // 👍🏽
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(source.length, result.spanStyles[0].end)
+    }
+
+    @Test
+    fun `addEmojiSpans keeps a flag in one span`() {
+        val source = "\uD83C\uDDFA\uD83C\uDDF8"  // 🇺🇸
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(source.length, result.spanStyles[0].end)
+    }
+
+    @Test
+    fun `addEmojiSpans spans adjacent emoji separately`() {
+        val result = addEmojiSpans("\uD83D\uDE00\uD83C\uDF89", SIZE)  // 😀🎉
+        assertEquals(2, result.spanStyles.size)
+    }
+
+    @Test
+    fun `addEmojiSpans applies the size multiplier to the whole sequence`() {
+        val source = "\u2764\uFE0F\u200D\uD83D\uDD25"
+        val result = addEmojiSpans(source, SIZE, mapOf(0 to 2f))
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(SIZE * 2f, result.spanStyles[0].item.fontSize)
+        assertEquals(source.length, result.spanStyles[0].end)
+    }
+
+    @Test
+    fun `isEmojiOnly returns true for heart on fire`() {
+        assertTrue(isEmojiOnly("\u2764\uFE0F\u200D\uD83D\uDD25"))
+    }
+
+    companion object {
+        private val SIZE = androidx.compose.ui.unit.TextUnit(
+            18f,
+            androidx.compose.ui.unit.TextUnitType.Sp
+        )
+    }
 }

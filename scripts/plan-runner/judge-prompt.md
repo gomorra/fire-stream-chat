@@ -3,7 +3,8 @@ Prompt template for the judge pass (scripts/run-plan.sh, judge_step): after a st
 fresh read-only session on a fixed model grades the step's diff against its spec. It is a
 measuring instrument for comparing run configurations (scripts/plan-runner/benchmark.md), not
 a repair step: it changes nothing and its findings are logged, not acted on. Only runs when the
-variant sets JUDGE_MODEL, and only for steps whose diff the gate can see.
+variant sets JUDGE_MODEL, and only for steps whose diff holds more than documentation (lib.sh
+pr_has_code — wider than what the Gradle gate can see).
 
 Placeholders: {{PLAN_PATH}} {{STEP}} {{STEP_HEADING}} {{START_SHA}} {{HEAD_SHA}}
 -->
