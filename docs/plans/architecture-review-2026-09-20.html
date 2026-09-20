@@ -1,0 +1,634 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review — fire-stream-chat</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true, curve: "basis" } });
+</script>
+<style>
+  body { background:#fafaf9; color:#0f172a; font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .serif { font-family: ui-serif, Georgia, "Times New Roman", serif; }
+  .seam { border-top: 2px dashed #64748b; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; border: 2px solid #0f172a; }
+  .deep .faded { color: #94a3b8; }
+  .mod { border: 1.5px solid #334155; background: #fff; }
+  .leakbox { border: 1.5px solid #dc2626; background: #fef2f2; }
+  .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .mini { font-size: 10.5px; line-height: 1.25; }
+  .band { border-left: 4px solid #334155; background: #fff; }
+  .band.thin { border-left-color: #cbd5e1; color:#475569; }
+  .band.leak { border-left-color: #dc2626; }
+  .band.deepband { border-left: 6px solid #0f172a; background: #0f172a; color:#f8fafc; }
+  .diagram { min-height: 300px; }
+  pre.mermaid { font-size: 12px; }
+  .mermaid svg { max-width: 100%; height: auto; }
+  .badge { font-size: 11px; font-weight: 600; letter-spacing: .04em; padding: 3px 9px; border-radius: 9999px; }
+  .b-strong { background:#d1fae5; color:#065f46; border:1px solid #6ee7b7; }
+  .b-explore { background:#fef3c7; color:#92400e; border:1px solid #fcd34d; }
+  .b-spec { background:#e2e8f0; color:#334155; border:1px solid #cbd5e1; }
+  .b-cat { background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; }
+  .callout { background:#fffbeb; border:1px solid #fcd34d; color:#78350f; }
+  .fill { height:100%; }
+</style>
+</head>
+<body>
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-14">
+
+<header class="space-y-4">
+  <h1 class="serif text-4xl font-semibold tracking-tight">Architecture review — <span class="font-mono text-3xl">fire-stream-chat</span></h1>
+  <p class="text-sm text-slate-600">2026-09-20 · HEAD <span class="font-mono">9d28ed2</span> (v1.35.1) · lens: <strong>agent-only codebase</strong> — a deep monolith beats many small modules; hops are the cost, interface width is the measure. Two explorers walked <span class="font-mono">ui/chat</span> and the data packages; counts were spot-checked against the tree.</p>
+  <div class="flex flex-wrap gap-x-6 gap-y-2 text-xs text-slate-600 pt-2">
+    <span class="inline-flex items-center gap-2"><span class="inline-block w-6 h-4 mod rounded-sm"></span> module</span>
+    <span class="inline-flex items-center gap-2"><span class="inline-block w-6 h-4 deep rounded-sm"></span> deep module</span>
+    <span class="inline-flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-dashed border-slate-500"></span> seam</span>
+    <span class="inline-flex items-center gap-2"><span class="inline-block w-6 border-t-2 border-red-600"></span> leak across a seam</span>
+    <span class="inline-flex items-center gap-2"><span class="badge b-strong">Strong</span><span class="badge b-explore">Worth exploring</span><span class="badge b-spec">Speculative</span></span>
+    <span class="inline-flex items-center gap-2"><span class="badge b-cat">dependency category</span></span>
+  </div>
+  <nav class="text-xs text-slate-500 pt-1 flex flex-wrap gap-x-4 gap-y-1">
+    <a href="#c1" class="hover:text-slate-900">1 Send addressing</a>
+    <a href="#c2" class="hover:text-slate-900">2 Chat partner &amp; title</a>
+    <a href="#c3" class="hover:text-slate-900">3 Zoomable pager</a>
+    <a href="#c4" class="hover:text-slate-900">4 Composer</a>
+    <a href="#c5" class="hover:text-slate-900">5 Image editor</a>
+    <a href="#c6" class="hover:text-slate-900">6 Send managers</a>
+    <a href="#c7" class="hover:text-slate-900">7 Reconcile</a>
+    <a href="#c8" class="hover:text-slate-900">8 Outbox</a>
+    <a href="#c9" class="hover:text-slate-900">9 Media download</a>
+    <a href="#c10" class="hover:text-slate-900">10 ChatScreen cut</a>
+    <a href="#gated" class="hover:text-slate-900">Trigger-gated</a>
+    <a href="#ruled-out" class="hover:text-slate-900">Ruled out</a>
+    <a href="#top" class="hover:text-slate-900 font-semibold">Top recommendation</a>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-12">
+
+<!-- ============ 1 ============ -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">1 · The repository decides who a send is for</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-strong">Strong</span><span class="badge b-cat">in-process · local-substitutable (one Room read)</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    domain/repository/MessageRepository.kt (7 members) · data/repository/MessageRepositoryImpl.kt:213–280, 496–706, 1010–1050 · data/outbox/SendTarget.kt · ui/components/ChatTargets.kt:54 · ui/chat/ChatMessageSender.kt · ui/chat/ChatMessageActions.kt:103 · ui/chat/ChatViewModel.kt:122,663 · ui/share/SharePickerViewModel.kt:156–212 · navigation/NavGraph.kt (12 route producers) · test/fakes/FakeMessageRepository.kt
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">Before — the caller computes the crypto decision</div>
+      <pre class="mermaid">
+flowchart LR
+  NG["NavGraph<br/>12 route producers<br/>2 hardcode #quot;#quot;"]:::leak --> VM["ChatViewModel.recipientId<br/>nav argument"]:::leak
+  VM --> MS["ChatMessageSender<br/>5 send sites"]:::leak
+  VM --> TM["timer send<br/>in the VM"]:::leak
+  CT["ChatTargets.sendRecipientId<br/>the one guarded copy"] --> MA["ChatMessageActions"]
+  CT --> SP["SharePickerViewModel"]
+  MS --> R["MessageRepository<br/>7× recipientId: String"]
+  TM --> R
+  MA --> R
+  SP --> R
+  R --> ST["SendTarget.of(s)<br/>#quot;#quot; ⇒ plaintext, else encrypt-to-one"]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — one interface fact fewer</div>
+      <div class="grid grid-cols-4 gap-2 mini">
+        <div class="mod rounded p-2 text-center">ChatMessageSender</div>
+        <div class="mod rounded p-2 text-center">ChatMessageActions</div>
+        <div class="mod rounded p-2 text-center">SharePicker</div>
+        <div class="mod rounded p-2 text-center">timer / retry</div>
+      </div>
+      <div class="text-center text-slate-500 text-xs">↓ send*(chatId, …) — no recipient, no convention</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">MessageRepository · send</div>
+        <div class="mini faded space-y-1">
+          <div>reads the Chat row → INDIVIDUAL ⇒ partner session · else plaintext</div>
+          <div>SendTarget stays the outbox's private shape</div>
+          <div>block check · optimistic SENDING row · hand-off to the outbox</div>
+          <div>retry already prefers the row's recorded target (:637)</div>
+        </div>
+      </div>
+      <div class="text-xs text-slate-500">NavGraph's <span class="font-mono">recipientId</span> survives only if something other than sending needs it.</div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The emptiness of a caller-supplied string is the encrypt-vs-plaintext decision; 10 call sites and 12 route producers must all remember it, two go through the guarded helper, and the seventh <span class="font-mono">recipientId: String</span> — TECH_DEBT's own trigger — has already landed (<span class="font-mono">sendTimerMessage</span>).</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>The parameter leaves all seven members; the repository resolves the target from the chat it is sending into, so the interface no longer carries a fact a caller can get wrong.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>interface: 7 parameters gone</li><li>locality: one Room read owns the rule</li><li>tests assert the invariant, not the convention</li><li>the forward-dialog bug class closes</li><li>unblocks #2</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today <span class="font-mono">MessageRepositoryBlockTest</span> drives the group case by passing <span class="font-mono">""</span>. After: seed INDIVIDUAL vs GROUP rows and assert encrypt/plaintext per send path. Waste: <span class="font-mono">ChatPickerTargetsTest</span>'s <span class="font-mono">sendRecipientId</span> cases, two fake fields.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">Supersedes the <span class="font-mono">Chat.sendRecipientId</span> line in PATTERNS "One chat picker, three hosts" — the rule moves inside the seam; the pattern text follows. TECH_DEBT "who is this send addressed to" names this shape as the fix and cites diff scope, not merit, as the reason it waited.</div>
+</article>
+
+<!-- ============ 2 ============ -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">2 · "Who is the 1:1 partner" and "what is this chat called" become behaviour on <span class="font-mono">Chat</span></h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-strong">Strong</span><span class="badge b-cat">in-process · pure</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    domain/model/Chat.kt (27 lines, zero methods) · ui/components/ChatTargets.kt:25,40,54 · ui/search/GlobalSearchLabels.kt:18–32 · ui/chatlist/ChatListItem.kt:66–70 · ChatListScreen.kt:93,344 · ChatListViewModel.kt:113 · ArchivedChatsScreen.kt:93 · ui/calls/CallsViewModel.kt:76 · ui/lists/ListShareSheet.kt:57,58,91 · ListsViewModel.kt:231 · ListDetailViewModel.kt:86 · ui/chat/ChatUtils.kt:124 · ChatTimerReactor.kt:97 · data/timer/BootRestoreLogic.kt:83
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">Before — 13 partner expressions, 3 semantics · 4 title copies, 2 precedences</div>
+      <div class="grid grid-cols-3 gap-1.5 mini">
+        <div class="leakbox rounded p-1.5">CallsViewModel<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="leakbox rounded p-1.5">ListShareSheet ×2<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="leakbox rounded p-1.5">ListsViewModel<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="leakbox rounded p-1.5">ListDetailViewModel<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="leakbox rounded p-1.5">ChatUtils<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="leakbox rounded p-1.5">ChatTargets.otherParticipantId<br/><span class="font-mono">firstOrNull</span> · any type</div>
+        <div class="mod rounded p-1.5">ChatTargets.sendRecipientId<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5">GlobalSearchLabels<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5">ChatListItem<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5">ChatListScreen ×2<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5">ChatListViewModel<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5">ArchivedChatsScreen<br/>INDIVIDUAL-gated</div>
+        <div class="mod rounded p-1.5 border-emerald-600">BootRestoreLogic (data/)<br/><span class="font-mono">singleOrNull</span> · tested</div>
+        <div class="leakbox rounded p-1.5">ChatListItem title<br/>contact→name, <b>no blank check</b></div>
+        <div class="leakbox rounded p-1.5">ListShareSheet title<br/>name→user, no blank check</div>
+      </div>
+      <div class="text-xs text-slate-500 mt-2">red = a group yields an arbitrary member, or an empty row. Two copies live in <span class="font-mono">data/</span>, which may not import the <span class="font-mono">ui/components</span> helper.</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — the model answers, 17 sites call</div>
+      <div class="text-center text-xs text-slate-500">ui/chatlist · ui/search · ui/lists · ui/calls · ui/chat · data/timer</div>
+      <div class="text-center text-slate-400">↓ ↓ ↓ ↓ ↓ ↓</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">domain · Chat</div>
+        <div class="mini space-y-2">
+          <div><span class="font-mono">partner(currentUserId)</span> — the one other participant, or none: INDIVIDUAL-gated, <span class="font-mono">singleOrNull</span> meaning, decided once</div>
+          <div><span class="font-mono">title(resolve)</span> — one precedence, one blank rule; Contact-vs-User keying disappears behind the resolver the caller supplies</div>
+          <div class="faded">not a resolver class, not a use case — a function on the model adds no hop</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The same question is answered three ways; <span class="font-mono">CallsViewModel:76</span> names an arbitrary group member as a call's other party and <span class="font-mono">ChatListItem:70</span> renders an empty row on a blank name — a live bug TECH_DEBT already lists.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>Two behaviours on the domain model, each call site re-decided explicitly against the one semantics; <span class="font-mono">ChatTargets.kt</span> shrinks to whatever is Compose-specific.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>leverage: one implementation, 17 sites</li><li>locality: two known bugs get one home</li><li>tests: one pure table replaces three partial ones</li><li>data/ callers stop hand-rolling it</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today <span class="font-mono">ChatPickerTargetsTest</span>, <span class="font-mono">BootRestoreLogicTest</span>, <span class="font-mono">ChatListItemUiTest</span> (does not cover blank name). After: one pure test on <span class="font-mono">Chat</span> — group / self-chat / unsynced participants / blank name; the UI test stays for rendering.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">TECH_DEBT "who is the other participant" names <span class="font-mono">Chat.otherParticipantId</span> as the right form and parked the helper in <span class="font-mono">ui/</span> only because "the deeper fix is the repository API" — #1 removes that reason. Do #1 first.</div>
+</article>
+
+<!-- ============ 3 ============ -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">3 · Collapse the zoomable-page-in-a-pager cluster and its overlay chrome</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-strong">Strong</span><span class="badge b-cat">in-process · Compose, Coil behind the content slot</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    ui/chat/ZoomableBox.kt (265) · ZoomCropSurface.kt (187) · FullscreenImageViewer.kt:84–264 · ImagePreviewScreen.kt (pager wiring, :256, :495) · ChatScreen.kt:340–344, 660–690, 2234–2461 · ChatOverlaysState.kt:62–66 · PendingMedia.kt:230 · hosts: ChatList, Profile, Group, Share, Chat
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-1.5">
+      <div class="lbl text-slate-500 mb-2">Before — one pinch through four bands, the contract written twice, chrome ×5</div>
+      <div class="band leak rounded-r px-3 py-1.5 mini">5 hosts · each: BackHandler, keyboard hide, <span class="font-mono">FullscreenImageArgsSaver</span> · ChatScreen adds a 3-SnackbarHost router that re-derives stacking order and the <span class="font-mono">viewerUnderPreview</span> fade</div>
+      <div class="grid grid-cols-2 gap-1.5">
+        <div class="band leak rounded-r px-3 py-1.5 mini"><span class="font-mono">FullscreenImagePager</span> :147–191<br/>pagerState · currentPageZoomed · userScrollEnabled · isActive guard · empty→dismiss · one <span class="font-mono">crop</span> var</div>
+        <div class="band leak rounded-r px-3 py-1.5 mini"><span class="font-mono">ImagePreviewScreen</span> pager<br/>same contract, second copy · <span class="font-mono">crops</span> map keyed by step URI · own <span class="font-mono">CropsSaver</span></div>
+      </div>
+      <div class="band thin rounded-r px-3 py-1.5 mini"><span class="font-mono">ZoomableImage</span> (private) — pass-through</div>
+      <div class="band rounded-r px-3 py-1.5 mini"><span class="font-mono">ZoomCropSurface</span> — deep, keep</div>
+      <div class="band rounded-r px-3 py-1.5 mini"><span class="font-mono">ZoomableBox</span> — deep, keep (the gesture detector is the hidden part)</div>
+      <div class="text-xs text-slate-500 pt-1">One <span class="font-mono">PendingCrop</span> travels 4 hops: pager → ViewerEdit.Ready → PendingMedia.initialCrop → crops-map seed. Fixes span the cluster: clamp (3 files), crop pill (9 files).</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-1.5">
+      <div class="lbl text-slate-500 mb-2">After — three callers of one pager</div>
+      <div class="grid grid-cols-3 gap-1.5 mini text-center">
+        <div class="mod rounded p-1.5">FullscreenImageViewer<br/><span class="text-slate-500">5 hosts</span></div>
+        <div class="mod rounded p-1.5">search gallery</div>
+        <div class="mod rounded p-1.5">ImagePreviewScreen</div>
+      </div>
+      <div class="text-center text-xs text-slate-500">↓ pageCount · onEmpty · content slot ↓</div>
+      <div class="seam"></div>
+      <div class="band deepband rounded-r px-3 py-2.5 mini">
+        <div class="lbl mb-1">Zoomable pager</div>
+        pager state · per-page crop (one ownership model) · zoom ⇒ scroll lock · empty ⇒ dismiss · back · keyboard hide · its own snackbar host
+        <div class="faded mt-1 text-slate-400">ZoomCropSurface → ZoomableBox stay inside, unchanged</div>
+      </div>
+      <div class="text-xs text-slate-500 pt-1">ChatScreen's overlay choreography collapses to "which overlay is open".</div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The pager↔zoom contract lives in two files, the gesture split "has been fixed three separate times" with no test at its seam, and every host re-implements back/keyboard/snackbar handling around it.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>One pager module owns the whole contract and the chrome; the viewer, the search gallery and the pre-send preview become three callers of it.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>locality: the thrice-fixed bug gets one home</li><li>tests hit the pager, not the whole preview</li><li>delete 2 contract copies, 5 chrome copies</li><li>one crop-ownership model</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today 9 zoom tests reach the contract only through <span class="font-mono">ImagePreviewScreen</span> (needs <span class="font-mono">PendingMedia</span> + <span class="font-mono">ImageEditServices</span> fakes). After: one Robolectric test on the pager — zoom locks paging, page change resets crop, empty dismisses — the coverage TECH_DEBT says is missing.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">TECH_DEBT "ImagePreviewScreen re-implements FullscreenImagePager's contract" defers until "a third zoomable pager appears": there are already three pager call sites (<span class="font-mono">ChatScreen:2259, :2311, ProfileScreen:452</span>) plus the preview. Its trigger is met.</div>
+</article>
+
+<!-- ============ 4 ============ -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">4 · One composer text module — the chat input and the caption bar are two hand-rolled copies</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-strong">Strong</span><span class="badge b-cat">in-process</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    ui/chat/ChatScreen.kt:236–267, 735–743, 907–926, 1851–1885, 2484–2518 · ImagePreviewScreen.kt CaptionBar (~745–800) · ComposerValue.kt · ChatDictationState.kt (applyDictationCommit) · ChatComposerState.kt
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-3">
+      <div class="lbl text-slate-500">Before — the state machine is 7 locals written from 5 sites, twice</div>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="leakbox rounded p-2 mini">
+          <div class="lbl text-red-700 mb-1">ChatScreen — chat input</div>
+          <div class="font-mono">messageText · pendingEmojiSizes · inputCursor · inputComposition · dictationAnchor · dictationLastLen · lastDictationWriteText</div>
+          <div class="mt-1 text-slate-600">written by applyComposerEdit :250 · clearInput :1851 · editingMessage effect :735 · dictation collector :907 · onValueChange :1868 · private untested <span class="font-mono">adjustEmojiIndices</span> :2497</div>
+        </div>
+        <div class="leakbox rounded p-2 mini">
+          <div class="lbl text-red-700 mb-1">ImagePreviewScreen — CaptionBar</div>
+          <div class="font-mono">captions[key] · captionCursor · captionComposition</div>
+          <div class="mt-1 text-slate-600">re-wires insertAtCursor / deleteBeforeCursor / buildComposerValue :782–798 — a second adapter of the same concept; the last two fixes (caret insert, focus) landed here only</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-3 gap-1.5 mini text-center">
+        <div class="mod rounded p-1.5">ComposerEditTest<br/>20 · pure</div>
+        <div class="mod rounded p-1.5">ComposerValueTest<br/>6 · pure</div>
+        <div class="mod rounded p-1.5">DictationCommitApplyTest<br/>5 · pure</div>
+      </div>
+      <div class="text-xs text-slate-500">The invariants — null the composition on every programmatic write (GOTCHAS restartInput loop), a user edit cancels dictation, emoji indices shift on IME edits — are enforced at the call sites, which no test reaches.</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — one holder, two adapters</div>
+      <div class="grid grid-cols-2 gap-2 mini text-center">
+        <div class="mod rounded p-2">chat input bar</div>
+        <div class="mod rounded p-2">caption bar</div>
+      </div>
+      <div class="text-center text-xs text-slate-500">↓ typed · insert · delete · dictate · setEditing · clear ↓</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">Composer text</div>
+        <div class="mini space-y-1">
+          <div>text · cursor · composition · emoji sizes · dictation anchor — owned, never handed out raw</div>
+          <div class="faded">ComposerValue, applyDictationCommit, adjustEmojiIndices become internals</div>
+          <div class="faded">every programmatic write nulls the composition — enforced once</div>
+        </div>
+      </div>
+      <div class="text-xs text-slate-500">Naming trap to fix on the way: <span class="font-mono">ComposerState</span> (the VM slice: isSending / editing / reply / mentions) holds no text; an agent looking for "the composer's state" opens the wrong file.</div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The pure pieces are tested; the rules that make them safe live in two callers × five write sites, and both recent fixes were caller-side.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>A holder that owns the text state and its invariants, used by the chat input and the caption bar; the pure functions move inside.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>tests run sequences: IME edit → emoji → dictation → send</li><li><span class="font-mono">adjustEmojiIndices</span> covered for the first time</li><li>two adapters justify the seam</li><li>ChatScreen loses 7 locals and 5 write sites</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Deletion test.</span> The module does not exist; its absence is why the rules are duplicated. Creating it concentrates them.</div>
+</article>
+
+<!-- ============ 5 ============ -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">5 · Image editor: delete the rasterizer pass-through chain; one shell, one undo stack</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-strong">Strong — the chain</span><span class="badge b-explore">Worth exploring — the shell</span><span class="badge b-cat">local-substitutable (cacheDir files) · in-process (shell, stacks)</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    data/util/ImageEditRasterizer.kt:161–306 · ui/chat/ChatViewModel.kt:392–466 (7 one-line forwards) · ui/chat/imageedit/ImageEditServices.kt:38–88 · ChatScreen.kt:2409–2418 · AdjustImageScreen.kt (1,113) · DrawImageScreen.kt (704) · OverlayImageScreen.kt (443) · AdjustStack.kt · DrawStack.kt · OverlayStack.kt · EditorChrome.kt
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">Before — the same 7-method surface, three times; the same 9-step lifecycle, three times</div>
+      <pre class="mermaid">
+flowchart LR
+  R["ImageEditRasterizer<br/>9 public methods"] --> VM["ChatViewModel<br/>7 one-line forwards<br/>:398–466"]:::leak
+  VM --> S["ImageEditServices<br/>7 lambdas, built at ChatScreen:2410"]:::leak
+  S --> A["AdjustImageScreen<br/>stack · preview · flattening · failed<br/>13-lambda Callbacks · Done ×7 lines"]
+  S --> D["DrawImageScreen<br/>same lifecycle<br/>9-lambda Callbacks · Done ×7 lines"]
+  S --> O["OverlayImageScreen<br/>same lifecycle<br/>11-lambda Callbacks · Done ×7 lines"]
+  S --> P["ImagePreviewScreen<br/>4th 'land a step'"]
+  A --- AS["AdjustStack"]
+  D --- DS["DrawStack"]
+  O --- OS["OverlayStack"]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — one seam the VM injects, one shell that hosts three tools</div>
+      <div class="mod rounded p-2 mini text-center">ImageEditRasterizer — the seam; the fake already exists (<span class="font-mono">ImageEditServices()</span> defaults)</div>
+      <div class="text-center text-xs text-slate-500">↓ injected once, not re-exported twice ↓</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">Editor shell</div>
+        <div class="mini space-y-1">
+          <div>source · preview · flatten · failed · chrome (top bar, failure banner, scrim) · Done — once</div>
+          <div>one cursor-over-list undo stack: cursor · active · canUndo/Redo · isPristine · one saver</div>
+          <div class="faded">Adjust / Draw / Overlay are tool content inside; their geometry and painters unchanged</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>Fourteen one-line forwards exist to keep the UI→data allowlist at one entry; the three screens share a byte-identical Done handler and lifecycle; the three stacks are one undo model with three savers and three test classes (16+9+14).</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>Inject the rasterizer as the seam once; fold the lifecycle and chrome into a shell that hosts the three tools; one undo stack differing only in what "push" means.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>delete 14 pass-throughs</li><li>3 stack tests → 1</li><li>7-lambda fake → one seam fake</li><li>hops: screen → seam, not screen → lambdas → VM → rasterizer</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Deletion test.</span> Delete the VM's 7 forwards + <span class="font-mono">ImageEditServices</span>: complexity vanishes — pass-through. Delete the 3 Callbacks bundles + Done handlers + chrome wiring: they reappear ×3 — concentrate. Geometry (6 pure files, 66 tests) is fine: in the visible history no fix landed in a helper alone, but the bugs live in the painter twins (TECH_DEBT "never one alone"), which this does not touch.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">Contradicts the Declined entry "UI imports 24 data/ utility classes" only in its reasoning for this one entry: the ceremony that entry declines (a one-impl interface) is already paid twice over in forwards. PATTERNS "image edits rasterize per screen" says the rasterizer is "needed only by the hosting ViewModel" — that line is what produced the chain.</div>
+</article>
+
+<!-- ============ 6 ============ -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">6 · Fold the shallow send/act managers back into one send module</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-explore">Worth exploring</span><span class="badge b-cat">in-process · orchestration over repository interfaces</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    ui/chat/ChatMessageSender.kt · ChatMessageActions.kt · ChatPollManager.kt · ChatViewModel.kt (sendTimerCommand / cancelTimer / pauseTimer / resumeTimer; 55 funs, 38 one-line forwards) · ChatComposerState.kt · architecture/ArchitectureTest.kt:220 (CHAT_MANAGERS roster)
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-2">
+      <div class="lbl text-slate-500">Before — slice ownership on paper, one template ×8 in practice</div>
+      <div class="mod rounded p-2 mini"><span class="font-mono">ChatViewModel</span> — composition root · 38 of 55 funs are one-line forwards · timer sends live here</div>
+      <div class="text-center text-slate-400 text-xs">↓ ↓ ↓</div>
+      <div class="grid grid-cols-3 gap-1.5 mini">
+        <div class="leakbox rounded p-1.5"><b>ChatMessageSender</b><br/>5 sends · 4 are the template · writes composer ×12, session ×6, messages ×2</div>
+        <div class="leakbox rounded p-1.5"><b>ChatMessageActions</b><br/>12 methods · 7 are one repo call + error · forward / snooze / confirmEdit are real</div>
+        <div class="leakbox rounded p-1.5"><b>ChatPollManager</b><br/>56 lines · pure pass-through</div>
+      </div>
+      <div class="text-xs text-slate-600 mini">The template <span class="font-mono">isSending=true → onFailure{isSending=false; session.error} → onSuccess{isSending=false}</span> appears 8× in 4 files; <span class="font-mono">session.error = AppError.from(e)</span> 21× in 5 files. Reply state is written by Actions (:64/68) and consumed only by Sender's text send (:81); media / voice / location neither pass nor clear it — "reply + attachment" is unsupported, discoverable only by a missing parameter, across 8 files.</div>
+      <div class="grid grid-cols-6 gap-1 mini text-center text-slate-500">
+        <div class="mod rounded p-1">Loader</div><div class="mod rounded p-1">Info</div><div class="mod rounded p-1">Dictation</div><div class="mod rounded p-1">Commands</div><div class="mod rounded p-1">Search</div><div class="mod rounded p-1">TimerReactor</div>
+      </div>
+      <div class="text-xs text-slate-500">the six deep managers: real state machines behind ≤6 methods — keep</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — one send module inside the composition root</div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">ChatViewModel · send &amp; act</div>
+        <div class="mini space-y-1">
+          <div>composer meta (reply · edit · mentions) + every send (text · media · voice · location · poll · timer · forward) + the one isSending/error template</div>
+          <div>reply travels with every send kind, or is cleared — decided once</div>
+          <div class="faded">~1,300 lines is fine under the deep-monolith rule; the VM is already the only composition root</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-6 gap-1 mini text-center text-slate-500">
+        <div class="mod rounded p-1">Loader</div><div class="mod rounded p-1">Info</div><div class="mod rounded p-1">Dictation</div><div class="mod rounded p-1">Commands</div><div class="mod rounded p-1">Search</div><div class="mod rounded p-1">TimerReactor</div>
+      </div>
+      <div class="text-xs text-slate-500">unchanged</div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The cut is by file, not by behaviour: poll sends get a manager, timer sends stay in the VM, and three "slice owners" write each other's slices through callback bridges the pattern forbids.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>Sender + Actions + Poll + the VM's timer sends become one module owning "composer meta, every send, isSending/error"; the six deep managers stay as they are.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>8 templates → 1</li><li>reply semantics decided once</li><li>hops for "send with reply + attachment": 8 → 3</li><li>tests through <span class="font-mono">uiState</span>, not a raw <span class="font-mono">MutableStateFlow</span></li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today 9 manager test classes construct a manager with 6–10 positional params and a raw <span class="font-mono">MutableStateFlow(ChatUiState())</span> — the shared mutable state is the test surface. After: <span class="font-mono">ChatMessageActionsEditTest/ForwardTest</span>, <span class="font-mono">ChatMessageSenderOfflineTest</span> and the poll test fold into one send-module test; the six deep-manager tests keep their value.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">Contradicts PATTERNS "Chat*Manager slice-ownership" and "ChatUiState slice composition" — the convention is the cause of the shallowness, and <span class="font-mono">ArchitectureTest</span>'s CHAT_MANAGERS roster enforces it. The two explorers split on this one: the data explorer would leave <span class="font-mono">ChatMessageSender</span> because the slice rule is its reason to exist; the ui explorer's evidence is that the rule is not obeyed. Badge reflects that: the grilling loop decides whether the convention changes, and #1 shrinks the sender's methods to one-liners first either way.</div>
+</article>
+
+<!-- ============ 7 ============ -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">7 · One reconcile, zero cycle-breakers — collapse the receive path's copies and out-reaches</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-explore">Worth exploring</span><span class="badge b-cat">in-process · mock (Signal stays behind SignalManager)</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    data/repository/MessageRepositoryImpl.kt:163–164 (Lazy pair), :379–466 (reconcileRawMessage), :457–461 (list-sync hook), :857–915 (sendBroadcastMessage), :1175–1245 (syncChatMessages) · ListRepositoryImpl.kt:59–61, 234, 406, 462 · domain/usecase/list/SendListUpdateToChatsUseCase.kt
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">Before — two repos doing each other's job, one body written twice</div>
+      <pre class="mermaid">
+flowchart LR
+  MR["MessageRepositoryImpl<br/>reconcileRawMessage :379<br/>syncChatMessages :1175 — same ~60 lines,<br/>already diverged"]
+  LR["ListRepositoryImpl"]
+  CR["ChatRepositoryImpl"]
+  UR["UserRepositoryImpl"]
+  MR -. "Lazy: fetchAndCacheList on LIST receipt" .-> LR
+  MR -. "Lazy: getOrCreateChat for broadcast" .-> CR
+  LR -. "Lazy: sendListMessage ×3 (share bubble)" .-> MR
+  LR -. "Lazy" .-> CR
+  LR -. "Lazy" .-> UR
+  UC["SendListUpdateToChatsUseCase<br/>already owns the update bubble"] --> LR
+  UC --> MR
+  linkStyle 0,1,2,3,4 stroke:#dc2626,stroke-width:2px;
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">After — repos observe their own rows; orchestration sits in use cases</div>
+      <pre class="mermaid">
+flowchart LR
+  MR["MessageRepositoryImpl<br/>one reconcile body<br/>NonCancellable decrypt→upsert untouched<br/>sync calls it per raw"]:::deep
+  LR["ListRepositoryImpl<br/>learns about shared lists from<br/>its own rows / LIST rows in Room"]
+  UC["SendListUpdateToChatsUseCase<br/>share bubble + update bubble"] --> LR
+  UC --> MR
+  BC["broadcast fan-out use case"] --> MR
+  BC --> CR["ChatRepositoryImpl"]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a;
+      </pre>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>Five <span class="font-mono">dagger.Lazy</span> exist because the message repo syncs the list cache and the list repo posts messages; the snapshot reconcile and the chat-list sync are the same decrypt-and-write body twice, and the sync copy already lacks auto-download and the list hook.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>Sync calls reconcile per raw (in-file, no new module); the list repo stops being called from the message repo; the share bubble goes through the use case that already sends the update bubble; only the broadcast fan-out — genuine cross-repo orchestration — becomes a use case.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>5 Lazys → 0–1</li><li>one receive behaviour on three paths</li><li>two reconcile tests → one</li><li>−60 lines from a 1,456-line class</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Deletion test.</span> Delete <span class="font-mono">syncChatMessages</span>' body → one reconcile serves all callers: it was a copy. Delete the Lazys → the repos stop reaching into each other's tables: complexity vanishes, it does not reappear.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">Inverts the <em>direction</em> of TECH_DEBT "extract an IncomingMessageProcessor": that entry wants an extraction and admits it would drag the Lazys along; this is a collapse that removes them. Its goal — the NonCancellable atomicity — is untouched, because the body stays one body. The list-sync move must keep <span class="font-mono">ListRepositoryMutexTripwireTest</span> green (#11 in trigger-gated).</div>
+</article>
+
+<!-- ============ 8 ============ -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">8 · The outbox gets one front door; "one attempt" becomes one module</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-explore">Worth exploring</span><span class="badge b-cat">local-substitutable · Room in-memory, WorkManager test driver</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    data/repository/MessageRepositoryImpl.kt:213–280 (enqueueSend · refuseIfBlocked · stageInput · failSendOnError), :545–548 (queued delete), :632–640 (retry) · data/outbox/OutboxSender.kt (418) · OutboxScheduler.kt · OutboxFiles.kt · OutboxJob.kt · BlockCheck.kt · data/worker/OutboxWorker.kt (130)
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram">
+      <div class="lbl text-slate-500 mb-2">Before — nine files, and the seam one step too late</div>
+      <pre class="mermaid">
+flowchart TB
+  R["MessageRepositoryImpl<br/>enqueueSend ritual ×5 send paths:<br/>outbox row → insert → refuseIfBlocked →<br/>stage → schedule, under NonCancellable<br/>retry re-entry by hand :632 · tombstone by hand :545"]:::leak
+  R --> F["OutboxFiles"]
+  R --> B["BlockCheck"]
+  R --> S["OutboxScheduler"]
+  S --> W["OutboxWorker<br/>the attempt's policy:<br/>block re-check · give-up at 8 · transient/permanent"]
+  W --> J["OutboxJob"]
+  W --> X["OutboxSender<br/>the attempt's pipeline<br/>only caller: the worker"]
+  X --> MW["MessageWriter"]
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — the repository hands over once</div>
+      <div class="mod rounded p-2 mini text-center"><span class="font-mono">MessageRepositoryImpl</span> — optimistic SENDING row, then one hand-off</div>
+      <div class="text-center text-xs text-slate-500">↓</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">Outbox</div>
+        <div class="mini space-y-1">
+          <div>block verdict → stage → schedule · manual retry · queued-delete tombstone</div>
+          <div>one attempt = policy + pipeline in one file (block re-check, give-up, transient/permanent, upload, write)</div>
+          <div class="faded">OutboxFiles · OutboxJob · BlockCheck private · OutboxWorker a thin WorkManager adapter · OutboxScheduler kept (its test captures the request — right shape)</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The idempotency and attempt internals are already contained (4 files touch <span class="font-mono">outboxAttempts</span>, nothing flips SENDING by age) — but the repo still sequences five collaborators per send with the ordering and FAILED-on-throw invariants as <em>its</em> knowledge, and re-implements the two re-entries by hand.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>The repo's job ends at the optimistic insert; the outbox owns everything after, and the worker's policy folds into the sender's pipeline so "what happens on one attempt" is one file.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>9 files → ~5</li><li>repo loses ~70 lines, 3 collaborators</li><li>repo tests assert one hand-off</li><li>worker cases become row outcomes</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today 11 of 17 <span class="font-mono">MessageRepository*Test</span> classes <span class="font-mono">coVerify</span> collaborators (149 verifies — reaching past the interface); <span class="font-mono">OutboxWorkerTest</span> mocks the sender. <span class="font-mono">OutboxSenderTest</span> is the good shape: an in-memory <span class="font-mono">rows</span> map for Room, assertions on row state. After: the worker's cases (block re-check, give-up, transient→retry, permanent→FAILED) join that file; <span class="font-mono">OutboxWorkerTest</span>'s sender-mock cases become waste.</div>
+  <div class="callout rounded-md px-3 py-2 text-xs">PATTERNS "Sends are idempotent by client id…" says "the repository's job ends at <span class="font-mono">OutboxScheduler.enqueue</span>" and "a delete is the tombstone path of <span class="font-mono">deleteMessage</span>" — both lines move one step. The WorkManager-only decision (TECH_DEBT, plan §0) is untouched. <span class="font-mono">/code-review</span> gate: coroutine scoping and the sync path.</div>
+</article>
+
+<!-- ============ 9 ============ -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">9 · Media download becomes one module instead of three repo paths plus a worker</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-explore">Worth exploring</span><span class="badge b-cat">local-substitutable (Room) · mock (OkHttp)</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    data/repository/MessageRepositoryImpl.kt:1332–1440 (downloadPendingMediaForChat · ensureLocalCopiesForChat · savePendingMediaForChat · tryAutoDownload · retryDownloadsLater · isOnWifi) · data/worker/MediaBackfillWorker.kt:29–77 · MediaBackfillScheduler.kt:47–51 · data/util/MediaFileManager.kt · FireStreamApp.scheduleMediaBackfill · SettingsViewModel.startMediaBackfill
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-2">
+      <div class="lbl text-slate-500">Before — one loop in four places, one gate in four, one Wi-Fi check in two</div>
+      <div class="grid grid-cols-2 gap-1.5 mini">
+        <div class="leakbox rounded p-1.5"><b>repo · per-chat</b> :1332<br/>getMessagesWithoutLocalMedia → downloadAndSave → updateLocalUri</div>
+        <div class="leakbox rounded p-1.5"><b>repo · per-message</b> tryAutoDownload :1389<br/>same loop · NEVER/WIFI_ONLY/ALWAYS gate</div>
+        <div class="leakbox rounded p-1.5"><b>repo · all messages</b> savePendingMediaForChat :1372<br/>same loop</div>
+        <div class="leakbox rounded p-1.5"><b>MediaBackfillWorker</b> :56–70<br/>same loop · same gate · <span class="font-mono">isOnWifi()</span> verbatim</div>
+      </div>
+      <div class="grid grid-cols-3 gap-1.5 mini text-center text-slate-600">
+        <div class="mod rounded p-1.5">gate: MediaBackfillScheduler :47</div>
+        <div class="mod rounded p-1.5">gate: repo :1338</div>
+        <div class="mod rounded p-1.5">3 request builders (TECH_DEBT)</div>
+      </div>
+      <div class="text-xs text-slate-500">The repo's AGENT-NOTE lists "media download · per-chat backfill scan" as its job while admitting it is 350 lines over its LOC ceiling.</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-3">
+      <div class="lbl text-slate-500">After — "make this row's media local", once</div>
+      <div class="grid grid-cols-3 gap-1.5 mini text-center">
+        <div class="mod rounded p-1.5">repo receive path<br/><span class="text-slate-500">one call per row</span></div>
+        <div class="mod rounded p-1.5">MediaBackfillWorker<br/><span class="text-slate-500">one call per row</span></div>
+        <div class="mod rounded p-1.5">Settings / App<br/><span class="text-slate-500">schedulePeriodic · runNow</span></div>
+      </div>
+      <div class="text-center text-xs text-slate-500">↓</div>
+      <div class="seam"></div>
+      <div class="deep rounded-lg p-4 flex-1">
+        <div class="lbl mb-2">MediaFileManager · local media</div>
+        <div class="mini space-y-1">
+          <div>preference gate · Wi-Fi check · download · <span class="font-mono">localUri</span> write · hand-off to the retry run · the three request builders</div>
+          <div class="faded">beside the file work it already does — not a new class</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The download-and-record loop exists three times in the repo and once in the worker; the auto-download preference is interpreted at four sites.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>One module beside the file work owns the whole decision; the repo's receive path and the worker each become a call per row.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>leverage: 3 loops, 4 gates → 1</li><li>repo −110 lines</li><li>one decision-table test replaces none</li><li>closes the "three request builders" entry</li></ul></div>
+  </div>
+  <div class="text-xs text-slate-600"><span class="font-semibold">Test surface.</span> Today <span class="font-mono">MessageRepositoryLocalUriTest</span>, <span class="font-mono">MediaBackfillSchedulerTest</span>; nothing on the worker's loop. After: one test for the gate / Wi-Fi / download / record table; the repo test asserts a hand-off. PATTERNS "MediaProcessingLimiter owns the concurrency bound" is unaffected — downloads are not decode/compress.</div>
+</article>
+
+<!-- ============ 10 ============ -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-7 space-y-5 shadow-sm">
+  <div class="space-y-2">
+    <h2 class="serif text-2xl font-semibold">10 · <span class="font-mono">ChatScreen.kt</span>: the recorded split is anti-deepening — cut by state ownership instead</h2>
+    <div class="flex flex-wrap gap-2"><span class="badge b-explore">Worth exploring — the media-pick cut</span><span class="badge b-strong">Strong — that the four-way split should not happen</span><span class="badge b-cat">mock (ActivityResult contracts) · in-process</span></div>
+  </div>
+  <div class="font-mono text-xs text-slate-600 leading-relaxed">
+    ui/chat/ChatScreen.kt (2,668 lines; the composable :219–2461 = 2,242 lines; 184 imports; 61 remember; 33 LaunchedEffect; 108 viewModel. calls over 71 members) · :830–890 (9 launchers, permission chains, cameraUri / cameraVideoUri) · :2046–2143 (attachment sheet) · ui/components/ImagePicker.kt (117 lines, 2 hosts)
+  </div>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram space-y-2">
+      <div class="lbl text-slate-500">Before — the TECH_DEBT cut: same state, four new parameter lists</div>
+      <div class="grid grid-cols-2 gap-1.5 mini">
+        <div class="leakbox rounded p-1.5"><b>ChatInputBar</b> ≈ 35 params<br/>7 composer locals r/w · panel flags · focus · IME math · 3 slices · ~12 VM calls</div>
+        <div class="leakbox rounded p-1.5"><b>ChatMessageList</b> ≈ 25 params<br/>list state · 5 reaction/highlight locals · jump · the 18-lambda MessageBubbleCallbacks per row</div>
+        <div class="leakbox rounded p-1.5"><b>ChatAttachmentSheet</b> ≈ 16 params<br/>9 launchers · 2 saved URIs · 4 flags · pendingMedia setter</div>
+        <div class="leakbox rounded p-1.5"><b>ChatTopBar</b> ≈ 12 params</div>
+      </div>
+      <div class="text-xs text-slate-600">Every piece hits the ~15-param VerifyError ceiling and needs a callbacks bundle; +4 hops; no interface shrinks. Deleting the four files would put the same lines back — pass-throughs. The entry's own numbers are stale (recorded ~1,400 lines / 135 imports; revisit at ~1,800 — tripped).</div>
+      <div class="text-xs text-slate-500">Pure rules were extracted with tests (<span class="font-mono">shouldAutoScrollToNewest</span>, <span class="font-mono">isScrolledUpPastThreshold</span>, <span class="font-mono">isChatContentReady</span>, <span class="font-mono">detectNewIncomingReactions</span> …); the effects that call them (:715–780, :907–926) are untested and are where the recorded regressions were (two reaction-cue deliveries "never reached the screen").</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diagram flex flex-col gap-2">
+      <div class="lbl text-slate-500">After — cut by what owns state; the rest stays one file</div>
+      <div class="deep rounded-lg p-3 mini">
+        <div class="lbl mb-1">Media pick</div>
+        9 launchers · permission chains · camera URIs · the sheet · mime sniffing · <span class="font-mono">MAX_GALLERY_PICK</span> → exactly one output: <span class="font-mono">List&lt;PendingMedia&gt;</span> (or a document Uri)
+        <div class="faded"><span class="font-mono">rememberImagePicker</span> (2 hosts) is its single-image degenerate case — the direction TECH_DEBT declines, inverted</div>
+      </div>
+      <div class="grid grid-cols-2 gap-1.5 mini text-center">
+        <div class="deep rounded p-2">overlay stack → #3</div>
+        <div class="deep rounded p-2">composer text → #4</div>
+      </div>
+      <div class="mod rounded p-3 mini flex-1">
+        <b>ChatScreen</b> — top bar · message list · scroll / jump / reaction-cue effects · what remains is the deep monolith the rule wants, with fewer locals and no parameter threading
+      </div>
+    </div>
+  </div>
+  <div class="grid md:grid-cols-3 gap-5 text-sm">
+    <div><div class="lbl text-slate-500 mb-1">Problem</div>The recorded split is by screen region; each region needs most of the screen's state, so the interfaces would be as wide as the implementation they hide.</div>
+    <div><div class="lbl text-slate-500 mb-1">Solution</div>Cut only where one output crosses the seam: media picking returns a batch; the overlay stack and the composer leave via #3 and #4; the rest stays.</div>
+    <div><div class="lbl text-slate-500 mb-1">Wins</div><ul class="list-disc pl-4 space-y-0.5"><li>the media-pick interface is one value</li><li>no callbacks bundles</li><li>ChatScreen shrinks by subtraction, not by threading</li><li>TECH_DEBT entry rewritten with a real cut</li></ul></div>
+  </div>
+  <div class="callout rounded-md px-3 py-2 text-xs">Contradicts TECH_DEBT "ChatScreen.kt — split into ChatTopBar / ChatInputBar / ChatAttachmentSheet / ChatMessageList" and "ChatScreen does not use rememberImagePicker". Both entries should be rewritten, not executed.</div>
+</article>
+
+</section>
+
+<!-- ============ trigger-gated ============ -->
+<section id="gated" class="space-y-4">
+  <h2 class="serif text-2xl font-semibold">Trigger-gated — real friction, sensible existing triggers</h2>
+  <div class="grid md:grid-cols-2 gap-4 text-sm">
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+      <div class="flex flex-wrap gap-2 items-center"><span class="font-semibold">11 · One per-key lock module for five hand-rolled copies</span><span class="badge b-explore">Worth exploring</span><span class="badge b-cat">in-process</span></div>
+      <div class="font-mono text-xs text-slate-600">data/util/KeyedMutex.kt · SingleFlight.kt · ListRepositoryImpl.kt:69–70 (+9 sites) · SignalManager.kt:59,164 · MediaFileManager.kt:26,53–71 · ProfileImageManager.kt:22,41–63 · ListRepositoryMutexTripwireTest.kt:73–74</div>
+      <p>Two concepts (serialise per key · share one in-flight result per key), five implementations, three of them private and untested. The tripwire test reflects into a private map while <span class="font-mono">KeyedMutex.isTracked</span> exists for exactly that. Both download copies already check <span class="font-mono">exists()</span> first, so lock-then-recheck gives one module for both concepts. Low risk, low leverage; both TECH_DEBT entries say "next time either is touched". <span class="font-mono">SignalManager</span> is crypto — strongest tier.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-2">
+      <div class="flex flex-wrap gap-2 items-center"><span class="font-semibold">12 · Drop the raw→domain→record hop and the <span class="font-mono">MessageColumns</span> shim</span><span class="badge b-spec">Speculative</span><span class="badge b-cat">in-process</span></div>
+      <div class="font-mono text-xs text-slate-600">data/local/entity/MessageEntity.kt:78–113, 146–224 · MessageRepositoryImpl.kt:1270–1310, :454, :1241 · data/remote/source/RawMessage.kt · FirestoreMessageSource.kt:667</div>
+      <p>A message takes four shapes through five mappers; adding one backend column is seven edits in four files. On receive the domain <span class="font-mono">Message</span> is built only to be flattened into a record (poll map → Poll → JSON). <span class="font-mono">MessageColumns</span> is a pass-through by the codebase's own admission. Wait for TECH_DEBT's trigger — the next <span class="font-mono">messages</span> column — and keep the record/entity split (PATTERNS trap "writing a queued row whole" depends on it). <span class="font-mono">RawMessage</span> itself has two adapters and stays.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ruled out ============ -->
+<section id="ruled-out" class="space-y-3">
+  <h2 class="serif text-2xl font-semibold">Ruled out — looked at, judged deep enough or not worth the churn</h2>
+  <ul class="text-sm space-y-1.5 list-disc pl-5 text-slate-700">
+    <li><b>Splitting <span class="font-mono">MessageRepository</span> (25) / <span class="font-mono">ChatRepository</span> (30).</b> The Declined entry was right: both have a real second adapter (<span class="font-mono">FakeMessageRepository</span> 32 overrides, <span class="font-mono">FakeChatRepository</span> 28, used by 20 test files) — a fat interface with two adapters is a real seam. #1 narrows it without splitting.</li>
+    <li><b><span class="font-mono">CallService</span> + <span class="font-mono">CallStateHolder</span> + <span class="font-mono">CallViewModel</span>.</b> <span class="font-mono">CallService</span> (735) already is the deep monolith; the state holder is the read half of an Android-forced seam (a Service cannot be injected into a ViewModel); the ViewModel is a 31-line pass-through but the Compose idiom. The shallow part is the string-typed <span class="font-mono">ACTION_/EXTRA_</span> surface (a typo is a silent no-op; <span class="font-mono">:496</span> re-parses an enum by name) — a typed front door would <em>add</em> a module. Note; don't do.</li>
+    <li><b><span class="font-mono">CallAudioRouter</span> / <span class="font-mono">CallAudioRoutePolicy</span>.</b> The correct pure-decision vs OS-adapter split: the policy's interface is exactly what its test exercises. Keep.</li>
+    <li><b><span class="font-mono">MessageWriter</span>.</b> 144 lines, two callers, a genuine test adapter (<span class="font-mono">buildEncrypts</span>); hides the <span class="font-mono">SUPPORTS_SIGNAL &amp;&amp; !DEBUG</span> gate in one place. Keep.</li>
+    <li><b>The six deep Chat*Managers</b> (Loader, Info, Dictation, Commands, Search, TimerReactor) — real state machines behind ≤6 methods, tested through constructor + state flow. Keep; their cross-slice writes are #6's evidence, not their own problem.</li>
+    <li><b><span class="font-mono">ZoomableBox</span>, <span class="font-mono">PendingMedia</span>, <span class="font-mono">MessageBubble</span> + <span class="font-mono">MessageBubbleCallbacks</span>, <span class="font-mono">picker/</span>.</b> Deep — the hidden part is real, two adapters where a seam exists, tested through the interface. The shallowness in the zoom cluster is above <span class="font-mono">ZoomableBox</span>, not in it.</li>
+    <li><b>The three use cases.</b> Pure or cross-repo per PATTERNS; none is a one-call pass-through.</li>
+    <li><b><span class="font-mono">CallRepositoryImpl</span></b> (10 of 12 members are pass-throughs over a single-adapter source). A candidate by the deletion test, but one caller and a domain-purity re-litigation for 100 lines. TECH_DEBT note at most.</li>
+    <li><b>The flavor seams.</b> Six of twelve <span class="font-mono">*Source</span> interfaces have one real adapter (PocketBase throws or no-ops for 18/23 <span class="font-mono">ListSource</span>, 17/27 <span class="font-mono">MessageSource</span> members …). Hypothetical seams — but the variant is a stated product direction. The actionable rule is negative: don't widen <span class="font-mono">MessageSource</span>/<span class="font-mono">ChatSource</span> for a Firebase-only feature; no thirteenth seam until PocketBase has two real adapters for it.</li>
+    <li><b>Geometry helpers split across <span class="font-mono">domain/util</span> and <span class="font-mono">ui/chat/imageedit</span>.</b> Forced by the allowlist, heavily tested; moving them is tidiness, not depth.</li>
+    <li><b><span class="font-mono">getChats()</span> sync-on-read</b> (TECH_DEBT "a read-only screen pays for the full sync pipeline"). Real cost, but a new accessor plus six consumer moves — an efficiency change, not a deepening.</li>
+  </ul>
+</section>
+
+<!-- ============ top ============ -->
+<section id="top" class="rounded-xl deep p-8 space-y-4">
+  <div class="lbl text-slate-300">Top recommendation</div>
+  <h2 class="serif text-3xl font-semibold"><a href="#c1" class="underline decoration-slate-500 underline-offset-4">1 · The repository decides who a send is for</a></h2>
+  <p class="text-slate-200 text-sm leading-relaxed max-w-3xl">It is the one candidate where the interface currently carries a fact a caller can get wrong, that fact is the encryption decision, a caller already got it wrong once in a shipped release, and TECH_DEBT's own trigger for fixing it has fired. It narrows the widest interface in the codebase by seven parameters without splitting it, turns <span class="font-mono">MessageRepositoryBlockTest</span> from a test of a convention into a test of the invariant, and it is the stated precondition for #2. Both explorers rated it Strong independently.</p>
+  <p class="text-slate-400 text-xs">Then #2 (pure, unblocked by #1). #3 and #4 are independent of the data work and of each other. #7 and #8 both touch <span class="font-mono">MessageRepositoryImpl</span> — never in parallel. #6 waits on a decision about the slice-ownership convention.</p>
+</section>
+
+<footer class="text-xs text-slate-400 pt-4">Generated 2026-09-20 in a Claude Code session · two explorer agents on the strongest tier · line numbers as of HEAD 9d28ed2 · vocabulary per <span class="font-mono">.claude/skills/codebase-design</span></footer>
+</main>
+</body>
+</html>

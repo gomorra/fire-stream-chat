@@ -3,7 +3,8 @@
 Brief for removing `recipientId: String` from `MessageRepository`'s seven send members
 and resolving the send target inside the repository from the chat row. Written
 2026-09-20 from an architecture review of `main` at `9d28ed2` (two explorer agents,
-counts spot-checked); re-verify line numbers before editing.
+counts spot-checked — the full report with before/after diagrams is
+`docs/plans/architecture-review-2026-09-20.html`); re-verify line numbers before editing.
 
 **This is a brief, not a runnable plan.** A fresh session takes it in three moves:
 grill §3 with the human and record the answers as a §0 decisions table; run the
