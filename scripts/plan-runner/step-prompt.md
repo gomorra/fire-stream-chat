@@ -117,6 +117,11 @@ Rules that hold throughout:
 - One plain command per Bash call: no `for`/`while` loops, no `$(…)` or `<(…)`, no `find -exec`,
   no `;` chains. Bash runs behind a prefix allowlist; every call of those shapes in earlier runs was
   denied, silently, and the turn was wasted. Use the Grep and Glob tools to look across files.
+- Run every Gradle command in the foreground and wait for it (give the Bash call a `timeout` of up
+  to 600000 ms): never `run_in_background`, never a monitor, never end a turn to wait for a
+  notification. This session is headless — the moment a turn
+  ends it is asked for its result, so a gate left running in the background can only be reported
+  as `blocked`, and the step is thrown away.
 - Do not update local memory (`MEMORY.md` does not exist here); route facts to the tracked docs.
 - Do not ask questions with any tool; the decision rule above is the only way to involve the human.
 - Do not skip or delete a failing test; fix the cause. If the gate cannot be made green, end with

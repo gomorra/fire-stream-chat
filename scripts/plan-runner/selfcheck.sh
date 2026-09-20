@@ -221,12 +221,12 @@ check "dry run flags the pending decision on step 3" "1" "$(printf '%s' "$dry" |
 check "dry run caps max to strong on step 4"  "1" "$(printf '%s' "$dry" | grep -c 'tier strong (tagged max)' || true)"
 check "dry run marks the checkpoint after step 4" "1" "$(printf '%s' "$dry" | grep -c 'would stop here after step 4' || true)"
 check "dry run lists steps 5 and 6"           "2" "$(printf '%s' "$dry" | grep -cE '^step (5|6) ' || true)"
-check "dry run honours the effort tag on step 6" "1" "$(printf '%s' "$dry" | grep -c 'tier mid (tagged mid) → model opus, effort low' || true)"
+check "dry run honours the effort tag on step 6" "1" "$(printf '%s' "$dry" | grep -c 'tier mid (tagged mid) → model fable, effort low' || true)"
 check "dry run keeps xhigh when the cap lowers the model" "1" "$(printf '%s' "$dry" | grep -c 'tier strong (tagged max) → model opus, effort xhigh' || true)"
 check "dry run renders a prompt per runnable step (2, 4, 5, 6; not the pending 3)" "4" "$(ls "$TMP/runs/plan.step"*.prompt.md 2>/dev/null | wc -l)"
 check "dry run prompt has no placeholders left" "0" "$(cat "$TMP/runs/plan.step2."*.prompt.md | grep -c '{{' || true)"
 check "dry run without a variant attaches no advisor" "0" "$(printf '%s' "$dry" | grep -c -- '--advisor' || true)"
-check "dry run shows the escalation rung (opus/medium → high on step 5) and the judge" "1" "$(printf '%s' "$dry" | grep -c 'one re-run at effort high | judge: off' || true)"
+check "dry run shows the escalation rung (fable/medium → high on step 5) and the judge" "1" "$(printf '%s' "$dry" | grep -c 'one re-run at effort high | judge: off' || true)"
 dryb=$(PLAN_RUNNER_RUNS_DIR=$TMP/runs "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant b 2>"$TMP/dryb.err") || { echo "  variant dry-run exit $? — stderr:"; sed 's/^/    /' "$TMP/dryb.err"; fail=$((fail + 1)); }
 check "variant b: untagged step 5 runs opus/medium with the advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort medium, budget \$25, advisor fable' || true)"
 check "variant b: the effort tag still wins on step 6" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort low' || true)"
@@ -241,10 +241,16 @@ check "malformed variant file exits 1"        "1" "$(PLAN_RUNNER_VARIANTS_DIR=$F
 check "fixture variant ok.env loads (ESCALATE=0 shows as blocked)" "1" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant ok 2>/dev/null | grep -c 'after a failed nudge: blocked | judge: opus/high' | sed 's/^[1-9][0-9]*$/1/')"
 check "bad --base exits 1"                    "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --base no-such-ref >/dev/null 2>&1; echo $?)"
 check "usage exits 1 without a plan"          "1" "$("$HERE/../run-plan.sh" >/dev/null 2>&1; echo $?)"
-check "--help prints the usage block with the new flags" "2" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base) ' || true)"
+check "--help prints the usage block with the new flags" "3" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to) ' || true)"
 check "--help exits 0"                        "0" "$("$HERE/../run-plan.sh" --help >/dev/null 2>&1; echo $?)"
 check "--from without a value exits 1"        "1" "$("$HERE/../run-plan.sh" "$PLAN" --from >/dev/null 2>&1; echo $?)"
 check "bad --cap exits 1"                     "1" "$("$HERE/../run-plan.sh" "$PLAN" --cap huge --dry-run >/dev/null 2>&1; echo $?)"
+dryto=$(PLAN_RUNNER_RUNS_DIR=$TMP/runs-to "$HERE/../run-plan.sh" "$PLAN" --dry-run --to 4 2>/dev/null) || true
+check "--to 4 lists steps 2 and 4 and nothing later" "2:0" "$(printf '%s' "$dryto" | grep -cE '^step (2|4) ' || true):$(printf '%s' "$dryto" | grep -cE '^step (5|6) ' || true)"
+check "--to 4 still reaches the checkpoint after step 4, then says where it stops" "1:1" "$(printf '%s' "$dryto" | grep -c 'would stop here after step 4' || true):$(printf '%s' "$dryto" | grep -c -- '--to 4: the run would stop here' || true)"
+check "--to past the last step changes nothing" "2" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs-to9 "$HERE/../run-plan.sh" "$PLAN" --dry-run --to 9 2>/dev/null | grep -cE '^step (5|6) |--to 9' || true)"
+check "bad --to exits 1"                      "1" "$("$HERE/../run-plan.sh" "$PLAN" --to two --dry-run >/dev/null 2>&1; echo $?)"
+check "--to before --from exits 1"            "1" "$("$HERE/../run-plan.sh" "$PLAN" --from 4 --to 2 --dry-run >/dev/null 2>&1; echo $?)"
 
 echo "Report"
 rep=$(PLAN_RUNNER_RUNS_DIR=$F "$HERE/report.sh" run-bench 2>"$TMP/rep.err") || { echo "  report exit $? — stderr:"; sed 's/^/    /' "$TMP/rep.err"; fail=$((fail + 1)); }

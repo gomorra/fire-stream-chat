@@ -112,6 +112,17 @@ check "one session, default config, no advisor"  "step:done-valid:medium:none" "
 check "validated event carries the @Test delta"  "1 2" "$(jq -r 'select(.event=="validated") | "\(.tests_before) \(.tests_after)"' "$RUNS/mini.log")"
 check "the launch records the base it forked from" "$(git -C "$R" rev-parse main | cut -c1-8)" "$(jq -r 'select(.event=="launched") | .base' "$RUNS/mini.log")"
 
+scenario "--to stops cleanly before the next step" done-valid
+# Step 2's section sits above step 1's on purpose: the stub appends its Shipped line to the end
+# of the file, and it has to land under step 1.
+printf '# Mini plan\n\n**Order: 1 → 2**\n\n## 3. Steps\n\n### Step 2 — Never reached (`feat(x):`)\nBody.\n\n### Step 1 — First step (`feat(x):`)\nBody.\n' > "$R/docs/plans/mini.md"
+git -C "$R" commit -qam "two steps"
+run --to 1
+check "exit 0"                                   "0" "$rc"
+check "events: step 1 only"                      "launched result validated" "$(events mini)"
+check "step 2 was never launched"                "1" "$(wc -l < "$STUB/calls" | tr -d ' ')"
+check "the driver says why it stopped"           "1" "$(grep -c 'stopped after step 1 as asked (--to)' "$TMP/err" || true)"
+
 scenario "An invalid done result is nudged by resume, then validates" done-no-shipped done-valid
 run
 check "exit 0"                                   "0" "$rc"

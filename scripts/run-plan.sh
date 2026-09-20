@@ -4,13 +4,15 @@
 # docs/plans/done/plan-runner.md. Run it from a terminal, not from inside a
 # Claude session.
 #
-#   scripts/run-plan.sh <plan.md> [--from N] [--dry-run] [--cap max|strong|mid] [--budget USD]
+#   scripts/run-plan.sh <plan.md> [--from N] [--to N] [--dry-run] [--cap max|strong|mid] [--budget USD]
 #                                 [--variant NAME] [--base REF]
 #
 #   --variant NAME  load scripts/plan-runner/variants/NAME.env over the tunables below and run
 #                   on plan/<name>-NAME (own worktree, own log) — two configurations of one
 #                   plan side by side. Pass it again on every re-run of that variant.
 #   --base REF      the commit a new plan branch starts from (default: main)
+#   --to N          stop after step N is validated (and judged); later steps stay untouched and a
+#                   run without --to continues from there. Exit 0.
 #
 # Exit codes: 0 all steps shipped (or dry run) · 1 usage/config error ·
 #             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint
@@ -28,13 +30,13 @@ trap 'echo "plan-runner: internal error at line $LINENO (exit $?) — this is a 
 # A --variant file may override the keys lib.sh's PR_VARIANT_KEYS lists, nothing else.
 MODEL_MAX=fable;     EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
 MODEL_STRONG=opus;   EFFORT_STRONG=xhigh; ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
-MODEL_MID=opus;      EFFORT_MID=medium;   ADVISOR_MID=''       # interim (2026-09-20): plan-runner-benchmark.md picks between variants a and b
+MODEL_MID=fable;     EFFORT_MID=medium;   ADVISOR_MID=''       # set 2026-09-20 by docs/plans/plan-runner-benchmark.md; variants/mid-opus-high.env is the fallback when the account's Fable share is used up
 JUDGE_MODEL='';      JUDGE_EFFORT=high    # '' = no judge pass; see plan-runner/judge-prompt.md
 ESCALATE=1                 # 1 = a step that stays invalid after its nudge is re-run once, one effort rung up
 DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
 NUDGE_BUDGET_USD=5         # the single fix-forward resume a step may get
 REVIEW_BUDGET_USD=8        # the fresh review session that stands in for the nudge when only skills are missing
-JUDGE_BUDGET_USD=5
+JUDGE_BUDGET_USD=7
 GATE_TASKS=":app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug"
 NOTIFY_CMD=notify-send     # <cmd> "<title>" "<body>"; point at a phone bridge later
 PERMISSION_MODE=acceptEdits
@@ -82,10 +84,11 @@ usage() { # usage [exit-code]  → the header comment, from its usage line to it
 }
 need_arg() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "$1 needs a value" >&2; usage 1; }; }
 
-PLAN_ARG=''; FROM=1; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''
+PLAN_ARG=''; FROM=1; TO=''; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''
 while [ $# -gt 0 ]; do
     case "$1" in
         --from)    need_arg "$@"; FROM=$2; shift 2 ;;
+        --to)      need_arg "$@"; TO=$2; shift 2 ;;
         --dry-run) DRY_RUN=1; shift ;;
         --cap)     need_arg "$@"; CAP=$2; shift 2 ;;
         --budget)  need_arg "$@"; BUDGET_OVERRIDE=$2; shift 2 ;;
@@ -99,6 +102,8 @@ done
 [ -n "$PLAN_ARG" ] || usage 1
 case "$CAP" in ''|max|strong|mid) ;; *) echo "--cap wants max|strong|mid" >&2; exit 1 ;; esac
 [[ "$FROM" =~ ^[0-9]+$ ]] || { echo "--from wants a step number" >&2; exit 1; }
+[[ -z "$TO" || "$TO" =~ ^[0-9]+$ ]] || { echo "--to wants a step number" >&2; exit 1; }
+[ -z "$TO" ] || [ "$TO" -ge "$FROM" ] || { echo "--to $TO is before --from $FROM" >&2; exit 1; }
 if [ -n "$VARIANT" ]; then
     [[ "$VARIANT" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "--variant wants a lowercase name (a-z, 0-9, -)" >&2; exit 1; }
     VARIANT_FILE=$VARIANTS/$VARIANT.env
@@ -617,8 +622,11 @@ if ! ORDER=$(pr_order_tokens "$PLAN_WT"); then exit 1; fi
 mapfile -t TOKENS <<< "$ORDER"
 [ "$DRY_RUN" = 1 ] || validate_pending_from_log
 
-ran_prev=0; prev=''; pending=0
+ran_prev=0; prev=''; pending=0; stopped_to=0
 for tok in "${TOKENS[@]}"; do
+    # --to: the first step past N ends the run. A ‖ between N and that step has had its turn by
+    # now (CP tokens carry no number), so a checkpoint due after step N still stops with exit 4.
+    if [ -n "$TO" ] && [ "$tok" != CP ] && [ "$(pr_step_num "$tok")" -gt "$TO" ]; then stopped_to=1; break; fi
     if [ "$tok" = CP ]; then
         # Due after a step this run shipped (or, dry, would ship), or one the runner had a
         # hand in earlier that never got its pause — see pr_checkpoint_due.
@@ -653,7 +661,15 @@ if [ "$pending" = 0 ]; then
     say "nothing to do — no unshipped step at or after step $FROM (a plan shipped by hand has no **Shipped** lines and would list every step; see --dry-run)"
     exit 0
 fi
-if [ "$DRY_RUN" = 1 ]; then exit 0; fi
+if [ "$DRY_RUN" = 1 ]; then
+    [ "$stopped_to" = 0 ] || { echo; echo "--to $TO: the run would stop here; later steps are not listed"; }
+    exit 0
+fi
+if [ "$stopped_to" = 1 ]; then
+    say "stopped after step $TO as asked (--to) — later steps are untouched; run again without --to to continue"
+    echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
+    exit 0
+fi
 notify "plan complete" "every step is shipped on $BRANCH"
 echo; git -C "$ROOT" log --oneline "main..$BRANCH"; echo
 echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
