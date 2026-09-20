@@ -383,12 +383,77 @@ lambda are what §2.5's route button replaces.
   sheet's check mark moves when the audio does. `audioRoute` may also briefly be a route that is
   not in `availableRoutes`, so do not assert membership.
 
+**Approach**
+1. `app/src/main/res/values/strings.xml` — the five §2.5 labels plus a `call_route_button` content
+   description per route (the button's description must name the current route, and the existing
+   hard-coded "Mute"/"Hang up" stay as they are, per §2.5).
+2. New `ui/call/CallAudioRouteSheet.kt` — `internal` `CallAudioRouteSheet(current, available,
+   onSelect, onDismiss)` as a `ModalBottomSheet` in the `SnoozePickerSheet.kt` shape (title +
+   rows), plus `internal fun routeIcon(route)` / `routeLabel(route)` shared with the button.
+   Departure from the step's file list: a new file rather than more of `CallScreen.kt` — every
+   other sheet in `ui/` is its own file, and `internal` is what makes the smoke test reachable.
+3. `CallScreen.kt` — delete the hoisted `val isSpeakerOn` and the `onToggleSpeaker` lambda left by
+   step 3; `ConnectedContent` swaps `isSpeakerOn`/`onToggleSpeaker` for `audioRoute`,
+   `availableRoutes`, `onSelectRoute` (10 params, under the ~15 ceiling, so no `*Callbacks` class).
+   The third `CallControlButton` becomes the route button; `available.size <= 2` toggles
+   EARPIECE⇄SPEAKER directly without indexing the list, otherwise a `remember { mutableStateOf }`
+   opens the sheet. Highlighted iff `audioRoute != EARPIECE`. Nothing latches the tap.
+4. `CallControlButton.kt` — untouched unless the highlight wants a helper; it does not, the
+   two-colour expression already lives at the call site for the mute button.
+5. Tests: new `ui/call/CallAudioRouteSheetUiTest.kt`, `@Config(sdk = [31], …)` per the step-1
+   annotation, in `ChatListItemUiTest` shape — the sheet lists one row per available route, the
+   check mark sits on `current`, a row tap reports that route; plus `ConnectedContent`-level
+   coverage that `size <= 2` toggles directly and `size == 3` opens the sheet.
+6. Gate: `:app:testFirebaseDebugUnitTest` → `assembleFirebaseDebug`; `changelog-release` for the
+   bump decision (expected: none — step 1 already took 2.0.0), then the `Added` entry.
+
+Nothing in the code contradicts the step's spec. The `(step-3 /code-review)` annotations match what
+is there: `availableRoutes` can be empty and `audioRoute` can sit outside it, and both branches
+above are written not to index or assert membership.
+
+**Shipped** `b1fbb029` (2026-09-20) — tier: mid, tagged mid. skills: app-ui-design, changelog-release. Reviewer models: none.
+The CHANGELOG `Added` entry is in that same commit; only its `` (`b1fbb029`) `` hash suffix —
+unknowable before the commit existed — was appended in this `docs(plan)` commit. No version bump:
+`feat` is below the major the section already carries from step 1.
+Departures (for sign-off):
+- **New file not in the step's list: `ui/call/CallAudioRouteSheet.kt`** (the route button, the
+  sheet, its row list, and the shared `routeIcon`/`routeLabel` mapping) plus
+  `CallAudioRouteUiTest.kt`. Every other sheet in `ui/` is its own file, and `internal` is what
+  makes the rows reachable from a test. `CallControlButton.kt` was left untouched — the
+  highlight is a two-colour expression at the call site, exactly as the mute button already does it.
+- **The route control is its own composable, not inlined in `ConnectedContent`.** The Approach
+  said the tests would drive `ConnectedContent`; they cannot. It is `private` and runs an
+  unbounded `LaunchedEffect { while (true) { …; delay(1000) } }` elapsed-time loop, which under
+  `createComposeRule()` fights `mainClock` rather than testing anything. `CallAudioRouteButton`
+  owns the sheet state and the `size <= 2` rule; the tests target it and `CallAudioRouteList`.
+  `ConnectedContent` keeps the 10 params §2.5 asked for and just calls it.
+- **Not in §2.5: the sheet closes itself when `availableRoutes` drops to two or fewer** — a
+  headset unplugged with the sheet open would otherwise leave a two-row sheet sitting over the call.
+- **Six strings, not the five §2.5 named.** The sixth, `call_route_button`, is the format string
+  for the button's content description ("Call audio: Bluetooth"), which §2.5 requires to name the
+  current route. §2.5 fixed the keys, not the copy; the labels are Phone / Speaker / Bluetooth /
+  Headphones, and the sheet title is "Call audio".
+- **Earpiece and speaker share `VolumeUp` in the sheet rows too**, not only on the button as §2.5
+  specified. Rows are told apart by their label and the check mark; a second volume-ish icon would
+  have been invented copy, not a distinction the user needs.
+- **The three-route test composes a real `ModalBottomSheet` under Robolectric (`sdk = [31]`) and
+  passes** — the first test in this repo to do so. Noted here because the previous absence of any
+  such test reads as a limitation, and it is not one. The row list is still hoisted into
+  `CallAudioRouteList` so row assertions do not depend on a dialog window.
+- No skill beyond the floor was triggered by the diff: 477 changed lines, no `data/crypto`,
+  `data/worker`, `di/`, no ViewModel (`CallViewModel.selectAudioRoute` already existed from step 3).
+  `changelog-release` was run for the bump decision, which is "none".
+
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
   `CallAudioRoutePolicyTest.kt`; refresh `last-verified`.
   **(step-3)** Three more files than that list names: `ProximityLock.kt` (new, see the step-3
   Shipped departures), `CallAudioRouterTest.kt` and `ProximityLockTest.kt`. The existing
   `CallControlButton.kt | Mute / speaker control` row is stale from step 4 onwards.
+  **(step-4)** Two more: `ui/call/CallAudioRouteSheet.kt` (the route button, the sheet, the
+  shared icon/label mapping) and its `CallAudioRouteUiTest.kt`. The stale
+  `CallControlButton.kt` row should now read "Mute / hang up / route control" — the speaker
+  toggle it names no longer exists.
 - `docs/BACKLOG.md` § Pending on-device verification: Bluetooth path is **untestable on the
   emulator** (no BT stack). Needs the phone + a headset: (a) headset connected before the
   call → audio on headset from first second, (b) connect mid-call → auto-switch, (c) disconnect
