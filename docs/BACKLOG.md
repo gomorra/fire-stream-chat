@@ -21,6 +21,29 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Call audio routes — Bluetooth and wired headsets (2026-09-20)
+
+Shipped on `plan/call-audio-routes-b` (`eb241341`, `81fab393`, `b1fbb029`); nothing has been on
+hardware. The Bluetooth path is **untestable on the emulator** — it has no Bluetooth stack, so no
+device ever appears in `availableCommunicationDevices` and the picker never shows a third row. The
+JVM tests cover the policy, the router's bookkeeping and the sheet's rows; none of them proves the
+OS actually moves the audio. Needs the phone plus a Bluetooth headset and a wired (or USB-C) one:
+
+- (a) Headset connected **before** the call → audio is on the headset from the first second, both
+  as caller and as callee.
+- (b) Connect the headset **mid-call** → audio switches to it automatically, even if speaker had
+  been picked by hand.
+- (c) Disconnect mid-call → audio falls back to the **earpiece**, never the speaker, and holding
+  the phone to the face blanks the screen again (proximity follows the playing route).
+- (d) With three routes available the button opens a sheet; pick each row in turn and the audio
+  follows. On Bluetooth the check mark and the button icon lag the tap by up to ~1 s — that is the
+  SCO link coming up and is **correct**, not a bug to file.
+- (e) After hanging up, play something in Spotify → it comes out at full A2DP quality, not the
+  8 kHz SCO link (this is what proves `clearCommunicationDevice()` ran on the exit path).
+- (f) The same with a wired / USB-C headset: plugged in before the call, plugged in mid-call,
+  and yanked mid-call. An A2DP-only Bluetooth *headphone* (music profile, no hands-free) correctly
+  never appears as a route — the stock dialer cannot use it either.
+
 ### The crop-shape pill, the preview rail's sizes, and the flash after an app switch (2026-09-19)
 
 Shipped on `claude/edit-image-zoomed-akt4mo`; nothing has been on hardware. Robolectric drives
@@ -598,6 +621,20 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 ---
 
 ## Rich Media & Communication
+
+### Call audio routing — the two deferrals
+
+Routing itself ships (earpiece / speaker / Bluetooth / wired, picked in `CallService` via
+`AudioManager.setCommunicationDevice()`). Two things were consciously left out, both signed off
+on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
+
+- **Telecom / `androidx.core:core-telecom` integration** (option B to the shipped option A).
+  Would hand the call to the platform's call stack instead of routing it ourselves. Trigger for
+  revisiting: *"calls need to survive an incoming cellular call"* or *"answer from a car kit"* —
+  neither works today. It is a rewrite of the audio session, not an addition to it.
+- **Real Bluetooth device names in the picker.** Rows say a generic "Bluetooth"; the product name
+  needs the `BLUETOOTH_CONNECT` runtime permission on API 31+, which was not judged worth a
+  permission prompt. Nice-to-have, and cheap if the app ever asks for that permission anyway.
 
 ### Video calls, 1-to-1 (4.2)
 - Extend the existing voice-call infrastructure with a video track

@@ -50,7 +50,7 @@ This document is the product-level feature list for **FireStream**, a real-time 
 - **Signaling**: Call state (ringing, connected, ended) is coordinated via Firestore. SDP offer/answer and ICE candidates are exchanged through dedicated call documents.
 - **FCM Wake-Up**: Incoming calls trigger a high-priority FCM push notification so the callee's device wakes up even in the background.
 - **Lock-Screen UI**: `CallActivity` is a separate Activity (not part of the NavHost) to support rendering on the lock screen.
-- **In-Call Controls**: Mute microphone and toggle speakerphone.
+- **In-Call Controls**: Mute microphone, and pick the audio route — earpiece, speaker, Bluetooth headset, or wired headset. With only the earpiece and the speaker available the control is a plain speaker toggle; a connected headset adds a picker sheet. A headset connected mid-call takes the audio automatically; unplugging it falls back to the earpiece.
 - **Call Log**: Dedicated Calls tab (next to Chats in the bottom nav) shows a history of incoming, outgoing, and missed calls sourced from call-type messages in the Room database.
 
 ### Shared Lists
