@@ -292,6 +292,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   by themselves. Not a test bug: the fix is `-XX:ReservedCodeCacheSize=256m` on the unit-test
   worker, which is set. If the symptom returns at a larger suite, raise it again rather
   than bisecting tests. Seen 2026-09-12 (offline outbox step 8, two consecutive full runs).
+- **The gate never verifies the Roborazzi baselines.** The plain unit-test task only
+  *captures* `MessageBubbleScreenshotTest`; nothing compares against
+  `app/src/test/snapshots/*.png` unless you run `./gradlew verifyRoborazziFirebaseDebug`
+  yourself, and CI does not. The baselines sat stale from a bubble-colour change in April
+  until the minSdk 31 bump in September looked at them. After any change to bubble visuals,
+  the theme, or the Robolectric `sdk` pin, run verify, look at the compare images, and
+  re-record with `recordRoborazziFirebaseDebug` if the difference is intended.
 
 ## Platform / dependencies
 

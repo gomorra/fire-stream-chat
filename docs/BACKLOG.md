@@ -21,6 +21,30 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Call audio routes — Bluetooth / wired headset in calls (`c043f36a`, `bb0ba755`, `6b39c566`, 2026-09-20)
+
+Shipped on `plan/call-audio-routes-a`; nothing has been on a device or an emulator. The
+Bluetooth path is **untestable on the emulator** (no BT stack) — this needs the phone and a
+hands-free headset (an A2DP-only headphone never shows up as a call route; that is expected).
+The policy, the router's listeners and the route button are covered on the JVM; `CallService`
+itself has no JVM test. Check on the phone:
+
+- (a) Headset connected before the call → audio is on the headset from the first second, and the
+  route button shows Bluetooth only once the link is actually up (~1 s lag is correct).
+- (b) Connect the headset mid-call → the call switches to it by itself, even after an explicit
+  speaker pick.
+- (c) Disconnect mid-call → the audio lands on the **earpiece**, never the speaker, and the
+  proximity screen-off works again; on speaker or a headset the screen must *not* blank near the face.
+- (d) With a headset connected the route button opens a sheet with three rows (four with wired +
+  Bluetooth); pick each one, the check follows the actual route, and **the sheet closes after a
+  row tap** (not asserted by any test). Without a headset the button is still the plain speaker toggle.
+- (e) After hangup, music (Spotify) plays through A2DP at full quality — proves
+  `clearCommunicationDevice()` ran. Repeat after a remote hangup and after a call that timed out.
+- (f) The item to check hardest — argued in `bb0ba755`, not pinned by a test: after a call the
+  phone leaves communication mode again (`requestAudioFocus()` used to run twice, on ICE CONNECTED
+  and COMPLETED, and save `MODE_IN_COMMUNICATION` as the mode to restore). Media volume keys and
+  a notification sound behaving normally right after hangup is the visible sign.
+
 ### The crop-shape pill, the preview rail's sizes, and the flash after an app switch (2026-09-19)
 
 Shipped on `claude/edit-image-zoomed-akt4mo`; nothing has been on hardware. Robolectric drives
@@ -653,6 +677,22 @@ data-model change, and the provider decision a GIF forces:
 - File size display and download progress
 - Cloud storage integration (Google Drive picker)
 - Files: `ui/chat/ChatScreen.kt`, `ui/chat/MessageBubble.kt`
+
+### Calls through Telecom (core-telecom) — option B of the audio-route plan
+- Calls route their audio inside `CallService` via `AudioManager.setCommunicationDevice()`
+  (option A, `docs/plans/call-audio-routes.md` §0). The system does not know a call is running:
+  an incoming cellular call does not put it on hold, and a car kit or headset button cannot
+  answer or hang up.
+- **Trigger:** "calls need to survive an incoming cellular call" or "answer from a car kit".
+  Then: register calls with `androidx.core:core-telecom` and take the routes from its
+  `CallControlScope` endpoints; `CallAudioRouter` goes, `CallAudioRoutePolicy` and the UI stay.
+- Files: `data/call/CallService.kt`, `data/call/CallAudioRouter.kt`
+
+### Show the Bluetooth headset's product name in the route sheet
+- The sheet says a generic "Bluetooth" (signed-off decision): `AudioDeviceInfo.productName`
+  needs the `BLUETOOTH_CONNECT` runtime permission on 31+, and a permission prompt was not worth
+  a label. Nice-to-have: ask only when the sheet is opened, fall back to the generic label on denial.
+- Files: `ui/call/CallAudioRouteControls.kt`, `data/call/CallAudioRouter.kt`, `AndroidManifest.xml`
 
 ### Call UI controls survive the call they belong to
 - `CallStateHolder.reset()` exists but **nothing in `app/src/main/` ever calls it** (only tests

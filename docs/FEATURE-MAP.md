@@ -1,4 +1,4 @@
-<!-- last-verified: 2026-09-12 -->
+<!-- last-verified: 2026-09-20 -->
 
 # Feature → File Map
 
@@ -18,6 +18,8 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 |---|---|
 | `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams |
 | `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>` |
+| `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | Owned by `CallService` — wraps `AudioManager.setCommunicationDevice()`, listens for device changes, publishes `CallRouteState` (the OS's actual route, never the requested one) |
+| `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure, Android-free — `resolve` (new headset preempts, then the user's pick, then stay put, then BT > wired > earpiece > speaker) and `routeOf` (device type → `CallAudioRoute`) |
 | `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications |
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory + ICE server config |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections |
@@ -25,11 +27,15 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
 | `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents |
-| `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | Mute / speaker control |
+| `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | The round in-call control button (mute, hang up, the route button's visual) |
+| `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteControls.kt` | Audio route button + route sheet — toggles earpiece⇄speaker with two routes or fewer, opens the sheet from three |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
 | `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
-| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions |
+| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, `updateAudioRoutes` |
+| `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | The route rules table-style + the `routeOf` mapping pinned against `AudioDeviceInfo` |
+| `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | The router's listeners driven over a MockK `AudioManager` — preemption, disconnect, re-query, idempotent stop |
+| `app/src/test/java/com/firestream/chat/ui/call/CallAudioRouteControlsUiTest.kt` | Robolectric — direct toggle, empty route list, three rows in the sheet, row tap selects |
 | `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation |
 
 **Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallStateHolder.startCall()` → `CallService` foregrounds.
