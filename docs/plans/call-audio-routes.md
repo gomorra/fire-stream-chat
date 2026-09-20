@@ -224,12 +224,68 @@ Tests (all pure, table-style):
 - tablet {SPEAKER} only → SPEAKER
 - `routeOf` mapping for every listed type + an unknown type → null
 
+**Approach**
+1. `domain/model/CallState.kt` — add `enum class CallAudioRoute`, replace `CallUiControls.isSpeakerOn`
+   with `audioRoute` + `availableRoutes` exactly as §2.1 writes them.
+2. New `data/call/CallAudioRoutePolicy.kt` — `object` with `resolve(...)` (the four rules, in order)
+   and `routeOf(type: Int)`. Departure from §2.2's "no Android imports": the file lives in `data/`,
+   where Android is allowed, so `routeOf` matches on `AudioDeviceInfo.TYPE_*` rather than on copied
+   magic ints — those are Java compile-time constants and inline, so no `android.jar` class is ever
+   loaded on the JVM. The test passes the same constants. Falls back to literals if the gate says
+   otherwise.
+3. `CallStateHolder.kt` — `toggleSpeaker()` → `updateAudioRoutes(available: List<CallAudioRoute>, current: CallAudioRoute)`.
+4. Minimal reader rewrites so the tree still compiles, behaviour unchanged: `CallService.toggleSpeaker()`
+   (`:528`) flips EARPIECE⇄SPEAKER through `updateAudioRoutes` and keeps its `isSpeakerphoneOn` write
+   until step 3 deletes it; `CallScreen.kt:97` passes `uiControls.audioRoute == SPEAKER`. `ConnectedContent`
+   keeps its current signature — the route button and the sheet are step 4's, so no Compose is written here
+   and `app-ui-design` is not loaded for a one-expression argument change.
+5. Tests: new `CallAudioRoutePolicyTest.kt` with the nine cases listed above; `CallStateHolderTest.kt`
+   loses `toggleSpeaker flips isSpeakerOn` and gains `updateAudioRoutes` coverage + a reset check.
+6. Gate: `:app:testFirebaseDebugUnitTest` then `assembleFirebaseDebug`.
+
+Nothing in the code contradicts the step's spec; §1's line numbers (`CallService.kt:528`,
+`CallScreen.kt:215/265`) are still accurate after step 1.
+
+**Shipped** `eb241341` (2026-09-20) — tier: mid, tagged mid. skills: app-ui-design. Reviewer models: none.
+Departures (for sign-off):
+- §2.2 says the policy file has no Android imports; `CallAudioRoutePolicy` imports `AudioDeviceInfo`
+  and matches on the real `TYPE_*` constants instead of copied magic ints. The file is in `data/`,
+  where Konsist allows Android, and those are Java compile-time constants, so they inline and no
+  Android class loads — `CallAudioRoutePolicyTest` is plain JUnit, no Robolectric, and is green.
+- §2.2 gives `resolve` no rule for an empty device list. It is total: `available` empty returns
+  `current ?: EARPIECE` (never SPEAKER), documented in the KDoc and tested both ways.
+- 14 policy tests, not the 9 listed. Added: a speaker that only enumerates late must **not** trigger
+  rule 1 (the rule is scoped to headset routes — without that scoping a late `TYPE_BUILTIN_SPEAKER`
+  would hijack the call); the two empty-list cases; unknown types split from the mapping table.
+  `CallStateHolderTest` also gained a check that `updateAudioRoutes` leaves `isMuted` alone.
+- `app-ui-design` loaded although no Compose was written: the step touches `ui/` only through
+  `CallScreen.kt:98`, which now derives `isSpeakerOn` from `audioRoute`. Confirmed the change adds no
+  param, no composable and no theme decision. The real screen work is step 4.
+- Per the step's own "leave the real routing for step 3", `CallService.toggleSpeaker()` still writes
+  `audioManager.isSpeakerphoneOn` and `ACTION_TOGGLE_SPEAKER` still exists — behaviour is unchanged by
+  this commit. Annotated on step 3 as its deletions.
+- No skill beyond the floor was triggered by the diff: ~357 changed lines, no `data/crypto`,
+  `data/worker`, `di/`, no ViewModel. `FEATURE-MAP.md` for the two new files is step 5's, as planned.
+
 ### Step 3 — router + service wiring (`feat(call)`, no CHANGELOG yet) — skills: simplify, code-review; model: strong
 Files: new `data/call/CallAudioRouter.kt`, `CallService.kt` (§2.4), `CallViewModel.kt`
 (`selectAudioRoute`). Keep the router free of coroutines except the `MutableStateFlow`; the
 listeners write to it on the main executor. No unit test for the router (Android `AudioManager`),
 the policy test is the coverage. Run `/simplify` (concurrency trigger). Run `/code-review` on
 the step-2+3 diff before commit: this touches coroutine scoping in a foreground service.
+**(step-2)** The policy exists and is the contract to honour:
+- Call `CallAudioRoutePolicy.routeOf(device.type)` directly — it takes the raw `AudioDeviceInfo.TYPE_*`
+  int, so the router needs no mapping of its own.
+- `previousAvailable` is `emptySet()` for the first `resolve` at call start — that is how a headset
+  already connected wins through rule 1. After each run, set `previous = available`. When the result
+  differs from `userPick`, null `userPick` (rule 1's stated side effect; the policy cannot do it).
+- `resolve` is total: with `available` empty it returns `current ?: EARPIECE` rather than throwing.
+  The router must still not call `setCommunicationDevice` for a route absent from the live list (§4).
+- `CallAudioRoute`'s KDoc promises `availableRoutes` is display-ordered by `ordinal`; nothing sorts
+  yet, so `RouteState.available` must be built `sortedBy { it.ordinal }`.
+- Still present for this step to delete: `ACTION_TOGGLE_SPEAKER`, `CallService.toggleSpeaker()`
+  (`:528`, now toggling EARPIECE⇄SPEAKER through `updateAudioRoutes` **and** still writing
+  `isSpeakerphoneOn`), and `previousSpeakerState`. `CallStateHolder.updateAudioRoutes` already exists.
 
 ### Step 4 — UI (`feat(call)`, **this** commit carries the CHANGELOG `Added` entry) — skills: app-ui-design
 Files: `CallScreen.kt`, `strings.xml`, possibly `CallControlButton.kt` if the highlighted
@@ -241,6 +297,10 @@ line from step 1 stays under `Removed`.
 **(step-1)** That section is now `## [UNRELEASED] [2.0.0] — 2026-09-20` — step 1 took the major
 bump (see its Shipped departures), so this step appends to it and does **not** raise the version
 again. Any Robolectric test this step adds pins `@Config(sdk = [31], …)`, not `[29]`.
+**(step-2)** `ConnectedContent` still has its original 9 params; `CallScreen.kt:98` now feeds it
+`isSpeakerOn = uiControls.audioRoute == CallAudioRoute.SPEAKER`. That derived line, the
+`isSpeakerOn`/`onToggleSpeaker` params and the third `CallControlButton` are what this step replaces
+with `audioRoute` / `availableRoutes` / `onSelectRoute`.
 
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
