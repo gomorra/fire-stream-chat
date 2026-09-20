@@ -296,12 +296,35 @@ it. `ConnectedContent` then takes `audioRoute` / `availableRoutes` / `onSelectRo
 emission, and if the OS reports no communication devices at all), so the `size <= 2` branch must be
 the one that handles it — never index into the list or assume EARPIECE is present.
 
+**Approach** (step-4, 2026-09-20)
+1. `strings.xml`: the five `call_route_*` labels of §2.5.
+2. `CallScreen.kt`: `ConnectedContent` takes `audioRoute` / `availableRoutes` / `onSelectRoute`
+   (10 params). The route button and the sheet go into a new `CallAudioRouteControls.kt` in
+   `ui/call/` (`internal`), so the Robolectric test can reach them without the whole screen.
+   `size <= 2` toggles EARPIECE⇄SPEAKER without reading the list (empty-safe); otherwise a
+   `ModalBottomSheet` with icon + label + check rows.
+3. `CallViewModel.toggleSpeaker()` deleted; `viewModel::selectAudioRoute` is the only caller.
+4. Test: `CallAudioRouteControlsUiTest` (Robolectric, sdk 31) — two routes toggle directly,
+   empty list toggles too, three routes open a sheet with three rows and a row tap selects.
+5. Gate, then `changelog-release` for the `Added` entry. Further skills: none intended — UI-only,
+   one ViewModel, well under 600 lines. Nothing found contradicts §0 or §2.
+
+**Shipped** `6b39c566` (2026-09-20) — tier: mid, tagged mid. skills: app-ui-design, changelog-release. Reviewer models: none. CHANGELOG entry: in `6b39c566`, its hash filled in by this commit.
+Departures (for sign-off):
+- The button and the sheet live in a new `ui/call/CallAudioRouteControls.kt` (`CallAudioRouteButton`, `CallAudioRouteList`), not inline in `CallScreen.kt`, so the Robolectric test reaches them without a `CallViewModel`. `CallControlButton.kt` is untouched.
+- A sixth string, `call_route_button` ("Audio output: %1$s"), carries the button's `contentDescription`. The earpiece label reads "Phone". In the sheet the earpiece row uses `PhoneInTalk`, because `VolumeUp` for both earpiece and speaker side by side (§2.5's button mapping) would be two identical rows; the button itself follows §2.5 exactly.
+- `CallAudioRouteControlsUiTest` (5 cases): both toggle directions, the empty list, three routes → three rows and no selection, row tap selects. Dismissal of the real `ModalBottomSheet` after a row tap is not asserted (the row test drives `CallAudioRouteList` directly).
+- Bump: none — the `feat` lands on the already-minor unreleased `1.34.0`. No `docs/BACKLOG.md` item was closed by it.
+- Gate: full `:app:testFirebaseDebugUnitTest` and `assembleFirebaseDebug`, both clean. Nothing seen on a device or emulator.
+
 ### Step 5 — docs
 - `docs/FEATURE-MAP.md` § Voice Call: add `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
   `CallAudioRoutePolicyTest.kt`; refresh `last-verified`.
   **(step-3 /code-review)** Add `CallAudioRouterTest.kt` to that list too — step 3 wrote one
   although this plan said it would not. `CallRouteState` lives in `CallAudioRouter.kt`, so it needs
   no row of its own.
+  **(step-4)** Also `ui/call/CallAudioRouteControls.kt` and `CallAudioRouteControlsUiTest.kt`.
+  On-device item (d) should include: the sheet closes after a row tap (not asserted by the test).
 - **(step-3 /code-review)** `docs/BACKLOG.md` § Rich Media & Communication already carries the
   "Call UI controls survive the call they belong to" entry step 3's review added
   (`CallStateHolder.reset()` is never called in `app/src/main/`). Leave it where it is; it is not
