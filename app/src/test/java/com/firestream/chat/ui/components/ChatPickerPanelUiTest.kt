@@ -28,7 +28,7 @@ import org.robolectric.annotation.Config
  * you typed" are different problems for the user.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ChatPickerPanelUiTest {
 
     @get:Rule

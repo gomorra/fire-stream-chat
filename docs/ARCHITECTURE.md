@@ -192,6 +192,12 @@ sequenceDiagram
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
 - **`CallState`** (sealed interface): `Idle | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`.
+- **Audio session** (`startAudioSession()` / `stopAudioSession()` in `CallService`, idempotent and
+  mutually exclusive): sets `MODE_IN_COMMUNICATION`, then `CallAudioRouter` picks the route through
+  `AudioManager.setCommunicationDevice()`. `CallAudioRoutePolicy` is the pure decision (a headset
+  appearing mid-call wins; a disconnect falls back to the earpiece, never the speaker); the router
+  publishes what the OS *actually* reports, so the UI never shows Bluetooth before SCO is up.
+  `ProximityLock` follows that reported route — the screen blanks only while the earpiece is playing.
 
 ---
 
@@ -379,6 +385,9 @@ com.firestream.chat/
 │   │   ├── CallService.kt       # Foreground service — owns PeerConnection
 │   │   ├── CallStateHolder.kt   # @Singleton state bridge (service ↔ UI)
 │   │   ├── CallNotificationManager.kt
+│   │   ├── CallAudioRoutePolicy.kt  # Pure — which route wins, TYPE_* → CallAudioRoute
+│   │   ├── CallAudioRouter.kt   # setCommunicationDevice() wrapper + live RouteState
+│   │   ├── ProximityLock.kt     # Wake lock held only while the earpiece is playing
 │   │   └── WebRtcPeerConnectionFactory.kt
 │   ├── crypto/
 │   │   ├── SignalManager.kt
@@ -457,7 +466,8 @@ com.firestream.chat/
 ├── ui/
 │   ├── auth/                    # Login, Otp, ProfileSetup, AuthViewModel
 │   ├── broadcast/               # CreateBroadcastScreen, CreateBroadcastViewModel
-│   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton
+│   ├── call/                    # CallActivity, CallScreen, CallViewModel, CallControlButton,
+│   │                            # CallAudioRouteSheet (route button + picker sheet)
 │   ├── calls/                   # CallsScreen, CallsViewModel (call log tab)
 │   ├── chat/                    # ChatScreen, ChatViewModel (orchestrator),
 │   │                            # ChatPollManager, ChatSearchManager, ChatMessageActions,

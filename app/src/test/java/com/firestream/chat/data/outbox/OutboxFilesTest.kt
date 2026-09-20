@@ -29,7 +29,7 @@ import java.io.FileNotFoundException
  * picked mime type through a retry.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class OutboxFilesTest {
 
     private val context = ApplicationProvider.getApplicationContext<Context>()

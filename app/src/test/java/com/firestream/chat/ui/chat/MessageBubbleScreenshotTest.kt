@@ -39,7 +39,7 @@ import org.robolectric.annotation.GraphicsMode
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(sdk = [29], application = android.app.Application::class, qualifiers = "w360dp-h640dp")
+@Config(sdk = [31], application = android.app.Application::class, qualifiers = "w360dp-h640dp")
 class MessageBubbleScreenshotTest {
 
     @get:Rule

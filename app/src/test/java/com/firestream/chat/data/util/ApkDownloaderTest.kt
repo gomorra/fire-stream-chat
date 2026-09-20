@@ -24,7 +24,7 @@ import java.io.File
 import java.security.MessageDigest
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], manifest = Config.NONE, application = android.app.Application::class)
+@Config(sdk = [31], manifest = Config.NONE, application = android.app.Application::class)
 class ApkDownloaderTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()

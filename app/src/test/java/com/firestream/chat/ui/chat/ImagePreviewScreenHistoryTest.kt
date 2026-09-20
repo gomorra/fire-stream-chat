@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
  * those files is no longer on disk.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ImagePreviewScreenHistoryTest {
 
     @get:Rule

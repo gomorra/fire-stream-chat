@@ -50,7 +50,21 @@ enum class EndReason {
     ERROR
 }
 
+/**
+ * Where the audio of an ongoing call is playing.
+ *
+ * Declaration order **is** display order — `availableRoutes` is sorted by `ordinal`, so
+ * reordering these constants reorders the route sheet. Keep EARPIECE first.
+ */
+enum class CallAudioRoute {
+    EARPIECE,
+    SPEAKER,
+    BLUETOOTH,
+    WIRED_HEADSET
+}
+
 data class CallUiControls(
     val isMuted: Boolean = false,
-    val isSpeakerOn: Boolean = false
+    val audioRoute: CallAudioRoute = CallAudioRoute.EARPIECE,
+    val availableRoutes: List<CallAudioRoute> = listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER)
 )

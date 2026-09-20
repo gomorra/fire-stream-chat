@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -24,5 +25,7 @@ class CallViewModel @Inject constructor(
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
     fun hangup() = CallService.sendAction(context, CallService.ACTION_HANGUP)
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
-    fun toggleSpeaker() = CallService.sendAction(context, CallService.ACTION_TOGGLE_SPEAKER)
+
+    /** Move the call's audio to [route]. The OS decides when it actually lands; [uiControls] follows. */
+    fun selectAudioRoute(route: CallAudioRoute) = CallService.sendSelectAudioRoute(context, route)
 }

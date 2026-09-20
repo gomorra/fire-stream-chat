@@ -23,7 +23,6 @@ import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import kotlinx.coroutines.delay
 
@@ -94,10 +94,11 @@ internal fun CallScreen(
                 remoteLocalAvatarPath = state.remoteLocalAvatarPath,
                 startTime = state.startTime,
                 isMuted = uiControls.isMuted,
-                isSpeakerOn = uiControls.isSpeakerOn,
+                audioRoute = uiControls.audioRoute,
+                availableRoutes = uiControls.availableRoutes,
                 onHangup = viewModel::hangup,
                 onToggleMute = viewModel::toggleMute,
-                onToggleSpeaker = viewModel::toggleSpeaker
+                onSelectRoute = viewModel::selectAudioRoute
             )
             is CallState.Ended -> EndedContent()
             CallState.Idle -> {}
@@ -218,10 +219,11 @@ private fun ConnectedContent(
     remoteLocalAvatarPath: String?,
     startTime: Long,
     isMuted: Boolean,
-    isSpeakerOn: Boolean,
+    audioRoute: CallAudioRoute,
+    availableRoutes: List<CallAudioRoute>,
     onHangup: () -> Unit,
     onToggleMute: () -> Unit,
-    onToggleSpeaker: () -> Unit
+    onSelectRoute: (CallAudioRoute) -> Unit
 ) {
     var elapsed by remember { mutableLongStateOf(0L) }
     LaunchedEffect(startTime) {
@@ -262,12 +264,10 @@ private fun ConnectedContent(
                 iconTint = Color.White,
                 size = 72.dp
             )
-            CallControlButton(
-                icon = Icons.Default.VolumeUp,
-                contentDescription = if (isSpeakerOn) "Disable speaker" else "Enable speaker",
-                onClick = onToggleSpeaker,
-                backgroundColor = if (isSpeakerOn) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.surfaceVariant,
-                iconTint = if (isSpeakerOn) MaterialTheme.colorScheme.onSecondary else MaterialTheme.colorScheme.onSurface
+            CallAudioRouteButton(
+                audioRoute = audioRoute,
+                availableRoutes = availableRoutes,
+                onSelectRoute = onSelectRoute
             )
         }
     }

@@ -16,7 +16,6 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.util.ReflectionHelpers
 
 /**
  * Robolectric provides a real [Context] so [Intent] construction works without
@@ -94,24 +93,6 @@ class TimerAlarmSchedulerTest {
             )
         }
         verify(exactly = 0) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
-    }
-
-    @Test
-    fun `pre-S devices skip the canScheduleExactAlarms check entirely`() {
-        // canScheduleExactAlarms() does not exist before API 31. The scheduler
-        // must not call it on lower SDKs.
-        ReflectionHelpers.setStaticField(Build.VERSION::class.java, "SDK_INT", Build.VERSION_CODES.R)
-
-        scheduler.schedule(
-            messageId = "m3",
-            fireAtMs = 1_700_000_002_000L,
-            caption = null,
-            chatId = "c3",
-            otherUserId = null,
-        )
-
-        verify(exactly = 0) { alarmManager.canScheduleExactAlarms() }
-        verify(exactly = 1) { alarmManager.setExactAndAllowWhileIdle(any(), any(), any()) }
     }
 
     @Test

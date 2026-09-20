@@ -1,5 +1,6 @@
 package com.firestream.chat.data.call
 
+import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
@@ -42,19 +43,55 @@ class CallStateHolderTest {
     }
 
     @Test
-    fun `toggleSpeaker flips isSpeakerOn`() {
-        assertFalse(holder.uiControls.value.isSpeakerOn)
-        holder.toggleSpeaker()
-        assertTrue(holder.uiControls.value.isSpeakerOn)
-        holder.toggleSpeaker()
-        assertFalse(holder.uiControls.value.isSpeakerOn)
+    fun `updateAudioRoutes publishes the available routes and the active one`() {
+        assertEquals(CallAudioRoute.EARPIECE, holder.uiControls.value.audioRoute)
+
+        holder.updateAudioRoutes(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER, CallAudioRoute.BLUETOOTH),
+            CallAudioRoute.BLUETOOTH
+        )
+
+        assertEquals(CallAudioRoute.BLUETOOTH, holder.uiControls.value.audioRoute)
+        assertEquals(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER, CallAudioRoute.BLUETOOTH),
+            holder.uiControls.value.availableRoutes
+        )
+    }
+
+    @Test
+    fun `updateAudioRoutes with no reported route keeps the displayed one`() {
+        holder.updateAudioRoutes(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER, CallAudioRoute.BLUETOOTH),
+            CallAudioRoute.BLUETOOTH
+        )
+
+        // The OS stopped reporting a communication device; the list still updates.
+        holder.updateAudioRoutes(listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER), null)
+
+        assertEquals(CallAudioRoute.BLUETOOTH, holder.uiControls.value.audioRoute)
+        assertEquals(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER),
+            holder.uiControls.value.availableRoutes
+        )
+    }
+
+    @Test
+    fun `updateAudioRoutes leaves the mute state alone`() {
+        holder.toggleMute()
+
+        holder.updateAudioRoutes(listOf(CallAudioRoute.EARPIECE), CallAudioRoute.EARPIECE)
+
+        assertTrue(holder.uiControls.value.isMuted)
     }
 
     @Test
     fun `reset returns to Idle with default controls`() {
         holder.updateState(CallState.Connected("call1", "user2", "Alice", null, 1000L))
         holder.toggleMute()
-        holder.toggleSpeaker()
+        holder.updateAudioRoutes(
+            listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER),
+            CallAudioRoute.SPEAKER
+        )
 
         holder.reset()
 
@@ -64,9 +101,9 @@ class CallStateHolderTest {
 
     @Test
     fun `updateControls sets controls directly`() {
-        holder.updateControls(CallUiControls(isMuted = true, isSpeakerOn = true))
+        holder.updateControls(CallUiControls(isMuted = true, audioRoute = CallAudioRoute.SPEAKER))
         assertTrue(holder.uiControls.value.isMuted)
-        assertTrue(holder.uiControls.value.isSpeakerOn)
+        assertEquals(CallAudioRoute.SPEAKER, holder.uiControls.value.audioRoute)
     }
 
     @Test

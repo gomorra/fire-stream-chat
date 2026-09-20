@@ -2,9 +2,15 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.34.0] — 2026-09-19
+## [UNRELEASED] [2.0.0] — 2026-09-20
+
+### Removed
+
+- **Android 10 and 11 are no longer supported.** The app now requires Android 12 or newer. A phone on Android 10 or 11 keeps the version it has — it will not receive this or any later update, and the APK will refuse to install on it. The reason is the call audio work that follows: routing a call to a Bluetooth or wired headset has exactly one API that is not deprecated, and it arrived in Android 12. Supporting the older two would have meant a second, fragile routing path alongside it for a shrinking share of devices. Dropping them also retires the version checks around exact alarms and on-device dictation, which are now simply always available. (`3b30b8f7`)
 
 ### Added
+
+- **Calls can use a Bluetooth or wired headset.** A voice call had only two places to play: the earpiece and the speaker. A connected headset was simply unreachable, because Android will not move call audio to one unless the app asks. It asks now. A headset that is already connected when the call starts takes the audio from the first second, one connected mid-call takes over the way it does in the stock dialer, and unplugging it drops back to the earpiece rather than announcing the rest of the call to the room. The speaker button on the call screen has become the route control: with nothing but the earpiece and the speaker to choose from it still toggles between them on a tap, and once a third route exists it opens a small sheet listing them with the one currently playing checked. The check follows the audio rather than the tap, so on Bluetooth it moves the moment the headset actually takes over, about a second later. (`b1fbb029`)
 
 - **A crop-shape pill on every fullscreen photo, before any editing.** The send preview after a camera shot or a gallery pick, and the fullscreen viewer of a photo in a chat, now carry a small pill bottom-left that cycles through Free, Original, 1:1, 4:5 and 16:9. A shape other than Free draws its frame over the photo, and pinching and panning move the photo under the frame; what is inside the frame is what is sent. Opening Adjust from the preview carries the frame and the shape into its crop tool, still editable, and opening Edit from the viewer carries them into the preview. (`9e8c4d0`)
 

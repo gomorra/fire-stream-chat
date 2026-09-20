@@ -88,7 +88,7 @@ android {
 
     defaultConfig {
         applicationId = "com.firestream.chat"
-        minSdk = 29
+        minSdk = 31
         targetSdk = 35
         versionCode = versionCodeOverride ?: gitCommitCount
         versionName = versionNameOverride ?: gitTagVersionName

@@ -35,7 +35,7 @@ import org.robolectric.annotation.Config
  * covered by the preview.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ImagePreviewScreenFocusTest {
 
     @get:Rule

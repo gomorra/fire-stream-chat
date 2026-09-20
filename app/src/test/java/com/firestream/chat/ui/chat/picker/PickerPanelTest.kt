@@ -46,7 +46,7 @@ import org.robolectric.annotation.Config
  * `docs/BACKLOG.md` §*Pending on-device verification*.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class PickerPanelTest {
 
     @get:Rule

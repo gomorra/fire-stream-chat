@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
  * what caught the MessageBubble crash (`00b15da`).
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [29], application = android.app.Application::class)
+@Config(sdk = [31], application = android.app.Application::class)
 class ImagePreviewScreenMultiTest {
 
     @get:Rule

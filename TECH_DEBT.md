@@ -33,7 +33,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ### Sends run only through WorkManager — no in-process fast path
 
-**The smell.** Every retryable send is enqueued as WorkManager work (`OutboxScheduler` → `OutboxWorker` → `OutboxSender`) and the tick waits for that job to be scheduled, run, and acknowledged by the server. WorkManager adds latency a direct attempt would not: an expedited job on API 31+ usually starts within a second or two, ordinary work below that — text on API 29/30 — can wait longer under Doze or battery restrictions.
+**The smell.** Every retryable send is enqueued as WorkManager work (`OutboxScheduler` → `OutboxWorker` → `OutboxSender`) and the tick waits for that job to be scheduled, run, and acknowledged by the server. WorkManager adds latency a direct attempt would not: an expedited job usually starts within a second or two, but it is still a scheduling round-trip. (Before minSdk rose to 31 on 2026-09-20, text sends on API 29/30 were not expedited at all and could wait far longer under Doze; `OutboxScheduler.runsExpedited(sdkInt, uploads)` still carries that now-unreachable arm — it takes the SDK as a parameter rather than branching on `Build.VERSION`, so it is harmless, and it is left in place with its test until someone is in that file for another reason.)
 
 **Why we haven't fixed it.** The offline outbox plan (§0) decided WorkManager only, so there is one code path with one durability story. An in-process fast path racing the worker would need `OutboxSender`'s per-id lock to arbitrate every time and would re-open the cancellation semantics the outbox removed (a send tied to the chat's `viewModelScope`). Checklist item 6 in [`docs/BACKLOG.md`](docs/BACKLOG.md) measures compose→SENT before and after.
 
@@ -222,6 +222,26 @@ Known refactors and code smells that have been consciously deferred or declined.
 **Why we're not fixing it.** Rasterizing at true source resolution is what the ceiling exists to prevent: a 108 MP camera original is roughly 430 MB as an ARGB_8888 bitmap, and a rotate holds source and destination at once. `MediaProcessingLimiter` bounds how many such bitmaps are resident, not how large each one is, so without a ceiling one edited photo can OOM the process on a mid-range device. 4096 px is past what any phone screen or messaging recipient resolves, and the alternative — tiled processing, or rasterizing at send time from an accumulated edit list — is the `ImageEdit` value-object design `docs/plans/image-editor.md` §2.1 weighed and rejected for this feature.
 
 **When to revisit.** If generational quality loss or the ceiling turns out to be visible in practice — the trigger §5 of the plan records for reopening the accumulated-`ImageEdit` decision. Revisit the two together, never separately: raising the ceiling without changing the model just moves the OOM. Landed with Phase 2 of the image editor (2026-09-09).
+
+---
+
+### The Roborazzi baselines are stale, and no gate notices
+
+**The smell.** `./gradlew :app:verifyRoborazziFirebaseDebug` fails on all four `MessageBubbleScreenshotTest` baselines in `app/src/test/snapshots/`. The recorded PNGs show an **orange** own-message bubble and a cool-grey incoming one; the theme has rendered warm neutrals since the bubble-colour redesign (`Color.kt:23` — `SentBubble = 0xFFE0DDD6 // light mode: warm-neutral (not orange)`). The baselines were recorded once in `317d9f5a` and never re-recorded. Found during the minSdk 31 bump (2026-09-20) and confirmed pre-existing: the diff is a colour the current code cannot produce, not an API-31 rendering change.
+
+**Why we haven't fixed it.** Neither `./gradlew test` nor `.github/workflows/ci.yml` runs `verifyRoborazzi` — the plain test task only *captures*, so the screenshot suite has been green-by-omission for months and re-recording now would bless four images nobody has looked at against a spec nobody wrote down. Doing it properly means deciding what the baselines are for (the TC-03/04/05 typography assertions the test's KDoc names) and putting `verifyRoborazzi` in the CI gate, or deleting the suite. That is its own decision, not a line in an SDK bump.
+
+**When to revisit.** Next time someone touches `MessageBubble`'s typography or bubble geometry — that is the change these baselines were meant to catch, and it is the moment the choice between `recordRoborazziFirebaseDebug` + a CI gate, and deleting the suite, has to be made.
+
+---
+
+### `CallAudioRouter` holds its monitor across AudioService binder calls
+
+**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run make their `AudioManager` calls — `availableCommunicationDevices`, `setCommunicationDevice`, `clearCommunicationDevice`, and both un/register calls — inside `synchronized(lock)`, while the two listeners it registers fire on the main looper and block on that same monitor. A slow AudioService round-trip, made from the WebRTC signaling thread, therefore stalls the main thread for its duration. The lock strictly only needs to guard the four routing fields (`started`, `previousAvailable`, `userPick`, `currentRoute`).
+
+**Why we haven't fixed it.** Narrowing it means copying the fields out, dropping the monitor, calling into `AudioManager`, and re-taking it to publish — which re-opens exactly the read-modify-write races the lock exists for (a device-list callback landing between the query and the `setCommunicationDevice`, so the route is chosen from one device list and applied to another). The calls held under the lock are single binder round-trips on a path that runs a handful of times per call, and `docs/plans/call-audio-routes.md` §4 rules out the retry/polling logic that would make them slow.
+
+**When to revisit.** If an ANR trace or a jank report ever points at `CallAudioRouter`'s monitor on the main thread — then the fix is to move the whole router onto the main looper (the listeners are already there) and drop the lock entirely, rather than to narrow it.
 
 ---
 
