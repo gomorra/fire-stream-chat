@@ -345,6 +345,27 @@ Departures (for sign-off):
 - Local memory: update `project_shipped_plans_archive` / add a pointer; move this plan to
   `docs/plans/done/` once the device pass is recorded.
 
+**Approach** (step-5, 2026-09-20)
+1. `docs/FEATURE-MAP.md` § Voice Call: rows for `CallAudioRouter.kt`, `CallAudioRoutePolicy.kt`,
+   `CallAudioRouteControls.kt` and the three new tests; `CallControlButton` row reworded (the
+   speaker control moved out of it); `last-verified` → 2026-09-20. All six paths checked with `git ls-files`.
+2. `docs/BACKLOG.md`: a new on-device block at the top of § Pending on-device verification
+   (items a–e, the sheet-closes check in (d), plus step 3's argued-not-pinned audio-mode restore);
+   two entries in § Rich Media & Communication (core-telecom option B, Bluetooth product name).
+   The "Call UI controls survive…" entry is left untouched.
+3. `docs/GOTCHAS.md` § Testing: the step-1 candidate — the gate never verifies Roborazzi baselines.
+4. `TECH_DEBT.md`: nothing. Local memory: a runner session has none; the plan stays in
+   `docs/plans/` until the device pass, as the step says.
+5. No tests, no Gradle gate: the diff is Markdown only. No skills intended — no code to review.
+
+**Shipped** `ca723cea` (2026-09-20) — tier: mid, tagged mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- The Gradle gate was **not run**: the commit touches three Markdown files and nothing else. No CHANGELOG entry (doc-only).
+- The on-device checklist has a sixth item (f) beyond the plan's a–e: step 3's re-entry guard in `requestAudioFocus()` (the phone must leave communication mode after a call), which step 3 marked as argued, not pinned.
+- The `CallControlButton.kt` row in FEATURE-MAP was reworded, since the speaker control moved to `CallAudioRouteControls.kt`.
+- GOTCHAS got the step-1 Roborazzi entry; the task names in it (`verifyRoborazziFirebaseDebug`, `recordRoborazziFirebaseDebug`) follow step 1's Shipped block — the record task name is inferred from the plugin's naming, not run here.
+- Not done, by design: local memory (a runner session has none) and the move to `docs/plans/done/` (waits for the device pass). `TECH_DEBT.md` untouched.
+
 ## 4. Traps (read before step 3)
 
 - `setCommunicationDevice()` returns `false` and does nothing if the device is not in
