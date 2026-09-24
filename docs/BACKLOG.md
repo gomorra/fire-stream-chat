@@ -30,6 +30,9 @@ in the sent bubble, and in an emoji-only bubble (the large size path). Long-pres
 them to a bigger size and the whole glyph must scale, not just its first half. Backspace over
 each must delete the whole emoji in one press.
 
+Also receive 🙂‍↕️ and 🙂‍↔️ typed from a phone keyboard (not in our panel): the bubble must
+show the one nodding/shaking face, not 🙂 followed by an arrow.
+
 ### Call audio routes — Bluetooth and wired headsets (2026-09-20)
 
 Shipped on `plan/call-audio-routes-b` (`eb241341`, `81fab393`, `b1fbb029`); nothing has been on

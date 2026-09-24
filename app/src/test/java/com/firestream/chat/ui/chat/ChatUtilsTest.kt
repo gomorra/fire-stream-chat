@@ -143,6 +143,44 @@ class ChatUtilsTest {
         assertTrue(isEmojiOnly("\u2764\uFE0F\u200D\uD83D\uDD25"))
     }
 
+    // --- Text-default bases (arrows, ▪ ◻, ©, ™ …) are emoji only with U+FE0F ---
+    // Head shaking vertically/horizontally (Emoji 15.1) put an arrow after the
+    // joiner. With the arrow outside EMOJI_BASE the sequence split into 🙂 and a
+    // separate ↕️ in the bubble, while the unstyled reply header drew it whole.
+
+    @Test
+    fun `addEmojiSpans keeps head shaking vertically in one span`() {
+        val source = "🙂‍↕️"  // 🙂‍↕️
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(0, result.spanStyles[0].start)
+        assertEquals(source.length, result.spanStyles[0].end)
+        assertTrue(isEmojiOnly(source))
+    }
+
+    @Test
+    fun `addEmojiSpans keeps head shaking horizontally in one span`() {
+        val source = "🙂‍↔️"  // 🙂‍↔️
+        val result = addEmojiSpans(source, SIZE)
+        assertEquals(1, result.spanStyles.size)
+        assertEquals(source.length, result.spanStyles[0].end)
+        assertTrue(isEmojiOnly(source))
+    }
+
+    @Test
+    fun `isEmojiOnly returns true for arrow and square emoji`() {
+        assertTrue(isEmojiOnly("↗️"))   // ↗️
+        assertTrue(isEmojiOnly("⤴️"))   // ⤴️
+        assertTrue(isEmojiOnly("▪️"))   // ▪️
+        assertTrue(isEmojiOnly("◾◽"))   // ◾◽ (emoji presentation by default)
+    }
+
+    @Test
+    fun `plain text arrow without variation selector is not an emoji`() {
+        assertFalse(isEmojiOnly("→"))  // →
+        assertEquals(0, addEmojiSpans("a → b", SIZE).spanStyles.size)
+    }
+
     companion object {
         private val SIZE = androidx.compose.ui.unit.TextUnit(
             18f,

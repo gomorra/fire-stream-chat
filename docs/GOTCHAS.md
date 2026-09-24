@@ -30,7 +30,10 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   not one code point at a time; `EMOJI_REGEX` in `ui/chat/ChatUtils.kt` is the
   shape. A per-emoji size map keyed by char index has the same requirement from
   the other side: keyed at the sequence start, it only reaches the first code
-  point and sizes the halves differently. Fixed in `d175db8e`.
+  point and sizes the halves differently. Fixed in `d175db8e`. The base set
+  matters too: Emoji 15.1 joins an *arrow* (🙂‍↕️, 🙂‍↔️), so text-default symbols
+  (arrows, ▪ ◻, © ™) must count as a base when U+FE0F follows them, or the
+  sequence splits into 🙂 plus a stray ↕️.
 
 - **Composable param-count ceiling (~15).** ART rejects composables with too many
   explicit params with a `VerifyError` **on first render**, not at compile time.
