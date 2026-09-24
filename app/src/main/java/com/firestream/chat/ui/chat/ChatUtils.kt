@@ -25,11 +25,23 @@ import java.util.Locale
 // 👨‍👩‍👧 as three faces. A per-sequence multiplier would also land on the first
 // code point only, sizing the halves differently. So a match is one grapheme:
 // a base character plus its modifiers, repeated across zero or more joiners.
+//
+// Arrows, small squares, © ® ™ and friends are text by default and only become
+// emoji when U+FE0F follows, so they count as a base only then — otherwise a
+// plain "a → b" would be restyled. They must be bases at all because Emoji 15.1
+// joins an arrow into a sequence: 🙂‍↕️ (nodding) and 🙂‍↔️ (shaking head) split
+// into 🙂 plus a stray ↕️ when the arrow was left out.
 private const val EMOJI_BASE =
-    "[\\x{1F000}-\\x{1FFFF}" + // Supplementary-plane emoji (faces, flags, objects, etc.)
+    "(?:[\\x{1F000}-\\x{1FFFF}" + // Supplementary-plane emoji (faces, flags, objects, etc.)
     "\\u2600-\\u27BF"         + // Misc symbols (☀ ★ ✉ etc.)
     "\\u2300-\\u23FF"         + // Misc technical (⏰ ⌚ ✂ etc.)
-    "\\u2B00-\\u2BFF]"          // Misc arrows/symbols (⬛ ⬜ ⬅ etc.)
+    "\\u2B00-\\u2BFF"         + // Misc arrows/symbols (⬛ ⬜ ⬅ etc.)
+    "\\u25FD\\u25FE]"         + // ◽ ◾ — emoji presentation even without U+FE0F
+    "|[\\u2190-\\u21FF"       + // Arrows (↔ ↕ ↗ ↩ etc.)
+    "\\u2934\\u2935"          + // ⤴ ⤵
+    "\\u25A0-\\u25FF"         + // Geometric shapes (▪ ▫ ◻ ◼ ▶ ◀)
+    "\\u00A9\\u00AE\\u203C\\u2049\\u2122\\u2139\\u3030\\u303D\\u3297\\u3299]" +
+    "(?=\\uFE0F))"
 
 // Variation-selector-16 and the skin-tone modifiers bind to the base before them.
 private const val EMOJI_MODIFIERS = "[\\uFE0F\\x{1F3FB}-\\x{1F3FF}]*"

@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.35.2] — 2026-09-24
+
+### Fixed
+
+- **The nodding and head-shaking faces no longer arrive as a smiley and an arrow.** 🙂‍↕️ and 🙂‍↔️, which newer keyboards offer, are a smiley joined to an arrow, and the app did not count arrows as emoji. The bubble split them into a plain 🙂 followed by a stray ↕️ or ↔️, while the reply header, which does no emoji styling, showed them correctly. Arrows, the small squares and the other symbols that turn into emoji only when marked as one (↗️ ▪️ ©️ ™️) are now styled as emoji. A single one sent on its own also gets the large emoji-only size. A plain arrow typed in text is left alone.
+
 ## [1.35.1] — 2026-09-20
 
 ### Fixed
