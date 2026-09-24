@@ -9,6 +9,7 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.util.resolveTimerAlarmSound
 import com.firestream.chat.data.util.resolveTimerAlarmStyle
 import com.firestream.chat.di.ApplicationScope
@@ -24,9 +25,11 @@ import javax.inject.Inject
  * Handles every stage of a timer's alarm, keyed by intent action:
  *
  *  - [TimerAlarmScheduler.ACTION_TIMER_FIRED] — the timer reached its fire time.
- *    Posts the alarm notification and flips the message to `COMPLETED` so both
- *    devices' bubbles update. `goAsync()` extends the receiver's life to ~10s so
- *    the suspend call can land before the process is torn down.
+ *    Checks the local row first ([TimerFireGate]) so a timer deleted or paused
+ *    while its chat was closed stays silent, then posts the alarm notification
+ *    and flips the message to `COMPLETED` so both devices' bubbles update.
+ *    `goAsync()` extends the receiver's life to ~10s so the suspend calls can
+ *    land before the process is torn down.
  *  - [TimerAlarmScheduler.ACTION_TIMER_REALERT] — the nag. A `NORMAL` timer that
  *    rang once and was never acknowledged rings again, up to [MAX_REALERTS] times.
  *  - [TimerAlarmScheduler.ACTION_TIMER_DISMISS] — the notification's Dismiss
@@ -47,6 +50,9 @@ class TimerAlarmReceiver : BroadcastReceiver() {
     lateinit var messageRepository: MessageRepository
 
     @Inject
+    lateinit var messageDao: MessageDao
+
+    @Inject
     lateinit var scheduler: TimerAlarmScheduler
 
     @Inject
@@ -64,26 +70,37 @@ class TimerAlarmReceiver : BroadcastReceiver() {
     private fun handleFired(context: Context, intent: Intent) {
         val alarm = TimerAlarmRequest.from(intent) ?: return
 
-        // Post synchronously — it's the user-visible primary effect and we don't
-        // want to lose it if the suspend call below stalls. Silent timers skip the
-        // notification entirely but still flip to COMPLETED.
-        if (!alarm.style.isSilent) {
-            postAlarmNotification(context, alarm)
-            queueRealert(alarm, attempt = 1)
-        }
-
-        // The state flip is best-effort: if the network is down, the next observer
-        // reconciliation on either device will catch up because the local Room
-        // entry is also marked completed by markTimerCompleted.
+        // goAsync() extends the receiver's life so the fire-time check can read
+        // Room before anything is posted. The check is local-only and capped by
+        // TimerFireGate.LOOKUP_TIMEOUT_MS, so no network state can hold up the ring.
         val pendingResult = goAsync()
         appScope.launch {
             try {
+                // A timer deleted for everyone or paused while its chat was closed
+                // still has its alarm armed — see TimerFireGate. Nothing to ring,
+                // and nothing to mark completed.
+                if (!TimerFireGate.shouldRing { lookupTimerRow(alarm.messageId) }) return@launch
+
+                // Silent timers skip the notification entirely but still flip to COMPLETED.
+                if (!alarm.style.isSilent) {
+                    postAlarmNotification(context, alarm)
+                    queueRealert(alarm, attempt = 1)
+                }
+
+                // The state flip is best-effort: if the network is down, the next observer
+                // reconciliation on either device will catch up because the local Room
+                // entry is also marked completed by markTimerCompleted.
                 messageRepository.markTimerCompleted(alarm.chatId, alarm.messageId)
             } finally {
                 pendingResult.finish()
             }
         }
     }
+
+    private suspend fun lookupTimerRow(messageId: String): TimerRow? =
+        messageDao.getMessageById(messageId)?.toDomain()?.let { message ->
+            TimerRow(state = message.timerState, deleted = message.deletedAt != null)
+        }
 
     /**
      * Ring again if — and only if — the notification is still sitting there

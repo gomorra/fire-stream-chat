@@ -2,8 +2,9 @@
 // Responsibility: react to TIMER message state changes by scheduling or cancelling
 //   AlarmManager entries via TimerAlarmScheduler. This is the bidirectional wire
 //   that makes both sender and recipient ring at the server-stamped fire time.
-//   Listens to ChatUiState.messages and distincts on (id, state, startedAt+duration)
-//   so non-timer churn doesn't churn AlarmManager.
+//   Listens to ChatUiState.messages and distincts on (id, state, startedAt+duration,
+//   deleted) so non-timer churn doesn't churn AlarmManager. A soft-deleted timer
+//   is cancelled whatever its timerState.
 // Owns: nothing in ChatUiState — pure reactor. The schedule/cancel calls into
 //   TimerAlarmScheduler are idempotent (FLAG_UPDATE_CURRENT for schedule,
 //   PendingIntent.cancel for cancel) so re-emitting the same snapshot is safe.
@@ -71,6 +72,13 @@ internal class ChatTimerReactor(
     }
 
     private fun reactTo(msg: Message) {
+        // Delete-for-everyone is a soft delete: the row stays in the list with
+        // deletedAt set and timerState untouched, so a RUNNING timer would
+        // otherwise keep its alarm and ring after being deleted.
+        if (msg.deletedAt != null) {
+            scheduler.cancel(msg.id)
+            return
+        }
         when (msg.timerState) {
             TimerState.RUNNING -> scheduleIfPending(msg)
             TimerState.PAUSED,
@@ -101,12 +109,18 @@ internal class ChatTimerReactor(
         onScheduleResult(result)
     }
 
-    private data class TimerSnapshot(val state: TimerState?, val fireAtMs: Long, val remainingMs: Long?) {
+    private data class TimerSnapshot(
+        val state: TimerState?,
+        val fireAtMs: Long,
+        val remainingMs: Long?,
+        val deleted: Boolean,
+    ) {
         companion object {
             fun of(msg: Message): TimerSnapshot = TimerSnapshot(
                 state = msg.timerState,
                 fireAtMs = (msg.timerStartedAtMs ?: 0L) + (msg.timerDurationMs ?: 0L),
                 remainingMs = msg.timerRemainingMs,
+                deleted = msg.deletedAt != null,
             )
         }
     }
