@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **A timer deleted for everyone no longer rings.** Deleting a running timer for everyone left its alarm armed, so it still went off at the set time — on the phone that deleted it and on the other person's. The alarm is now cancelled as the deletion arrives while the chat is open, a restart no longer re-arms it, and when an alarm goes off the app first checks the timer on the phone itself: a timer deleted or paused while its chat was closed stays silent. That check needs no connection, and if it cannot answer within two seconds the alarm rings anyway, so a real timer is never silenced by it. (`6f86ef80`)
+- **A timer deleted for everyone no longer rings.** Deleting a running timer for everyone left its alarm armed, so it still went off at the set time — on the phone that deleted it and on the other person's. The alarm is now cancelled as the deletion arrives while the chat is open, a restart no longer re-arms it, and when an alarm goes off the app first checks the timer on the phone itself: a timer deleted or paused while its chat was closed stays silent. That check needs no connection, and if it cannot answer within two seconds the alarm rings anyway, so a real timer is never silenced by it. (`6f86ef80`, `73781144`)
 
 ## [1.35.2] — 2026-09-24
 
