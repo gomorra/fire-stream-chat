@@ -306,6 +306,8 @@ interface MessageDao {
     fun getCallMessages(): Flow<List<MessageEntity>>
 
     // Boot-restore: re-arm or auto-complete after device reboot.
-    @Query("SELECT * FROM messages WHERE type = 'TIMER' AND timerState = 'RUNNING'")
+    // Deleted-for-everyone timers keep timerState = RUNNING (soft delete), so
+    // without the deletedAt filter boot restore would re-arm their alarms.
+    @Query("SELECT * FROM messages WHERE type = 'TIMER' AND timerState = 'RUNNING' AND deletedAt IS NULL")
     suspend fun getRunningTimers(): List<MessageEntity>
 }

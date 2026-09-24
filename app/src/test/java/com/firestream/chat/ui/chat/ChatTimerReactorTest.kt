@@ -106,6 +106,28 @@ class ChatTimerReactorTest {
     }
 
     @Test
+    fun `cancels running timer when it is deleted for everyone`() = runTest(UnconfinedTestDispatcher()) {
+        reactor(backgroundScope).start()
+        pushMessages(timer(id = "t1"))
+
+        // Delete-for-everyone is a soft delete: the row stays in the list with
+        // deletedAt set and its timerState still RUNNING.
+        pushMessages(timer(id = "t1").copy(deletedAt = now, content = ""))
+
+        verify { scheduler.cancel("t1") }
+    }
+
+    @Test
+    fun `does not schedule a running timer that arrives already deleted`() = runTest(UnconfinedTestDispatcher()) {
+        reactor(backgroundScope).start()
+
+        pushMessages(timer(id = "t1").copy(deletedAt = now))
+
+        verify(exactly = 0) { scheduler.schedule(any(), any(), any(), any(), any()) }
+        verify { scheduler.cancel("t1") }
+    }
+
+    @Test
     fun `does not schedule past-fire-time timer`() = runTest(UnconfinedTestDispatcher()) {
         reactor(backgroundScope).start()
 
