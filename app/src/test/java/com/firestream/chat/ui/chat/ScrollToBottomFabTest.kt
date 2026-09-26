@@ -48,7 +48,7 @@ import org.robolectric.annotation.Config
 
 /**
  * Tests for the scroll-to-bottom FAB visibility threshold:
- * The FAB appears when the chat list is scrolled up by at least 20% of the
+ * The FAB appears when the chat list is scrolled up by more than 10% of the
  * chat screen's height from the newest message (bottom).
  */
 @RunWith(RobolectricTestRunner::class)
@@ -71,7 +71,7 @@ class ScrollToBottomFabTest {
     }
 
     @Test
-    fun `isScrolledUpPastThreshold detects 20 percent threshold correctly`() {
+    fun `isScrolledUpPastThreshold detects 10 percent threshold correctly`() {
         lateinit var state: LazyListState
         val itemHeights = mutableMapOf<Int, Int>()
 
@@ -95,12 +95,12 @@ class ScrollToBottomFabTest {
         // Viewport height in Robolectric with height 500.dp:
         val viewportHeight = state.layoutInfo.viewportSize.height
         assertTrue("Viewport height should be > 0", viewportHeight > 0)
-        val threshold = viewportHeight * 0.2f
+        val threshold = viewportHeight * SCROLLED_AWAY_THRESHOLD
 
         // At bottom: 0 offset -> false
         assertFalse(isScrolledUpPastThreshold(state, totalItems = 50, itemHeights = itemHeights))
 
-        // Scroll up by less than 20%
+        // Scroll up by less than 10%
         val scrollBelowThreshold = threshold * 0.5f
         composeTestRule.runOnIdle {
             runBlocking { state.scrollBy(scrollBelowThreshold) }
@@ -108,7 +108,7 @@ class ScrollToBottomFabTest {
         composeTestRule.waitForIdle()
         assertFalse(isScrolledUpPastThreshold(state, totalItems = 50, itemHeights = itemHeights))
 
-        // Scroll further up so total scroll >= 20%
+        // Scroll further up so total scroll > 10%
         val scrollPastThreshold = threshold * 0.7f
         composeTestRule.runOnIdle {
             runBlocking { state.scrollBy(scrollPastThreshold) }
@@ -125,7 +125,7 @@ class ScrollToBottomFabTest {
     }
 
     @Test
-    fun `fab appears after scrolling 20 percent and clicking scrolls to bottom`() {
+    fun `fab appears after scrolling 10 percent and clicking scrolls to bottom`() {
         lateinit var listState: LazyListState
 
         composeTestRule.setContent {
@@ -140,7 +140,7 @@ class ScrollToBottomFabTest {
                             listState = listState,
                             totalItems = totalItems,
                             itemHeights = itemHeights,
-                            thresholdFraction = 0.2f
+                            thresholdFraction = SCROLLED_AWAY_THRESHOLD
                         )
                     }
                 }
@@ -189,16 +189,16 @@ class ScrollToBottomFabTest {
         composeTestRule.onNodeWithContentDescription("Scroll to bottom").assertDoesNotExist()
 
         val viewportHeight = listState.layoutInfo.viewportSize.height
-        val threshold = viewportHeight * 0.2f
+        val threshold = viewportHeight * SCROLLED_AWAY_THRESHOLD
 
-        // Scroll up by less than 20%
+        // Scroll up by less than 10%
         composeTestRule.runOnIdle {
             runBlocking { listState.scrollBy(threshold * 0.5f) }
         }
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithContentDescription("Scroll to bottom").assertDoesNotExist()
 
-        // Scroll up past 20%
+        // Scroll up past 10%
         composeTestRule.runOnIdle {
             runBlocking { listState.scrollBy(threshold * 0.7f) }
         }

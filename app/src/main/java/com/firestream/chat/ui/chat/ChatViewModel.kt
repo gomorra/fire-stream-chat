@@ -21,6 +21,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.ReminderScheduleOutcome
@@ -318,6 +319,9 @@ class ChatViewModel @Inject constructor(
         ensureLocalCopiesIfBrowsingMedia(photos)
         searchManager.openSearchWithFilter(photos)
     }
+
+    suspend fun checkMessageAvailability(messageId: String): MessageAvailability =
+        messageRepository.checkMessageAvailability(chatId, messageId)
 
     fun onSearchLinkVisible(message: Message) = searchManager.onLinkResultVisible(message)
     fun toggleSearch() = searchManager.toggleSearch()
