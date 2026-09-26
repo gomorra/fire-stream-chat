@@ -603,7 +603,8 @@ fun ChatScreen(
     // restore for a targeted open — see the initial-scroll block above) so the
     // jump isn't overwritten. The target may still be syncing (a cold start from
     // a notification), so "no longer available" is shown only once the backend
-    // confirms the message is gone — see awaitDeepLinkTarget.
+    // confirms the message is gone — see awaitDeepLinkTarget. A user who has
+    // scrolled away by the time it lands keeps their place (shouldJumpToDeepLinkTarget).
     LaunchedEffect(targetMessageId, initialScrollDone) {
         val targetId = targetMessageId ?: return@LaunchedEffect
         if (targetJumpConsumed || !initialScrollDone) return@LaunchedEffect
@@ -613,7 +614,10 @@ fun ChatScreen(
         )
         targetJumpConsumed = true
         when (outcome) {
-            DeepLinkTargetOutcome.FOUND -> jumpToSourceMessage(targetId, animate = false)
+            DeepLinkTargetOutcome.FOUND ->
+                if (shouldJumpToDeepLinkTarget(listState, uiState.messages.messages.size)) {
+                    jumpToSourceMessage(targetId, animate = false)
+                }
             DeepLinkTargetOutcome.GONE -> snackbarHostState.showSnackbar(
                 "Message no longer available",
                 duration = SnackbarDuration.Short,

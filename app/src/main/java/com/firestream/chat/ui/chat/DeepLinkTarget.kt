@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import androidx.compose.foundation.lazy.LazyListState
 import com.firestream.chat.domain.model.MessageAvailability
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -44,3 +45,21 @@ internal suspend fun awaitDeepLinkTarget(
     }
     return if (arrivesWithin(syncWaitMs)) DeepLinkTargetOutcome.FOUND else DeepLinkTargetOutcome.NOT_ARRIVED
 }
+
+/**
+ * How far up from the newest message, as a fraction of the viewport height, the
+ * user may have scrolled and still be taken to a deep-link target. Tighter than
+ * the scroll-to-bottom FAB's 20%: a target can land seconds after the chat
+ * opened, and by then any real scroll means the user is reading something else.
+ */
+internal const val DEEP_LINK_JUMP_THRESHOLD = 0.1f
+
+/**
+ * Whether the deep-link jump may still move the list. A targeted open always
+ * lands on the newest message, so "scrolled up from the bottom" is "moved away
+ * from where the chat opened" — and a jump then would yank the user out of
+ * what they chose to read. Skipped silently: the message is there, the user is
+ * just elsewhere.
+ */
+internal fun shouldJumpToDeepLinkTarget(listState: LazyListState, totalItems: Int): Boolean =
+    !isScrolledUpPastThreshold(listState, totalItems, thresholdFraction = DEEP_LINK_JUMP_THRESHOLD)
