@@ -2,6 +2,7 @@ package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -93,6 +94,13 @@ interface MessageRepository {
      * it). Best-effort: never throws, since the push handler cannot retry.
      */
     suspend fun reconcileFromPush(chatId: String, messageId: String)
+    /**
+     * Where a deep-linked message stands, for deciding whether a jump to it can
+     * still land. Read-only: it never writes the message into the local store —
+     * the chat asking is open, and its listener owns that write (a second,
+     * concurrent decrypt of the same Signal message would fail). Never throws.
+     */
+    suspend fun checkMessageAvailability(chatId: String, messageId: String): MessageAvailability
     // Timers (.timer.set)
     suspend fun sendTimerMessage(
         chatId: String,

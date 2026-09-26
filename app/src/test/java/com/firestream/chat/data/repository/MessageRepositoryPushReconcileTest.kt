@@ -15,6 +15,7 @@ import com.firestream.chat.data.remote.source.UserSource
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.worker.MediaBackfillScheduler
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import io.mockk.Runs
@@ -26,6 +27,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.signal.libsignal.protocol.message.CiphertextMessage
@@ -187,6 +189,50 @@ class MessageRepositoryPushReconcileTest {
 
         coVerify(exactly = 1) { signalManager.ensureInitialized() }
         coVerify(exactly = 1) { messageDao.upsertRecord(match { it.id == "m1" && it.content == "hello" }) }
+    }
+
+    // ── checkMessageAvailability: what a deep-link jump may conclude ──
+
+    @Test
+    fun `a message already in Room is local, without asking the backend`() = runTest {
+        coEvery { messageDao.getMessageById("m1") } returns ownRow("m1", MessageStatus.SENT)
+
+        assertEquals(MessageAvailability.LOCAL, repository.checkMessageAvailability(CHAT, "m1"))
+        coVerify(exactly = 0) { messageSource.fetchMessage(any(), any()) }
+    }
+
+    // The bug: a cold start from a notification outlasted the fixed wait, and
+    // the chat reported a message that was only still syncing as gone.
+    @Test
+    fun `a message the backend holds but Room lacks is pending, and is not written`() = runTest {
+        activeChatTracker.setActive(CHAT)
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
+
+        assertEquals(MessageAvailability.PENDING, repository.checkMessageAvailability(CHAT, "m1"))
+        coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
+        coVerify(exactly = 0) { signalManager.decrypt(any(), any()) }
+    }
+
+    @Test
+    fun `a message the backend does not hold is gone`() = runTest {
+        coEvery { messageSource.fetchMessage(CHAT, "gone") } returns null
+
+        assertEquals(MessageAvailability.GONE, repository.checkMessageAvailability(CHAT, "gone"))
+    }
+
+    @Test
+    fun `a message from a blocked sender is gone`() = runTest {
+        coEvery { userSource.getBlockedUserIds(SELF) } returns setOf(PEER)
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
+
+        assertEquals(MessageAvailability.GONE, repository.checkMessageAvailability(CHAT, "m1"))
+    }
+
+    @Test
+    fun `an unreachable backend is unknown, not gone`() = runTest {
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } throws IOException("offline")
+
+        assertEquals(MessageAvailability.UNKNOWN, repository.checkMessageAvailability(CHAT, "m1"))
     }
 
     @Test

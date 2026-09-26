@@ -2,6 +2,7 @@ package com.firestream.chat.test.fakes
 
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchResults
@@ -350,6 +351,11 @@ internal class FakeMessageRepository : MessageRepository {
     override suspend fun syncAllChatMessages(chatIds: List<String>) = Unit
 
     override suspend fun reconcileFromPush(chatId: String, messageId: String) = Unit
+
+    var messageAvailability: MessageAvailability =
+        MessageAvailability.LOCAL
+
+    override suspend fun checkMessageAvailability(chatId: String, messageId: String) = messageAvailability
 
     override suspend fun sendTimerMessage(
         chatId: String,

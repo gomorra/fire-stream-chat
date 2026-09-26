@@ -72,6 +72,7 @@ import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.worker.MediaBackfillScheduler
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
 import com.firestream.chat.domain.model.MessageSearchLimits
@@ -1266,6 +1267,24 @@ class MessageRepositoryImpl @Inject constructor(
         } catch (t: Throwable) {
             t.rethrowIfCancellation()
             Log.w(TAG, "reconcileFromPush: failed for msg=$messageId chat=$chatId", t)
+        }
+    }
+
+    override suspend fun checkMessageAvailability(chatId: String, messageId: String): MessageAvailability {
+        return try {
+            if (messageDao.getMessageById(messageId) != null) return MessageAvailability.LOCAL
+            val currentUid = authSource.currentUserId ?: return MessageAvailability.UNKNOWN
+            val raw = fetchMessageWithRetry(chatId, messageId) ?: return MessageAvailability.GONE
+            // The listener drops a blocked sender's messages, so this one will never arrive.
+            if (raw.senderId != currentUid && raw.senderId in blockedUserIds(currentUid, chatId)) {
+                MessageAvailability.GONE
+            } else {
+                MessageAvailability.PENDING
+            }
+        } catch (t: Throwable) {
+            t.rethrowIfCancellation()
+            Log.w(TAG, "checkMessageAvailability: failed for msg=$messageId chat=$chatId", t)
+            MessageAvailability.UNKNOWN
         }
     }
 

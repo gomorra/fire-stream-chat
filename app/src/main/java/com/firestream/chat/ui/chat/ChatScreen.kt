@@ -601,23 +601,24 @@ fun ChatScreen(
     // scroll to and flash it (reusing jumpToSourceMessage's 1.5s highlight).
     // Runs after the initial scroll positioning (which suppresses the persisted
     // restore for a targeted open — see the initial-scroll block above) so the
-    // jump isn't overwritten. An older message may not be in the first cached
-    // batch, so wait up to 3s for it to appear before giving up.
+    // jump isn't overwritten. The target may still be syncing (a cold start from
+    // a notification), so "no longer available" is shown only once the backend
+    // confirms the message is gone — see awaitDeepLinkTarget.
     LaunchedEffect(targetMessageId, initialScrollDone) {
         val targetId = targetMessageId ?: return@LaunchedEffect
         if (targetJumpConsumed || !initialScrollDone) return@LaunchedEffect
-        val found = withTimeoutOrNull(3000L) {
-            snapshotFlow { uiState.messages.messages.any { it.id == targetId } }
-                .first { it }
-        }
+        val outcome = awaitDeepLinkTarget(
+            isLoaded = snapshotFlow { uiState.messages.messages.any { it.id == targetId } },
+            checkAvailability = { viewModel.checkMessageAvailability(targetId) },
+        )
         targetJumpConsumed = true
-        if (found == true) {
-            jumpToSourceMessage(targetId, animate = false)
-        } else {
-            snackbarHostState.showSnackbar(
+        when (outcome) {
+            DeepLinkTargetOutcome.FOUND -> jumpToSourceMessage(targetId, animate = false)
+            DeepLinkTargetOutcome.GONE -> snackbarHostState.showSnackbar(
                 "Message no longer available",
                 duration = SnackbarDuration.Short,
             )
+            DeepLinkTargetOutcome.NOT_ARRIVED -> Unit
         }
     }
 
