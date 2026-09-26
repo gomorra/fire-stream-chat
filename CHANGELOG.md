@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **"Message no longer available" no longer shows for a message that is still arriving.** Opening a chat from a notification or a reminder jumps to the message it names, and the app gave that message three seconds to appear before saying it was gone. After a cold start the chat can need longer than that to connect and decrypt, so the snackbar came up and the message showed up right after it. The app now asks the server before saying anything: the snackbar appears only when the message really has been removed, and a message that is still syncing is jumped to once it arrives — unless you have scrolled up more than a tenth of the screen in the meantime, in which case the chat keeps your place. (`aacdfbc0`, `a7b3b885`)
+- **"Message no longer available" no longer shows for a message that is still arriving.** Opening a chat from a notification or a reminder jumps to the message it names, and the app gave that message three seconds to appear before saying it was gone. After a cold start the chat can need longer than that to connect and decrypt, so the snackbar came up and the message showed up right after it. The app now asks the server before saying anything: the snackbar appears only when the message really has been removed, and a message that is still syncing is jumped to once it arrives — unless you have scrolled up more than a tenth of the screen in the meantime, in which case the chat keeps your place. The scroll-to-bottom button now appears at that same point, a tenth of the screen up instead of a fifth, so whenever the jump is skipped the button is there to take you down. (`aacdfbc0`, `a7b3b885`)
 
 ## [1.35.3] — 2026-09-24
 

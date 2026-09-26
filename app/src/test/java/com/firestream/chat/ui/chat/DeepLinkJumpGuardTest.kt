@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -73,11 +74,33 @@ class DeepLinkJumpGuardTest {
         assertTrue(jumps())
     }
 
-    // Past 10% but short of the FAB's 20%: the guard is its own, tighter threshold.
     @Test
     fun `scrolling past 10 percent keeps the user's place`() {
         scrollUpBy(0.15f)
         assertFalse(jumps())
+    }
+
+    // "Up to 10%" is inclusive: exactly at the line still jumps, and no FAB.
+    @Test
+    fun `exactly 10 percent still jumps and shows no FAB`() {
+        val thresholdPx = viewportHeight * SCROLLED_AWAY_THRESHOLD
+        assumeTrue("threshold must be a whole pixel to land on it", thresholdPx % 1f == 0f)
+        composeTestRule.runOnIdle { runBlocking { state.scrollBy(thresholdPx) } }
+        composeTestRule.waitForIdle()
+
+        assertTrue(jumps())
+        assertFalse(isScrolledUpPastThreshold(state, totalItems = 50))
+    }
+
+    // One threshold, two behaviours: wherever the list sits, exactly one of
+    // "jump to the target" and "show the scroll-to-bottom FAB" holds.
+    @Test
+    fun `the jump and the scroll-to-bottom FAB never both hold or both fail`() {
+        for (step in listOf(0f, 0.03f, 0.05f, 0.04f, 0.1f, 0.3f)) {
+            scrollUpBy(step)
+            val fab = isScrolledUpPastThreshold(state, totalItems = 50)
+            assertTrue("jump=${jumps()} fab=$fab after +$step", jumps() != fab)
+        }
     }
 
     @Test

@@ -1241,8 +1241,9 @@ fun ChatScreen(
                         }
                     }
                     else -> {
-                        // Scroll-to-bottom: show FAB when the list is scrolled up by at least
-                        // 20% of the chat screen's height from the newest message.
+                        // Scroll-to-bottom: show FAB when the list is scrolled up by more than
+                        // SCROLLED_AWAY_THRESHOLD of the chat screen's height from the newest
+                        // message — the same line past which a deep-link jump is skipped.
                         // derivedStateOf prevents recomposition on every scroll frame — the
                         // boolean only changes when the FAB needs to appear or disappear.
                         val totalItems = uiState.messages.messages.size
@@ -1253,7 +1254,6 @@ fun ChatScreen(
                                     listState = listState,
                                     totalItems = totalItems,
                                     itemHeights = itemHeights,
-                                    thresholdFraction = 0.2f
                                 )
                             }
                         }
@@ -2622,8 +2622,19 @@ internal fun shouldAutoScrollToNewest(
 }
 
 /**
+ * How far up from the newest message, as a fraction of the chat viewport's height,
+ * the user must scroll to count as having moved away from the bottom. One line for
+ * two behaviours that must stay complementary: up to it, a deep-link target that
+ * lands is jumped to ([shouldJumpToDeepLinkTarget]); past it, the jump is skipped
+ * and the scroll-to-bottom FAB shows instead. Two thresholds would leave a band
+ * with neither.
+ */
+internal const val SCROLLED_AWAY_THRESHOLD = 0.1f
+
+/**
  * Calculates whether the chat list is scrolled up from the newest message (bottom)
- * by at least [thresholdFraction] of the chat viewport's height (default 20%).
+ * by more than [thresholdFraction] of the chat viewport's height (default
+ * [SCROLLED_AWAY_THRESHOLD]). Exactly at the threshold still counts as at the bottom.
  *
  * In reverseLayout:
  * - When at the bottom: `firstVisibleItemIndex == 0`, `firstVisibleItemScrollOffset == 0`.
@@ -2637,7 +2648,7 @@ internal fun isScrolledUpPastThreshold(
     listState: LazyListState,
     totalItems: Int,
     itemHeights: MutableMap<Int, Int> = mutableMapOf(),
-    thresholdFraction: Float = 0.2f
+    thresholdFraction: Float = SCROLLED_AWAY_THRESHOLD
 ): Boolean {
     val layoutInfo = listState.layoutInfo
     val total = if (totalItems > 0) totalItems else layoutInfo.totalItemsCount
@@ -2659,15 +2670,15 @@ internal fun isScrolledUpPastThreshold(
     val firstOffset = listState.firstVisibleItemScrollOffset
 
     if (firstIndex == 0) {
-        return firstOffset >= thresholdPx
+        return firstOffset > thresholdPx
     }
 
     val avgHeight = maxOf(1, visInfo.sumOf { it.size } / visInfo.size)
     var scrolledPx = firstOffset
     for (i in 0 until firstIndex) {
         scrolledPx += itemHeights[i] ?: avgHeight
-        if (scrolledPx >= thresholdPx) return true
+        if (scrolledPx > thresholdPx) return true
     }
-    return scrolledPx >= thresholdPx
+    return scrolledPx > thresholdPx
 }
 
