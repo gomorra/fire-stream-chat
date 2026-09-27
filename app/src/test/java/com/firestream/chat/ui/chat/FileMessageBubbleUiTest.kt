@@ -45,11 +45,11 @@ class FileMessageBubbleUiTest {
         override suspend fun load(path: String, kind: FileKind): FilePreview = preview
     }
 
-    private fun show(preview: FilePreview) {
+    private fun show(preview: FilePreview, message: Message = message()) {
         composeTestRule.setContent {
             MaterialTheme {
                 FileMessageBubble(
-                    message = message(),
+                    message = message,
                     textColor = Color.Black,
                     transfer = FileTransfer.NONE,
                     uploadProgress = null,
@@ -79,5 +79,27 @@ class FileMessageBubbleUiTest {
 
         composeTestRule.onNodeWithText("Show less").assertExists()
         composeTestRule.onNodeWithText("Preview ends here — open the file to read the rest").assertExists()
+    }
+
+    @Test
+    fun `a PDF shows its page count over the first page and an excerpt below`() {
+        val thumbnail = File.createTempFile("thumb", ".jpg")
+        try {
+            show(
+                FilePreview.Pdf(
+                    thumbnailPath = thumbnail.absolutePath,
+                    thumbnailAspect = 0.707f,
+                    pageCount = 12,
+                    text = FilePreview.Text("Quarterly report\nRevenue grew", truncated = true),
+                ),
+                message().copy(fileName = "report.pdf", mimeType = "application/pdf"),
+            )
+
+            composeTestRule.onNodeWithText("12 pages").assertIsDisplayed()
+            composeTestRule.onNodeWithText("Quarterly report\nRevenue grew").assertIsDisplayed()
+            composeTestRule.onNodeWithText("Show more").assertExists()
+        } finally {
+            thumbnail.delete()
+        }
     }
 }

@@ -19,3 +19,10 @@
 # top-level Kt class so R8 skips the broken pass; APK-size impact is
 # negligible since the contents are emoji string literals.
 -keep class com.firestream.chat.ui.chat.EmojiHandlerPanelKt { *; }
+
+# PdfBox-Android (PDF text excerpt in file bubbles). Its optional JPEG 2000
+# decoder is not bundled; the reference is dead code unless a JPX image is
+# decoded, which text extraction never does. This is the one rule the
+# library's README asks for; anything R8 did break there fails into
+# FilePreviewLoader's catch (no excerpt), never a crash.
+-dontwarn com.gemalto.jp2.**

@@ -5,9 +5,15 @@ import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.domain.util.FileKind
 import com.firestream.chat.domain.util.FilePreview
 import com.firestream.chat.domain.util.TextPreview
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -22,7 +28,7 @@ import java.io.File
 class FilePreviewLoaderTest {
 
     private val context: Context = ApplicationProvider.getApplicationContext()
-    private val loader = FilePreviewLoader()
+    private val loader = FilePreviewLoader(context, MediaProcessingLimiter())
     private val files = mutableListOf<File>()
 
     private fun file(name: String, content: String) =
@@ -65,5 +71,46 @@ class FilePreviewLoaderTest {
 
         assertSame(first, loader.cached(notes.path))
         assertSame(first, loader.load(notes.path, FileKind.TEXT))
+    }
+
+    /** A real PDF with a text layer on each of [pages] pages, written by PdfBox itself. */
+    private fun pdf(name: String, pages: Int): File {
+        PDFBoxResourceLoader.init(context)
+        val out = File(context.cacheDir, name).also { files += it }
+        PDDocument().use { document ->
+            repeat(pages) { index ->
+                val page = PDPage()
+                document.addPage(page)
+                PDPageContentStream(document, page).use { stream ->
+                    stream.beginText()
+                    stream.setFont(PDType1Font.HELVETICA, 12f)
+                    stream.newLineAtOffset(72f, 700f)
+                    stream.showText("Page ${index + 1} of the quarterly report")
+                    stream.endText()
+                }
+            }
+            document.save(out)
+        }
+        return out
+    }
+
+    @Test
+    fun `a PDF previews the text of its first pages, and says when more pages follow`() = runTest {
+        val report = pdf("report.pdf", pages = 5)
+
+        val preview = loader.load(report.path, FileKind.PDF) as FilePreview.Pdf
+        val text = preview.text!!
+
+        assertTrue(text.text.contains("Page 1 of the quarterly report"))
+        assertTrue(text.text.contains("Page 3 of the quarterly report"))
+        assertFalse("only the first ${PdfText.MAX_PAGES} pages are read", text.text.contains("Page 4"))
+        assertTrue(text.truncated)
+    }
+
+    @Test
+    fun `a damaged PDF gives no preview rather than throwing`() = runTest {
+        val broken = file("broken.pdf", "%PDF-1.4 this is not really a pdf")
+
+        assertEquals(FilePreview.None, loader.load(broken.path, FileKind.PDF))
     }
 }

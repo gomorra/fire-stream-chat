@@ -80,6 +80,21 @@ object TextPreview {
         return FilePreview.Text(cleaned, truncated)
     }
 
+    /**
+     * The preview of text already decoded elsewhere — a PDF's text layer.
+     * [moreFollows]: the source goes on past what [text] covers. Held to the
+     * same [MAX_BYTES] budget, counted in characters.
+     */
+    fun fromText(text: String, moreFollows: Boolean): FilePreview.Text? {
+        val cleaned = text.replace("\r\n", "\n").replace('\r', '\n')
+            // PDF text layers carry runs of blank lines between blocks.
+            .replace(Regex("\n{3,}"), "\n\n")
+            .trim()
+        if (cleaned.isEmpty()) return null
+        val cut = cleaned.length > MAX_BYTES
+        return FilePreview.Text(if (cut) cleaned.take(MAX_BYTES).trimEnd() else cleaned, truncated = cut || moreFollows)
+    }
+
     private fun charsetOf(head: ByteArray): Pair<Charset, Int> = when {
         head.size >= 3 && head[0] == 0xEF.toByte() && head[1] == 0xBB.toByte() && head[2] == 0xBF.toByte() ->
             Charsets.UTF_8 to 3

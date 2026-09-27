@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,6 +36,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -97,7 +100,9 @@ internal fun FileMessageBubble(
         initialValue = localPath?.let { previews?.cached(it) },
         localPath, kind, previews,
     ) {
-        if (localPath != null && previews != null && kind.hasTextPreview) value = previews.load(localPath, kind)
+        if (localPath != null && previews != null && (kind.hasTextPreview || kind == FileKind.PDF)) {
+            value = previews.load(localPath, kind)
+        }
     }
     val details = remember(kind, message.fileSize, hasLocalCopy, transfer) {
         fileDetailsLine(kind, message.fileSize, hasLocalCopy, transfer)
@@ -109,7 +114,11 @@ internal fun FileMessageBubble(
                 TextFilePreview(shown, textColor, monospace = kind == FileKind.CODE, messageId = message.id)
                 Spacer(modifier = Modifier.height(6.dp))
             }
-            else -> Unit
+            is FilePreview.Pdf -> {
+                PdfPreview(shown, textColor, messageId = message.id, onOpen = onOpen, onLongPress = onLongPress)
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+            FilePreview.None, null -> Unit
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -149,6 +158,60 @@ internal fun FileMessageBubble(
         }
     }
 }
+
+/**
+ * A PDF: the top of its first page (tap opens the file, like the card) with the
+ * page count over it, then the text of its first pages as an expandable excerpt.
+ * Either half may be missing — a scan has no text, an encrypted file no page.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PdfPreview(
+    preview: FilePreview.Pdf,
+    textColor: Color,
+    messageId: String,
+    onOpen: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        preview.thumbnailPath?.let { path ->
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    // The page's own shape, but never taller than a glance: the top of
+                    // page one is what identifies a document.
+                    .aspectRatio(preview.thumbnailAspect.coerceAtLeast(MIN_THUMBNAIL_ASPECT))
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White)
+                    .combinedClickable(onClickLabel = "Open with", onClick = onOpen, onLongClick = onLongPress),
+            ) {
+                AsyncImage(
+                    model = File(path),
+                    contentDescription = "First page",
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                    modifier = Modifier.matchParentSize(),
+                )
+                if (preview.pageCount > 0) {
+                    Text(
+                        text = if (preview.pageCount == 1) "1 page" else "${preview.pageCount} pages",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(6.dp)
+                            .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
+        }
+        preview.text?.let { TextFilePreview(it, textColor, monospace = false, messageId = messageId) }
+    }
+}
+
+/** The widest-shaped box a page thumbnail gets: 280dp wide is then at most 200dp tall. */
+private const val MIN_THUMBNAIL_ASPECT = 1.4f
 
 /**
  * The first lines of a text file, [TextPreview.COLLAPSED_LINES] of them until
