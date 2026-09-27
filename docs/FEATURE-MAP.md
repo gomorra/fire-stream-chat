@@ -590,6 +590,7 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 | `app/src/main/java/com/firestream/chat/domain/util/FilePreviewSource.kt` | The bubble's way to a preview without a UI→data import; bound to `FilePreviewLoader` in `AppModule` |
 | `app/src/main/java/com/firestream/chat/data/util/FilePreviewLoader.kt` | Builds a preview from the local copy on IO; LRU by path + mtime; a PDF's page 1 via `PdfRenderer` into `cacheDir/file_previews/`, under a `MediaProcessingLimiter` permit |
 | `app/src/main/java/com/firestream/chat/data/util/PdfText.kt` | PdfBox-Android text layer of a PDF's first 3 pages (temp-file buffered) |
+| `app/src/main/java/com/firestream/chat/ui/chat/SendFileSheet.kt` | `PendingFile` (picked uri + name/size, rotation-safe) and the confirm sheet — badge, caption, the 100 MB refusal |
 | `app/src/main/java/com/firestream/chat/ui/components/FileIntents.kt` | `FileProvider` uri + *Open with* / share-sheet chooser |
 | `app/src/main/res/xml/file_paths.xml` | `documents/` and `outbox/` roots the provider may grant |
 | `app/src/test/java/com/firestream/chat/domain/util/FileKindTest.kt` | Classification, risk, size formatting |
@@ -598,6 +599,7 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryEnsureLocalFileTest.kt` | Kept copy vs download vs refusal |
 | `app/src/test/java/com/firestream/chat/domain/util/TextPreviewTest.kt` | Decoding rule — encodings, truncation, binary and blank refusals |
 | `app/src/test/java/com/firestream/chat/data/util/FilePreviewLoaderTest.kt` | Reads only the head, caches, None for other kinds; a PdfBox-written PDF's first pages, a damaged PDF |
+| `app/src/test/java/com/firestream/chat/ui/chat/SendFileSheetUiTest.kt` | Name/size/caption to send, the over-limit refusal, rotation |
 | `app/src/test/java/com/firestream/chat/ui/chat/FileMessageBubbleUiTest.kt` | Preview above the card; Show more / Show less; where the preview ends |
 
 **Entry point:** `MessageBubble` DOCUMENT branch → `FileMessageBubble` → `MessageBubbleCallbacks.onOpenFile` → `ChatViewModel.openFile` → `ChatFileActions.request` → `MessageRepository.ensureLocalFile` → `ChatViewModel.fileLaunches` → `ChatScreen` → `FileIntents.open`.

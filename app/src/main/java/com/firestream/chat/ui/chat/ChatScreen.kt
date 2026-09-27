@@ -888,11 +888,10 @@ fun ChatScreen(
         }
     }
 
+    // A picked file waits in SendFileSheet for the user to confirm (and caption) it.
+    var pendingFile by rememberSaveable(stateSaver = PendingFile.Saver) { mutableStateOf<PendingFile?>(null) }
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            val mimeType = context.contentResolver.getType(it) ?: "application/octet-stream"
-            viewModel.sendMediaMessage(it, mimeType)
-        }
+        uri?.let { pendingFile = PendingFile.describe(context, it) }
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -2202,6 +2201,17 @@ fun ChatScreen(
                 viewModel.createAndSendList(title, type)
                 showCreateListSheet = false
             }
+        )
+    }
+
+    pendingFile?.let { file ->
+        SendFileSheet(
+            file = file,
+            onDismiss = { pendingFile = null },
+            onSend = { caption ->
+                pendingFile = null
+                viewModel.sendMediaMessage(file.uri, file.mimeType, caption)
+            },
         )
     }
 

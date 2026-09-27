@@ -71,7 +71,10 @@ import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.worker.MediaBackfillScheduler
+import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
+import com.firestream.chat.domain.util.formatFileSize
 import com.firestream.chat.domain.model.ListDiff
+import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
@@ -613,6 +616,10 @@ class MessageRepositoryImpl @Inject constructor(
             documentFiles.describe(uri).let { info -> fileName?.let { info.copy(name = it) } ?: info }
         } else {
             null
+        }
+        // The send sheet refuses these already; this holds the share sheet to it too.
+        if ((document?.size ?: 0L) > MAX_DOCUMENT_BYTES) {
+            throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
         }
 
         // Insert the optimistic row BEFORE any IO so the bubble appears immediately

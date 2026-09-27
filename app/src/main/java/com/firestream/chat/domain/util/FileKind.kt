@@ -103,6 +103,13 @@ enum class FileKind(val label: String) {
     }
 }
 
+/**
+ * The largest document a chat accepts: 100 MB. Checked where the file is picked
+ * (the send sheet says so and disables Send) and again by the repository, so a
+ * share-sheet send is held to it too.
+ */
+const val MAX_DOCUMENT_BYTES: Long = 100L * 1024 * 1024
+
 /** A byte count as people read it: `512 B`, `1.4 KB`, `23 MB`, `1.2 GB` (1024-based, one decimal under 10). */
 fun formatFileSize(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"

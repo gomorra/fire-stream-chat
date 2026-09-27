@@ -6,7 +6,9 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.DocumentInfo
+import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -15,6 +17,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -71,5 +74,15 @@ class MessageRepositoryDocumentSendTest {
         assertNull(row.fileSize)
         assertNull(row.mimeType)
         coVerify(exactly = 0) { documentFiles.describe(any()) }
+    }
+
+    @Test
+    fun `a document over the size limit is refused before any row is written`() = runTest {
+        coEvery { documentFiles.describe("content://pick/huge") } returns DocumentInfo("backup.zip", MAX_DOCUMENT_BYTES + 1)
+
+        val result = repository.sendMediaMessage("chat1", "content://pick/huge", "application/zip", "", caption = "", isHd = null)
+
+        assertTrue(result.exceptionOrNull() is MediaLimitException)
+        assertTrue(inserted.isEmpty())
     }
 }

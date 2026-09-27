@@ -265,7 +265,7 @@ private fun TextFilePreview(preview: FilePreview.Text, textColor: Color, monospa
 
 /** The tile left of the name: the kind's colour and label, or a spinner over it while a transfer runs. */
 @Composable
-private fun FileBadge(kind: FileKind, transfer: FileTransfer, uploadProgress: Float?) {
+internal fun FileBadge(kind: FileKind, transfer: FileTransfer = FileTransfer.NONE, uploadProgress: Float? = null) {
     Box(
         contentAlignment = Alignment.Center,
         modifier = Modifier
