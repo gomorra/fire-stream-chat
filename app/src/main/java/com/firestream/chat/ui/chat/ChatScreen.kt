@@ -1426,6 +1426,7 @@ fun ChatScreen(
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
                                                 onOpenFile = { viewModel.openFile(message) },
+                                                filePreviews = viewModel.filePreviews,
                                                 onVideoClick = { source ->
                                                     viewModel.showFullscreenVideo(source)
                                                 },

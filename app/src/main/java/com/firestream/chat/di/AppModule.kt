@@ -18,6 +18,7 @@ import com.firestream.chat.data.reminder.ReminderAlarmScheduler
 import com.firestream.chat.data.reminder.ReminderAlarmScheduling
 import com.firestream.chat.data.reminder.ReminderRepositoryImpl
 import com.firestream.chat.data.util.AndroidConnectivityObserver
+import com.firestream.chat.data.util.FilePreviewLoader
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.AppUpdateRepository
 import com.firestream.chat.domain.repository.AuthRepository
@@ -39,6 +40,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+import com.firestream.chat.domain.util.FilePreviewSource
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -51,6 +53,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindMessageRepository(impl: MessageRepositoryImpl): MessageRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindFilePreviewSource(impl: FilePreviewLoader): FilePreviewSource
 
     @Binds
     @Singleton

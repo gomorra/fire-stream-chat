@@ -109,6 +109,7 @@ class ChatViewModelFullscreenImageTest {
         callStateHolder = callStateHolder,
         commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         timerAlarmScheduler = mockk(relaxed = true),
+        filePreviews = io.mockk.mockk(relaxed = true),
         connectivityObserver = FakeConnectivityObserver(),
         appScope = TestScope(mainDispatcherRule.testDispatcher),
         context = context,

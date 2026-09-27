@@ -120,6 +120,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
 import androidx.compose.ui.graphics.Color
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
@@ -184,6 +185,9 @@ internal data class MessageBubbleCallbacks(
     // Tapping a DOCUMENT's file card — Open with another app (downloading first
     // when there is no local copy).
     val onOpenFile: () -> Unit = {},
+    // Where a DOCUMENT bubble gets its preview (first lines, a PDF's first page).
+    // Null in contexts that show no previews.
+    val filePreviews: FilePreviewSource? = null,
     // Tapping a thumbnail inside a LinkPreviewCard. This MUST use the URL
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
@@ -1106,6 +1110,7 @@ private fun MessageBubbleBody(
                 uploadProgress = state.uploadProgress,
                 onOpen = callbacks.onOpenFile,
                 onLongPress = onLongPress,
+                previews = callbacks.filePreviews,
             )
             MessageType.CALL -> {
                 val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"

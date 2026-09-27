@@ -7,6 +7,17 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.font.FontFamily
+import com.firestream.chat.domain.util.FilePreview
+import com.firestream.chat.domain.util.FilePreviewSource
+import com.firestream.chat.domain.util.TextPreview
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -54,9 +65,10 @@ internal enum class FileTransfer { NONE, UPLOADING, PREPARING }
 
 /**
  * The DOCUMENT bubble: a colour-coded type badge, the file's name and a
- * `PDF · 1.4 MB` line, with an optional [preview] above (the first lines of a
- * text file, a PDF's first page) and the caption below. Tapping the card opens
- * the file with another app ([onOpen]); a long press is the message menu.
+ * `PDF · 1.4 MB` line, with a preview above once the file is on the device (the
+ * first lines of a text file, from [previews]) and the caption below. Tapping
+ * the card opens the file with another app ([onOpen]); a long press is the
+ * message menu.
  *
  * Its own composable rather than a branch body in `MessageBubbleBody`, which is
  * already near ART's register ceiling (see its KDoc).
@@ -70,21 +82,34 @@ internal fun FileMessageBubble(
     uploadProgress: Float?,
     onOpen: () -> Unit,
     onLongPress: () -> Unit,
-    preview: (@Composable () -> Unit)? = null,
+    previews: FilePreviewSource? = null,
 ) {
     val kind = remember(message.mimeType, message.fileName) { FileKind.of(message.mimeType, message.fileName) }
     val name = message.fileName ?: "Document"
-    val hasLocalCopy = remember(message.localUri) {
-        message.localUri?.let(::File)?.let { it.isFile && it.canRead() } == true
+    // Synchronous, not produceState: the card must not render one frame as
+    // "Tap to download" for a file that is there (app-ui-design skill).
+    val localPath = remember(message.localUri) {
+        message.localUri?.takeIf { it.startsWith("/") }?.takeIf { File(it).let { f -> f.isFile && f.canRead() } }
+    }
+    val hasLocalCopy = localPath != null
+    // The preview itself is IO, so it loads after the card; a cached one shows at once.
+    val preview by produceState(
+        initialValue = localPath?.let { previews?.cached(it) },
+        localPath, kind, previews,
+    ) {
+        if (localPath != null && previews != null && kind.hasTextPreview) value = previews.load(localPath, kind)
     }
     val details = remember(kind, message.fileSize, hasLocalCopy, transfer) {
         fileDetailsLine(kind, message.fileSize, hasLocalCopy, transfer)
     }
 
     Column(modifier = Modifier.widthIn(min = 200.dp, max = 280.dp)) {
-        if (preview != null) {
-            preview()
-            Spacer(modifier = Modifier.height(6.dp))
+        when (val shown = preview) {
+            is FilePreview.Text -> {
+                TextFilePreview(shown, textColor, monospace = kind == FileKind.CODE, messageId = message.id)
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+            else -> Unit
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -121,6 +146,56 @@ internal fun FileMessageBubble(
         if (message.content.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(text = message.content, color = textColor, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+/**
+ * The first lines of a text file, [TextPreview.COLLAPSED_LINES] of them until
+ * *Show more* expands it in place to everything the preview holds — which is at
+ * most [TextPreview.MAX_BYTES] of the file, and says so when the file goes on.
+ */
+@Composable
+private fun TextFilePreview(preview: FilePreview.Text, textColor: Color, monospace: Boolean, messageId: String) {
+    var expanded by rememberSaveable(messageId) { mutableStateOf(false) }
+    var overflows by remember(preview) { mutableStateOf(false) }
+    val baseStyle = MaterialTheme.typography.bodySmall
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(textColor.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+            .padding(start = 10.dp, end = 10.dp, top = 8.dp),
+    ) {
+        Text(
+            text = preview.text,
+            color = textColor,
+            // Code reads by its columns; prose keeps the app's face.
+            style = if (monospace) baseStyle.copy(fontFamily = FontFamily.Monospace) else baseStyle,
+            maxLines = if (expanded) Int.MAX_VALUE else TextPreview.COLLAPSED_LINES,
+            overflow = TextOverflow.Ellipsis,
+            onTextLayout = { if (!expanded) overflows = it.hasVisualOverflow },
+        )
+        if (expanded && preview.truncated) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Preview ends here — open the file to read the rest",
+                color = textColor.copy(alpha = 0.7f),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
+        if (expanded || overflows || preview.truncated) {
+            TextButton(
+                onClick = { expanded = !expanded },
+                contentPadding = PaddingValues(horizontal = 0.dp),
+            ) {
+                Text(
+                    text = if (expanded) "Show less" else "Show more",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        } else {
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }

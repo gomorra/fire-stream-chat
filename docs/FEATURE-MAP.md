@@ -586,12 +586,18 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` fills the file fields; `ensureLocalFile` — kept copy or download, remembered on the row |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatFileActions.kt` | Open / Share / Save for one chat: the preparing set (spinners), `FileLaunch` events, the type offered to other apps |
 | `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption, preview slot) and `RiskyFileDialog` |
+| `app/src/main/java/com/firestream/chat/domain/util/TextPreview.kt` | `FilePreview` model; the text rule — at most 32 KB, binary refused, BOM/UTF-16/CRLF, a cut character dropped |
+| `app/src/main/java/com/firestream/chat/domain/util/FilePreviewSource.kt` | The bubble's way to a preview without a UI→data import; bound to `FilePreviewLoader` in `AppModule` |
+| `app/src/main/java/com/firestream/chat/data/util/FilePreviewLoader.kt` | Builds a preview from the local copy on IO; LRU by path + mtime |
 | `app/src/main/java/com/firestream/chat/ui/components/FileIntents.kt` | `FileProvider` uri + *Open with* / share-sheet chooser |
 | `app/src/main/res/xml/file_paths.xml` | `documents/` and `outbox/` roots the provider may grant |
 | `app/src/test/java/com/firestream/chat/domain/util/FileKindTest.kt` | Classification, risk, size formatting |
 | `app/src/test/java/com/firestream/chat/data/util/DocumentFilesTest.kt` | Extension rule and path safety, describe, adopt, discard |
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatFileActionsTest.kt` | Launch events, risky flag, fallbacks, failure notice, double tap, save |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryEnsureLocalFileTest.kt` | Kept copy vs download vs refusal |
+| `app/src/test/java/com/firestream/chat/domain/util/TextPreviewTest.kt` | Decoding rule — encodings, truncation, binary and blank refusals |
+| `app/src/test/java/com/firestream/chat/data/util/FilePreviewLoaderTest.kt` | Reads only the head, caches, None for other kinds |
+| `app/src/test/java/com/firestream/chat/ui/chat/FileMessageBubbleUiTest.kt` | Preview above the card; Show more / Show less; where the preview ends |
 
 **Entry point:** `MessageBubble` DOCUMENT branch → `FileMessageBubble` → `MessageBubbleCallbacks.onOpenFile` → `ChatViewModel.openFile` → `ChatFileActions.request` → `MessageRepository.ensureLocalFile` → `ChatViewModel.fileLaunches` → `ChatScreen` → `FileIntents.open`.
 

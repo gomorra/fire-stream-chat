@@ -21,6 +21,7 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
@@ -115,6 +116,8 @@ class ChatViewModel @Inject constructor(
     private val commandRegistry: CommandRegistry,
     private val connectivityObserver: ConnectivityObserver,
     private val timerAlarmScheduler: TimerAlarmScheduler,
+    /** Handed to the bubbles as-is: a DOCUMENT's preview is the file's, not this chat's state. */
+    internal val filePreviews: FilePreviewSource,
     @ApplicationScope private val appScope: CoroutineScope,
     @ApplicationContext private val context: Context
 ) : ViewModel() {

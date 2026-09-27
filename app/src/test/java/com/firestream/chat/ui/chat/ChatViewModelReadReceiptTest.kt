@@ -232,6 +232,7 @@ class ChatViewModelReadReceiptTest {
         callStateHolder = callStateHolder,
         commandRegistry = com.firestream.chat.domain.command.CommandRegistry(emptySet()),
         timerAlarmScheduler = mockk(relaxed = true),
+        filePreviews = io.mockk.mockk(relaxed = true),
         connectivityObserver = FakeConnectivityObserver(),
         appScope = TestScope(testDispatcher),
         context = context
