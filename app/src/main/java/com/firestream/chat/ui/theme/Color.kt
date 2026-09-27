@@ -57,3 +57,19 @@ val FsAccentDim = Color(0x8CF26A1F)        // rgba(242,106,31,0.55) — toggle t
 
 val FsAvatarBg = FsSurface3
 val FsAvatarText = Color(0xFFC9C6BF)
+
+// ─── File-type badges ────────────────────────────────────────────────
+// The conventional hue of each format family, identical in both themes: the
+// badge carries white text on a saturated tile, so it reads on either bubble.
+val FileBadgePdf = Color(0xFFD64541)
+val FileBadgeWord = Color(0xFF2B5797)
+val FileBadgeSheet = Color(0xFF1E7145)
+val FileBadgeSlides = Color(0xFFC8502A)
+val FileBadgeArchive = Color(0xFF8A6D3B)
+val FileBadgeAudio = Color(0xFF7B4FB8)
+val FileBadgeVideo = Color(0xFF3A6FC4)
+val FileBadgeImage = Color(0xFF2E8B7E)
+val FileBadgeText = Color(0xFF5F6B70)
+val FileBadgeCode = Color(0xFF3F5560)
+val FileBadgeRisky = Color(0xFFB9770E)
+val FileBadgeOther = Color(0xFF6E6C67)

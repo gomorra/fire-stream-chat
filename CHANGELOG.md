@@ -2,7 +2,11 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.35.4] — 2026-09-26
+## [UNRELEASED] [1.36.0] — 2026-09-27
+
+### Added
+
+- **Files sent in a chat can be opened.** A file used to arrive as a paperclip with nothing else — no name, no type, and tapping it did nothing. It now shows as a card: a coloured badge for the kind of file (PDF, Word, Excel, PowerPoint, text, archive, audio, …), its name and its size. Tapping the card opens Android's *Open with* chooser, so you pick which app opens it; a file that is not on the phone yet downloads first, with a spinner on the badge. Opening an APK or a script asks first, since it can install an app or run code. Underneath, documents never actually reached the phone before: every download was refused by the photo library it was written into, on the sender's phone as on the receiver's. Documents now keep their own private folder, the sender keeps the file it sent, and a file shared into the app from another one keeps its real name instead of a random one.
 
 ### Fixed
 

@@ -102,6 +102,11 @@ internal class FakeMessageRepository : MessageRepository {
         ensureLocalCopiesCalls.add(chatId)
     }
 
+    /** What [ensureLocalFile] answers; the default fails like a document not uploaded yet. */
+    var ensureLocalFileResult: (Message) -> Result<String> = { Result.failure(IllegalStateException("not uploaded")) }
+
+    override suspend fun ensureLocalFile(message: Message): Result<String> = ensureLocalFileResult(message)
+
     override fun getCallLog(): Flow<List<Message>> = emptyFlow()
 
     // ── Send / mutate ─────────────────────────────────────────────────────────

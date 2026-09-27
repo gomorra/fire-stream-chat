@@ -86,6 +86,14 @@ interface MessageRepository {
      * failed download never aborts the rest.
      */
     suspend fun ensureLocalCopiesForChat(chatId: String)
+
+    /**
+     * A readable local file holding [message]'s document, as an absolute path
+     * another app can be granted: its kept copy when there is one, else a
+     * download, remembered as the row's `localUri`. Fails when there is neither
+     * — a document still being picked up by the outbox and not yet uploaded.
+     */
+    suspend fun ensureLocalFile(message: Message): Result<String>
     // Phase 5.5: broadcast
     suspend fun sendBroadcastMessage(broadcastChatId: String, content: String, recipientIds: List<String>): Result<Message>
     // Lists

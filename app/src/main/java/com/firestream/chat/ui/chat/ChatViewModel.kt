@@ -212,6 +212,28 @@ class ChatViewModel @Inject constructor(
         },
     )
 
+    private val fileActions = ChatFileActions(
+        messageRepository = messageRepository,
+        scope = viewModelScope,
+        saveToDownloads = { file ->
+            // MediaStore refuses a wildcard type; a file of unknown type is bytes.
+            val type = file.mimeType.takeUnless { '*' in it } ?: "application/octet-stream"
+            val uri = mediaFileManager.saveToDownloads(Uri.fromFile(File(file.path)), type, file.displayName)
+            _snackbarEvent.emit(SnackbarEvent("${file.displayName} saved to Downloads", actionLabel = "Open", actionUri = uri))
+        },
+        notify = { _snackbarEvent.emit(SnackbarEvent(it)) },
+    )
+
+    /** Ids of file messages being fetched for Open / Share / Save — their bubbles show a spinner. */
+    internal val preparingFiles: StateFlow<Set<String>> = fileActions.preparing
+
+    /** Files ready to hand to another app; the screen launches the intent. */
+    internal val fileLaunches: SharedFlow<FileLaunch> = fileActions.launches
+
+    internal fun openFile(message: Message) = fileActions.request(message, FileAction.OPEN)
+    internal fun shareFile(message: Message) = fileActions.request(message, FileAction.SHARE)
+    internal fun saveFileToDownloads(message: Message) = fileActions.request(message, FileAction.SAVE)
+
     // Latest persisted dictation language. Updated via collect of dictationLanguageFlow
     // so startDictation() can synchronously read it from the IconButton onClick path.
     @Volatile

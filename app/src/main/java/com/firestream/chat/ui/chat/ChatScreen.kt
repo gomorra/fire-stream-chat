@@ -150,6 +150,7 @@ import com.firestream.chat.ui.search.SearchResultsSummary
 import com.firestream.chat.ui.search.searchResultsSummary
 import com.firestream.chat.ui.chat.imageedit.ImageEditServices
 import com.firestream.chat.ui.chat.imageedit.PendingCrop
+import com.firestream.chat.ui.components.FileIntents
 import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
 import androidx.compose.ui.text.input.ImeAction
@@ -231,6 +232,7 @@ fun ChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val uploadProgressMap by viewModel.uploadProgress.collectAsState()
+    val preparingFiles by viewModel.preparingFiles.collectAsState()
     // Global "send images in HD"; the send preview's per-image pill falls back to it.
     val sendImagesFullQuality by viewModel.sendImagesFullQuality.collectAsState()
     var messageText by rememberSaveable { mutableStateOf("") }
@@ -665,6 +667,35 @@ fun ChatScreen(
             snackbarHostState.showSnackbar(error.message, duration = SnackbarDuration.Short)
             viewModel.clearDictationError()
         }
+    }
+
+    // A file message the ViewModel has a local copy of: hand it to another app.
+    // An APK or a script asks first — opening one can install or run code.
+    var riskyFileLaunch by remember { mutableStateOf<FileLaunch?>(null) }
+    // Outlives the confirm dialog: a scope remembered inside it would be cancelled
+    // by the very dismissal that starts the launch.
+    val fileLaunchScope = rememberCoroutineScope()
+    val launchFile: suspend (FileLaunch) -> Unit = { launch ->
+        val shown = when (launch.action) {
+            FileAction.SHARE -> FileIntents.share(context, launch.file)
+            else -> FileIntents.open(context, launch.file)
+        }
+        if (!shown) snackbarHostState.showSnackbar("No app can open this file", duration = SnackbarDuration.Short)
+    }
+    LaunchedEffect(Unit) {
+        viewModel.fileLaunches.collect { launch ->
+            if (launch.isRisky && launch.action == FileAction.OPEN) riskyFileLaunch = launch else launchFile(launch)
+        }
+    }
+    riskyFileLaunch?.let { launch ->
+        RiskyFileDialog(
+            fileName = launch.file.displayName,
+            onOpen = {
+                riskyFileLaunch = null
+                fileLaunchScope.launch { launchFile(launch) }
+            },
+            onDismiss = { riskyFileLaunch = null },
+        )
     }
 
     // Forward any snackbarEvent emissions (e.g. "Saved to Downloads") to the correct host.
@@ -1394,6 +1425,7 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
+                                                onOpenFile = { viewModel.openFile(message) },
                                                 onVideoClick = { source ->
                                                     viewModel.showFullscreenVideo(source)
                                                 },
@@ -1440,6 +1472,7 @@ fun ChatScreen(
                                                 uploadProgress = uploadProgressMap[message.id],
                                                 isHighlighted = highlightedMessageId == message.id,
                                                 hasReminder = message.id in uiState.messages.pendingReminderIds,
+                                                isPreparingFile = message.id in preparingFiles,
                                             ),
                                         )
 

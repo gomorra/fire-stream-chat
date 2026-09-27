@@ -169,6 +169,65 @@ class MessageBubbleSmokeTest {
         composeTestRule.onNodeWithText("1:35").assertIsDisplayed()
     }
 
+    // A DOCUMENT used to render only a paperclip and its (usually empty) caption,
+    // with nothing to tap: the card must show the file's name, type and size.
+    @Test
+    fun `a document shows its name, type and size, and a tap opens it`() {
+        var opened = false
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "d1",
+                        senderId = "uid2",
+                        content = "for Monday",
+                        type = MessageType.DOCUMENT,
+                        status = MessageStatus.SENT,
+                    ).copy(
+                        mediaUrl = "https://cdn.example.com/d1.pdf",
+                        fileName = "Quarterly report.pdf",
+                        fileSize = 1_468_006L,
+                        mimeType = "application/pdf",
+                    ),
+                    isOwnMessage = false,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = emptyCallbacks.copy(onOpenFile = { opened = true }),
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("Quarterly report.pdf").assertIsDisplayed()
+        composeTestRule.onNodeWithText("PDF · 1.4 MB · Tap to download").assertIsDisplayed()
+        composeTestRule.onNodeWithText("for Monday").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Quarterly report.pdf").performClick()
+        assert(opened) { "expected onOpenFile" }
+    }
+
+    @Test
+    fun `an own document still uploading says so`() {
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "d2",
+                        senderId = "uid1",
+                        content = "",
+                        type = MessageType.DOCUMENT,
+                        status = MessageStatus.SENDING,
+                    ).copy(fileName = "notes.txt", fileSize = 512L, mimeType = "text/plain"),
+                    isOwnMessage = true,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = emptyCallbacks,
+                    state = MessageBubbleState(uploadProgress = 0.4f),
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("TXT · 512 B · Sending…").assertIsDisplayed()
+    }
+
     @Test
     fun `tapping video bubble invokes onVideoClick with mediaUrl`() {
         var clickedUrl: String? = null

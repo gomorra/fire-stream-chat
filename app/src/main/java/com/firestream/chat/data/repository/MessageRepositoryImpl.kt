@@ -111,6 +111,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -1413,6 +1414,22 @@ class MessageRepositoryImpl @Inject constructor(
                 Log.w(TAG, "downloadPendingMediaForChat: scan failed for chat=$chatId", e)
             }
         }
+    }
+
+    override suspend fun ensureLocalFile(message: Message): Result<String> = resultOf {
+        message.localUri
+            ?.takeIf { it.startsWith("/") }
+            ?.let(::File)
+            // Only a file the FileProvider can grant: the kept copy, or a queued
+            // send's staged input (tapping your own document while it uploads).
+            ?.takeIf { it.isFile && it.canRead() && (documentFiles.owns(it) || outboxFiles.isStaged(it.path)) }
+            ?.let { return@resultOf it.absolutePath }
+        val url = message.mediaUrl ?: throw IllegalStateException("Document ${message.id} is not uploaded yet")
+        val file = mediaFileManager.downloadFor(
+            message.chatId, message.id, message.type, url, message.fileName, message.mimeType,
+        )
+        messageDao.updateLocalUri(message.id, file.absolutePath)
+        file.absolutePath
     }
 
     override suspend fun ensureLocalCopiesForChat(chatId: String) {

@@ -44,7 +44,6 @@ import android.net.Uri
 import android.os.Build
 import android.widget.Toast
 import androidx.compose.material.icons.filled.AlarmOff
-import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.CallEnd
@@ -159,6 +158,9 @@ internal data class MessageBubbleState(
     // bell indicator in the metadata row and the Snooze ⇄ Cancel reminder menu
     // swap (see MessageBubbleCallbacks.onSnooze / onCancelReminder).
     val hasReminder: Boolean = false,
+    // True while a DOCUMENT's file is being fetched for Open / Share / Save —
+    // the file card's badge shows a spinner (ChatViewModel.preparingFiles).
+    val isPreparingFile: Boolean = false,
 )
 
 @Immutable
@@ -179,6 +181,9 @@ internal data class MessageBubbleCallbacks(
     // Tapping a VIDEO bubble's thumbnail — opens the fullscreen player. The
     // String is localUri ?: mediaUrl, same convention as onImageClick.
     val onVideoClick: (String) -> Unit = {},
+    // Tapping a DOCUMENT's file card — Open with another app (downloading first
+    // when there is no local copy).
+    val onOpenFile: () -> Unit = {},
     // Tapping a thumbnail inside a LinkPreviewCard. This MUST use the URL
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
@@ -1090,24 +1095,18 @@ private fun MessageBubbleBody(
                     textColor = textColor
                 )
             }
-            MessageType.DOCUMENT -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.AttachFile,
-                        contentDescription = null,
-                        tint = textColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = message.content,
-                        color = textColor,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            lineHeightStyle = CenteredLineHeight
-                        )
-                    )
-                }
-            }
+            MessageType.DOCUMENT -> FileMessageBubble(
+                message = message,
+                textColor = textColor,
+                transfer = when {
+                    state.uploadProgress != null || message.status == MessageStatus.SENDING -> FileTransfer.UPLOADING
+                    state.isPreparingFile -> FileTransfer.PREPARING
+                    else -> FileTransfer.NONE
+                },
+                uploadProgress = state.uploadProgress,
+                onOpen = callbacks.onOpenFile,
+                onLongPress = onLongPress,
+            )
             MessageType.CALL -> {
                 val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
                 val isMissed = !isOwnMessage && endReason == "timeout"

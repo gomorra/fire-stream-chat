@@ -699,7 +699,7 @@ data-model change, and the provider decision a GIF forces:
 
 ### Document sharing enhancements (4.7)
 - In-app document viewer (PDF, images)
-- File size display and download progress
+- Download progress as a percentage — the file card shows a spinner while it downloads
 - Cloud storage integration (Google Drive picker)
 - Files: `ui/chat/ChatScreen.kt`, `ui/chat/MessageBubble.kt`
 

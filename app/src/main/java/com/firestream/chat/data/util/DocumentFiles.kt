@@ -46,6 +46,9 @@ class DocumentFiles @Inject constructor(
     fun fileFor(messageId: String, fileName: String?, mimeType: String?, mediaUrl: String?): File =
         File(dir.apply { mkdirs() }, "$messageId.${extensionFor(fileName, mimeType, mediaUrl)}")
 
+    /** Whether [file] is a copy in the documents directory. */
+    fun owns(file: File): Boolean = file.parentFile == dir
+
     /**
      * Moves a sent document's staged copy at [stagedPath] into the documents
      * directory and returns the new path, or `null` when there is nothing to

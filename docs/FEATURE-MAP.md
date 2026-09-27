@@ -567,6 +567,34 @@ must go out through the plaintext branch.
 
 ---
 
+## File Messages (documents)
+
+A DOCUMENT is any picked file that is not a photo or a video. It carries its name, size and
+type (`Message.fileName` / `fileSize` / `mimeType`), and its bytes live in
+`filesDir/documents/<id>.<ext>` on both phones. They never go through MediaStore. The bubble is a
+type-coloured card. A tap runs `ChatFileActions`, which gets a readable local copy (downloading it
+if needed) and hands the screen a `FileLaunch`; the screen opens it through `FileProvider` with the
+system *Open with* chooser. Design, decisions and the remaining steps (previews, send sheet, audio):
+`docs/plans/file-handling.md`.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/util/FileKind.kt` | Pure classification (type, then extension) into badge kinds, `isRisky`, `hasTextPreview`; `formatFileSize` |
+| `app/src/main/java/com/firestream/chat/data/util/DocumentFiles.kt` | The documents dir, the extension rule, a picked uri's name/size, the sent copy's move out of the outbox, `discard` |
+| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` — a DOCUMENT downloads into `DocumentFiles` with plain file IO |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `keepDocument` after the upload; `tombstone` discards a moved copy |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` fills the file fields; `ensureLocalFile` — kept copy or download, remembered on the row |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatFileActions.kt` | Open / Share / Save for one chat: the preparing set (spinners), `FileLaunch` events, the type offered to other apps |
+| `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption, preview slot) and `RiskyFileDialog` |
+| `app/src/main/java/com/firestream/chat/ui/components/FileIntents.kt` | `FileProvider` uri + *Open with* / share-sheet chooser |
+| `app/src/main/res/xml/file_paths.xml` | `documents/` and `outbox/` roots the provider may grant |
+| `app/src/test/java/com/firestream/chat/domain/util/FileKindTest.kt` | Classification, risk, size formatting |
+| `app/src/test/java/com/firestream/chat/data/util/DocumentFilesTest.kt` | Extension rule and path safety, describe, adopt, discard |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatFileActionsTest.kt` | Launch events, risky flag, fallbacks, failure notice, double tap, save |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryEnsureLocalFileTest.kt` | Kept copy vs download vs refusal |
+
+**Entry point:** `MessageBubble` DOCUMENT branch → `FileMessageBubble` → `MessageBubbleCallbacks.onOpenFile` → `ChatViewModel.openFile` → `ChatFileActions.request` → `MessageRepository.ensureLocalFile` → `ChatViewModel.fileLaunches` → `ChatScreen` → `FileIntents.open`.
+
 ## Adding a feature here
 
 Create an entry only when the feature spans 4+ packages. Otherwise let the package layout speak for itself. New entries follow the same shape: one-paragraph description → table of files with one-line roles → entry point.
