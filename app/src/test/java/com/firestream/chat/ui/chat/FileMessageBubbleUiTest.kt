@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.firestream.chat.domain.model.Message
@@ -101,5 +102,27 @@ class FileMessageBubbleUiTest {
         } finally {
             thumbnail.delete()
         }
+    }
+
+    @Test
+    fun `an audio file on the device plays inline, with its length`() {
+        show(
+            FilePreview.None,
+            message().copy(fileName = "song.mp3", mimeType = "audio/mpeg", duration = 205),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Play").assertIsDisplayed()
+        composeTestRule.onNodeWithText("3:25").assertIsDisplayed()
+    }
+
+    @Test
+    fun `an audio file not yet downloaded shows only the card`() {
+        show(
+            FilePreview.None,
+            message().copy(fileName = "song.mp3", mimeType = "audio/mpeg", duration = 205, localUri = null),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Play").assertDoesNotExist()
+        composeTestRule.onNodeWithText("AUDIO · 2 KB · Tap to download").assertIsDisplayed()
     }
 }

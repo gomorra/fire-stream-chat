@@ -152,6 +152,11 @@ internal fun FileMessageBubble(
                 )
             }
         }
+        // An audio file on the device plays right here. Only a local one: the
+        // shared player prepares synchronously, fine for a file, not for a stream.
+        if (kind == FileKind.AUDIO && localPath != null) {
+            VoiceMessagePlayer(mediaUrl = localPath, durationSeconds = message.duration ?: 0, textColor = textColor)
+        }
         if (message.content.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(text = message.content, color = textColor, style = MaterialTheme.typography.bodyMedium)

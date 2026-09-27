@@ -85,4 +85,22 @@ class MessageRepositoryDocumentSendTest {
         assertTrue(result.exceptionOrNull() is MediaLimitException)
         assertTrue(inserted.isEmpty())
     }
+
+    @Test
+    fun `an audio file is queued with its playing time for the inline player`() = runTest {
+        coEvery { documentFiles.describe("content://pick/song") } returns DocumentInfo("song.mp3", 3_000_000L)
+        coEvery { documentFiles.audioDurationSeconds("content://pick/song") } returns 205
+
+        repository.sendMediaMessage("chat1", "content://pick/song", "audio/mpeg", "", caption = "", isHd = null)
+
+        assertEquals(205, inserted.single().toDomain().duration)
+    }
+
+    @Test
+    fun `a non-audio document never reads a duration`() = runTest {
+        repository.sendMediaMessage("chat1", "content://pick/report", "application/pdf", "", caption = "", isHd = null)
+
+        assertNull(inserted.single().toDomain().duration)
+        coVerify(exactly = 0) { documentFiles.audioDurationSeconds(any()) }
+    }
 }

@@ -6,7 +6,8 @@
 //   → "bin"); the move of a sent document's staged copy into the directory.
 // Collaborators: MediaFileManager (downloads a received document to fileFor()),
 //   OutboxSender (adopt() once uploaded, discard() for a row deleted while
-//   queued), MessageRepositoryImpl (describe() at send).
+//   queued), MessageRepositoryImpl (describe() and an audio file's duration at
+//   send, ensureLocalFile's owns()).
 // Don't put here: photo/video storage (MediaFileManager — MediaStore, Pictures/),
 //   the outbox staging copy (OutboxFiles) — "Sends are idempotent by client id
 //   and drained by OutboxWorker" (docs/PATTERNS.md) keeps staging there.
@@ -15,6 +16,7 @@
 package com.firestream.chat.data.util
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
@@ -111,6 +113,25 @@ class DocumentFiles @Inject constructor(
                 )
             }
         }.getOrNull() ?: DocumentInfo(null, null)
+    }
+
+    /**
+     * The playing time of the audio file at [localUri], in whole seconds, read
+     * from its header — for an audio document's inline player. `null` when the
+     * file has no readable duration.
+     */
+    suspend fun audioDurationSeconds(localUri: String): Int? = withContext(Dispatchers.IO) {
+        val retriever = MediaMetadataRetriever()
+        try {
+            if (localUri.startsWith("/")) retriever.setDataSource(localUri) else retriever.setDataSource(context, Uri.parse(localUri))
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                ?.let { ms -> ((ms + 500) / 1000).toInt() }
+                ?.takeIf { it > 0 }
+        } catch (e: Exception) {
+            null
+        } finally {
+            retriever.release()
+        }
     }
 
     companion object {

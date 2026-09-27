@@ -71,6 +71,7 @@ import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.worker.MediaBackfillScheduler
+import com.firestream.chat.domain.util.FileKind
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
 import com.firestream.chat.domain.util.formatFileSize
 import com.firestream.chat.domain.model.ListDiff
@@ -617,6 +618,13 @@ class MessageRepositoryImpl @Inject constructor(
         } else {
             null
         }
+        // An audio file plays inline in the bubble, which shows its length before
+        // it is played — read once here, carried in the voice notes' `duration`.
+        val audioDuration = if (document != null && FileKind.of(mimeType, document.name) == FileKind.AUDIO) {
+            documentFiles.audioDurationSeconds(uri)
+        } else {
+            null
+        }
         // The send sheet refuses these already; this holds the share sheet to it too.
         if ((document?.size ?: 0L) > MAX_DOCUMENT_BYTES) {
             throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
@@ -640,6 +648,7 @@ class MessageRepositoryImpl @Inject constructor(
             isHd = sendAsHd,
             fileName = document?.name,
             fileSize = document?.size,
+            duration = audioDuration,
             mimeType = mimeType.takeIf { document != null },
         )
         val row = MessageEntity.outbox(placeholder, SendTarget.of(recipientId))

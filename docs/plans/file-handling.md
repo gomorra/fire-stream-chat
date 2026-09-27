@@ -1,6 +1,6 @@
 # File handling in chat bubbles
 
-Status: in progress · branch `claude/chat-file-handling-6slm5p`
+Status: shipped (steps 1–7) — pending on-device verification · branch `claude/chat-file-handling-6slm5p`
 
 ## Why
 
@@ -86,12 +86,20 @@ Order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 - `data/util/FileOpener.kt`: `FileProvider` uri + `ACTION_VIEW` chooser; a download
   first when the local copy is missing (`ChatViewModel.openFile`), with an error on failure.
 
+**Shipped** — departures: the opener is `ChatFileActions` (ui/chat, owns no `ChatUiState`
+slice) + `ui/components/FileIntents`, not `data/util/FileOpener` — intents need the Activity.
+The APK/script confirm (planned for step 6) landed here with the first Open.
+
 ### 3. Text preview
 
 - `FilePreviewLoader` (data/util): reads ≤ 64 KB of a local file on IO, decodes UTF-8
   leniently, strips a BOM, detects binary; an LRU cache by message id.
 - The bubble shows 10 lines, *Show more* / *Show less*; the expanded view notes when the
   file was cut at 64 KB.
+
+**Shipped** — departures: the limit is 32 KB, not 64 — a few hundred lines is already more
+than a bubble should lay out. The chat reaches `FilePreviewLoader` through a domain
+`FilePreviewSource` (bound in `AppModule`) rather than growing the UI→data allowlist.
 
 ### 4. PDF preview
 
@@ -100,18 +108,29 @@ Order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 - PdfBox-Android extracts text from the first pages (≤ 64 KB), shown with the same
   expandable text block. Encrypted or damaged PDFs fall back to the plain card.
 
+**Shipped** — PdfBox-Android 2.0.27.0 adds ~4.6 MB of font/CMap assets. Text from the first
+3 pages; the thumbnail box is at most 200 dp tall and shows the top of page one.
+
 ### 5. Send-confirm sheet + size limit
 
 - Picking a file opens a sheet (badge, name, size, optional caption, *Send*).
 - Files over 100 MB are refused in the sheet and in `sendMediaMessage`
   (`MediaLimitException` → `AppError.Validation`).
 
+**Shipped**.
+
 ### 6. Save / Share + risky-type warning
 
 - Long-press menu on a file bubble: *Save to Downloads*, *Share…* (`ACTION_SEND`).
 - Opening an APK or script file first shows a confirm dialog.
 
+**Shipped** — the confirm dialog shipped with step 2.
+
 ### 7. Audio files play inline
 
 - A DOCUMENT whose kind is AUDIO renders the voice-note player over its local file,
   with the file card's name line above it; `duration` is read at send time.
+
+**Shipped** — departure: the player shows only once the file is on the device. The shared
+voice player calls `MediaPlayer.prepare()` on the main thread, harmless for a local file and an
+ANR risk for a large remote one.

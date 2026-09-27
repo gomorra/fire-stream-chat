@@ -21,6 +21,27 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### File messages — card, open with, previews, send sheet (2026-09-27)
+
+`docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two
+phones, with auto-download on:
+1. Send a `.txt`, a `.pdf` (several pages), a `.docx`, an `.mp3` and a `.apk` from the attachment
+   sheet. The send sheet shows name, type and size; a caption arrives with the file.
+2. On the **receiver**, each arrives as a card with the right badge, name and size, and downloads
+   by itself (no "Tap to download" left once it lands). This is the fix: before it, no document
+   ever downloaded.
+3. The `.txt` shows its first 10 lines; *Show more* / *Show less* work; a text file over 32 KB says
+   where the preview ends. The `.pdf` shows the top of page 1, the page count and an excerpt; a
+   scanned PDF shows the page but no text; a password-protected one shows just the card.
+4. Tap each card: the *Open with* chooser lists apps that handle that type, and the chosen app opens
+   the file with its **original name**. The `.apk` asks "Open this file?" first.
+5. Long-press → *Save to Downloads*: the file appears in Files → Downloads under its own name;
+   the snackbar's *Open* works. *Share file* shares the file itself (e.g. into Gmail as an attachment).
+6. The `.mp3` plays inline with its length shown before play, on both phones.
+7. The **sender** can open its own file right after sending, and again after it is SENT (the kept
+   copy, not a re-download). Share a PDF *into* FireStream from Files: it arrives with its real name.
+8. Pick a file over 100 MB: the sheet refuses it and Send stays disabled.
+
 ### Multi-character emoji render as one glyph (2026-09-20)
 
 `d175db8e` made `EMOJI_REGEX` match whole emoji sequences so `addEmojiSpans` stops splitting

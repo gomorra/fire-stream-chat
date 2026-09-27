@@ -585,7 +585,7 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `keepDocument` after the upload; `tombstone` discards a moved copy |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` fills the file fields; `ensureLocalFile` — kept copy or download, remembered on the row |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatFileActions.kt` | Open / Share / Save for one chat: the preparing set (spinners), `FileLaunch` events, the type offered to other apps |
-| `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption, preview slot) and `RiskyFileDialog` |
+| `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption), the text and PDF previews, the inline `VoiceMessagePlayer` for a local audio file, and `RiskyFileDialog` |
 | `app/src/main/java/com/firestream/chat/domain/util/TextPreview.kt` | `FilePreview` model; the text rule — at most 32 KB, binary refused, BOM/UTF-16/CRLF, a cut character dropped |
 | `app/src/main/java/com/firestream/chat/domain/util/FilePreviewSource.kt` | The bubble's way to a preview without a UI→data import; bound to `FilePreviewLoader` in `AppModule` |
 | `app/src/main/java/com/firestream/chat/data/util/FilePreviewLoader.kt` | Builds a preview from the local copy on IO; LRU by path + mtime; a PDF's page 1 via `PdfRenderer` into `cacheDir/file_previews/`, under a `MediaProcessingLimiter` permit |
