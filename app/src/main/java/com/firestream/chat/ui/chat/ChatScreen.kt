@@ -1432,6 +1432,12 @@ fun ChatScreen(
                                                 onSaveImage = if (message.type == MessageType.IMAGE) {
                                                     { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
                                                 } else null,
+                                                onSaveFile = if (message.type == MessageType.DOCUMENT && message.deletedAt == null) {
+                                                    { viewModel.saveFileToDownloads(message) }
+                                                } else null,
+                                                onShareFile = if (message.type == MessageType.DOCUMENT && message.deletedAt == null) {
+                                                    { viewModel.shareFile(message) }
+                                                } else null,
                                                 onReplyPreviewClick = {
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },

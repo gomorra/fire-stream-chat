@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.IosShare
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.BrokenImage
@@ -192,6 +193,10 @@ internal data class MessageBubbleCallbacks(
     // parameter — the enclosing message has no media of its own.
     val onPreviewImageClick: (String) -> Unit = {},
     val onSaveImage: (() -> Unit)? = null,
+    // A DOCUMENT's file to the Downloads folder / to another app through the
+    // share sheet (the file itself, not a forward). Null for other types.
+    val onSaveFile: (() -> Unit)? = null,
+    val onShareFile: (() -> Unit)? = null,
     val onCall: (() -> Unit)? = null,
     // Tapping the quoted-reply preview inside the bubble — jumps to the source.
     val onReplyPreviewClick: () -> Unit = {},
@@ -1313,6 +1318,24 @@ private fun MessageContextMenu(
                 ) {
                     Icon(Icons.Default.Download, null, modifier = Modifier.padding(end = 4.dp))
                     Text("Save image")
+                }
+            }
+            callbacks.onSaveFile?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.Download, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Save to Downloads")
+                }
+            }
+            callbacks.onShareFile?.let {
+                FilledTonalButton(
+                    onClick = { onDismiss(); it() },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                ) {
+                    Icon(Icons.Default.IosShare, null, modifier = Modifier.padding(end = 4.dp))
+                    Text("Share file")
                 }
             }
             if (copyableText != null) {

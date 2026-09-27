@@ -4,7 +4,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.test.TestData
@@ -202,6 +206,36 @@ class MessageBubbleSmokeTest {
         composeTestRule.onNodeWithText("for Monday").assertIsDisplayed()
         composeTestRule.onNodeWithText("Quarterly report.pdf").performClick()
         assert(opened) { "expected onOpenFile" }
+    }
+
+    @Test
+    fun `a document's long-press menu saves and shares the file`() {
+        var saved = false
+        var shared = false
+        composeTestRule.setContent {
+            MaterialTheme {
+                MessageBubble(
+                    message = TestData.message(
+                        id = "d3",
+                        senderId = "uid2",
+                        content = "",
+                        type = MessageType.DOCUMENT,
+                        status = MessageStatus.SENT,
+                    ).copy(mediaUrl = "https://cdn.example.com/d3.zip", fileName = "photos.zip", fileSize = 4_096L),
+                    isOwnMessage = false,
+                    replyToMessage = null,
+                    linkPreview = null,
+                    currentUserId = "uid1",
+                    callbacks = emptyCallbacks.copy(onSaveFile = { saved = true }, onShareFile = { shared = true }),
+                )
+            }
+        }
+        composeTestRule.onNodeWithText("photos.zip").performTouchInput { longClick() }
+        composeTestRule.onNodeWithText("Save to Downloads").performSemanticsAction(SemanticsActions.OnClick)
+        composeTestRule.onNodeWithText("photos.zip").performTouchInput { longClick() }
+        composeTestRule.onNodeWithText("Share file").performSemanticsAction(SemanticsActions.OnClick)
+
+        assert(saved && shared) { "expected both menu actions, saved=$saved shared=$shared" }
     }
 
     @Test

@@ -137,4 +137,18 @@ class ChatFileActionsTest {
 
         assertEquals("Report.pdf", saved.single().displayName)
     }
+
+    @Test
+    fun `share hands the screen a share launch for the same file`() = runTest {
+        repository.ensureLocalFileResult = { Result.success("/files/documents/doc1.pdf") }
+        val actions = actions()
+        val launches = mutableListOf<FileLaunch>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { actions.launches.toList(launches) }
+
+        actions.request(pdf, FileAction.SHARE)
+        advanceUntilIdle()
+
+        assertEquals(FileAction.SHARE, launches.single().action)
+        assertEquals("Report.pdf", launches.single().file.displayName)
+    }
 }
