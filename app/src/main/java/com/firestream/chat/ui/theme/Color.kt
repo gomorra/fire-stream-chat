@@ -73,3 +73,6 @@ val FileBadgeText = Color(0xFF5F6B70)
 val FileBadgeCode = Color(0xFF3F5560)
 val FileBadgeRisky = Color(0xFFB9770E)
 val FileBadgeOther = Color(0xFF6E6C67)
+// Text and spinners on a badge; the paper a PDF page is shown on, before and behind it.
+val OnFileBadge = Color(0xFFFFFFFF)
+val FilePaper = Color(0xFFFFFFFF)

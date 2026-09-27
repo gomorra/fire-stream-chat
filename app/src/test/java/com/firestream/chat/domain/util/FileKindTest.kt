@@ -47,6 +47,15 @@ class FileKindTest {
     }
 
     @Test
+    fun `the badge shows a short extension, else the kind`() {
+        assertEquals("DOCX", FileKind.badgeLabel(null, "Plan.docx"))
+        assertEquals("MP3", FileKind.badgeLabel("audio/mpeg", "song.mp3"))
+        assertEquals("PDF", FileKind.badgeLabel("application/pdf", "scan"))
+        assertEquals("TXT", FileKind.badgeLabel("text/plain", "notes.markdown"))
+        assertEquals("FILE", FileKind.badgeLabel(null, null))
+    }
+
+    @Test
     fun `sizes read as people read them`() {
         assertEquals("0 B", formatFileSize(0))
         assertEquals("1023 B", formatFileSize(1023))

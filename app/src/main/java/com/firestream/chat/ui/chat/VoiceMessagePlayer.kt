@@ -42,11 +42,18 @@ internal fun VoiceMessagePlayer(
     var progress by remember { mutableFloatStateOf(0f) }
     var speed by remember { mutableFloatStateOf(1f) }
     val mediaPlayer = remember { mutableStateOf<MediaPlayer?>(null) }
+    // Set when the source would not prepare. Voice notes are always app-recorded
+    // AAC, but an audio *file* can be anything the sender picked.
+    var unplayable by remember(mediaUrl) { mutableStateOf(false) }
 
     DisposableEffect(mediaUrl) {
         onDispose {
             mediaPlayer.value?.release()
             mediaPlayer.value = null
+            // The source changed under a playing player (a sent file moving out
+            // of the outbox): back to the start, not stuck on Pause.
+            isPlaying = false
+            progress = 0f
         }
     }
 
@@ -56,7 +63,7 @@ internal fun VoiceMessagePlayer(
             while (isPlaying) {
                 val current = mediaPlayer.value?.currentPosition ?: 0
                 progress = if (total > 0) current / total else 0f
-                if (mediaPlayer.value?.isPlaying == false) {
+                if (mediaPlayer.value?.isPlaying != true) {
                     isPlaying = false
                     progress = 0f
                 }
@@ -75,10 +82,17 @@ internal fun VoiceMessagePlayer(
                         isPlaying = false
                     } else {
                         if (mediaPlayer.value == null) {
-                            mediaPlayer.value = MediaPlayer().apply {
-                                setDataSource(mediaUrl)
-                                playbackParams = playbackParams.setSpeed(speed)
-                                prepare()
+                            val player = MediaPlayer()
+                            try {
+                                player.setDataSource(mediaUrl)
+                                player.playbackParams = player.playbackParams.setSpeed(speed)
+                                player.prepare()
+                                mediaPlayer.value = player
+                            } catch (e: Exception) {
+                                // IOException on a device, IllegalArgument/State from a bad source.
+                                player.release()
+                                unplayable = true
+                                return@IconButton
                             }
                         }
                         mediaPlayer.value?.let {
@@ -119,7 +133,7 @@ internal fun VoiceMessagePlayer(
             )
         }
         Text(
-            text = formatDuration(durationSeconds),
+            text = if (unplayable) "Can't play this file" else formatDuration(durationSeconds),
             style = MaterialTheme.typography.labelSmall,
             color = textColor.copy(alpha = 0.7f),
             modifier = Modifier.padding(start = 36.dp)

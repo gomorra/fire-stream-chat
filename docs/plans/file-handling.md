@@ -89,6 +89,9 @@ Order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 **Shipped** — departures: the opener is `ChatFileActions` (ui/chat, owns no `ChatUiState`
 slice) + `ui/components/FileIntents`, not `data/util/FileOpener` — intents need the Activity.
 The APK/script confirm (planned for step 6) landed here with the first Open.
+"No app can open this file" is the system chooser's own message, not ours: `createChooser` always
+resolves, and a resolve pre-check would need a `<queries>` entry per type on Android 11+. The
+app's snackbar ("Couldn't open the file") covers only a file the FileProvider refuses to grant.
 
 ### 3. Text preview
 

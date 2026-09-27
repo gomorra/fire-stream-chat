@@ -3,6 +3,7 @@ package com.firestream.chat.ui.chat
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.webkit.MimeTypeMap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -21,7 +22,6 @@ import com.firestream.chat.data.remote.LinkPreviewSource
 import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.domain.model.ListType
 import com.firestream.chat.domain.model.Message
-import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.domain.model.MessageAvailability
 import com.firestream.chat.domain.model.MessageFilterType
 import com.firestream.chat.domain.model.MessageSearchFilter
@@ -41,6 +41,8 @@ import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
 import com.firestream.chat.domain.util.ConnectivityObserver
+import com.firestream.chat.domain.util.FileKind
+import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.domain.util.RasterOp
 import com.firestream.chat.domain.util.SizeEstimate
 import com.firestream.chat.domain.util.SourceImage
@@ -53,6 +55,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -219,8 +222,12 @@ class ChatViewModel @Inject constructor(
         messageRepository = messageRepository,
         scope = viewModelScope,
         saveToDownloads = { file ->
-            // MediaStore refuses a wildcard type; a file of unknown type is bytes.
-            val type = file.mimeType.takeUnless { '*' in it } ?: "application/octet-stream"
+            // The type its own extension names: MediaStore appends the extension of
+            // a disagreeing type ("notes.md" as text/plain → "notes.md.txt"), and
+            // refuses a wildcard. A file of unknown type is bytes.
+            val type = FileKind.extensionOf(file.displayName)?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+                ?: file.mimeType.takeUnless { '*' in it }
+                ?: "application/octet-stream"
             val uri = mediaFileManager.saveToDownloads(Uri.fromFile(File(file.path)), type, file.displayName)
             _snackbarEvent.emit(SnackbarEvent("${file.displayName} saved to Downloads", actionLabel = "Open", actionUri = uri))
         },
@@ -231,7 +238,7 @@ class ChatViewModel @Inject constructor(
     internal val preparingFiles: StateFlow<Set<String>> = fileActions.preparing
 
     /** Files ready to hand to another app; the screen launches the intent. */
-    internal val fileLaunches: SharedFlow<FileLaunch> = fileActions.launches
+    internal val fileLaunches: Flow<FileLaunch> = fileActions.launches
 
     internal fun openFile(message: Message) = fileActions.request(message, FileAction.OPEN)
     internal fun shareFile(message: Message) = fileActions.request(message, FileAction.SHARE)

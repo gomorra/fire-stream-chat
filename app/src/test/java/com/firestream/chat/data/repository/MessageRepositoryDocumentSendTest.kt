@@ -7,6 +7,7 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.DocumentInfo
 import com.firestream.chat.domain.model.MediaLimitException
+import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
 import io.mockk.coEvery
@@ -20,6 +21,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.File
+import java.io.RandomAccessFile
 
 /**
  * A document's identity travels with it (`docs/plans/file-handling.md` step 1).
@@ -86,21 +89,23 @@ class MessageRepositoryDocumentSendTest {
         assertTrue(inserted.isEmpty())
     }
 
+    // A provider that reports no size gets past the pre-insert check; the staged
+    // copy's real length catches it. Sparse, so the test writes nothing real.
     @Test
-    fun `an audio file is queued with its playing time for the inline player`() = runTest {
-        coEvery { documentFiles.describe("content://pick/song") } returns DocumentInfo("song.mp3", 3_000_000L)
-        coEvery { documentFiles.audioDurationSeconds("content://pick/song") } returns 205
+    fun `a document of unreported size is failed once its copy proves too large`() = runTest {
+        val huge = File.createTempFile("huge", ".bin").apply {
+            RandomAccessFile(this, "rw").use { it.setLength(MAX_DOCUMENT_BYTES + 1) }
+        }
+        try {
+            coEvery { documentFiles.describe(huge.absolutePath) } returns DocumentInfo("backup.bin", null)
 
-        repository.sendMediaMessage("chat1", "content://pick/song", "audio/mpeg", "", caption = "", isHd = null)
+            val result = repository.sendMediaMessage("chat1", huge.absolutePath, "application/octet-stream", "", caption = "", isHd = null)
 
-        assertEquals(205, inserted.single().toDomain().duration)
-    }
-
-    @Test
-    fun `a non-audio document never reads a duration`() = runTest {
-        repository.sendMediaMessage("chat1", "content://pick/report", "application/pdf", "", caption = "", isHd = null)
-
-        assertNull(inserted.single().toDomain().duration)
-        coVerify(exactly = 0) { documentFiles.audioDurationSeconds(any()) }
+            assertTrue(result.exceptionOrNull() is MediaLimitException)
+            val id = inserted.single().id
+            coVerify { messageDao.updateMessageStatus(id, MessageStatus.FAILED.name) }
+        } finally {
+            huge.delete()
+        }
     }
 }

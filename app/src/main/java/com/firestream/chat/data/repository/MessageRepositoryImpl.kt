@@ -71,9 +71,6 @@ import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.worker.MediaBackfillScheduler
-import com.firestream.chat.domain.util.FileKind
-import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
-import com.firestream.chat.domain.util.formatFileSize
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.MediaLimitException
 import com.firestream.chat.domain.model.Message
@@ -91,6 +88,8 @@ import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
+import com.firestream.chat.domain.util.formatFileSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -277,7 +276,16 @@ class MessageRepositoryImpl @Inject constructor(
     private suspend fun stageInput(row: MessageEntity, mimeType: String?) {
         val localUri = row.localUri ?: return
         if (row.mediaUrl != null) return
-        outboxFiles.stage(row.id, localUri, mimeType)?.let { messageDao.updateLocalUri(row.id, it) }
+        val staged = outboxFiles.stage(row.id, localUri, mimeType)?.also { messageDao.updateLocalUri(row.id, it) }
+        // A provider that reports no size got past the check before the insert; the
+        // copy's real length is the last word. The row goes FAILED (failSendOnError).
+        if (row.type == MessageType.DOCUMENT.name) {
+            val copy = (staged ?: localUri).takeIf { it.startsWith("/") }?.let(::File)
+            if (copy != null && copy.length() > MAX_DOCUMENT_BYTES) {
+                outboxFiles.delete(row.id)
+                throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
+            }
+        }
     }
 
     /**
@@ -618,13 +626,6 @@ class MessageRepositoryImpl @Inject constructor(
         } else {
             null
         }
-        // An audio file plays inline in the bubble, which shows its length before
-        // it is played — read once here, carried in the voice notes' `duration`.
-        val audioDuration = if (document != null && FileKind.of(mimeType, document.name) == FileKind.AUDIO) {
-            documentFiles.audioDurationSeconds(uri)
-        } else {
-            null
-        }
         // The send sheet refuses these already; this holds the share sheet to it too.
         if ((document?.size ?: 0L) > MAX_DOCUMENT_BYTES) {
             throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
@@ -648,7 +649,6 @@ class MessageRepositoryImpl @Inject constructor(
             isHd = sendAsHd,
             fileName = document?.name,
             fileSize = document?.size,
-            duration = audioDuration,
             mimeType = mimeType.takeIf { document != null },
         )
         val row = MessageEntity.outbox(placeholder, SendTarget.of(recipientId))

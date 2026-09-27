@@ -31,6 +31,7 @@ import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.util.ConnectivityObserver
+import com.firestream.chat.domain.util.FilePreviewSource
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.Binds
@@ -40,7 +41,6 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
-import com.firestream.chat.domain.util.FilePreviewSource
 
 @Module
 @InstallIn(SingletonComponent::class)

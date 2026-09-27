@@ -824,6 +824,28 @@ class OutboxSenderTest {
         assertEquals(listOf(Upload("doc1", "application/octet-stream", reportsProgress = true)), uploads)
     }
 
+    // The receiver's inline player shows an audio file's length before play; it is
+    // read from the staged copy here, not from the picker's provider before the insert.
+    @Test
+    fun `an audio document is written with the playing time read from its staged copy`() = runTest {
+        val staged = "/data/outbox/song1.mp3"
+        coEvery { documentFiles.audioDurationSeconds(staged) } returns 205
+        store(sending("song1", MessageType.DOCUMENT, localUri = staged).copy(fileName = "song.mp3", mimeType = "audio/mpeg"))
+
+        sender.send("song1")
+
+        assertEquals(205, writes.single().duration)
+    }
+
+    @Test
+    fun `a non-audio document never reads a playing time`() = runTest {
+        store(sending("doc1", MessageType.DOCUMENT, localUri = "/data/outbox/doc1.pdf").copy(fileName = "a.pdf", mimeType = "application/pdf"))
+
+        sender.send("doc1")
+
+        coVerify(exactly = 0) { documentFiles.audioDurationSeconds(any()) }
+    }
+
     @Test
     fun `a voice message uploads as aac without progress and is written with its duration`() = runTest {
         store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac").copy(duration = 5))

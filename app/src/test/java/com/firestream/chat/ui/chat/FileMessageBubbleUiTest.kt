@@ -123,6 +123,23 @@ class FileMessageBubbleUiTest {
         )
 
         composeTestRule.onNodeWithContentDescription("Play").assertDoesNotExist()
-        composeTestRule.onNodeWithText("AUDIO · 2 KB · Tap to download").assertIsDisplayed()
+        composeTestRule.onNodeWithText("MP3 · 2 KB · Tap to download").assertIsDisplayed()
+    }
+
+    // Regression: the voice player only ever saw app-recorded AAC, so prepare()
+    // had no guard; an audio file it cannot play (a .wma, a corrupt .mp3) threw
+    // on the main thread and took the app down.
+    @Test
+    fun `pressing play on an audio file the player cannot read does not crash`() {
+        show(
+            FilePreview.None,
+            message().copy(fileName = "broken.mp3", mimeType = "audio/mpeg", duration = 12),
+        )
+
+        composeTestRule.onNodeWithContentDescription("Play").performClick()
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithContentDescription("Play").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Can't play this file").assertIsDisplayed()
     }
 }

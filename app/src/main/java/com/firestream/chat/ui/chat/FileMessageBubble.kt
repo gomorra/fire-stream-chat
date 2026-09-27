@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontFamily
 import com.firestream.chat.domain.util.FilePreview
 import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.domain.util.TextPreview
+import com.firestream.chat.domain.util.UNNAMED_FILE
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.painter.ColorPainter
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import androidx.compose.ui.graphics.Color
@@ -45,7 +46,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.util.FileKind
 import com.firestream.chat.domain.util.formatFileSize
@@ -61,6 +61,8 @@ import com.firestream.chat.ui.theme.FileBadgeSlides
 import com.firestream.chat.ui.theme.FileBadgeText
 import com.firestream.chat.ui.theme.FileBadgeVideo
 import com.firestream.chat.ui.theme.FileBadgeWord
+import com.firestream.chat.ui.theme.FilePaper
+import com.firestream.chat.ui.theme.OnFileBadge
 import java.io.File
 
 /** What a file bubble shows about the transfer beside its badge. */
@@ -85,10 +87,12 @@ internal fun FileMessageBubble(
     uploadProgress: Float?,
     onOpen: () -> Unit,
     onLongPress: () -> Unit,
+    modifier: Modifier = Modifier,
     previews: FilePreviewSource? = null,
 ) {
     val kind = remember(message.mimeType, message.fileName) { FileKind.of(message.mimeType, message.fileName) }
-    val name = message.fileName ?: "Document"
+    val name = message.fileName ?: UNNAMED_FILE
+    val label = remember(message.mimeType, message.fileName) { FileKind.badgeLabel(message.mimeType, message.fileName) }
     // Synchronous, not produceState: the card must not render one frame as
     // "Tap to download" for a file that is there (app-ui-design skill).
     val localPath = remember(message.localUri) {
@@ -100,15 +104,15 @@ internal fun FileMessageBubble(
         initialValue = localPath?.let { previews?.cached(it) },
         localPath, kind, previews,
     ) {
-        if (localPath != null && previews != null && (kind.hasTextPreview || kind == FileKind.PDF)) {
+        if (localPath != null && previews != null && kind.hasPreview) {
             value = previews.load(localPath, kind)
         }
     }
-    val details = remember(kind, message.fileSize, hasLocalCopy, transfer) {
-        fileDetailsLine(kind, message.fileSize, hasLocalCopy, transfer)
+    val details = remember(label, message.fileSize, hasLocalCopy, transfer) {
+        fileDetailsLine(label, message.fileSize, hasLocalCopy, transfer)
     }
 
-    Column(modifier = Modifier.widthIn(min = 200.dp, max = 280.dp)) {
+    Column(modifier = modifier.widthIn(min = 200.dp, max = 280.dp)) {
         when (val shown = preview) {
             is FilePreview.Text -> {
                 TextFilePreview(shown, textColor, monospace = kind == FileKind.CODE, messageId = message.id)
@@ -135,7 +139,7 @@ internal fun FileMessageBubble(
                 .padding(vertical = 2.dp)
                 .semantics { contentDescription = "$name, $details" },
         ) {
-            FileBadge(kind = kind, transfer = transfer, uploadProgress = uploadProgress)
+            FileBadge(kind = kind, label = label, transfer = transfer, uploadProgress = uploadProgress)
             Column(modifier = Modifier.weight(1f, fill = false)) {
                 Text(
                     text = name,
@@ -187,7 +191,7 @@ private fun PdfPreview(
                     // page one is what identifies a document.
                     .aspectRatio(preview.thumbnailAspect.coerceAtLeast(MIN_THUMBNAIL_ASPECT))
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White)
+                    .background(FilePaper)
                     .combinedClickable(onClickLabel = "Open with", onClick = onOpen, onLongClick = onLongPress),
             ) {
                 AsyncImage(
@@ -195,12 +199,13 @@ private fun PdfPreview(
                     contentDescription = "First page",
                     contentScale = ContentScale.Crop,
                     alignment = Alignment.TopCenter,
+                    placeholder = ColorPainter(FilePaper),
                     modifier = Modifier.matchParentSize(),
                 )
                 if (preview.pageCount > 0) {
                     Text(
                         text = if (preview.pageCount == 1) "1 page" else "${preview.pageCount} pages",
-                        color = Color.White,
+                        color = OnFileBadge,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
@@ -268,43 +273,48 @@ private fun TextFilePreview(preview: FilePreview.Text, textColor: Color, monospa
     }
 }
 
-/** The tile left of the name: the kind's colour and label, or a spinner over it while a transfer runs. */
+/** The tile left of the name: the kind's colour and [label], or a spinner over it while a transfer runs. */
 @Composable
-internal fun FileBadge(kind: FileKind, transfer: FileTransfer = FileTransfer.NONE, uploadProgress: Float? = null) {
+internal fun FileBadge(
+    kind: FileKind,
+    label: String,
+    modifier: Modifier = Modifier,
+    transfer: FileTransfer = FileTransfer.NONE,
+    uploadProgress: Float? = null,
+) {
     Box(
         contentAlignment = Alignment.Center,
-        modifier = Modifier
-            .size(width = 40.dp, height = 48.dp)
+        modifier = modifier
+            .size(width = 44.dp, height = 48.dp)
             .background(badgeColor(kind), RoundedCornerShape(8.dp)),
     ) {
         when {
             transfer == FileTransfer.UPLOADING && uploadProgress != null -> CircularProgressIndicator(
                 progress = { uploadProgress },
                 modifier = Modifier.size(24.dp),
-                color = Color.White,
+                color = OnFileBadge,
                 strokeWidth = 2.dp,
             )
             transfer != FileTransfer.NONE -> CircularProgressIndicator(
                 modifier = Modifier.size(24.dp),
-                color = Color.White,
+                color = OnFileBadge,
                 strokeWidth = 2.dp,
             )
             else -> Text(
-                text = kind.label,
-                color = Color.White,
-                fontSize = if (kind.label.length > 4) 9.sp else 11.sp,
-                fontWeight = FontWeight.Bold,
+                text = label,
+                color = OnFileBadge,
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                 maxLines = 1,
-                modifier = Modifier.padding(horizontal = 2.dp),
+                softWrap = false,
             )
         }
     }
 }
 
 /** `PDF · 1.4 MB`, with what a tap will do when it is not simply "open". */
-internal fun fileDetailsLine(kind: FileKind, size: Long?, hasLocalCopy: Boolean, transfer: FileTransfer): String {
+internal fun fileDetailsLine(label: String, size: Long?, hasLocalCopy: Boolean, transfer: FileTransfer): String {
     val parts = buildList {
-        add(kind.label)
+        add(label)
         size?.let { add(formatFileSize(it)) }
         when (transfer) {
             FileTransfer.UPLOADING -> add("Sending…")
@@ -328,21 +338,4 @@ private fun badgeColor(kind: FileKind): Color = when (kind) {
     FileKind.CODE -> FileBadgeCode
     FileKind.APK, FileKind.EXECUTABLE -> FileBadgeRisky
     FileKind.OTHER -> FileBadgeOther
-}
-
-/** Confirm before opening a file that can install or run code (an APK, a script). */
-@Composable
-internal fun RiskyFileDialog(fileName: String, onOpen: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Open this file?") },
-        text = {
-            Text(
-                "\"$fileName\" can install an app or run code on your device. " +
-                    "Only open it if you trust the person who sent it."
-            )
-        },
-        confirmButton = { TextButton(onClick = onOpen) { Text("Open") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }

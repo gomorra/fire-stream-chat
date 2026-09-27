@@ -16,8 +16,8 @@ enum class FileKind(val label: String) {
     SPREADSHEET("XLS"),
     PRESENTATION("PPT"),
     ARCHIVE("ZIP"),
-    AUDIO("AUDIO"),
-    VIDEO("VIDEO"),
+    AUDIO("AUD"),
+    VIDEO("VID"),
     IMAGE("IMG"),
     APK("APK"),
     EXECUTABLE("EXE"),
@@ -25,6 +25,9 @@ enum class FileKind(val label: String) {
 
     /** Whether the bubble can show this kind's first lines as text. */
     val hasTextPreview: Boolean get() = this == TEXT || this == CODE
+
+    /** Whether the bubble builds a preview for this kind at all — text, or a PDF's page and text. */
+    val hasPreview: Boolean get() = hasTextPreview || this == PDF
 
     /**
      * Whether opening it hands control to something that can install or run
@@ -46,6 +49,15 @@ enum class FileKind(val label: String) {
         private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "amr")
         private val VIDEO_EXTENSIONS = setOf("mp4", "mkv", "webm", "mov", "avi", "3gp")
         private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "svg")
+
+        /**
+         * The badge and details-line label: the file's own extension when it is a
+         * short one (`DOCX`, `MP3`, `CSV`), else the kind's — the extension is what
+         * people recognise a file by.
+         */
+        fun badgeLabel(mimeType: String?, fileName: String?): String =
+            extensionOf(fileName)?.takeIf { it.length <= 4 && it.all(Char::isLetterOrDigit) }?.uppercase(Locale.ROOT)
+                ?: of(mimeType, fileName).label
 
         /** Classifies from [mimeType] and [fileName]; either may be null. */
         fun of(mimeType: String?, fileName: String?): FileKind {
@@ -102,6 +114,9 @@ enum class FileKind(val label: String) {
         )
     }
 }
+
+/** What a document without a name is called — sent before names were kept, or by a provider that gave none. */
+const val UNNAMED_FILE = "Document"
 
 /**
  * The largest document a chat accepts: 100 MB. Checked where the file is picked

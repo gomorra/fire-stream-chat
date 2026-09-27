@@ -579,14 +579,16 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/domain/util/FileKind.kt` | Pure classification (type, then extension) into badge kinds, `isRisky`, `hasTextPreview`; `formatFileSize` |
+| `app/src/main/java/com/firestream/chat/domain/util/FileKind.kt` | Pure classification (type, then extension) into kinds, `isRisky`, `hasPreview`; the badge label (short extension, else kind); `formatFileSize`, `MAX_DOCUMENT_BYTES` |
 | `app/src/main/java/com/firestream/chat/data/util/DocumentFiles.kt` | The documents dir, the extension rule, a picked uri's name/size, the sent copy's move out of the outbox, `discard` |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` — a DOCUMENT downloads into `DocumentFiles` with plain file IO |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `keepDocument` after the upload; `tombstone` discards a moved copy |
 | `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendMediaMessage` fills the file fields; `ensureLocalFile` — kept copy or download, remembered on the row |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatFileActions.kt` | Open / Share / Save for one chat: the preparing set (spinners), `FileLaunch` events, the type offered to other apps |
-| `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption), the text and PDF previews, the inline `VoiceMessagePlayer` for a local audio file, and `RiskyFileDialog` |
-| `app/src/main/java/com/firestream/chat/domain/util/TextPreview.kt` | `FilePreview` model; the text rule — at most 32 KB, binary refused, BOM/UTF-16/CRLF, a cut character dropped |
+| `app/src/main/java/com/firestream/chat/ui/chat/FileMessageBubble.kt` | The file card (badge, name, `PDF · 1.4 MB` line, caption), the text and PDF previews, the inline `VoiceMessagePlayer` for a local audio file |
+| `app/src/main/java/com/firestream/chat/ui/chat/RiskyFileDialog.kt` | The confirm before opening an APK or a script |
+| `app/src/main/java/com/firestream/chat/domain/util/FilePreview.kt` | What a file bubble can show — `None`, `Text`, `Pdf` |
+| `app/src/main/java/com/firestream/chat/domain/util/TextPreview.kt` | The text rule — at most 32 KB, binary refused, BOM/UTF-16/CRLF, a cut character dropped; a PDF text layer's cleanup |
 | `app/src/main/java/com/firestream/chat/domain/util/FilePreviewSource.kt` | The bubble's way to a preview without a UI→data import; bound to `FilePreviewLoader` in `AppModule` |
 | `app/src/main/java/com/firestream/chat/data/util/FilePreviewLoader.kt` | Builds a preview from the local copy on IO; LRU by path + mtime; a PDF's page 1 via `PdfRenderer` into `cacheDir/file_previews/`, under a `MediaProcessingLimiter` permit |
 | `app/src/main/java/com/firestream/chat/data/util/PdfText.kt` | PdfBox-Android text layer of a PDF's first 3 pages (temp-file buffered) |

@@ -1,18 +1,34 @@
+// region: AGENT-NOTE
+// Responsibility: Open / Share / Save to Downloads for DOCUMENT messages in one
+//   chat — a readable local copy first (MessageRepository.ensureLocalFile), then
+//   a FileLaunch for the screen or a save.
+// Owns: which messages are being fetched for an action (the badge spinner); the
+//   launch channel; the type and name a file is offered to other apps under.
+// Collaborators: ChatViewModel (constructs it, re-exposes preparing/launches,
+//   supplies the save and snackbar lambdas), ChatScreen (launches FileIntents,
+//   the risky confirm).
+// Don't put here: ChatUiState — it owns no slice, so it is not a Chat*Manager
+//   ("Chat*Manager slice-ownership", docs/PATTERNS.md); the intents themselves
+//   (they need the Activity — ui/components/FileIntents).
+// endregion
+
 package com.firestream.chat.ui.chat
 
 import android.webkit.MimeTypeMap
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.FileKind
+import com.firestream.chat.domain.util.UNNAMED_FILE
 import com.firestream.chat.ui.components.ReadyFile
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -46,8 +62,11 @@ internal class ChatFileActions(
     /** Ids of messages whose file is being fetched for an action — the bubble shows a spinner. */
     val preparing: StateFlow<Set<String>> = _preparing.asStateFlow()
 
-    private val _launches = MutableSharedFlow<FileLaunch>(extraBufferCapacity = 4)
-    val launches: SharedFlow<FileLaunch> = _launches.asSharedFlow()
+    // A channel, not a SharedFlow: a download that finishes while the chat is off
+    // screen (the user opened a profile meanwhile) is held until the screen
+    // collects again instead of being dropped. One slot — only the latest counts.
+    private val _launches = Channel<FileLaunch>(capacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    val launches: Flow<FileLaunch> = _launches.receiveAsFlow()
 
     /** Runs [action] on [message]'s file. A second tap while the first is still fetching is ignored. */
     fun request(message: Message, action: FileAction) {
@@ -61,7 +80,7 @@ internal class ChatFileActions(
                     saveToDownloads(file)
                 } else {
                     val isRisky = FileKind.of(message.mimeType, message.fileName).isRisky
-                    _launches.emit(FileLaunch(file, action, isRisky))
+                    _launches.send(FileLaunch(file, action, isRisky))
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -84,6 +103,6 @@ internal class ChatFileActions(
                 ?: ANY_TYPE
 
         /** The original file name, or a generic one for a document sent before names were kept. */
-        fun displayNameFor(message: Message): String = message.fileName?.takeIf { it.isNotBlank() } ?: "Document"
+        fun displayNameFor(message: Message): String = message.fileName?.takeIf { it.isNotBlank() } ?: UNNAMED_FILE
     }
 }

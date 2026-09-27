@@ -179,11 +179,13 @@ import com.firestream.chat.ui.theme.FsSurface3
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.Locale
@@ -680,7 +682,9 @@ fun ChatScreen(
             FileAction.SHARE -> FileIntents.share(context, launch.file)
             else -> FileIntents.open(context, launch.file)
         }
-        if (!shown) snackbarHostState.showSnackbar("No app can open this file", duration = SnackbarDuration.Short)
+        // The chooser itself says when no app handles the type; this is the rarer
+        // case of a file the provider would not grant.
+        if (!shown) snackbarHostState.showSnackbar("Couldn't open the file", duration = SnackbarDuration.Short)
     }
     LaunchedEffect(Unit) {
         viewModel.fileLaunches.collect { launch ->
@@ -891,7 +895,9 @@ fun ChatScreen(
     // A picked file waits in SendFileSheet for the user to confirm (and caption) it.
     var pendingFile by rememberSaveable(stateSaver = PendingFile.Saver) { mutableStateOf<PendingFile?>(null) }
     val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let { pendingFile = PendingFile.describe(context, it) }
+        uri?.let { picked ->
+            fileLaunchScope.launch { pendingFile = withContext(Dispatchers.IO) { PendingFile.describe(context, picked) } }
+        }
     }
 
     val cameraPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -1329,6 +1335,8 @@ fun ChatScreen(
                                     else -> 4.dp
                                 }
                                 val isOwn = message.senderId == uiState.session.currentUserId
+                                // A file the long-press menu can still save or share.
+                                val hasLiveFile = message.type == MessageType.DOCUMENT && message.deletedAt == null
                                 val replyToMessage = message.replyToId?.let { messagesById[it] }
                                 val linkPreview = uiState.overlays.linkPreviews[message.id]
 
@@ -1432,10 +1440,10 @@ fun ChatScreen(
                                                 onSaveImage = if (message.type == MessageType.IMAGE) {
                                                     { viewModel.saveImageToDownloads(message.localUri, message.mediaUrl) }
                                                 } else null,
-                                                onSaveFile = if (message.type == MessageType.DOCUMENT && message.deletedAt == null) {
+                                                onSaveFile = if (hasLiveFile) {
                                                     { viewModel.saveFileToDownloads(message) }
                                                 } else null,
-                                                onShareFile = if (message.type == MessageType.DOCUMENT && message.deletedAt == null) {
+                                                onShareFile = if (hasLiveFile) {
                                                     { viewModel.shareFile(message) }
                                                 } else null,
                                                 onReplyPreviewClick = {

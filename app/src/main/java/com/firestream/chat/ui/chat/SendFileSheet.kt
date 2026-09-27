@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.util.FileKind
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
+import com.firestream.chat.domain.util.UNNAMED_FILE
 import com.firestream.chat.domain.util.formatFileSize
 
 /** A file picked from the attachment sheet, waiting for the user to confirm the send. */
@@ -54,7 +55,13 @@ internal data class PendingFile(val uri: Uri, val mimeType: String, val name: St
             },
         )
 
-        /** What the picker's provider says about [uri]: its name and size, when it answers. */
+        /**
+         * What the picker's provider says about [uri]: its name and size, when it
+         * answers. A provider query — call it off the main thread. The same query
+         * as `DocumentFiles.describe`, which the UI cannot reach (UI→data rule,
+         * ArchitectureTest); the repository reads it again at send, so the two can
+         * never disagree about what is sent.
+         */
         fun describe(context: Context, uri: Uri): PendingFile {
             val resolver = context.contentResolver
             var name: String? = null
@@ -87,10 +94,11 @@ internal fun SendFileSheet(
     file: PendingFile,
     onDismiss: () -> Unit,
     onSend: (caption: String) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     var caption by rememberSaveable(file.uri) { mutableStateOf("") }
     val kind = remember(file) { file.kind }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(onDismissRequest = onDismiss, modifier = modifier) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -100,16 +108,17 @@ internal fun SendFileSheet(
             Text(text = "Send file", style = MaterialTheme.typography.titleMedium)
             Spacer(modifier = Modifier.height(16.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                FileBadge(kind = kind)
+                FileBadge(kind = kind, label = FileKind.badgeLabel(file.mimeType, file.name))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = file.name ?: "Document",
+                        text = file.name ?: UNNAMED_FILE,
                         style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                         maxLines = 2,
                         overflow = TextOverflow.MiddleEllipsis,
                     )
                     Text(
-                        text = listOfNotNull(kind.label, file.size?.let(::formatFileSize)).joinToString(" · "),
+                        text = listOfNotNull(FileKind.badgeLabel(file.mimeType, file.name), file.size?.let(::formatFileSize))
+                            .joinToString(" · "),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

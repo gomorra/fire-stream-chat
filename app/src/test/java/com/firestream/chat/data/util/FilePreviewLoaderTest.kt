@@ -113,4 +113,20 @@ class FilePreviewLoaderTest {
 
         assertEquals(FilePreview.None, loader.load(broken.path, FileKind.PDF))
     }
+
+    // Regression: the page was rendered with no transform, which stretches it to
+    // fill the clamped bitmap — a long receipt came out squashed.
+    @Test
+    fun `a page is scaled uniformly, and only its height is clamped`() {
+        val (letterHeight, letterScale) = loader.thumbnailGeometry(612, 792)
+        assertEquals(931, letterHeight)
+        assertEquals(720f / 612, letterScale, 0.0001f)
+
+        val (receiptHeight, receiptScale) = loader.thumbnailGeometry(200, 2_000)
+        assertEquals("cut at three times the width", 720 * 3, receiptHeight)
+        assertEquals("not squashed to fit", 720f / 200, receiptScale, 0.0001f)
+
+        val (bannerHeight, _) = loader.thumbnailGeometry(2_000, 200)
+        assertEquals("a wide page sits on white at least half as tall as wide", 360, bannerHeight)
+    }
 }

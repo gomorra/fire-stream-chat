@@ -18,6 +18,7 @@ package com.firestream.chat.data.util
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -105,14 +106,18 @@ class FilePreviewLoader @Inject constructor(
             PdfRenderer(descriptor).use { renderer ->
                 if (renderer.pageCount == 0) return null
                 renderer.openPage(0).use { page ->
-                    val aspect = (page.width.toFloat() / page.height.coerceAtLeast(1)).coerceIn(MIN_ASPECT, MAX_ASPECT)
-                    val bitmap = Bitmap.createBitmap(THUMBNAIL_WIDTH, (THUMBNAIL_WIDTH / aspect).toInt(), Bitmap.Config.ARGB_8888)
+                    val (height, scale) = thumbnailGeometry(page.width, page.height)
+                    val bitmap = Bitmap.createBitmap(THUMBNAIL_WIDTH, height, Bitmap.Config.ARGB_8888)
                     try {
                         bitmap.eraseColor(Color.WHITE)
-                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        // One scale for both axes, the page's top-left at the bitmap's: a
+                        // page taller than the clamp is cut at the bottom, a wider one sits
+                        // on white — never stretched (render() fills the bitmap without it).
+                        val transform = Matrix().apply { setScale(scale, scale) }
+                        page.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                         val out = File(thumbnailDir.apply { mkdirs() }, "${Integer.toHexString(key.hashCode())}.jpg")
                         out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, THUMBNAIL_QUALITY, it) }
-                        RenderedPage(out.path, aspect, renderer.pageCount)
+                        RenderedPage(out.path, THUMBNAIL_WIDTH.toFloat() / height, renderer.pageCount)
                     } finally {
                         bitmap.recycle()
                     }
@@ -122,6 +127,18 @@ class FilePreviewLoader @Inject constructor(
     } catch (e: Exception) {
         Log.w(TAG, "No first page for ${file.name}", e)
         null
+    }
+
+    /**
+     * The thumbnail's height and the page's scale into it, for a page of
+     * [pageWidth] by [pageHeight] points: the page fills the width, and the
+     * height follows it within [MIN_THUMBNAIL_HEIGHT]..[MAX_THUMBNAIL_HEIGHT].
+     */
+    internal fun thumbnailGeometry(pageWidth: Int, pageHeight: Int): Pair<Int, Float> {
+        val scale = THUMBNAIL_WIDTH.toFloat() / pageWidth.coerceAtLeast(1)
+        val height = (pageHeight * scale).toInt()
+            .coerceIn(MIN_THUMBNAIL_HEIGHT, MAX_THUMBNAIL_HEIGHT)
+        return height to scale
     }
 
     /** A cached PDF preview whose thumbnail the system has since purged from the cache dir is rebuilt. */
@@ -142,7 +159,7 @@ class FilePreviewLoader @Inject constructor(
 
     private fun keyOf(file: File) = "${file.path}|${file.lastModified()}"
 
-    private companion object {
+    internal companion object {
         const val TAG = "FilePreviewLoader"
         const val CACHE_ENTRIES = 64
         const val THUMBNAIL_DIR = "file_previews"
@@ -150,8 +167,8 @@ class FilePreviewLoader @Inject constructor(
         const val THUMBNAIL_WIDTH = 720
         const val THUMBNAIL_QUALITY = 85
         const val A4_ASPECT = 0.707f
-        // A landscape slide at most twice as wide as tall, a receipt at most three times as tall.
-        const val MIN_ASPECT = 1f / 3f
-        const val MAX_ASPECT = 2f
+        // A landscape slide gets at least half the width in height, a receipt at most three times it.
+        const val MIN_THUMBNAIL_HEIGHT = THUMBNAIL_WIDTH / 2
+        const val MAX_THUMBNAIL_HEIGHT = THUMBNAIL_WIDTH * 3
     }
 }

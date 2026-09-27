@@ -46,6 +46,7 @@ import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.util.FileKind
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
@@ -157,7 +158,7 @@ class OutboxSender @Inject constructor(
 
         val row = when (stored.type) {
             MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored)
-            MessageType.DOCUMENT -> keepDocument(prepareMedia(stored))
+            MessageType.DOCUMENT -> keepDocument(prepareMedia(withAudioDuration(stored)))
             MessageType.VOICE -> uploadIfNeeded(stored, VOICE_MIME_TYPE)
             else -> stored
         }
@@ -285,6 +286,19 @@ class OutboxSender @Inject constructor(
             row.mimeType ?: row.localUri?.let(outboxFiles::mimeTypeOf) ?: FALLBACK_MIME_TYPE
         }
         return uploadIfNeeded(row, uploadMimeType)
+    }
+
+    /**
+     * An audio document's playing time, read from its staged copy and persisted
+     * like any other step, so the receiver's inline player shows the length
+     * before it is played. Here rather than before the optimistic insert: it
+     * reads a local file, not the picker's provider. Skipped once recorded.
+     */
+    private suspend fun withAudioDuration(row: Message): Message {
+        if (row.duration != null || FileKind.of(row.mimeType, row.fileName) != FileKind.AUDIO) return row
+        val localUri = row.localUri ?: return row
+        val seconds = documentFiles.audioDurationSeconds(localUri) ?: return row
+        return persist(row.copy(duration = seconds))
     }
 
     /**
