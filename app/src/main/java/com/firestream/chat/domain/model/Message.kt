@@ -58,4 +58,10 @@ data class Message(
     // `resolveTimerAlarmStyle`, so nothing above that layer sees a legacy timer.
     val timerAlarmStyle: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
     val timerAlarmSound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
+    // A DOCUMENT's identity as the sender picked it — display name, byte size and
+    // mime type. Null for every other type and for documents sent before these
+    // fields existed (whose `content` may still hold a caption, never the name).
+    val fileName: String? = null,
+    val fileSize: Long? = null,
+    val mimeType: String? = null,
 )

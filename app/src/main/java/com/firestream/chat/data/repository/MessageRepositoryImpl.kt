@@ -60,6 +60,7 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
@@ -171,6 +172,7 @@ class MessageRepositoryImpl @Inject constructor(
     private val sendClock: SendClock,
     private val activeChatTracker: ActiveChatTracker,
     private val mediaBackfillScheduler: MediaBackfillScheduler,
+    private val documentFiles: DocumentFiles,
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -571,7 +573,15 @@ class MessageRepositoryImpl @Inject constructor(
      *   the global preference, so a caller that never offers the choice — the
      *   share sheet, a retry — behaves exactly as it did before per-image HD.
      */
-    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
+    override suspend fun sendMediaMessage(
+        chatId: String,
+        uri: String,
+        mimeType: String,
+        recipientId: String,
+        caption: String,
+        isHd: Boolean?,
+        fileName: String?,
+    ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
@@ -593,6 +603,16 @@ class MessageRepositoryImpl @Inject constructor(
         // Guard BEFORE the optimistic insert: reject over-limit videos so no dead
         // SENDING row is left behind. MediaLimitException maps to AppError.Validation.
         if (isVideo) videoTranscoder.ensureWithinLimits(Uri.parse(uri))
+        // A document's name, size and type travel with it — the bubble's card, the
+        // receiver's file extension and the Open-with chooser all read them. Read
+        // before the insert, like the video guard above: the row is written whole
+        // (a later column update would race the worker), and the size is what the
+        // document size limit checks. One provider metadata query, not the bytes.
+        val document = if (messageType == MessageType.DOCUMENT) {
+            documentFiles.describe(uri).let { info -> fileName?.let { info.copy(name = it) } ?: info }
+        } else {
+            null
+        }
 
         // Insert the optimistic row BEFORE any IO so the bubble appears immediately
         // and survives a downstream failure (e.g. concurrent-compression OOM when
@@ -609,7 +629,10 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             mediaWidth = null,
             mediaHeight = null,
-            isHd = sendAsHd
+            isHd = sendAsHd,
+            fileName = document?.name,
+            fileSize = document?.size,
+            mimeType = mimeType.takeIf { document != null },
         )
         val row = MessageEntity.outbox(placeholder, SendTarget.of(recipientId))
         messageDao.insertOutbox(row)
@@ -1368,6 +1391,9 @@ class MessageRepositoryImpl @Inject constructor(
         timerRemainingMs = timerRemainingMs,
         timerAlarmStyle = resolveTimerAlarmStyle(timerAlarmStyle, timerSilent),
         timerAlarmSound = resolveTimerAlarmSound(timerAlarmSound),
+        fileName = fileName,
+        fileSize = fileSize,
+        mimeType = mimeType,
     )
 
     private fun downloadPendingMediaForChat(chatId: String) {
@@ -1415,7 +1441,9 @@ class MessageRepositoryImpl @Inject constructor(
         for (entity in pending) {
             try {
                 val url = entity.mediaUrl ?: continue
-                val file = mediaFileManager.downloadAndSave(chatId, entity.id, url)
+                val file = mediaFileManager.downloadFor(
+                    chatId, entity.id, parseMessageType(entity.type), url, entity.fileName, entity.mimeType,
+                )
                 messageDao.updateLocalUri(entity.id, file.absolutePath)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -1438,8 +1466,8 @@ class MessageRepositoryImpl @Inject constructor(
                     return@launch
                 }
 
-                val file = mediaFileManager.downloadAndSave(
-                    message.chatId, message.id, message.mediaUrl!!
+                val file = mediaFileManager.downloadFor(
+                    message.chatId, message.id, message.type, message.mediaUrl!!, message.fileName, message.mimeType,
                 )
                 messageDao.updateLocalUri(message.id, file.absolutePath)
             } catch (e: Exception) {

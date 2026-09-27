@@ -72,6 +72,9 @@ erDiagram
         String localUri
         Int mediaWidth
         Int mediaHeight
+        String fileName
+        Long fileSize
+        String mimeType
         Long timestamp
         Long editedAt
         Boolean isStarred

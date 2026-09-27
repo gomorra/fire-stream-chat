@@ -1,5 +1,6 @@
 package com.firestream.chat.data.remote.firebase
 
+import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.domain.model.MessageType
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
@@ -70,6 +71,37 @@ class FirestoreMessageSourceTest {
         verify(exactly = 0) { firestore.waitForPendingWrites() }
         // The one transaction is the chat preview's; the message itself is not written in one.
         assertEquals(1, transactions.size)
+    }
+
+    @Test
+    fun `a document's name, size and type are written beside its media url`() = runTest {
+        val written = slot<Map<String, Any?>>()
+        every { messageRef.set(capture(written)) } returns setTask
+
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "", type = MessageType.DOCUMENT, replyToId = null, timestamp = 1L,
+            mediaUrl = "https://storage.example/doc1.pdf",
+            file = FileMetadata("Report.pdf", 48_213L, "application/pdf"),
+        )
+
+        assertEquals("Report.pdf", written.captured["fileName"])
+        assertEquals(48_213L, written.captured["fileSize"])
+        assertEquals("application/pdf", written.captured["mimeType"])
+    }
+
+    @Test
+    fun `a message without a file writes no file fields`() = runTest {
+        val written = slot<Map<String, Any?>>()
+        every { messageRef.set(capture(written)) } returns setTask
+
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "hi", type = MessageType.TEXT, replyToId = null, timestamp = 1L,
+        )
+
+        assertFalse(written.captured.containsKey("fileName"))
+        assertFalse(written.captured.containsKey("mimeType"))
     }
 
     // The chat document is readable by the server like the message document; a
@@ -366,6 +398,28 @@ class FirestoreMessageSourceTest {
         assertEquals("peer1", raw.senderId)
         assertEquals("https://firebasestorage.example/msg1.jpg", raw.mediaUrl)
         assertFalse(raw.hasPendingWrites)
+    }
+
+    @Test
+    fun `a read carries a document's name, size and type`() = runTest {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.id } returns "msg1"
+        every { doc.data } returns mapOf(
+            "senderId" to "peer1", "type" to "DOCUMENT", "content" to "",
+            "mediaUrl" to "https://firebasestorage.example/msg1.pdf", "timestamp" to 5L,
+            "fileName" to "Report.pdf", "fileSize" to 48_213L, "mimeType" to "application/pdf",
+        )
+        every { doc.metadata.hasPendingWrites() } returns false
+        val getTask = mockk<Task<DocumentSnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns doc
+        every { messageRef.get() } returns getTask
+
+        val raw = source.fetchMessage("chat1", "msg1")!!
+
+        assertEquals("Report.pdf", raw.fileName)
+        assertEquals(48_213L, raw.fileSize)
+        assertEquals("application/pdf", raw.mimeType)
     }
 
     @Test

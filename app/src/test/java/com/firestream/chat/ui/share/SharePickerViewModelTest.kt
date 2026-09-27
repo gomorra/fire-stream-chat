@@ -133,6 +133,30 @@ class SharePickerViewModelTest {
         assertEquals("", messageRepository.lastSentRecipientId)
     }
 
+    // Regression: the share sheet's cache copy is named by a random id, so a
+    // shared document went out as "3f2a….pdf" instead of its own name.
+    @Test
+    fun `a shared document is sent under its original name, not the cache copy's`() = runTest {
+        every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
+        coEvery { shareContentResolver.resolve(any()) } returns SharedContent.Media(
+            items = listOf(
+                SharedContent.Media.MediaItem(
+                    cachedUri = "file:///cache/shared_media/3f2a9c.pdf",
+                    mimeType = "application/pdf",
+                    fileName = "Quarterly report.pdf"
+                )
+            )
+        )
+
+        val viewModel = buildViewModel()
+        advanceUntilIdle()
+        viewModel.toggleChatSelection(individualChat.id)
+        viewModel.send { _, _ -> }
+        advanceUntilIdle()
+
+        assertEquals("Quarterly report.pdf", messageRepository.sentMedia.single().fileName)
+    }
+
     @Test
     fun `send video shared content routes to sendMediaMessage with video mime`() = runTest {
         every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()

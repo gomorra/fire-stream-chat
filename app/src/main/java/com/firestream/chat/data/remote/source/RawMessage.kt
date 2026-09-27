@@ -60,5 +60,8 @@ data class RawMessage(
     val timerSilent: Boolean = false,
     val timerAlarmStyle: String? = null,
     val timerAlarmSound: String? = null,
+    val fileName: String? = null,
+    val fileSize: Long? = null,
+    val mimeType: String? = null,
     val hasPendingWrites: Boolean = false,
 )

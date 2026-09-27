@@ -13,6 +13,7 @@ import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.ImageResult
+import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoMetadata
 import com.firestream.chat.data.util.VideoResult
@@ -59,6 +60,7 @@ class OutboxSenderTest {
     private val mediaFileManager = mockk<MediaFileManager>()
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val outboxFiles = mockk<OutboxFiles>(relaxed = true)
+    private val documentFiles = mockk<DocumentFiles>(relaxed = true)
 
     /** The messages table, keyed by id. */
     private val rows = mutableMapOf<String, MessageEntity>()
@@ -172,7 +174,7 @@ class OutboxSenderTest {
     private fun newSender(buildEncrypts: Boolean) = OutboxSender(
         messageDao, chatDao, messageSource, storageSource,
         MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts),
-        outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore,
+        outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore, documentFiles,
     )
 
     /** Records every plaintext write in [writes]. A test that stubs a failing write calls it again to recover. */
@@ -184,7 +186,7 @@ class OutboxSenderTest {
                 mediaUrl = arg(7),
                 mediaThumbnailUrl = arg(8),
                 duration = arg(10),
-                ifAbsent = arg(18),
+                ifAbsent = arg(19),
             )
             arg<String>(2)
         }
@@ -200,7 +202,7 @@ class OutboxSenderTest {
                 mediaUrl = arg(8),
                 mediaThumbnailUrl = arg(9),
                 duration = arg(11),
-                ifAbsent = arg(19),
+                ifAbsent = arg(20),
                 ciphertext = arg(3),
                 ciphertextOnRow = rows[id]?.outboxCiphertext,
             )
@@ -211,13 +213,13 @@ class OutboxSenderTest {
     /** Any plaintext write, positional in `MessageSource.sendPlainMessage` order. */
     private suspend fun MockKMatcherScope.anyPlainWrite() = messageSource.sendPlainMessage(
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Any encrypted write, positional in `MessageSource.sendMessage` order. */
     private suspend fun MockKMatcherScope.anyEncryptedWrite() = messageSource.sendMessage(
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Inserts [message] as the repository does, recording its target — and, for a re-attempt, earlier runs. */
@@ -334,7 +336,7 @@ class OutboxSenderTest {
     fun `a write whose row was deleted meanwhile does not undelete it, and leaves the tombstone owed`() = runTest {
         store(sending("msg1", MessageType.TEXT))
         coEvery { anyPlainWrite() } answers {
-            writes += Write(arg(2), arg(4), arg(7), arg(8), arg(10), ifAbsent = arg(18))
+            writes += Write(arg(2), arg(4), arg(7), arg(8), arg(10), ifAbsent = arg(19))
             rows["msg1"] = rows.getValue("msg1").let { it.copy(record = it.record.copy(deletedAt = 5_000L, content = "")) }
             arg<String>(2)
         }
@@ -768,18 +770,49 @@ class OutboxSenderTest {
 
     // ── documents and voice ─────────────────────────────────────────────────
 
-    // The picked type travels as the staged copy's extension, so a retry — which
-    // has only the row — uploads a document under the right type too.
+    // A row queued before `mimeType` was a column: the picked type travels as the
+    // staged copy's extension, so a retry — which has only the row — uploads it
+    // under the right type too.
     @Test
-    fun `a document uploads under the type its staged copy carries, and its SENT row drops the copy`() = runTest {
-        every { outboxFiles.mimeTypeOf("/data/outbox/doc1.pdf") } returns "application/pdf"
-        store(sending("doc1", MessageType.DOCUMENT, localUri = "/data/outbox/doc1.pdf"), attempts = 1)
+    fun `a legacy document uploads under the type its staged copy carries`() = runTest {
+        val staged = "/data/outbox/doc1.pdf"
+        every { outboxFiles.mimeTypeOf(staged) } returns "application/pdf"
+        every { outboxFiles.isStaged(staged) } returns true
+        // An earlier run already moved it: nothing left to move, and SENT drops the path.
+        coEvery { documentFiles.adopt("doc1", staged, null, null) } returns null
+        every { outboxFiles.isDurable(staged) } returns false
+        store(sending("doc1", MessageType.DOCUMENT, localUri = staged), attempts = 1)
 
         sender.send("doc1")
 
         assertEquals(listOf(Upload("doc1", "application/pdf", reportsProgress = true)), uploads)
-        assertNull("the staged copy is deleted; the media backfill fetches a durable one", stored("doc1").localUri)
+        assertNull(stored("doc1").localUri)
         coVerify(exactly = 1) { outboxFiles.delete("doc1") }
+    }
+
+    // The sender keeps its own document: the uploaded staged copy moves into the
+    // documents dir, so there is a file to open without downloading it back.
+    @Test
+    fun `a document uploads under its picked type and its SENT row keeps the moved copy`() = runTest {
+        val staged = "/data/outbox/doc1.bin"
+        val kept = "/data/documents/doc1.docx"
+        val docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        every { outboxFiles.isStaged(staged) } returns true
+        every { outboxFiles.isDurable(kept) } returns true
+        coEvery { documentFiles.adopt("doc1", staged, "Plan.docx", docx) } returns kept
+        store(
+            sending("doc1", MessageType.DOCUMENT, localUri = staged)
+                .copy(fileName = "Plan.docx", fileSize = 2_048L, mimeType = docx),
+        )
+
+        sender.send("doc1")
+
+        assertEquals(listOf(Upload("doc1", docx, reportsProgress = true)), uploads)
+        val sent = stored("doc1")
+        assertEquals(kept, sent.localUri)
+        assertEquals("Plan.docx", sent.fileName)
+        assertEquals(2_048L, sent.fileSize)
+        coVerify(exactly = 1) { messageDao.updateLocalUri("doc1", kept) }
     }
 
     @Test
@@ -824,6 +857,8 @@ class OutboxSenderTest {
         assertEquals(MessageStatus.SENT, stored("msg1").status)
         assertNull("out of the outbox", rows.getValue("msg1").outboxRecipientId)
         coVerify(exactly = 1) { outboxFiles.delete("msg1") }
+        // A document an earlier run moved out of the outbox goes too, by this id.
+        coVerify(exactly = 1) { documentFiles.discard("msg1") }
     }
 
     @Test

@@ -115,6 +115,9 @@ interface MessageColumns {
     val timerRemainingMs: Long?
     val timerAlarmStyle: String
     val timerAlarmSound: String
+    val fileName: String?
+    val fileSize: Long?
+    val mimeType: String?
 }
 
 /**
@@ -163,6 +166,9 @@ data class MessageRecord(
     // fall back from. Legacy resolution belongs at the remote boundary only.
     override val timerAlarmStyle: String = TimerAlarmStyle.DEFAULT.name,
     override val timerAlarmSound: String = TimerAlarmSound.DEFAULT.name,
+    override val fileName: String? = null,
+    override val fileSize: Long? = null,
+    override val mimeType: String? = null,
 ) : MessageColumns {
 
     /** The domain message, with the local columns the caller holds beside this record. */
@@ -203,6 +209,9 @@ data class MessageRecord(
         timerRemainingMs = timerRemainingMs,
         timerAlarmStyle = parseTimerAlarmStyle(timerAlarmStyle) ?: TimerAlarmStyle.DEFAULT,
         timerAlarmSound = parseTimerAlarmSound(timerAlarmSound) ?: TimerAlarmSound.DEFAULT,
+        fileName = fileName,
+        fileSize = fileSize,
+        mimeType = mimeType,
     )
 
     companion object {
@@ -242,6 +251,9 @@ data class MessageRecord(
             timerRemainingMs = message.timerRemainingMs,
             timerAlarmStyle = message.timerAlarmStyle.name,
             timerAlarmSound = message.timerAlarmSound.name,
+            fileName = message.fileName,
+            fileSize = message.fileSize,
+            mimeType = message.mimeType,
         )
 
         private fun pollToJson(poll: Poll): String {

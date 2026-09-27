@@ -4,7 +4,9 @@
 //   write, the SENT transaction and the chat preview. Reads the row and skips
 //   every step it already records, so a first attempt and a retry run the same
 //   code. Which file the media dir keeps for an image — the encoding, or under
-//   "Keep Original Images" the input — is decided here too. Covers TEXT, IMAGE,
+//   "Keep Original Images" the input — is decided here too, and so is moving an
+//   uploaded document's staged copy into the documents dir, so the sender keeps
+//   a file to open (keepDocument). Covers TEXT, IMAGE,
 //   VIDEO, DOCUMENT, VOICE, LOCATION (SENDABLE_TYPES), and the tombstone of a
 //   row deleted while it was queued.
 // Owns: uploadProgress (MessageRepository re-exposes it); the outbox columns on
@@ -16,7 +18,7 @@
 // Collaborators: OutboxWorker (only caller — one run per attempt, online by
 //   constraint), MessageWriter, MessageDao, ChatDao, MessageSource, StorageSource,
 //   OutboxFiles, ImageCompressor, VideoTranscoder, MediaFileManager,
-//   PreferencesDataStore.
+//   PreferencesDataStore, DocumentFiles.
 // Don't put here: validation, the optimistic insert, staging the input, the
 //   block check and FAILED marking — they stay in MessageRepositoryImpl and
 //   OutboxWorker, where a definite block and an unanswerable block check part
@@ -36,6 +38,7 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.KeyedMutex
 import com.firestream.chat.data.util.MediaFileManager
@@ -105,6 +108,7 @@ class OutboxSender @Inject constructor(
     private val videoTranscoder: VideoTranscoder,
     private val mediaFileManager: MediaFileManager,
     private val preferencesDataStore: PreferencesDataStore,
+    private val documentFiles: DocumentFiles,
 ) {
 
     private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -152,7 +156,8 @@ class OutboxSender @Inject constructor(
         messageDao.incrementOutboxAttempts(messageId)
 
         val row = when (stored.type) {
-            MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT -> prepareMedia(stored)
+            MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored)
+            MessageType.DOCUMENT -> keepDocument(prepareMedia(stored))
             MessageType.VOICE -> uploadIfNeeded(stored, VOICE_MIME_TYPE)
             else -> stored
         }
@@ -171,9 +176,9 @@ class OutboxSender @Inject constructor(
                 id = remoteId,
                 status = MessageStatus.SENT,
                 // Kept only when it is a file the app keeps — the media dir copy an
-                // image or video was encoded into. A staged input (a document, a voice
-                // note) is deleted below, and the media backfill fetches a copy of a
-                // document; a picked URI would not outlive the process anyway.
+                // image or video was encoded into, a document moved into the documents
+                // dir (keepDocument). A staged input (a voice note) is deleted below;
+                // a picked URI would not outlive the process anyway.
                 localUri = row.localUri?.takeIf { outboxFiles.isDurable(it) },
             )
             // One transaction: the row as written, and out of the outbox — the stored
@@ -213,6 +218,10 @@ class OutboxSender @Inject constructor(
         if (entity.outboxAttempts > 0) messageSource.deleteIfExists(entity.chatId, entity.id, deletedAt)
         messageDao.acknowledge(entity.id, MessageStatus.SENT.name)
         outboxFiles.delete(entity.id)
+        // A document an earlier run already moved out of the outbox (keepDocument).
+        // By this message's id, so a queued forward — whose localUri is its
+        // source's file — never takes the source's copy with it.
+        documentFiles.discard(entity.id)
         return entity.toDomain().copy(status = MessageStatus.SENT)
     }
 
@@ -271,10 +280,25 @@ class OutboxSender @Inject constructor(
         val uploadMimeType = if (row.type in LOCAL_FILE_TYPES) {
             LocalFormat.of(row.type).mimeType
         } else {
-            // A document uploads under the type its staged copy's extension carries.
-            row.localUri?.let(outboxFiles::mimeTypeOf) ?: FALLBACK_MIME_TYPE
+            // A document uploads under the type it was picked as; a row from before
+            // that was a column, under the type its staged copy's extension carries.
+            row.mimeType ?: row.localUri?.let(outboxFiles::mimeTypeOf) ?: FALLBACK_MIME_TYPE
         }
         return uploadIfNeeded(row, uploadMimeType)
+    }
+
+    /**
+     * Moves an uploaded document's staged copy into the documents directory, so
+     * the sender keeps a file to open instead of downloading its own document
+     * back. A crash between the move and the column update leaves the row
+     * pointing at the vanished staged path; SENT then drops it as not durable
+     * and the auto-download fetches the copy — the old behaviour, not a loss.
+     */
+    private suspend fun keepDocument(row: Message): Message {
+        val staged = row.localUri?.takeIf { row.mediaUrl != null && outboxFiles.isStaged(it) } ?: return row
+        val kept = documentFiles.adopt(row.id, staged, row.fileName, row.mimeType) ?: return row
+        messageDao.updateLocalUri(row.id, kept)
+        return row.copy(localUri = kept)
     }
 
     /** Compresses an IMAGE or transcodes a VIDEO, then copies the result into the app's media dir. */

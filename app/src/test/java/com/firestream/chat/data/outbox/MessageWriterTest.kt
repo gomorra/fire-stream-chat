@@ -92,7 +92,7 @@ class MessageWriterTest {
                 type = any(), replyToId = any(), timestamp = any(), mediaUrl = any(), mediaThumbnailUrl = any(),
                 isForwarded = any(), duration = any(), mentions = any(), emojiSizes = any(),
                 mediaWidth = any(), mediaHeight = any(), latitude = any(), longitude = any(), isHd = any(),
-                ifAbsent = any(),
+                file = any(), ifAbsent = any(),
             )
         } returns "msg1"
 
@@ -105,7 +105,7 @@ class MessageWriterTest {
                 type = MessageType.TEXT, replyToId = null, timestamp = 1_000L, mediaUrl = null,
                 mediaThumbnailUrl = null, isForwarded = false, duration = null, mentions = emptyList(),
                 emojiSizes = emptyMap(), mediaWidth = null, mediaHeight = null,
-                latitude = null, longitude = null, isHd = false, ifAbsent = false,
+                latitude = null, longitude = null, isHd = false, file = null, ifAbsent = false,
             )
         }
     }
@@ -133,7 +133,7 @@ class MessageWriterTest {
                 mediaUrl = "https://storage.example/v", mediaThumbnailUrl = "https://storage.example/v_thumb",
                 isForwarded = true, duration = 12, mentions = emptyList(), emojiSizes = emptyMap(),
                 mediaWidth = 1280, mediaHeight = 720, latitude = null, longitude = null, isHd = true,
-                ifAbsent = true,
+                file = null, ifAbsent = true,
             )
         }
     }

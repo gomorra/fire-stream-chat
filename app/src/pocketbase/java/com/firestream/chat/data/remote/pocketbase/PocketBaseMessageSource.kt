@@ -24,6 +24,7 @@
 // endregion
 package com.firestream.chat.data.remote.pocketbase
 
+import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.domain.model.MessageStatus
@@ -119,6 +120,7 @@ class PocketBaseMessageSource @Inject constructor(
         latitude: Double?,
         longitude: Double?,
         isHd: Boolean,
+        file: FileMetadata?,
         ifAbsent: Boolean,
     ): String {
         // v0 pb_schema.json has no media_thumbnail field; the param is accepted
@@ -178,6 +180,7 @@ class PocketBaseMessageSource @Inject constructor(
         latitude: Double?,
         longitude: Double?,
         isHd: Boolean,
+        file: FileMetadata?,
         ifAbsent: Boolean,
     ): String = throw NotImplementedError(
         "encryption gated off in pocketbase flavor — MessageWriter should not reach here"
@@ -288,7 +291,7 @@ class PocketBaseMessageSource @Inject constructor(
      * v0 schema has no fields for: ciphertext, signalType, mediaThumbnailUrl,
      * editedAt, reactions, isForwarded, duration, readBy, deliveredTo,
      * pollData, mentions, deletedAt, emojiSizes, listId/listDiff, isPinned,
-     * mediaWidth/Height, latitude/longitude. They default to null/empty.
+     * mediaWidth/Height, latitude/longitude, fileName/fileSize/mimeType. They default to null/empty.
      */
     internal fun mapToRaw(record: JSONObject): RawMessage = RawMessage(
         id = record.optString("id"),

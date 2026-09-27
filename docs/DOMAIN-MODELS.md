@@ -46,6 +46,9 @@ data class Message(
     val localUri: String?,                   // local file path for media (offline-first)
     val mediaWidth: Int?,                    // original image width for aspect ratio
     val mediaHeight: Int?,                   // original image height for aspect ratio
+    val fileName: String?,                   // DOCUMENT: display name as picked (null for other types)
+    val fileSize: Long?,                     // DOCUMENT: size in bytes
+    val mimeType: String?,                   // DOCUMENT: type as picked
     val status: MessageStatus,   // SENDING | SENT | DELIVERED | READ | FAILED
     val replyToId: String?,
     val timestamp: Long,

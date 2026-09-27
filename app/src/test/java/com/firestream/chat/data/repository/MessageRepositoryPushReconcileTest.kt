@@ -81,12 +81,12 @@ class MessageRepositoryPushReconcileTest {
     fun `a pushed photo is written to Room and downloaded without the chat being open`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
         val saved = File("/storage/emulated/0/Pictures/FireStream Images/m1.jpg")
-        coEvery { mediaFileManager.downloadAndSave(CHAT, "m1", photoUrl("m1")) } returns saved
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } returns saved
 
         repository.reconcileFromPush(CHAT, "m1")
 
         coVerify(exactly = 1) { messageDao.upsertRecord(match { it.id == "m1" && it.mediaUrl == photoUrl("m1") }) }
-        coVerify(timeout = 2_000) { mediaFileManager.downloadAndSave(CHAT, "m1", photoUrl("m1")) }
+        coVerify(timeout = 2_000) { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) }
         coVerify(timeout = 2_000) { messageDao.updateLocalUri("m1", saved.absolutePath) }
     }
 
@@ -249,7 +249,7 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a failed auto-download queues the retry`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
-        coEvery { mediaFileManager.downloadAndSave(CHAT, "m1", photoUrl("m1")) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } throws IOException("network went away")
 
         repository.reconcileFromPush(CHAT, "m1")
 
@@ -260,7 +260,7 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a successful auto-download queues nothing`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
-        coEvery { mediaFileManager.downloadAndSave(CHAT, "m1", photoUrl("m1")) } returns File("/tmp/m1.jpg")
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } returns File("/tmp/m1.jpg")
 
         repository.reconcileFromPush(CHAT, "m1")
 
@@ -278,7 +278,7 @@ class MessageRepositoryPushReconcileTest {
         repository.reconcileFromPush(CHAT, "m1")
 
         coVerify(timeout = 2_000, exactly = 1) { mediaBackfillScheduler.retryDownloads() }
-        coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -291,7 +291,7 @@ class MessageRepositoryPushReconcileTest {
         repository.getMessages(CHAT).first()
 
         coVerify(timeout = 2_000, exactly = 1) { mediaBackfillScheduler.retryDownloads() }
-        coVerify(exactly = 0) { mediaFileManager.downloadAndSave(any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -310,7 +310,7 @@ class MessageRepositoryPushReconcileTest {
     fun `a per-chat scan with failures queues the retry once`() = runTest {
         val rows = listOf(pendingRow("a"), pendingRow("b"))
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat(CHAT) } returns rows
-        coEvery { mediaFileManager.downloadAndSave(CHAT, any(), any()) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any()) } throws IOException("network went away")
         coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
 
         repository.ensureLocalCopiesForChat(CHAT)
@@ -323,7 +323,7 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a scheduler failure does not fail the scan`() = runTest {
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat(CHAT) } returns listOf(pendingRow("a"))
-        coEvery { mediaFileManager.downloadAndSave(CHAT, any(), any()) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any()) } throws IOException("network went away")
         coEvery { mediaBackfillScheduler.retryDownloads() } throws IllegalStateException("WorkManager not initialised")
 
         repository.ensureLocalCopiesForChat(CHAT)

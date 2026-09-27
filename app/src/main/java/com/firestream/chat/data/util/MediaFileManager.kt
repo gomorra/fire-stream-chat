@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import com.firestream.chat.domain.model.MessageType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -12,6 +13,8 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
+import java.io.IOException
+import java.io.InputStream
 import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -20,7 +23,8 @@ import javax.inject.Singleton
 @Singleton
 class MediaFileManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val httpClient: OkHttpClient
+    private val httpClient: OkHttpClient,
+    private val documentFiles: DocumentFiles,
 ) {
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
@@ -49,28 +53,76 @@ class MediaFileManager @Inject constructor(
             val extension = extractExtension(mediaUrl)
             val localFile = getLocalFile(chatId, messageId, extension)
             if (localFile.exists()) return@withContext localFile
-
-            val myDeferred = CompletableDeferred<File>()
-            val existing = inFlightDownloads.putIfAbsent(messageId, myDeferred)
-            if (existing != null) return@withContext existing.await()
-
-            try {
-                val request = Request.Builder().url(mediaUrl).build()
-                httpClient.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
-                    val inputStream = response.body?.byteStream()
-                        ?: throw Exception("Empty response body")
-                    writeViaMediaStore(localFile.name, mimeFromExtension(extension), inputStream)
-                }
-                myDeferred.complete(localFile)
+            deduplicated(messageId) {
+                fetch(mediaUrl) { input -> writeViaMediaStore(localFile.name, mimeFromExtension(extension), input) }
                 localFile
-            } catch (e: Exception) {
-                myDeferred.completeExceptionally(e)
-                throw e
-            } finally {
-                inFlightDownloads.remove(messageId, myDeferred)
             }
         }
+
+    /**
+     * Downloads a message's media to where its [type] keeps it: a DOCUMENT into
+     * the app's documents directory ([DocumentFiles]) with plain file IO — the
+     * MediaStore image collection refuses any non-image type — and anything else
+     * through [downloadAndSave].
+     */
+    suspend fun downloadFor(
+        chatId: String,
+        messageId: String,
+        type: MessageType,
+        mediaUrl: String,
+        fileName: String?,
+        mimeType: String?,
+    ): File =
+        if (type == MessageType.DOCUMENT) {
+            downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl))
+        } else {
+            downloadAndSave(chatId, messageId, mediaUrl)
+        }
+
+    /** Downloads [mediaUrl] into [target] through a `.part` sibling, so a cut-off download never looks finished. */
+    private suspend fun downloadToFile(messageId: String, mediaUrl: String, target: File): File =
+        withContext(Dispatchers.IO) {
+            if (target.exists()) return@withContext target
+            deduplicated(messageId) {
+                val partial = File(target.parentFile, "${target.name}.part")
+                try {
+                    fetch(mediaUrl) { input -> partial.outputStream().use { input.copyTo(it) } }
+                    if (!partial.renameTo(target)) throw IOException("Cannot finish download of $messageId")
+                } finally {
+                    partial.delete()
+                }
+                target
+            }
+        }
+
+    /**
+     * Runs [download] for [messageId] unless one is already in flight, in which
+     * case its result is awaited instead — the auto-download, the chat-open scan
+     * and the backfill can all reach the same message at once.
+     */
+    private suspend fun deduplicated(messageId: String, download: suspend () -> File): File {
+        val myDeferred = CompletableDeferred<File>()
+        val existing = inFlightDownloads.putIfAbsent(messageId, myDeferred)
+        if (existing != null) return existing.await()
+        return try {
+            download().also(myDeferred::complete)
+        } catch (e: Exception) {
+            myDeferred.completeExceptionally(e)
+            throw e
+        } finally {
+            inFlightDownloads.remove(messageId, myDeferred)
+        }
+    }
+
+    /** GETs [mediaUrl] and hands the body to [write]; a non-2xx answer throws. */
+    private fun fetch(mediaUrl: String, write: (InputStream) -> Unit) {
+        val request = Request.Builder().url(mediaUrl).build()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")
+            val body = response.body ?: throw Exception("Empty response body")
+            body.byteStream().use(write)
+        }
+    }
 
     suspend fun saveToDownloads(localFile: File, mimeType: String): Uri =
         withContext(Dispatchers.IO) {

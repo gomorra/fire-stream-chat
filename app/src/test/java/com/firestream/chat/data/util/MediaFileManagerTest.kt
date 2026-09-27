@@ -13,7 +13,13 @@ import io.mockk.spyk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import com.firestream.chat.domain.model.MessageType
+import okhttp3.Call
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -46,7 +52,7 @@ class MediaFileManagerTest {
 
     @Before
     fun setUp() {
-        manager = MediaFileManager(context, httpClient)
+        manager = MediaFileManager(context, httpClient, DocumentFiles(context))
 
         // A real, readable temp file so the input stream copy works.
         sourceFile = File.createTempFile("mfm-test-", ".jpg").apply {
@@ -59,6 +65,32 @@ class MediaFileManagerTest {
     fun tearDown() {
         unmockkAll()
         sourceFile.delete()
+    }
+
+    // ── documents: private file, never MediaStore ─────────────────────────
+
+    // Regression: every DOCUMENT download went through MediaStore.Images, which
+    // refuses a non-image mime type — so no document ever got a local copy.
+    @Test
+    fun `a document downloads into the private documents dir without touching MediaStore`() = runTest {
+        val body = "hello, file".toByteArray()
+        val call = mockk<Call> {
+            every { execute() } returns Response.Builder()
+                .request(Request.Builder().url("https://storage.example/o/doc1.txt").build())
+                .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody())
+                .build()
+        }
+        every { httpClient.newCall(any()) } returns call
+
+        val file = manager.downloadFor(
+            "chat1", "doc1", MessageType.DOCUMENT, "https://storage.example/o/doc1.txt", "notes.txt", "text/plain",
+        )
+
+        assertEquals(File(realContext.filesDir, "documents/doc1.txt"), file)
+        assertEquals("hello, file", file.readText())
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+        file.delete()
     }
 
     // ── happy path: insert + write + clear IS_PENDING ─────────────────────

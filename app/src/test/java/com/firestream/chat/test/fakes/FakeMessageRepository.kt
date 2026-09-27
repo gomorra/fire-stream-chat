@@ -50,6 +50,7 @@ internal class FakeMessageRepository : MessageRepository {
         val caption: String,
         /** null = "follow the global preference"; see MessageRepository.sendMediaMessage. */
         val isHd: Boolean? = null,
+        val fileName: String? = null,
     )
 
     val sentMedia: MutableList<SentMedia> = mutableListOf()
@@ -179,13 +180,14 @@ internal class FakeMessageRepository : MessageRepository {
         recipientId: String,
         caption: String,
         isHd: Boolean?,
+        fileName: String?,
     ): Result<Message> {
         consumeFailure()?.let { return it }
         val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, content = caption)
         lastSentMessage = msg
         lastSentMimeType = mimeType
         lastSentRecipientId = recipientId
-        sentMedia += SentMedia(chatId, uri, mimeType, recipientId, caption, isHd)
+        sentMedia += SentMedia(chatId, uri, mimeType, recipientId, caption, isHd, fileName)
         return Result.success(msg)
     }
 

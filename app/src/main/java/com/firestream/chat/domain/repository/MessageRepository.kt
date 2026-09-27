@@ -23,7 +23,19 @@ interface MessageRepository {
      *   global "send images in HD" preference, which is what every caller that
      *   does not offer the choice wants.
      */
-    suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String = "", isHd: Boolean? = null): Result<Message>
+    /**
+     * [fileName] names a document whose [uri] no longer carries its name — a
+     * share-sheet cache copy is a random id; `null` reads the name off the uri.
+     */
+    suspend fun sendMediaMessage(
+        chatId: String,
+        uri: String,
+        mimeType: String,
+        recipientId: String,
+        caption: String = "",
+        isHd: Boolean? = null,
+        fileName: String? = null,
+    ): Result<Message>
     /**
      * Re-drive the send pipeline for a previously-failed message, mutating the
      * existing Room row in place (no new optimistic placeholder, no duplicate

@@ -15,6 +15,8 @@ import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.util.DocumentFiles
+import com.firestream.chat.data.util.DocumentInfo
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.worker.MediaBackfillScheduler
@@ -53,6 +55,7 @@ internal fun messageRepository(
     sendClock: SendClock = SendClock(),
     activeChatTracker: ActiveChatTracker = ActiveChatTracker(),
     mediaBackfillScheduler: MediaBackfillScheduler = mockk(relaxed = true),
+    documentFiles: DocumentFiles = mockk(relaxed = true) { coEvery { describe(any()) } returns DocumentInfo(null, null) },
 ) = MessageRepositoryImpl(
     messageDao = messageDao,
     chatDao = chatDao,
@@ -74,4 +77,5 @@ internal fun messageRepository(
     sendClock = sendClock,
     activeChatTracker = activeChatTracker,
     mediaBackfillScheduler = mediaBackfillScheduler,
+    documentFiles = documentFiles,
 )

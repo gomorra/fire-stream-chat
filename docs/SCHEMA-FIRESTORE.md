@@ -37,6 +37,7 @@ chats/{chatId}
     ├── senderId, content, type, status, timestamp
     ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
     ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight
+    ├── fileName, fileSize, mimeType            # DOCUMENT only — plaintext, like mediaUrl (docs/plans/file-handling.md)
     ├── localUri                                # NOT synced to Firestore — Room only
     ├── replyToId, isForwarded, isPinned, duration
     ├── editedAt, deletedAt

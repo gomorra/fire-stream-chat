@@ -62,6 +62,7 @@ interface MessageSource {
         latitude: Double? = null,
         longitude: Double? = null,
         isHd: Boolean = false,
+        file: FileMetadata? = null,
         ifAbsent: Boolean = false,
     ): String
 
@@ -84,6 +85,7 @@ interface MessageSource {
         latitude: Double? = null,
         longitude: Double? = null,
         isHd: Boolean = false,
+        file: FileMetadata? = null,
         ifAbsent: Boolean = false,
     ): String
 

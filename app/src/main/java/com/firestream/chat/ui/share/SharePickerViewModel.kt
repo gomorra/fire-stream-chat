@@ -209,11 +209,14 @@ class SharePickerViewModel @Inject constructor(
                 // still lets the rest through.
                 var firstFailure: Throwable? = null
                 content.items.forEach { item ->
+                    // The cache copy is named by a random id; the original name
+                    // is what a document is sent under.
                     messageRepository.sendMediaMessage(
                         chatId,
                         item.cachedUri,
                         item.mimeType,
-                        recipientId
+                        recipientId,
+                        fileName = item.fileName,
                     ).onFailure { e -> if (firstFailure == null) firstFailure = e }
                 }
                 firstFailure?.let { throw it }

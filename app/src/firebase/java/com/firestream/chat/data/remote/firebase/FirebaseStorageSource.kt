@@ -14,6 +14,7 @@ package com.firestream.chat.data.remote.firebase
 
 import android.net.Uri
 import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.util.DocumentFiles
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
@@ -45,7 +46,11 @@ class FirebaseStorageSource @Inject constructor(
         mimeType: String,
         onProgress: ((Float) -> Unit)?
     ): String {
-        val extension = mimeType.substringAfter("/")
+        // The object name's extension is how a receiver without a mime type (a
+        // message sent before `mimeType` was a field) types the file — so the
+        // platform's extension for it, never the raw subtype ("plain",
+        // "vnd.openxmlformats-officedocument…").
+        val extension = DocumentFiles.extensionFor(fileName = null, mimeType = mimeType, mediaUrl = null)
         val ref = storage.reference.child("media/$chatId/$messageId.$extension")
 
         suspendCancellableCoroutine { cont ->

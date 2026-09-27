@@ -19,6 +19,7 @@ import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
@@ -112,6 +113,7 @@ class MessageWriter internal constructor(
                 latitude = message.latitude,
                 longitude = message.longitude,
                 isHd = message.isHd,
+                file = FileMetadata.of(message),
                 ifAbsent = ifAbsent,
             )
         } else {
@@ -134,6 +136,7 @@ class MessageWriter internal constructor(
                 latitude = message.latitude,
                 longitude = message.longitude,
                 isHd = message.isHd,
+                file = FileMetadata.of(message),
                 ifAbsent = ifAbsent,
             )
         }

@@ -23,6 +23,7 @@
 package com.firestream.chat.data.remote.firebase
 
 import android.util.Log
+import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.TimerSendResult
@@ -267,6 +268,7 @@ class FirestoreMessageSource @Inject constructor(
         latitude: Double?,
         longitude: Double?,
         isHd: Boolean,
+        file: FileMetadata?,
         ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
@@ -290,6 +292,7 @@ class FirestoreMessageSource @Inject constructor(
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
+        putFileMetadata(data, file)
         writeMessage(chatId, messageId, data, ifAbsent)
 
         // The chat document is readable by the server like any other, so an
@@ -319,6 +322,7 @@ class FirestoreMessageSource @Inject constructor(
         latitude: Double?,
         longitude: Double?,
         isHd: Boolean,
+        file: FileMetadata?,
         ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
@@ -341,6 +345,7 @@ class FirestoreMessageSource @Inject constructor(
         if (latitude != null) data["latitude"] = latitude
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
+        putFileMetadata(data, file)
         writeMessage(chatId, messageId, data, ifAbsent)
 
         writeBackChatPreview(chatId, lastContentFor(type, content), timestamp, senderId)
@@ -718,8 +723,18 @@ class FirestoreMessageSource @Inject constructor(
             timerSilent = data["timerSilent"] as? Boolean ?: false,
             timerAlarmStyle = data["timerAlarmStyle"] as? String,
             timerAlarmSound = data["timerAlarmSound"] as? String,
+            fileName = data["fileName"] as? String,
+            fileSize = (data["fileSize"] as? Number)?.toLong(),
+            mimeType = data["mimeType"] as? String,
             hasPendingWrites = hasPendingWrites,
         )
+    }
+
+    private fun putFileMetadata(data: MutableMap<String, Any?>, file: FileMetadata?) {
+        if (file == null) return
+        file.name?.let { data["fileName"] = it }
+        file.size?.let { data["fileSize"] = it }
+        file.mimeType?.let { data["mimeType"] = it }
     }
 
     private fun parseIntFloatMap(raw: Any?): Map<Int, Float> {

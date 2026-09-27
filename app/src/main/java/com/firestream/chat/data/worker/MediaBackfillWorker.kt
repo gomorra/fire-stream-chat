@@ -11,6 +11,7 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.util.MediaFileManager
+import com.firestream.chat.data.util.parseMessageType
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -65,7 +66,9 @@ class MediaBackfillWorker @AssistedInject constructor(
         var done = 0
         for (msg in messages) {
             try {
-                val file = mediaFileManager.downloadAndSave(msg.chatId, msg.id, msg.mediaUrl!!)
+                val file = mediaFileManager.downloadFor(
+                    msg.chatId, msg.id, parseMessageType(msg.type), msg.mediaUrl!!, msg.fileName, msg.mimeType,
+                )
                 messageDao.updateLocalUri(msg.id, file.absolutePath)
             } catch (_: Exception) { }
             done++
