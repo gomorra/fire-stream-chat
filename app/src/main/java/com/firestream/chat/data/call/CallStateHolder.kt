@@ -22,6 +22,15 @@ class CallStateHolder @Inject constructor() {
         _callState.value = state
     }
 
+    /**
+     * Move to [next] only if the state is still [expected], as one step. For a writer that must
+     * not overwrite a state another thread set in the meantime.
+     *
+     * @return true when the state was changed.
+     */
+    fun compareAndSetState(expected: CallState, next: CallState): Boolean =
+        _callState.compareAndSet(expected, next)
+
     fun updateControls(controls: CallUiControls) {
         _uiControls.value = controls
     }

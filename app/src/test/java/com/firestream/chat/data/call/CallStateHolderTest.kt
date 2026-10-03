@@ -34,6 +34,22 @@ class CallStateHolderTest {
     }
 
     @Test
+    fun `compareAndSetState moves on only from the expected state`() {
+        val ringing = CallState.OutgoingRinging("call1", "user2", "Alice", null)
+        val connecting = CallState.Connecting("call1", "user2", "Alice", null)
+        val connected = CallState.Connected("call1", "user2", "Alice", null, 1L)
+        holder.updateState(ringing)
+
+        assertTrue(holder.compareAndSetState(ringing, connecting))
+        assertEquals(connecting, holder.callState.value)
+
+        // A late writer that still expects "ringing" must not undo a connect.
+        holder.updateState(connected)
+        assertFalse(holder.compareAndSetState(ringing, connecting))
+        assertEquals(connected, holder.callState.value)
+    }
+
+    @Test
     fun `toggleMute flips isMuted`() {
         assertFalse(holder.uiControls.value.isMuted)
         holder.toggleMute()

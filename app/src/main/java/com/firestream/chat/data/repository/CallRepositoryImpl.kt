@@ -6,7 +6,7 @@
 //   message stream (call-log entries). Stateless — call state itself lives in
 //   CallStateHolder + CallService, not here.
 // Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService.
-// Don't put here: PeerConnection lifecycle (CallService), in-call UI state
+// Don't put here: PeerConnection lifecycle (PeerSession), in-call UI state
 //   (CallStateHolder), call-log derivation (CallsViewModel).
 // endregion
 

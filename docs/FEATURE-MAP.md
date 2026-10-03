@@ -16,7 +16,10 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams, and the audio session (router + proximity lock) |
+| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns the call: intents, notification, ring timeout, call status, the local audio track, the audio session (router + proximity lock), and a map of `PeerSession`s |
+| `app/src/main/java/com/firestream/chat/data/call/PeerSession.kt` | One `PeerConnection` to one remote person — offer/answer, ICE candidates held until the remote description is set, duplicate filter, events through a channel |
+| `app/src/main/java/com/firestream/chat/data/call/PeerSignaling.kt` | What a session needs for one pair, and `OneToOneSignaling` over the call document |
+| `app/src/main/java/com/firestream/chat/data/call/IcePath.kt` | Pure — direct or relayed, from the selected candidate pair; logged on connect |
 | `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>` |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | `AudioManager.setCommunicationDevice()` wrapper — device callbacks, live `RouteState` |
@@ -34,6 +37,9 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
 | `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions |
+| `app/src/test/java/com/firestream/chat/data/call/PeerSessionTest.kt` | Offer and answer flow, held and duplicate candidates, events, failures, `close()` twice (MockK `PeerConnection`, fake `PeerSignaling`) |
+| `app/src/test/java/com/firestream/chat/data/call/OneToOneSignalingTest.kt` | Caller/callee → candidate subcollection, answer written with the status, offer fetch failures |
+| `app/src/test/java/com/firestream/chat/data/call/IcePathTest.kt` | Direct, relayed and unknown pairs |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |

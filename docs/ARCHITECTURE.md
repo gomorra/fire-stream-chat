@@ -101,7 +101,7 @@ The concrete implementation resolving the Repository Interfaces.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firestore, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: `SignalManager` and `SignalProtocolStoreImpl` orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
 - **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). Under the "Keep Original Images" preference `OutboxSender` uploads the encoding but copies the untouched input into the media dir as the message's local file, in one persisted step. `MediaBackfillWorker` (WorkManager) downloads whatever media has no local copy, respecting `AutoDownloadOption` and network constraints — daily as periodic work, on demand from Settings, and as the one-time run `MediaBackfillScheduler` queues when an auto-download fails, so a photo received while offline lands once there is a network again without the chat being opened (the push reconcile, `MessageRepository.reconcileFromPush`, is what gets such a message into Room in the first place).
-- **Call Infrastructure**: `CallService` (foreground service) owns the WebRTC peer connection lifecycle. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
+- **Call Infrastructure**: `CallService` (foreground service) owns the call and one `PeerSession` per remote person. Each `PeerSession` owns its WebRTC peer connection. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
 
 ### 3.3 UI / Presentation Layer
 
@@ -188,7 +188,9 @@ sequenceDiagram
 
 ### Call Architecture Details
 
-- **`CallService`** (foreground service): Owns the `PeerConnection` lifecycle, ICE negotiation, and audio stream management.
+- **`CallService`** (foreground service): Owns the call as a whole. That is the intents, the notification, the ring timeout, the status of the call document, the local audio track, the audio session, and a map of `PeerSession`s keyed by remote user id. A 1:1 call has one session.
+- **`PeerSession`**: Owns one `PeerConnection` to one remote person. It negotiates the offer and answer, holds remote ICE candidates until the remote description is set, and drops duplicates. It reports connected, disconnected, failed and remote-track events through a channel, so `CallService` reacts on its own scope. `PeerConnection.close()` waits for the WebRTC signalling thread, so a session is never closed from inside one of its own callbacks. On connect it logs whether the path is direct or relayed (`IcePath`).
+- **`PeerSignaling`**: What a session needs for one pair: send and observe the offer, the answer and the candidates. `OneToOneSignaling` implements it over `CallRepository` and maps caller and callee to the two candidate subcollections.
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
 - **`CallState`** (sealed interface): `Idle | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`.
@@ -382,7 +384,10 @@ graph TD
 com.firestream.chat/
 ├── data/
 │   ├── call/                    # WebRTC infrastructure
-│   │   ├── CallService.kt       # Foreground service — owns PeerConnection
+│   │   ├── CallService.kt       # Foreground service — owns the call and its PeerSessions
+│   │   ├── PeerSession.kt       # One PeerConnection to one remote person
+│   │   ├── PeerSignaling.kt     # Offer/answer/candidates for one pair + OneToOneSignaling
+│   │   ├── IcePath.kt           # Pure — direct or relayed, from the selected candidate pair
 │   │   ├── CallStateHolder.kt   # @Singleton state bridge (service ↔ UI)
 │   │   ├── CallNotificationManager.kt
 │   │   ├── CallAudioRoutePolicy.kt  # Pure — which route wins, TYPE_* → CallAudioRoute
