@@ -57,8 +57,9 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
 
 ## Open risks, each with the step that settles it
 
-1. **Folder access, and how many of the owner's files carry pack metadata, are unverified.**
-   Pre-flight below, then the checkpoint after step 2.
+1. **How many of the owner's files carry pack metadata is unverified, and so is the folder grant
+   from inside the app.** The folder itself is confirmed (pre-flight below). The checkpoint after
+   step 2 settles the rest.
 2. **Storage rules cannot check that a file matches its name.** A signed-in user could claim a hash
    with wrong bytes. Clients verify the hash on download and refuse a mismatch. Accepted for a
    closed user base; recorded in `TECH_DEBT.md` in step 3.
@@ -75,8 +76,9 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
    any signed-in user who has its id.
 10. **This is eleven steps.** Run it one checkpoint at a time.
 
-**Pre-flight (owner, 30 seconds):** in the phone's Files app open
-`Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers` and confirm it lists sticker files.
+**Pre-flight, done:** the owner opened
+`Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers` in the phone's Files app, and it lists
+sticker files.
 
 ## Prototype (done, throwaway branch, not a runner step)
 
