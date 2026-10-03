@@ -1,0 +1,9 @@
+{"type":"active_goal","session_id":"s-probe"}
+{"type":"system","subtype":"session_title_changed","session_id":"s-probe"}
+{"type":"autocompact_state","session_id":"s-probe"}
+{"type":"system","subtype":"init","session_id":"s-probe","claude_code_version":"2.1.288","model":"claude-haiku","permissionMode":"default"}
+{"type":"assistant","session_id":"s-probe"}
+{"type":"assistant","session_id":"s-probe"}
+{"type":"user","session_id":"s-probe"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793865600,"rateLimitType":"ccr_promotional","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0,"resetsAt":1791089400},"seven_day":{"utilization":0.17,"resetsAt":1791162000}}},"uuid":"u-rate","session_id":"s-probe"}
+{"type":"result","subtype":"success","is_error":false,"terminal_reason":"completed","api_error_status":null,"session_id":"s-probe","num_turns":2,"total_cost_usd":0.040910999999999996,"permission_denials":[],"result":"{\"ok\":true}","structured_output":{"ok":true},"stop_reason":"tool_use"}

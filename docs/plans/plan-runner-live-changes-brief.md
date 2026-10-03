@@ -75,7 +75,7 @@ Two things went wrong on 2026-10-03 and 2026-10-04.
 |---|---|---|
 | 15 | Evidence | Three sources, all real, none of them the CLI's message text. **(a) The stream.** `--output-format stream-json --verbose` carries objects with `rate_limit_info`. Fields seen in a cloud session's transcript at 23:02 UTC: `status` (`"rejected"`), `rateLimitType` (`"five_hour"`), `resetsAt` (epoch seconds), `isUsingOverage`, `overageStatus`, `overageDisabledReason`, `unifiedWindows`. **(b) The result.** A limit turn ends `subtype: "success"`, `is_error: true`, `api_error_status: 429`. The desktop session read this from the CLI's code; nobody has seen it live. **(c) The transcript.** The session transcript holds an assistant entry with `error: "rate_limit"`, `apiErrorStatus: 429` and `quotaLimits.resetsAt` (epoch seconds). The desktop session found 27 real entries (CLI 2.1.263–2.1.278), and `resetsAt` matched the "resets 9:40pm" text. The transcript is `${PLAN_RUNNER_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects/*/<session-id>.jsonl`. |
 | 16 | Output format | Sessions run with `--output-format stream-json --verbose`, written to `<result>.stream.jsonl`. The result file becomes the stream's last line whose `type` is `result`, so everything that reads result files today keeps working. |
-| 17 | What a limit stop is | Any of: (a) the newest `rate_limit_info` in the stream has `status: "rejected"`; (b) the result is `is_error: true` with `api_error_status: 429`; (c) the transcript's last main-chain assistant entry has `error == "rate_limit"`. `pr_result_kind` gains the kind `usage_limit` for (b). |
+| 17 | What a limit stop is | Any of: (a) the newest `rate_limit_info` in the stream has `status: "rejected"`, or one of its `unifiedWindows` has `utilization` ≥ 1; (b) the result is `is_error: true` with `api_error_status: 429`; (c) the transcript's last main-chain assistant entry has `error == "rate_limit"`. For (a) the reset time is the latest `resetsAt` among the windows at ≥ 1, else the top-level `resetsAt`. `pr_result_kind` gains the kind `usage_limit` for (b). |
 | 18 | The cloud case | A cloud session keeps running past the limit on cloud credits. Two sessions were seen on 2026-10-03 working while `rejected` with overage rejected. One of them was a runner step session. So the driver **stops the session itself** as soon as its stream says `rejected`, on a desktop and in a cloud container alike. It sends SIGTERM to the `claude` process, and SIGKILL ten seconds later if it is still alive. The stream is checked every `USAGE_POLL_S` (10 s). |
 | 19 | Reset time | The stream's `resetsAt`, else the transcript's `quotaLimits.resetsAt`, plus `USAGE_WAIT_SLACK_S` (90). With neither, wait `USAGE_WAIT_FALLBACK_S` (3600) and try. |
 | 20 | Ceiling and cap | A reset more than `USAGE_WAIT_MAX_S` (21600, six hours) away is not waited for. That is a weekly limit: exit 3, naming the reset time. At most `USAGE_RESUME_MAX` (6) waits per step, shared by its step, nudge, review and judge sessions. Past the cap: exit 3. |
@@ -112,7 +112,20 @@ Two things went wrong on 2026-10-03 and 2026-10-04.
   carries a 429 that nobody has checked against a real one.
 - **Step sessions may run the self-check.** `afd2940` added `selfcheck.sh` and `e2e.sh` to
   `ALLOWED_TOOLS`. Without that, every step of this plan would have been denied its own gate.
-- **Probe**: pending until the reset at 23:50 UTC. The planning session fills this in before the run.
+- **Probe** (23:51 UTC, CLI 2.1.288, this cloud container, Haiku, `-p --output-format stream-json
+  --verbose --json-schema`). A trimmed copy of the stream is `fixtures/stream-probe.jsonl`:
+  - The stream has nine lines: `active_goal`, `system`/`session_title_changed`, `autocompact_state`,
+    `system`/`init` (`session_id`), `assistant` ×2, `user`, `rate_limit_event`, `result`.
+  - `rate_limit_event` carries `rate_limit_info` at the top level. It came after the first
+    assistant turn, once per invocation. When a later one comes mid-session is not seen.
+  - The `result` line has the json format's fields, `structured_output` included.
+  - `--resume <id>` keeps the session id. `total_cost_usd` went from 0.0409 to 0.0478 over the
+    resume, so it is cumulative on this build.
+  - The transcript is `~/.claude/projects/<cwd slug>/<id>.jsonl`.
+  - After the reset, the event read `status: allowed`, `rateLimitType: "ccr_promotional"` (resets
+    2026-11-05) and `unifiedWindows.five_hour.utilization: 0`. At 23:02, with the five-hour window used
+    up, the same field read `five_hour` / `rejected`. Which pool pays in each state is not visible in
+    these fields. So the rule in §0 17 also reads the window utilization.
 
 ## 2. Design
 
@@ -154,8 +167,8 @@ and exit 0.
 1. Start `claude … --output-format stream-json --verbose` in the background from the session's cwd
    (`exec`, so `$!` is the `claude` process). The stream goes to `<out>.stream.jsonl` and stderr to
    `<out>.stderr`.
-2. Every `USAGE_POLL_S` while it runs, read the stream's newest limit state. On `rejected`, stop the
-   session (§0 18).
+2. Every `USAGE_POLL_S` while it runs, read the stream's newest limit state. When §0 17 (a) holds,
+   stop the session (§0 18).
 3. When it has exited, write the stream's last `result` line to `<out>`. Leave `<out>` empty when
    there is none.
 4. Classify (§0 17). A limit stop logs the interrupted result and `usage_limit`, renames the
@@ -167,8 +180,8 @@ and exit 0.
 `lib.sh` gains, each with `selfcheck.sh` cases and fixtures:
 - `pr_stream_result <stream>`: the last `result` line.
 - `pr_session_id <stream>`.
-- `pr_stream_limit <stream>`: `status resetsAt rateLimitType` of the newest `rate_limit_info` at any
-  depth, or nothing. It finds candidate lines with `grep -F '"rate_limit_info"'` and parses only the
+- `pr_stream_limit <stream>`: from the newest `rate_limit_info` at any depth, `limited <resetsAt>`
+  when §0 17 (a) holds, `open` when it does not, nothing when the stream has none. It finds candidate lines with `grep -F '"rate_limit_info"'` and parses only the
   last one, because the stream carries every tool output and grows to megabytes.
 - `pr_transcript_usage_limit <jsonl>`: exit 0 when the last main-chain assistant entry has
   `error == "rate_limit"`, and print `quotaLimits.resetsAt`. It reads with `jq -R 'fromjson?'` and no
@@ -219,8 +232,9 @@ What stays: a spent budget is blocked at once. The nudge and escalation ladder i
   line for a 429, because a 429 no longer reaches it.
 - `lib.sh`: the functions of §2.2. `pr_result_kind`'s comment records what was confirmed, how and
   on which build.
-- Fixtures: trimmed copies of the probe's stream (§1), one line per kind it showed;
+- Fixtures: `stream-probe.jsonl` (real, committed with this plan; §1);
   `stream-limit-rejected.jsonl` in the probe's line shape with §0 15 (a)'s fields;
+  `stream-window-full.jsonl` (`status: allowed`, `ccr_promotional`, `five_hour.utilization: 1`);
   `stream-killed.jsonl` (an `init` line, no result); `result-usage-limit.json` (§0 15 (b), marked as
   read from the code); `transcript-usage-limit.jsonl` and `transcript-resumed.jsonl` (§0 15 (c), ids
   and text made up, field names as recorded there).
