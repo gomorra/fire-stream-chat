@@ -44,7 +44,7 @@ phones, with auto-download on:
 
 ### Send addressing — the repository decides who a send is for (2026-10-03)
 
-Shipped on `plan/send-addressing` (`d63ae9b1`, `7abdf337`, `f411a330`, `58de0f05`); nothing has
+Shipped in 1.36.1 (`d63ae9b1`, `7abdf337`, `f411a330`, `58de0f05`); nothing has
 been on hardware. The JVM tests prove which target each row records. Only a device proves that
 the people a message is for can read it. Encryption is off in debug builds, so every check needs
 a **release build of the firebase flavor with the E2E toggle on** (Settings), on at least two
@@ -77,7 +77,7 @@ show the one nodding/shaking face, not 🙂 followed by an arrow.
 
 ### Call audio routes — Bluetooth and wired headsets (2026-09-20)
 
-Shipped on `plan/call-audio-routes-b` (`eb241341`, `81fab393`, `b1fbb029`); nothing has been on
+Shipped in 1.35.0 (`eb241341`, `81fab393`, `b1fbb029`); nothing has been on
 hardware. The Bluetooth path is **untestable on the emulator** — it has no Bluetooth stack, so no
 device ever appears in `availableCommunicationDevices` and the picker never shows a third row. The
 JVM tests cover the policy, the router's bookkeeping and the sheet's rows; none of them proves the
@@ -100,7 +100,7 @@ OS actually moves the audio. Needs the phone plus a Bluetooth headset and a wire
 
 ### The crop-shape pill, the preview rail's sizes, and the flash after an app switch (2026-09-19)
 
-Shipped on `claude/edit-image-zoomed-akt4mo`; nothing has been on hardware. Robolectric drives
+Shipped in 1.34.0 (`9e8c4d0`); nothing has been on hardware. Robolectric drives
 the pill and the transfer into Adjust through Coil on a synthetic JPEG, but not the frame's look
 over a real photo nor the feel of moving the photo under it. Check on a device:
 
@@ -133,13 +133,13 @@ recipient:
 2. Same photo sent HD → the recipient's copy is full size; yours is still the untouched
    file (compare byte sizes in Files: yours keeps the camera's EXIF block).
 3. Send a PNG or HEIC gallery pick → it must render in the bubble, the viewer and in
-   Google Photos under `Pictures/FireStream/` although its name ends in `.jpg`.
+   Google Photos under `Pictures/FireStream Images/` although its name ends in `.jpg`.
 4. Flight mode, send a photo, kill the app, go online → the retry must upload the
    encoding, not the original (the row persists nothing until the upload is through).
 
 ### Presence: no online flash on a push, "Online" while typing, stale typing bounded (2026-09-18)
 
-Shipped on `claude/chat-typing-status-delays-y9eau9`; nothing has been on hardware. RTDB's
+Shipped and on `main`; nothing has been on hardware. RTDB's
 write queue and Firestore's listener cannot be exercised under Robolectric — the unit tests pin
 the write gating, the derived header rule and the expiry timer. Two devices, B's presence
 watched from A's open chat with B:
@@ -153,6 +153,7 @@ watched from A's open chat with B:
 3. **Stale typing ends.** B types, then B's connection is cut mid-typing (airplane mode) → A's
    dots, and the "Online" they imply, disappear within about ten seconds without any further
    message in the chat.
+
 ### Emoji insertion at the caret (2026-09-18)
 
 Shipped in `39ebf89`. Robolectric drives the caption bar end to end, but a real IME is
@@ -203,10 +204,11 @@ Shipped in `bcd4426c`; nothing has been on hardware. Upgrade over an existing in
 3. Airplane mode → forward a photo → leave and reopen the chat (it shows failed) → airplane
    off → retry → it arrives once, without the app trying to re-compress anything.
 
-**Before end-to-end encryption is switched on for the phones** (planned, not yet enabled —
-these belong to that double-check). `SignalManagerTest` runs real libsignal only on the JVM,
-and the encrypted send path is tested with `SignalManager` mocked. On a **release** build
-(debug never encrypts) with Settings → Privacy → Encryption on, two devices:
+**Before end-to-end encryption is switched on for the phones.** The switch exists and
+defaults to off; these checks belong to the double-check before anyone turns it on.
+`SignalManagerTest` runs real libsignal only on the JVM, and the encrypted send path is
+tested with `SignalManager` mocked. On a **release** build of the firebase flavor (debug
+never encrypts) with Settings → End-to-End Encryption on, two devices:
 4. Pick a contact never messaged since the upgrade, send four photos at once plus a text →
    all five decrypt on the recipient.
 5. Airplane mode → send a text (fails) → airplane off → retry → the recipient reads it once.
@@ -253,9 +255,8 @@ over an existing install**, with a second device as recipient:
    "failed" once connected (the worker's authoritative check).
 7. Release build, two devices, E2E on (once encryption is switched on): a burst of mixed media
    and text offline → all decrypt on the recipient.
-8. Compose→SENT latency online, before vs after step 6 (logcat timestamps). Include an API
-   29/30 device or emulator, where a text send runs as non-expedited work, and confirm no
-   notification flashes for a text send there; an upload shows the low-importance "Sending"
+8. Compose→SENT latency online, before vs after step 6 (logcat timestamps). Confirm no
+   notification flashes for a text send; an upload shows the low-importance "Sending"
    notification while it runs.
 9. Give-up: keep a captive-portal Wi-Fi (connected, no Firestore) for the eight attempts
    (about 20 minutes of backoff) → the bubble turns failed; tap retry once online → it sends.
@@ -715,33 +716,25 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 ### Stickers & GIFs (4.6)
 
-**The picker is no longer the missing piece.** Phase 5a of the image editor extracted
-`ui/chat/picker/` — a shell whose tabs are declared by the host, with `PickerTab` already
-enumerating `STICKER` and `GIF` and `PickerSelection` shaped to carry them. What is left
-open is not "a picker" but *sending* a sticker or a GIF as its own message, which is a
-data-model change, and the provider decision a GIF forces:
+Planned in [`docs/plans/stickers-and-gifs.md`](plans/stickers-and-gifs.md): approved, no step
+started. The plan owns the scope, the data model and the step order. It covers sticker and GIF
+messages, packs, favourites and recents, import from WhatsApp, and an in-app GIFs tab. Nothing
+of it has shipped: the only stickers today are the twelve drawn marks the image editor places
+on a photo.
 
-- **Sticker-as-message** — a new `MessageType.STICKER`, an `AppDatabase` version bump, a
-  sync path and a bubble renderer. Placing a sticker *on a photo* needed none of this and
-  **shipped with the editor in Phase 5b**, because it is flattened into the JPEG.
-- **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
-  impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
-  one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
-- **The provider-privacy decision, already made and written down:** sending a Giphy URL
-  makes the recipient's device fetch from Giphy, which tells a third party who received
-  what and hollows out the Signal-Protocol story. For this app only downloading the bytes
-  and re-uploading them as an ordinary media message is consistent — it costs bandwidth
-  and keeps the recipient private.
-- **Downloadable sticker packs** — pack management is its own feature. Phase 5b shipped
-  one bundled local pack of twelve drawn marks, and the sticker tab has no recents row
-  because twelve fit on screen; both become worth revisiting together with pack
-  management.
-- Files: `ui/chat/picker/` (exists), new `data/remote/GifSource.kt`, `MessageType`,
-  `AppDatabase`, `MessageBubble.kt`
+Two decisions stay recorded here, and the plan cites the first:
+
+- **Recipient privacy.** The recipient's device fetches a sticker or a GIF from our Storage
+  only. Sending a provider URL would make the recipient fetch from the provider, which tells a
+  third party who received what and hollows out the Signal-Protocol story. The bytes are
+  downloaded and re-uploaded as an ordinary media message. That costs bandwidth and keeps the
+  recipient private.
+- **GIF on a photo is impossible, not unbuilt.** The image editor's pipeline ends at JPEG, and
+  a flattened animation is one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
 
 ### Document sharing enhancements (4.7)
 The file card, *Open with*, text/PDF previews, the send sheet, Save/Share and inline audio shipped
-in 1.36.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decided:
+in 1.37.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decided:
 - **In-app PDF viewer** — every page, swipe and pinch-zoom, without leaving the chat. `PdfRenderer`
   already renders page 1 in `FilePreviewLoader`; a pager rendering pages on demand (bounded by
   `MediaProcessingLimiter`) inside the existing `ZoomableBox` would do it. Tapping the PDF thumbnail
@@ -804,7 +797,8 @@ in 1.36.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decide
 ### Accessibility (6.6)
 - Content descriptions on all interactive elements
 - Screen reader support throughout
-- Dynamic font sizing
+- Dynamic font sizing across the app. The chat font size setting (Settings → Chat → Font Size)
+  covers message text and the composer only.
 - High contrast mode
 - Files: all UI files across the `ui/` package
 
