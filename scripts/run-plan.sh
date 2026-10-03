@@ -32,9 +32,9 @@ done
 
 # ---- tunables (the only place model ids and effort levels live) -------------
 # A --variant file may override the keys lib.sh's PR_VARIANT_KEYS lists, nothing else.
-MODEL_MAX=fable;     EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
-MODEL_STRONG=opus;   EFFORT_STRONG=xhigh; ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
-MODEL_MID=fable;     EFFORT_MID=medium;   ADVISOR_MID=''       # set 2026-09-20 by scripts/plan-runner/benchmark.md; variants/mid-opus-high.env is the fallback when the account's Fable share is used up
+MODEL_MAX=opus;      EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
+MODEL_STRONG=opus;   EFFORT_STRONG=high;  ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
+MODEL_MID=opus;      EFFORT_MID=medium;   ADVISOR_MID=''       # 2026-10-03: one model, the tiers differ by effort only (was Fable for mid/max, set 2026-09-20 by scripts/plan-runner/benchmark.md)
 JUDGE_MODEL='';      JUDGE_EFFORT=high    # '' = no judge pass; see plan-runner/judge-prompt.md
 ESCALATE=1                 # 1 = a step that stays invalid after its nudge is re-run once, one effort rung up
 DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
