@@ -21,6 +21,19 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Voice calls after the `PeerSession` move (2026-10-03)
+
+`docs/plans/video-calls.md` step 1 (`da97e8c3`). The connection handling moved from `CallService`
+into `PeerSession`, and no call has run on a device since. JVM tests cover the session against a
+mocked `PeerConnection`. These need a phone and the emulator:
+1. One voice call in each direction connects, with audio both ways, and the timer runs.
+2. `adb logcat -s CallService` shows `Connected: direct (…)` or `Connected: relayed (…)`, or a
+   `Path: …` line right after `Connected: path not known yet`.
+3. Hang up from each side, decline, and let a call ring out. Each ends on both phones, and the
+   next call starts normally.
+4. Hang up at the moment the call connects, a few times. Media audio afterwards (a video, a voice
+   message) plays through the speaker at normal quality, not in call mode.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two

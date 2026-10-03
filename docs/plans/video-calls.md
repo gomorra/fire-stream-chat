@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, no step started. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
+Status: approved, step 1 shipped. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
 
 ## Context
 
@@ -201,6 +201,44 @@ CHANGELOG entry and a bump through the `changelog-release` skill.
 
 Callbacks arrive on the WebRTC signalling thread while teardown arrives from the main thread.
 
+**Approach**
+
+1. `data/call/PeerSignaling.kt`: the interface (send offer, answer, candidate; observe the remote
+   offer, answer, candidates) and `OneToOneSignaling` over `CallRepository`. The remote offer stays
+   a single fetch of the call document, and the answer is still written together with
+   `status = "answered"`, as today.
+2. `data/call/PeerSession.kt`: the connection, the SDP observers, the candidate queue and the
+   duplicate filter move here from `CallService`. Events go through a channel, so the owner handles
+   them on its own scope and never on the signalling thread. No `PeerConnection` method is called
+   while the session's lock is held.
+3. `CallService`: a map of sessions keyed by the remote user id, one collector per session's events.
+   Intents, foreground state, notification, ring timeout, call status, audio session and the call
+   message stay.
+4. The direct-or-relayed line comes from `onSelectedCandidatePairChanged`. The classification is a
+   pure function (`IcePath`), tested on its own.
+5. Tests: `PeerSessionTest` (MockK `PeerConnection`, fake `PeerSignaling`), `OneToOneSignalingTest`,
+   `IcePathTest`.
+6. The code contradicts the spec in one place. Today `CallService` closes the connection from inside
+   its own callbacks (`onIceConnectionChange` `FAILED`, `onCreateFailure`, `onSetFailure` all reach
+   `cleanup()`). The event channel removes that, which is the trap this step names.
+7. Skills: `code-review` (tagged), and `simplify` because the diff is concurrency-heavy and will
+   pass 600 lines.
+
+**Shipped** `da97e8c3` (2026-10-03) — tier: strong, tagged strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- MockK mocks `PeerConnection` on the JVM, so no interface was put in front of it.
+- A third file, `data/call/IcePath.kt`, holds the direct-or-relayed classification so it can be tested without a connection. The line is logged under the tag `CallService`.
+- "No behaviour change" does not hold on four error paths. A local description that cannot be set, a factory that returns no connection, and a remote description of an unknown type now end the call with `ERROR`. Before, the first two left the call hanging and the third crashed the app. A local track the connection rejects also ends the call instead of throwing on the main thread.
+- The caller applies the answer once. Before, every snapshot of an answered call document applied it again.
+- `CallService.onCallAnswered` moves to `Connecting` only from `OutgoingRinging`, through the new `CallStateHolder.compareAndSetState`. The session and the service both watch the call document, so the service must not write `Connecting` over a `Connected`.
+- Remote candidates are observed from the start of a session and held. Before, the listener started after the remote description was set.
+- `Connected` is reported once for ICE `CONNECTED` and `COMPLETED`. Before, `COMPLETED` set the call's start time a second time.
+- The session closes the connection and does not dispose it, as before. The teardown order is unchanged: track, connections, factory.
+- `docs/ARCHITECTURE.md` was updated too, because it named `CallService` as the owner of the connection.
+- /code-review found that a connect event can be handled while `cleanup()` runs on another thread, which would start the audio session after it was stopped. `onSessionConnected` checks again after the start and undoes it. The same race can still write `Connected` over `Ended`, as it could before this step. See the note in step 7.
+- Not done: the names `"answered"`, `callerCandidates` and `calleeCandidates` are constants in `OneToOneSignaling` and literals in `CallRepositoryImpl`, `FirestoreCallSource` and `CallService`.
+- Nothing ran on a device. The checks are in `docs/BACKLOG.md` § *Pending on-device verification*.
+
 - `data/call/PeerSignaling.kt`: the pair boundary from the model. `OneToOneSignaling` implements it
   over `CallRepository`, mapping caller and callee to the two candidate subcollections.
 - `data/call/PeerSession.kt`, with an AGENT-NOTE header. It takes the factory, a `PeerSignaling`, the
@@ -271,6 +309,17 @@ The message sync path and a Room column change here.
 - Manifest: `FOREGROUND_SERVICE_CAMERA`, and `foregroundServiceType="microphone|camera|shortService"`.
 - Audio: `CallAudioRoutePolicy.resolve` gains `preferSpeaker`. With it, no headset and no user pick,
   the answer is `SPEAKER`. `ProximityLock` takes no lock while any video shows.
+- **(step-1)** `PeerSession.createLocalDescription` builds both the offer and the answer, with the
+  constraints in `audioOnlyConstraints()`. A remote video track arrives as the existing
+  `PeerSessionEvent.RemoteTrack`, which `CallService.onSessionEvent` ignores today.
+- **(step-1)** `CallService.cleanup()` disposes the local audio track before it closes the
+  sessions, which matches the dispose order above. `PeerSession.start()` turns the resulting
+  `IllegalStateException` from `addTrack` into a `Failed` event; keep that when the camera track
+  joins `localTracks`.
+- **(step-1 /simplify)** `CallService.observeCallDocument` runs its `when` on every snapshot of the
+  call document. The `media` writes of this step make an answered call emit many snapshots.
+  `onCallAnswered` is safe against that. Check the `"declined"` and `"ended"` branches, or collect
+  the status through `distinctUntilChanged()` and the media separately.
 - Tests: `PeerSessionTest` (directions, `setCamera`, availability with an old peer on either side),
   `CallVideoSinksTest` (bind, rebind, the drop-before-dispose order), new rows in
   `CallAudioRoutePolicyTest`, `ProximityLockTest`, `CallStateHolderTest`.
@@ -371,6 +420,23 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
 - A second incoming call during a call is ignored, as today.
 - If the verdict's group layout needs an active speaker, each session reads its audio level from the
   connection's stats twice a second into `CallParticipant.speaking`.
+- **(step-1 /code-review)** Call-level state in `CallService` has no single owner. `currentCallId`,
+  `sessions`, `callConnectedAt`, the audio session and the `CallState` writes are touched from the
+  main thread and from `serviceScope` (`Dispatchers.IO`). With one session this leaves one known
+  race: a connect event handled while a hang-up runs can write `Connected` over `Ended`. Three
+  sessions make it worse. Confine that state to one serial dispatcher
+  (`Dispatchers.IO.limitedParallelism(1)`) that the intents post into, before the mesh is added.
+- **(step-1 /simplify)** `CallService.onSessionConnected` stops the audio session when the session
+  that connected is no longer in the map. That reads "this session is gone" as "the call is over".
+  It is true for one session and wrong for a mesh, where one session can close while others live.
+  Replace it when the audio session follows the first and the last connected session.
+- **(step-1 /simplify)** `PeerSession` logs an error of the answer flow and keeps waiting, while an
+  error of the offer flow fails the session. "Reopened once" needs the answer side to fail too.
+- **(step-1)** `PeerSession` takes a `logTag`. `CallService` passes its own tag today. Give each
+  session of a mesh its own, so the direct-or-relayed lines can be told apart.
+- **(step-1)** `PeerSession.events` has one collector, and a closed session still delivers events
+  queued before the close. The owner must check by identity that the session is still the current
+  one for that person, as `CallService.onSessionEvent` does.
 - Tests: `MeshCoordinatorTest` (join, leave, reopen, second failure, the cap), `CallQualityTest`.
 
 ### Step 8 — Ringing a group — skills: code-review; model: strong
