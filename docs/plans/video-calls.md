@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, no step started. The prototype below runs first, and steps 4 and 9 wait for its verdict.
+Status: approved, no step started. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
 
 ## Context
 
@@ -174,6 +174,13 @@ Built per the `prototype` skill's UI branch, before step 1. Work stops afterward
   Load the `app-ui-design` skill so the variants look like this app.
 - **Capture:** one commit on the throwaway branch. The verdict (which variant, which parts of the
   others) is written into steps 4 and 9 in a `docs(plan):` commit on main.
+- **Built:** the commit is the tip of `prototype/video-call`. The header of
+  `VideoCallPrototypeActivity.kt` lists every intent extra (`phase`, `theircam`, `weak`, `theme`,
+  `bare` and more), so any state can be opened without a tap. Comparison boards of all three
+  variants are in `docs/plans/video-calls-prototype/` on that branch.
+- **Screenshots without a device:**
+  `./gradlew :app:testFirebaseDebugUnitTest --tests '*VideoCallPrototypeShots*' -Proborazzi.test.record=true`
+  writes every variant and scenario to `app/build/prototype-shots/`.
 
 **What the verdict changes.** With A or B, steps 4 and 9 rebuild `CallScreen` inside `CallActivity`.
 With C, the in-call screen lives in the main activity and `CallActivity` keeps only ringing on the
