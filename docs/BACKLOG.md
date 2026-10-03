@@ -776,6 +776,27 @@ in 1.37.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decide
 - Message sync across linked devices
 - Files: `data/crypto/SignalManager.kt`, new `ui/settings/LinkedDevicesScreen.kt`
 
+### Web app
+- A browser client for the same account: chat list, 1:1 and group chats, sending and receiving
+  text and media, presence and typing.
+- Nothing exists today. The repo is a single Android module, and no stack or hosting is decided.
+- **Backend integration.** Firestore, RTDB presence, Storage and the Cloud Functions are reachable
+  from the Firebase JS SDK, so the web client reads and writes the collections in
+  `SCHEMA-FIRESTORE.md` as they are. The pocketbase flavor would need its own client.
+- **Sign-in.** Phone auth in a browser needs reCAPTCHA. Linking by QR code from the phone is the
+  alternative, and it is the same flow as *Multi-device support (6.2)*.
+- **Encryption is the blocker for parity.** Signal sessions are per device, so a browser can only
+  read encrypted chats once 6.2 gives it its own session. Until then the web client works for
+  plaintext chats only and must say so for an encrypted one.
+- **Sends must follow the app's rules.** A send takes a chat id, and a client-set message id makes
+  the retry idempotent (`PATTERNS.md`, *The repository decides who a send is for* and *Sends are
+  idempotent by client id*).
+- **Push.** Web push through FCM needs a service worker and a second token type in the
+  notification functions (`CLOUD-FUNCTIONS.md`).
+- Open decisions: the UI stack (Compose Multiplatform for web to share the domain layer, or a
+  separate TypeScript app), hosting (Firebase Hosting is the obvious fit), and whether Firestore
+  security rules are strict enough for a client that anyone can open in dev tools.
+
 ### Offline resilience — what is left after the outbox (6.3)
 - The durable outbox itself shipped in step 6 of `docs/plans/offline-outbox.md` (queued sends, reconnect, reboot, retry with backoff — see *Pending on-device verification* above).
 - The plan is complete: the "Waiting for network…" hint (step 7) and received media catching up on reconnect without opening the chat (step 8, reconcile on push + a download retry) shipped — see *Pending on-device verification* above.
