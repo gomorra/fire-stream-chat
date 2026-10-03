@@ -138,6 +138,7 @@ class DocumentFiles @Inject constructor(
         const val DIR_NAME = "documents"
         private const val DEFAULT_EXTENSION = "bin"
         private const val MAX_EXTENSION = 10
+        private val LEGACY_TOP_LEVEL_TYPES = listOf("application", "text", "audio", "video", "image")
 
         /**
          * The extension a document's local file gets: the one its [fileName]
@@ -149,9 +150,29 @@ class DocumentFiles @Inject constructor(
             fileName?.substringAfterLast('.', "")?.let(::clean)?.let { return it }
             mimeType?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) }?.let(::clean)?.let { return it }
             mediaUrl?.substringBefore('?')?.substringBefore('#')?.substringAfterLast('/')
-                ?.let(Uri::decode)?.substringAfterLast('/')?.substringAfterLast('.', "")
-                ?.let(::clean)?.let { return it }
+                ?.let(Uri::decode)?.substringAfterLast('/')?.let(::objectExtension)?.let { return it }
             return DEFAULT_EXTENSION
+        }
+
+        /**
+         * The extension a Storage [objectName] stands for. Before `mimeType` was a
+         * field the object was named `<id>.<raw mime subtype>` — `plain`, or a
+         * dotted `vnd.openxmlformats-officedocument.wordprocessingml.document` — so
+         * a suffix the platform does not know as an extension is tried as a subtype
+         * before the last segment is taken as it is.
+         */
+        private fun objectExtension(objectName: String): String? {
+            val last = objectName.substringAfterLast('.', "")
+            val map = MimeTypeMap.getSingleton()
+            if (map.hasExtension(last.lowercase())) return clean(last)
+            var dot = objectName.indexOf('.')
+            while (dot >= 0) {
+                val subtype = objectName.substring(dot + 1).lowercase()
+                LEGACY_TOP_LEVEL_TYPES.firstNotNullOfOrNull { map.getExtensionFromMimeType("$it/$subtype") }
+                    ?.let(::clean)?.let { return it }
+                dot = objectName.indexOf('.', dot + 1)
+            }
+            return clean(last)
         }
 
         /** The mime type [extension] maps to, if any. */

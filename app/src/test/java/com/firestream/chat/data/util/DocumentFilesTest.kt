@@ -54,6 +54,20 @@ class DocumentFilesTest {
     }
 
     @Test
+    fun `a legacy object named by the raw mime subtype gets that type's platform extension`() {
+        // Before d974555 the Storage object was named "<id>.<subtype>": "plain", and
+        // for a .docx a dotted "vnd.openxmlformats-officedocument.wordprocessingml.document".
+        assertEquals("txt", DocumentFiles.extensionFor(null, null, "https://x/o/media%2Fchat1%2Fmsg1.plain?alt=media"))
+        assertEquals(
+            "docx",
+            DocumentFiles.extensionFor(
+                null, null,
+                "https://x/o/media%2Fchat1%2Fmsg1.vnd.openxmlformats-officedocument.wordprocessingml.document?alt=media",
+            ),
+        )
+    }
+
+    @Test
     fun `nothing usable gives bin, and a hostile extension cannot steer the path`() {
         assertEquals("bin", DocumentFiles.extensionFor(null, null, null))
         assertEquals("bin", DocumentFiles.extensionFor("evil.x/../../y", "application/x-unknown", null))

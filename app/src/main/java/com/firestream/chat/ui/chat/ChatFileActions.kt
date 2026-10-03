@@ -75,7 +75,7 @@ internal class ChatFileActions(
         scope.launch {
             try {
                 val path = messageRepository.ensureLocalFile(message).getOrThrow()
-                val file = ReadyFile(path = path, mimeType = mimeTypeFor(message), displayName = displayNameFor(message))
+                val file = ReadyFile(path = path, mimeType = mimeTypeFor(message, path), displayName = displayNameFor(message))
                 if (action == FileAction.SAVE) {
                     saveToDownloads(file)
                 } else {
@@ -95,10 +95,16 @@ internal class ChatFileActions(
     companion object {
         private const val ANY_TYPE = "*/*"
 
-        /** The type other apps are offered the file as: the picked type, else its extension's, else any. */
-        fun mimeTypeFor(message: Message): String =
+        /**
+         * The type other apps are offered the file as: the picked type, else its
+         * name's extension's, else that of the local copy at [path] (a document
+         * sent before names and types were kept), else any.
+         */
+        fun mimeTypeFor(message: Message, path: String? = null): String =
             message.mimeType?.takeIf { it.isNotBlank() && it != "application/octet-stream" }
-                ?: FileKind.extensionOf(message.fileName)?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+                ?: sequenceOf(message.fileName, path?.substringAfterLast('/'))
+                    .mapNotNull { FileKind.extensionOf(it)?.let(MimeTypeMap.getSingleton()::getMimeTypeFromExtension) }
+                    .firstOrNull()
                 ?: message.mimeType
                 ?: ANY_TYPE
 

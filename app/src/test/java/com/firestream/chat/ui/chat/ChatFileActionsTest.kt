@@ -90,6 +90,19 @@ class ChatFileActionsTest {
     }
 
     @Test
+    fun `a legacy document with no type or name is offered under its local copy's extension`() = runTest {
+        repository.ensureLocalFileResult = { Result.success("/files/documents/doc1.txt") }
+        val actions = actions()
+        val launches = mutableListOf<FileLaunch>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { actions.launches.toList(launches) }
+
+        actions.request(pdf.copy(fileName = null, mimeType = null, fileSize = null), FileAction.OPEN)
+        advanceUntilIdle()
+
+        assertEquals("text/plain", launches.single().file.mimeType)
+    }
+
+    @Test
     fun `a failed download tells the user and ends the spinner`() = runTest {
         val actions = actions()
 
