@@ -53,6 +53,31 @@ JVM test decodes a frame, and no screen sends either type before step 5, so chec
 6. A debug build opens a chat. `MessageBubble` is close to the dex register ceiling
    (`docs/GOTCHAS.md`), and only a device runs the verifier.
 
+### Stickers tab in the composer (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 5. JVM and Robolectric tests cover the search, the managers
+and the panel's logic. Nothing ran on a device, and no test draws a real sticker file.
+1. The emoji button opens the panel with an island: *Emoji* and *Stickers*. The search button, the
+   island and the backspace key sit left-aligned in that order.
+2. *Stickers* shows Recents, the favourites, then each pack. A tap sends the sticker and it appears
+   at once, with a clock while offline. An empty library shows *Import stickers*, which opens the library.
+3. Between two accounts: a static and an animated sticker arrive with transparency and animation.
+   The chat list and the notification say *Sticker*. Forwarding one works. Nothing new is in the gallery.
+4. Send the same sticker twice and confirm one object under `stickers/` in Storage. This needs the
+   Storage rule from step 3 of the plan.
+5. Kill the app during a send. The outbox finishes it.
+6. A long press in the grid adds a sticker to the favourites, and a second one takes it out. A
+   snackbar says which. Check that it is visible above the panel.
+7. Tap a received sticker's bubble: the sheet offers *Add to favourites*, and the sticker then shows
+   in the favourites shelf.
+8. Search *cat* in the Stickers tab. Stickers tagged with a cat emoji show. The keyboard that opens
+   for the search field must not close the panel.
+9. Type one emoji that tags a sticker. The strip shows above the composer. A pick sends the sticker
+   and clears the composer. Typing a second character hides the strip.
+10. Recents does not reorder while the panel stays open, and does after it is reopened.
+11. A debug build opens a chat and the panel. `ChatScreen` gained code, and only a device runs the
+    dex verifier (`docs/GOTCHAS.md`).
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two
@@ -747,29 +772,21 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 ### Stickers & GIFs (4.6)
 
-**The picker is no longer the missing piece.** Phase 5a of the image editor extracted
-`ui/chat/picker/` — a shell whose tabs are declared by the host, with `PickerTab` already
-enumerating `STICKER` and `GIF` and `PickerSelection` shaped to carry them. What is left
-open is not "a picker" but *sending* a sticker or a GIF as its own message, which is a
-data-model change, and the provider decision a GIF forces:
+Stickers are imported, sent from the composer's Stickers tab and shown in a chat. A GIF can
+be received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it
+are open:
 
-- **Sticker-as-message** — a new `MessageType.STICKER`, an `AppDatabase` version bump, a
-  sync path and a bubble renderer. Placing a sticker *on a photo* needed none of this and
-  **shipped with the editor in Phase 5b**, because it is flattened into the JPEG.
-- **GIF-as-message** — the same, plus an animated bubble renderer. GIF *on a photo* is
-  impossible rather than unbuilt: the pipeline ends at JPEG, and a flattened animation is
-  one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
-- **The provider-privacy decision, already made and written down:** sending a Giphy URL
-  makes the recipient's device fetch from Giphy, which tells a third party who received
-  what and hollows out the Signal-Protocol story. For this app only downloading the bytes
-  and re-uploading them as an ordinary media message is consistent — it costs bandwidth
-  and keeps the recipient private.
-- **Downloadable sticker packs** — pack management is its own feature. Phase 5b shipped
-  one bundled local pack of twelve drawn marks, and the sticker tab has no recents row
-  because twelve fit on screen; both become worth revisiting together with pack
-  management.
-- Files: `ui/chat/picker/` (exists), new `data/remote/GifSource.kt`, `MessageType`,
-  `AppDatabase`, `MessageBubble.kt`
+- **Backup and sharing of packs.** The library lives on one device. Packs and favourites are
+  not saved under the account, and a received sticker's pack cannot be viewed or added (step 6).
+- **Lottie stickers** (`.was`, `.tgs`) and **making a sticker from a photo** (steps 7–8).
+- **Sending a GIF.** Nothing in the app picks one yet. The keyboard route is step 9. The
+  in-app GIFs tab and the online sticker catalogue are steps 10–11.
+- **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage
+  only. Search and media go through a Cloud Function, so the provider never sees a user's
+  IP. The pocketbase flavor gets no GIFs tab.
+- **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
+  flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
+- **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.
 
 ### Document sharing enhancements (4.7)
 The file card, *Open with*, text/PDF previews, the send sheet, Save/Share and inline audio shipped

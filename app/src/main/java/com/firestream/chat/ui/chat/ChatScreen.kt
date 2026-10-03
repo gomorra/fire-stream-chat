@@ -232,6 +232,8 @@ fun ChatScreen(
     onGroupSettingsClick: () -> Unit = {},
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
+    // Opens the sticker library screen, from the Stickers tab of an empty library.
+    onImportStickersClick: () -> Unit = {},
     fromNotification: Boolean = false,
     // Invoked once when the message list (or the empty state of a fresh chat)
     // becomes visible. MainActivity uses it to release the splash screen.
@@ -341,6 +343,8 @@ fun ChatScreen(
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
+    // The sticker bubble that was tapped, while its sheet is open.
+    var stickerSheetMessage by remember { mutableStateOf<Message?>(null) }
     // Swipe-to-react panel state
     var swipeReactMessage by remember { mutableStateOf<Message?>(null) }
     // ID of the message whose reaction chips should be scrolled into view after reacting
@@ -1440,6 +1444,7 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
+                                                onStickerClick = { stickerSheetMessage = message },
                                                 onOpenFile = { viewModel.openFile(message) },
                                                 filePreviews = viewModel.filePreviews,
                                                 onVideoClick = { source ->
@@ -1783,6 +1788,17 @@ fun ChatScreen(
                 }
             }
 
+            // Stickers tagged with the one emoji in the composer. A pick sends
+            // the sticker in the emoji's place, so the composer is cleared.
+            StickerSuggestionStrip(
+                text = messageText,
+                packs = uiState.overlays.stickerPacks,
+                onSelection = { pick ->
+                    viewModel.sendSticker(pick.stickerId, pick.packId)
+                    applyComposerEdit(ComposerEdit("", TextRange(0), emptyMap()))
+                },
+            )
+
             // Recording control bar — slides in above the composer while dictation is active.
             AnimatedVisibility(
                 visible = uiState.dictation.isListening,
@@ -2075,28 +2091,34 @@ fun ChatScreen(
                     .clipToBounds()
             ) {
                 if (showEmojiPanel || animatedPanelPx > 0) {
-                    EmojiHandlerPanel(
-                        mode = EmojiMode.TEXT_INPUT,
+                    ComposerPickerPanel(
                         recentEmojis = uiState.overlays.recentEmojis,
-                        onEmojiSelected = { emoji, size ->
-                            // Insert at the caret (replacing any selection), not at
-                            // the end — the picker must work mid-sentence.
-                            applyComposerEdit(
-                                insertAtCursor(
-                                    text = messageText,
-                                    selection = inputCursor,
-                                    insertion = emoji,
-                                    emojiSizes = pendingEmojiSizes,
-                                    insertionSize = size,
+                        stickerPacks = uiState.overlays.stickerPacks,
+                        recentStickers = uiState.overlays.recentStickers,
+                        callbacks = ComposerPickerCallbacks(
+                            onEmoji = { emoji, size ->
+                                // Insert at the caret (replacing any selection), not at
+                                // the end — the picker must work mid-sentence.
+                                applyComposerEdit(
+                                    insertAtCursor(
+                                        text = messageText,
+                                        selection = inputCursor,
+                                        insertion = emoji,
+                                        emojiSizes = pendingEmojiSizes,
+                                        insertionSize = size,
+                                    )
                                 )
-                            )
-                        },
-                        onBackspace = {
-                            applyComposerEdit(
-                                deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
-                            )
-                        },
-                        onRecentUsed = { viewModel.addRecentEmoji(it) },
+                            },
+                            onBackspace = {
+                                applyComposerEdit(
+                                    deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
+                                )
+                            },
+                            onRecentEmojiUsed = { viewModel.addRecentEmoji(it) },
+                            onSticker = { viewModel.sendSticker(it.stickerId, it.packId) },
+                            onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
+                            onImportStickers = onImportStickersClick,
+                        ),
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
@@ -2272,6 +2294,17 @@ fun ChatScreen(
                 modifier = Modifier.height((screenHeightDp * 2 / 5).dp)
             )
         }
+    }
+
+    // Sticker sheet — a tap on a sticker bubble.
+    stickerSheetMessage?.let { target ->
+        val stickerId = target.stickerId
+        StickerActionsSheet(
+            message = target,
+            isFavourite = stickerId != null && stickerId in uiState.overlays.favouriteStickerIds,
+            onToggleFavourite = { if (stickerId != null) viewModel.toggleStickerFavourite(stickerId, target) },
+            onDismiss = { stickerSheetMessage = null },
+        )
     }
 
     // Forward picker — the chat picker the share target uses, slid in over the

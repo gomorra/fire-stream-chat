@@ -13,12 +13,14 @@ import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.util.MentionParser
 
 internal class ChatMessageSender(
     private val chatId: String,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val stickerRepository: StickerRepository,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope
 ) {
@@ -122,6 +124,27 @@ internal class ChatMessageSender(
                     session = if (error != null) it.session.copy(error = error) else it.session
                 )
             }
+        }
+    }
+
+    /**
+     * Sends a sticker from the library and moves it to the front of Recents.
+     *
+     * [packId] is the pack the user picked it from, or null for a pick from
+     * Recents or from a suggestion. The repository decides whether the
+     * recipient sees it. No `isSending`: like a text send this is local-first,
+     * and a second sticker must be sendable while the first is in flight.
+     */
+    fun sendSticker(stickerId: String, packId: String?) {
+        scope.launch {
+            _uiState.update {
+                it.copy(messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1))
+            }
+            messageRepository.sendStickerMessage(chatId, stickerId, packId)
+                .onSuccess { stickerRepository.markUsed(stickerId) }
+                .onFailure { e ->
+                    _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
+                }
         }
     }
 

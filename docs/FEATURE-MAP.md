@@ -168,19 +168,21 @@ shell existed.
 
 | Host | Tabs | Where |
 |---|---|---|
-| Composer | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)`, with a backspace key |
+| Composer | Emoji · Stickers (the library) | `ChatScreen.kt` — `ComposerPickerPanel`, with a backspace key on both tabs |
 | Reaction sheet | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = REACTION)`, with the quick-reactions strip |
 | Caption bar | Emoji | `ImagePreviewScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)` |
-| Editor overlay | Emoji · Sticker · Text · Shapes | `imageedit/OverlayImageScreen.kt` — the one host with a selection to delete, and the only one with an island |
+| Editor overlay | Emoji · Sticker (the bundled pack) · Text · Shapes | `imageedit/OverlayImageScreen.kt` — the one host with a selection to delete |
 
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
-| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`GIF` enumerated, declared by nobody) and the `PickerSelection` a tab hands back |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`STICKER` is the editor's bundled pack, `STICKER_LIBRARY` the user's library, `GIF` is declared by nobody) and the `PickerSelection` a tab hands back |
+| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's two-tab picker, its callbacks bundle, and `StickerSuggestionStrip` above the composer |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The library as a tab: the pack row (Recents, favourites, packs), the active pack's grid, search by emoji, the empty state's import button |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiGridLayout.kt` | Pure layout arithmetic for the emoji grid — which row and column each item lands on once headers span a row, and which side of the held cell the size panel fits on |
 | `app/src/test/java/com/firestream/chat/ui/chat/picker/EmojiGridLayoutTest.kt` | That the last cell of a row is the last column, whatever headers sit above it, and that the size panel flips left rather than leave the grid |
-| `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the composer, reaction sheet and caption bar call — `EmojiMode` and the two controls that differ by host |
+| `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the reaction sheet and the caption bar call — `EmojiMode`, the two controls that differ by host, and the shared `PickerBackspaceKey` |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiSearchData.kt` | Bundled emoji → keyword table for in-panel search; no network |
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Owns `recentEmojis` in `OverlaysState` and the DataStore write behind it |
@@ -623,7 +625,10 @@ A receiver hashes what it downloads before storing it. A `GIF` message is plain 
 is: one upload per message, and the file is kept in `filesDir/documents/`, not in the gallery.
 A sticker bubble has no fill and no tail, and a GIF bubble is the photo layout with a badge.
 Both animate through a decoder attached per request. Previews show the first frame.
-No screen sends either type yet. Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
+
+A sticker is sent from the composer's picker, whose second tab is the library, or from the
+suggestion strip that appears while the composer holds one emoji. Nothing sends a GIF yet.
+Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
 
 The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
 under *Image / Media Pipeline*.
@@ -646,6 +651,13 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
 | `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` for the reply, forward and starred previews |
+| `app/src/main/java/com/firestream/chat/domain/util/StickerSearch.kt` | Pure: stickers by emoji tag across packs, and which composer text earns suggestions |
+| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's picker (Emoji and Stickers tabs) and `StickerSuggestionStrip` |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row, grid, search, the import button of an empty library |
+| `app/src/main/java/com/firestream/chat/ui/chat/StickerActionsSheet.kt` | The sheet a tap on a sticker bubble opens: add to or remove from the favourites |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Mirrors packs, recents and the favourite ids into `OverlaysState` in one update |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageSender.kt` | `sendSticker`: sends by id and pack, then `markUsed` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | `setStickerFavourite`: fetches a received sticker's file first, so that it has a library row |
 | `app/src/main/java/com/firestream/chat/data/sticker/WaStickerMetadata.kt` | Pack id, name, publisher and emojis out of a WhatsApp WebP's EXIF chunk |
 | `app/src/main/java/com/firestream/chat/data/sticker/StickerPackArchive.kt` | `.wastickers` / zip reader under caps on entry count, bytes per entry and total bytes |
 | `app/src/main/java/com/firestream/chat/data/sticker/WhatsAppStickerFolder.kt` | One child-documents query over the granted folder, newest first |
@@ -674,8 +686,12 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/test/WebpFixtures.kt` | Builders for WebP, EXIF and zip test bytes |
 | `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryViewModelTest.kt` | Selection, pack reorder, both import routes, the summary line |
 | `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryScreenTest.kt` | The empty state, the loading state, the unnamed packs' labels |
+| `app/src/test/java/com/firestream/chat/domain/util/StickerSearchTest.kt` | Tag matching, the variation selector, one result per sticker, what earns suggestions |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatStickerManagersTest.kt` | The library mirror, `sendSticker` with `markUsed`, the favourite toggle and its download-first rule |
+| `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip |
+| `app/src/test/java/com/firestream/chat/test/fakes/StickerRepositoryMocks.kt` | `emptyStickerRepository`, `testSticker`, `testStickerPack` |
 
-**Entry point:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`.
+**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`.
 
 **Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
 

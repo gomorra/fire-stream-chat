@@ -341,6 +341,9 @@ private fun OverlayPicker(
             }
 
             is PickerSelection.Overlay -> callbacks.onPlace(selection.content)
+
+            // A library sticker is a message. The editor does not declare its tab.
+            is PickerSelection.Sticker -> Unit
         }
     }
 
@@ -376,10 +379,10 @@ private fun OverlayPicker(
                 onSelection = onSelection,
             )
 
-            // Enumerated and declared by nobody — see PickerTab.GIF. Named
-            // rather than swept into an `else`, so a tab added to the enum
-            // fails to compile here instead of quietly rendering shapes.
-            PickerTab.GIF -> Unit
+            // Not declared by the editor — see PickerTab. Named rather than
+            // swept into an `else`, so a tab added to the enum fails to
+            // compile here instead of quietly rendering shapes.
+            PickerTab.GIF, PickerTab.STICKER_LIBRARY -> Unit
         }
     }
 }

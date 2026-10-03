@@ -2,6 +2,7 @@ package com.firestream.chat.ui.chat
 
 import com.firestream.chat.test.fakes.FakeChatRepository
 import com.firestream.chat.test.fakes.FakeMessageRepository
+import com.firestream.chat.test.fakes.emptyStickerRepository
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,7 +34,7 @@ class ChatMessageSenderOfflineTest {
     @Test
     fun `text send reaches the repository while the typing write never completes`() = runTest {
         chatRepository.typingGate = CompletableDeferred() // never completed: offline
-        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, emptyStickerRepository(), uiState, backgroundScope)
 
         sender.sendMessage("hello")
         runCurrent()
@@ -45,7 +46,7 @@ class ChatMessageSenderOfflineTest {
     @Test
     fun `three sends in a row all reach the repository while offline`() = runTest {
         chatRepository.typingGate = CompletableDeferred()
-        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, emptyStickerRepository(), uiState, backgroundScope)
 
         sender.sendMessage("one")
         sender.sendMessage("two")
@@ -58,7 +59,7 @@ class ChatMessageSenderOfflineTest {
     @Test
     fun `typing-off is still requested alongside the send`() = runTest {
         chatRepository.typingGate = CompletableDeferred()
-        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, emptyStickerRepository(), uiState, backgroundScope)
 
         sender.sendMessage("hello")
         runCurrent()

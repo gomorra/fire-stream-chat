@@ -117,6 +117,7 @@ class ChatViewModelViewerEditTest {
         dateTimeDetector = dateTimeDetector,
         pollRepository = mockk<PollRepository>(relaxed = true),
         userRepository = FakeUserRepository(),
+        stickerRepository = com.firestream.chat.test.fakes.emptyStickerRepository(),
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
         imageEditRasterizer = imageEditRasterizer,

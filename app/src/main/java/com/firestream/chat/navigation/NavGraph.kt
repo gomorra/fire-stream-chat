@@ -508,6 +508,7 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
+                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
                 fromNotification = fromNotification
             )
         }

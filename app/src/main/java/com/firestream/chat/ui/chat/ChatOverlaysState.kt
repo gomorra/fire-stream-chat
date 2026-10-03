@@ -7,6 +7,8 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.ListData
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageSearchFilter
+import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerPack
 
 // The currently-shown fullscreen image. Both message images and link-preview
 // thumbnails feed into the same fullscreen overlay, but they carry different
@@ -87,6 +89,12 @@ internal data class OverlaysState(
     val linkPreviews: Map<String, LinkPreview> = emptyMap(),
     val listDataCache: Map<String, ListData?> = emptyMap(),
     val recentEmojis: List<String> = emptyList(),
+    /** The sticker library, in the user's pack order. Mirrored from `StickerRepository` by `ChatInfoManager`. */
+    val stickerPacks: List<StickerPack> = emptyList(),
+    /** The stickers sent most recently, newest first. */
+    val recentStickers: List<Sticker> = emptyList(),
+    /** The ids in the favourites pack, written in the same update as [stickerPacks]. */
+    val favouriteStickerIds: Set<String> = emptySet(),
     val fullscreenImage: FullscreenImage? = null,
     val fullscreenVideo: FullscreenVideo? = null,
     val viewerEdit: ViewerEdit? = null,

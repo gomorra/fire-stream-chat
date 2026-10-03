@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.ui.components.StickerImage
@@ -459,6 +460,9 @@ private fun MoveToPackDialog(targets: List<StickerPack>, onPick: (String) -> Uni
 
 internal val STICKER_CELL = 88.dp
 
+/** The test tag of one [StickerCell]. A sticker has no text to find it by. */
+internal fun stickerCellTag(stickerId: String): String = "sticker:$stickerId"
+
 /**
  * One sticker in a grid, with the mark of a selection drawn over it. The clicks
  * hand [id] back, so a grid passes the same two functions to every cell and a
@@ -477,6 +481,7 @@ internal fun StickerCell(
 ) {
     Box(
         modifier = modifier
+            .testTag(stickerCellTag(id))
             .padding(4.dp)
             .aspectRatio(1f)
             .clip(MaterialTheme.shapes.medium)

@@ -7,17 +7,21 @@ import com.firestream.chat.domain.util.OverlayContent
  * what each of its hosts can actually do.
  *
  * The island of tabs in [PickerPanel] is **declared by the host**, not fixed
- * (`docs/plans/image-editor.md` §2.8): the composer offers emoji, the
- * reaction sheet offers emoji, and the image editor offers emoji, stickers,
- * text and shapes. A host that declares one tab renders no island at all, so
- * nothing ever ships greyed-out and unreachable.
+ * (`docs/plans/image-editor.md` §2.8). The composer offers emoji and the
+ * sticker library. The reaction sheet and the caption bar offer emoji. The
+ * image editor offers emoji, the bundled stickers, text and shapes. A host that
+ * declares one tab renders no island at all, so nothing ever ships greyed-out
+ * and unreachable.
  *
- * [GIF] is enumerated and deliberately declared by nobody. Sending a GIF as a
- * message needs a new `MessageType`, a Room version bump, a sync path and a
- * bubble renderer, plus the provider-privacy decision recorded in §2.8; placing
- * one *on a photo* is impossible while the output is a JPEG, since a flattened
- * animation is one frame and a worse sticker. Naming it here is what makes the
- * absence a decision rather than an oversight — see `docs/BACKLOG.md` §4.6.
+ * There are two sticker tabs, and no host declares both. [STICKER] is the
+ * bundled vector pack, drawn onto a photo. [STICKER_LIBRARY] is the user's own
+ * library, sent as a message.
+ *
+ * [GIF] is enumerated and declared by nobody yet. A GIF can be sent and shown
+ * as a message, but there is nothing to pick one from until the search behind
+ * the Cloud Function exists (`docs/plans/stickers-and-gifs.md`, step 11).
+ * Placing one on a photo stays impossible while the output is a JPEG, since a
+ * flattened animation is one frame.
  */
 internal enum class PickerTab(
     /** The word on the island's active segment, and the handle a test grabs it by. */
@@ -40,6 +44,7 @@ internal enum class PickerTab(
 ) {
     EMOJI(label = "Emoji", searchHint = "Search emoji…"),
     STICKER(label = "Stickers", searchHint = "Search stickers…"),
+    STICKER_LIBRARY(label = "Stickers", searchHint = "Search stickers…"),
     GIF(label = "GIFs", searchHint = "Search GIFs…"),
     TEXT(label = "Text", searchHint = null),
     SHAPE(label = "Shapes", searchHint = null),
@@ -52,13 +57,12 @@ internal enum class PickerTab(
  * lambda however many tabs it declares — and so adding a tab is a new subtype
  * here rather than a new parameter on every host.
  *
- * Two subtypes, not five, because there are only two kinds of answer. An emoji
- * is a *character* with a size the long-press drag chose, which is what the
- * composer inserts into a message and the reaction sheet stores on one; a
+ * Three subtypes, because there are three kinds of answer. An emoji is a
+ * *character* with a size the long-press drag chose, which is what the composer
+ * inserts into a message and the reaction sheet stores on one. A bundled
  * sticker, a text run and a shape are all *objects to place*, and the picker
- * hands those over as the domain type that already describes them rather than
- * re-declaring their fields here and forcing every host to map between two
- * identical shapes.
+ * hands those over as the domain type that already describes them. A library
+ * sticker is a *message to send*, named by its id.
  */
 internal sealed interface PickerSelection {
     /**
@@ -78,4 +82,12 @@ internal sealed interface PickerSelection {
      * to a text field or a reaction.
      */
     data class Overlay(val content: OverlayContent) : PickerSelection
+
+    /**
+     * A sticker from the library, to send as a message.
+     *
+     * [packId] is the pack it was picked from, and null for a pick from
+     * Recents. The repository decides whether the recipient gets to see it.
+     */
+    data class Sticker(val stickerId: String, val packId: String?) : PickerSelection
 }

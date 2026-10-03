@@ -16,6 +16,7 @@ import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.ui.components.destinationLabel
 import com.firestream.chat.ui.components.stickerLabel
 
@@ -24,6 +25,7 @@ internal class ChatMessageActions(
     private val partnerIdHint: String,
     private val messageRepository: MessageRepository,
     private val reminderRepository: ReminderRepository,
+    private val stickerRepository: StickerRepository,
     private val dateTimeDetector: DateTimeDetector,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope,
@@ -105,6 +107,34 @@ internal class ChatMessageActions(
             if (delivered > 0) {
                 onForwarded(targets.destinationLabel(session.currentUserId, session.chatParticipants))
             }
+        }
+    }
+
+    /**
+     * Adds a sticker to the favourites, or takes it out.
+     *
+     * [message] is the bubble the sticker was tapped in, and null for a sticker
+     * picked from the library. A received sticker has no library row until its
+     * file is downloaded and checked, so a bubble without a local file is
+     * fetched first. That fails for a sticker whose bytes were refused.
+     *
+     * [onDone] gets the line to show, for either outcome.
+     */
+    fun setStickerFavourite(
+        stickerId: String,
+        favourite: Boolean,
+        message: Message? = null,
+        onDone: (String) -> Unit,
+    ) {
+        scope.launch {
+            val toFetch = message?.takeIf { favourite && it.localUri == null }
+            if (toFetch != null && messageRepository.ensureLocalFile(toFetch).isFailure) {
+                onDone("Couldn't save this sticker")
+                return@launch
+            }
+            stickerRepository.setFavourite(stickerId, favourite)
+                .onSuccess { onDone(if (favourite) "Added to favourites" else "Removed from favourites") }
+                .onFailure { onDone("Couldn't update favourites") }
         }
     }
 
