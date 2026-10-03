@@ -138,6 +138,8 @@ run=$(jq -r '.structured_output.skills.run[]?' "$F/result-missing-skill.json")
 check "result missing a tagged skill"         "code-review" "$(lines "$(pr_missing "$required" "$run")")"
 check "nothing missing when all ran"          "" "$(pr_missing "$required" "$(printf 'simplify\ncode-review\n')")"
 check "empty required → nothing missing"      "" "$(pr_missing "" "$run")"
+# The same trap as the long block above: the match is the first of far more entries than a pipe holds.
+check "a long run list still finds its first entry" "" "$(pr_missing "code-review" "$(printf 'code-review\n'; seq 1 100000)")"
 
 echo "Nudge routing, escalation, test count"
 skills_only=$'required skills not run: code-review, simplify (floor: none; tripwire on the diff: code-review, simplify)\n'

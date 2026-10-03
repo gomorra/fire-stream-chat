@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, steps 1 and 2 shipped. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
+Status: approved, steps 1 and 2 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
 ## Context
 
@@ -18,17 +18,25 @@ The owner wants video calls, first between two people and then in groups.
 | Voice and video | One kind of call. Any call can turn the camera on, and each side controls only its own camera. The phone icon starts a call with the camera off, the camera icon with it on |
 | Group calls | A mesh: every phone connects directly to every other. At most four people, the caller included. No media server |
 | Relay | Video is built on what exists: direct connections, with today's free public relay as the fallback. A Cloudflare relay (step 5) runs only if calls fail to connect or stutter |
+| Call screen | The prototype's A · Stage. Groups use B's grid. An incoming video call gets B's two answer buttons. A swipe up docks the call over its chat as C's card |
+| Where it runs | On the owner's machine, not in a cloud container. Step 3 needs the emulator, and steps 4, 4a and 9 read `prototype/video-call`, which is never pushed |
 
 Set by this plan, not asked:
 
 - **firebase flavor only.** `PocketBaseCallSignalingSource` stays a stub and only follows signature changes.
 - **An older app keeps working as a voice partner.** The camera button is then disabled.
-- **The camera runs only while the call screen or its picture-in-picture window is visible.**
+- **The camera runs only while the call is on screen:** the stage, its picture-in-picture window,
+  or the docked card.
 - **An answer from the notification or the lock screen starts with the camera off.**
+- **The docked card shows only in the call's own chat.** Anywhere else in the app the call is
+  reached through its notification, as today.
+- **A docked call has no picture-in-picture.** Leaving the app from the chat pauses the camera, and
+  the call goes on with sound.
 - **A group of more than four members** gets a picker for up to three people to ring.
 
 Not in this plan: screen sharing, more than four people, adding someone to a running 1:1 call,
-background blur, recording, calls on the pocketbase flavor, authenticated signalling.
+background blur, recording, calls on the pocketbase flavor, authenticated signalling,
+picture-in-picture from the docked card, a call card outside the call's chat.
 
 ## What exists today (verified 2026-10-03)
 
@@ -57,6 +65,9 @@ background blur, recording, calls on the pocketbase flavor, authenticated signal
 ## The model
 
 - **One call screen for every call.** A voice call is a call with both cameras off.
+- **Two activities draw the call.** `CallActivity` draws the stage, full screen. The main activity
+  draws the docked card inside the call's chat. Both read `CallStateHolder` and take their tiles
+  from `CallVideoSinks`.
 - **Every call sets up one video line**, at the start, in both directions. Turning the camera on
   attaches the camera track to that line (`RtpSender.setTrack`). No new offer is needed.
 - **`video` on the call document says how the call was started.** It sets the ring text, the default
@@ -75,7 +86,8 @@ background blur, recording, calls on the pocketbase flavor, authenticated signal
   A session does not know the Firestore layout.
 - **Local media is shared.** One microphone track and one camera track go into every session.
 - **The screen never sees a WebRTC type.** `CallVideoSinks` in `data/call/` hands out a ready `View`
-  per participant id and rebinds it as tracks come and go.
+  per participant id and rebinds it as tracks come and go. The same participant can have a view in
+  each activity.
 - **Audio follows video.** While any video shows, the speaker is the default unless a headset is
   connected or the user picked a route, and the proximity lock is off.
 
@@ -116,7 +128,7 @@ so this is what removes a phone that died.
 3. **The emulator's camera** through `Camera2Capturer` is untried. Step 3 finds out. If it fails,
    the emulator joins with its camera off and the phone sends.
 4. **The free public relay may not carry video.** Step 1 logs for every call whether it runs direct
-   or relayed. The checkpoint after step 4 decides whether step 5 runs.
+   or relayed. The checkpoint after step 4a decides whether step 5 runs.
 5. **Three video encoders at once** in a four-person call may be too much for a phone. Step 7 lowers
    resolution and bitrate by group size. The checkpoint after step 8 tries it on the owner's phones.
 6. **Two plans bump `AppDatabase`.** `docs/plans/stickers-and-gifs.md` also goes from 29 to 30.
@@ -124,8 +136,8 @@ so this is what removes a phone that died.
 7. **Signalling is not authenticated end to end.** Media is encrypted between the phones, relay
    included. The key fingerprints travel through Firestore, so whoever can rewrite a call document
    could sit in the middle. Not settled here. Step 4 records it in `docs/BACKLOG.md`.
-8. **Variant C of the prototype moves the in-call screen into the main activity.** If it wins, the
-   plan gets one more step before step 4 for that host. See the prototype section.
+8. **Two activities draw one call.** A video `View` belongs to the activity that made it, and the
+   camera must not blink while the stage hands over to the docked card. Step 4a settles both.
 
 ## Prototype first (interactive, throwaway branch, not a runner step)
 
@@ -172,8 +184,7 @@ Built per the `prototype` skill's UI branch, before step 1. Work stops afterward
   Screenshots of each variant (two people connected, four people, incoming ring) go to the owner.
 - **Not owed:** tests, CHANGELOG, docs, review skills. It must only compile (`assembleFirebaseDebug`).
   Load the `app-ui-design` skill so the variants look like this app.
-- **Capture:** one commit on the throwaway branch. The verdict (which variant, which parts of the
-  others) is written into steps 4 and 9 in a `docs(plan):` commit on main.
+- **Capture:** one commit on the throwaway branch. The verdict is below.
 - **Built:** the commit is the tip of `prototype/video-call`. The header of
   `VideoCallPrototypeActivity.kt` lists every intent extra (`phase`, `theircam`, `weak`, `theme`,
   `bare` and more), so any state can be opened without a tap. Comparison boards of all three
@@ -184,14 +195,20 @@ Built per the `prototype` skill's UI branch, before step 1. Work stops afterward
 - **Not checked on a device:** the camera icon in the chat top bar, C's composer with the real
   keyboard, and the lock-screen flags. The owner's pass covers them.
 
-**What the verdict changes.** With A or B, steps 4 and 9 rebuild `CallScreen` inside `CallActivity`.
-With C, the in-call screen lives in the main activity and `CallActivity` keeps only ringing on the
-lock screen. The plan then gets a step before step 4 for the overlay host, and picture-in-picture
-is re-decided.
+**Verdict.** A · Stage is the base for every phase of a call.
+
+- From B: the grid for three and four people, and the two answer buttons of an incoming video call.
+- From C: the card and the strip, for a call docked over its chat. A swipe up on the stage docks it.
+- Not built: B's bottom sheet, C's active-speaker layout, C's incoming card, C's drag from the card
+  to full screen, and the ring around whoever speaks. Nothing in the plan reads audio levels.
+
+The stage stays in `CallActivity`, so the lock screen and picture-in-picture work as planned. The
+docked card is drawn by the main activity, inside the call's chat. Step 4 builds the stage, step 4a
+the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 ‖ 5 ‖ 6 → 7 → 8 ‖ 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 6 → 7 → 8 ‖ 9
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -334,7 +351,8 @@ Departures (for sign-off):
 - `data/call/CallVideoSinks.kt`, a singleton: `createView(context, participantId)` returns a
   `VideoTextureViewRenderer` on the call's EGL context, bound to that participant's track and
   rebound when it changes. `LOCAL` is the self view, mirrored for the front camera. It reports who
-  has drawn a first frame. It drops every track before a connection is disposed.
+  has drawn a first frame. It drops every track before a connection is disposed. A participant can
+  have more than one view at a time, and each view is released on its own.
 - State: `CallParticipant` (id, name, avatar, `cameraOn`, `micOn`, `connected`, `hasFrame`) in
   `domain/model/CallState.kt`. `CallStateHolder.participants` holds the remote people, one in a 1:1
   call. `CallUiControls` gains `cameraOn`, `frontCamera`, `videoAvailable`, `cameraPaused`.
@@ -371,17 +389,34 @@ Departures (for sign-off):
 
 ### Step 4 — The call screen with video, for two people (UI) — skills: app-ui-design
 
-**Waits for the prototype verdict.** The layout comes from the winning variant file on
-`prototype/video-call`. Rewrite it properly; do not copy it in. The rest holds for any variant:
+The layout is the prototype's A · Stage: `VariantAStage.kt` on `prototype/video-call`. The answer
+buttons are B's: `SplitAnswerRow` in `VariantBSplit.kt`. Rewrite them properly; do not copy them in.
 
 - One `CallScreen` for every call. Video tiles come in through a slot,
   `videoTile: @Composable (participantId) -> Unit`, so a Robolectric test can pass a plain box.
   Callbacks collapse into an `@Immutable CallScreenCallbacks`.
+- The stage is always dark, whatever the app theme.
+- Connected: the other person fills the screen. The self view is a rounded tile that floats above,
+  follows a drag and snaps to the nearest corner. A tap on it swaps the two. It shows only while
+  the own camera is on.
 - A tile shows the avatar while that person's camera is off or no frame has arrived, and a *muted*
-  mark from `micOn`.
-- Controls: camera, flip (only while the own camera is on), mic, the existing
+  mark from `micOn`. With both cameras off the stage is the voice call: avatar, name, timer.
+- Controls are a floating dock: camera, flip (only while the own camera is on), mic, the existing
   `CallAudioRouteButton`, hang up. With `videoAvailable` false the camera button is disabled and one
   line says the other side needs the latest app.
+- While any video shows, the dock and the top bar hide after four seconds, and a tap on the stage
+  brings them back. A voice call keeps them. The corners the self tile snaps to move up while the
+  dock shows.
+- The top bar has a *minimise* arrow, the name and the timer. The arrow leaves the stage, into
+  picture-in-picture while video shows.
+- Outgoing ring and connecting: the own preview fills the screen behind the name when the call
+  started as video. A voice ring shows a quiet glow instead. The dock is already there.
+- Incoming ring: *Decline*, *Voice only* and *With video* for a video call, *Decline* and *Answer*
+  for a voice call. The preview shows behind the caller's name only if `CAMERA` is already granted;
+  the ring never asks for it. *With video* asks if needed and answers with the camera off when it
+  is refused.
+- On a locked phone a video call offers only *Answer*, without the preview, and starts with the
+  camera off.
 - `CallActivity`: asks for `CAMERA` when a call starts as video and when the camera button is first
   tapped. A refusal leaves the call running with the camera off and says why once. It reports its
   visibility to the service; picture-in-picture counts as visible.
@@ -398,9 +433,51 @@ Departures (for sign-off):
 - `ArchitectureTest`: add `CallVideoSinks` to `UI_ALLOWED_DATA_IMPORTS` and name it in the
   allowlist entry of `TECH_DEBT.md`.
 - Tests (Robolectric): the camera button's three states, avatar or tile per participant state, the
-  unavailable line, the voice-only screen.
+  unavailable line, the voice-only screen, the answer row for a video ring, a voice ring and a
+  locked phone, and the dock hiding only while video shows.
 - Docs: `SPEC.md`, `FEATURE-MAP.md`, `BACKLOG.md` (the hardware list below, and risk 7), CHANGELOG
   `Added` — **Video calls**.
+
+### Step 4a — The call docks over its chat (UI) — skills: app-ui-design, code-review; model: strong
+
+Two activities hand one call over, and the camera follows whichever is on screen. The card and the
+strip are C's: `DockedCall`, `DockedStrip` and `DockedBody` in `VariantCDocked.kt` on
+`prototype/video-call`. Rewrite them properly; do not copy them in.
+
+- A swipe up on the stage docks the call. The call's chat opens in the main activity with the call
+  as a card under the chat's top bar. The thread and the composer below stay usable. The top bar's
+  *minimise* arrow does the same.
+- The swipe starts on the stage, not on the self tile or the dock, and works from the outgoing ring
+  on. An incoming ring cannot be docked. A swipe from the bottom edge stays Android's home gesture.
+- `CallActivity` opens the chat through the main activity's deep link (`MainActivity.EXTRA_CHAT_ID`
+  and `EXTRA_SENDER_ID`) and moves its own task to the back. The hand-over is a short slide and
+  fade, not a drag that follows the finger. On a locked phone the swipe asks for the unlock first
+  and does nothing when it is refused.
+- `CallStateHolder` carries the call's `chatId`. The caller has it from the start. The callee
+  resolves it with `ChatRepository.getOrCreateChat(callerId)` when it answers. Trap: `CallService`
+  writes the `CALL` message only where `currentChatId` is set, which is the caller's side. The
+  callee must still not write one.
+- `ui/call/DockedCallCard.kt` holds the card and the strip, in the app theme. `ChatScreen` shows it
+  while a call of this chat is running and the stage, its picture-in-picture window included, is
+  not on screen. It reads `CallViewModel`; `ChatUiState` gains nothing. Tiles come through the same
+  `videoTile` slot.
+- Two sizes, changed by a drag on the card or a tap on the strip. The strip has avatars, name,
+  timer, camera, mic and hang up. The card has the other person's video with the self view fixed in
+  a corner, and camera, flip, mic, audio route and hang up. A voice call rests as the strip, a call
+  with video as the card. The thread starts below whichever shows.
+- Pulling the card down past its height, or its *full screen* button, brings `CallActivity` back to
+  the front.
+- When the call ends while docked, the card says *Call ended* for a moment and goes. `CallActivity`
+  finishes without coming to the front.
+- Visibility: both activities report to the service. The call counts as visible while either does.
+  The camera pauses only after one second with neither, so the hand-over does not blink.
+- Leaving the chat for another screen, or the app, pauses the camera like any time the call is off
+  screen. The call notification leads back to the stage.
+- Tests (Robolectric): what the card and the strip show for voice and for video, which size a call
+  rests in, and the card showing only in the call's chat. A unit test for the visibility rule:
+  stage to card without a pause, and the pause after a second with neither.
+- Docs: `SPEC.md`, `FEATURE-MAP.md`, `ARCHITECTURE.md` (the two activities), `BACKLOG.md` (the
+  composer with the real keyboard under the card, the hand-over on a device), CHANGELOG `Added`.
 
 **‖ Checkpoint.** The owner deploys the functions (`firebase deploy --only functions`), makes the
 two-device pass from Verification, and reads the direct-or-relayed log lines. `/code-review ultra` if
@@ -466,8 +543,6 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
 - `CallStateHolder.participants` carries everyone. The ringing states gain the group's name.
 - The creator writes the `CALL` message into the group chat when it leaves or the call ends.
 - A second incoming call during a call is ignored, as today.
-- If the verdict's group layout needs an active speaker, each session reads its audio level from the
-  connection's stats twice a second into `CallParticipant.speaking`.
 - **(step-1 /code-review)** Call-level state in `CallService` has no single owner. `currentCallId`,
   `sessions`, `callConnectedAt`, the audio session and the `CallState` writes are touched from the
   main thread and from `serviceScope` (`Dispatchers.IO`). With one session this leaves one known
@@ -511,15 +586,28 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
 
 ### Step 9 — Group call screen, entry and joining late (UI) — skills: app-ui-design
 
-**Waits for the prototype verdict** for the three- and four-person layout.
+The layout for three and four people is B's grid: `SplitTiles` and `splitSlots` in
+`VariantBSplit.kt` on `prototype/video-call`. Everything around it stays the stage from step 4.
+Rewrite it properly; do not copy it in.
 
 - Entry: phone and camera icons in a group chat's top bar. Up to four members: everyone rings.
   More: a picker for up to three people.
 - A banner in the group chat while `observeLiveCall` reports a call I am invited to and not in:
   *Call in progress · Join*.
-- The tiles from step 4, laid out for three and four people.
+- Two people in the call look like step 4.
+- Three and four people get equal rounded tiles with a gap, on the dark stage. The own view is one
+  of them, and no self tile floats. Three is one over two, four is two by two.
+- A tap enlarges a tile and puts the others in a row along the bottom. A second tap returns to
+  equal tiles. Each tile keeps its identity and animates to its slot.
+- In the grid the dock and the top bar do not hide, and the tiles sit between them. A tap cannot
+  both enlarge a tile and toggle the controls.
+- The slot arithmetic is a pure function with a table test.
+- Ringing: the ring screen from step 4, with the faces in a row, the group's name and the caller's
+  name.
+- Docked: the card from step 4a shows the same grid, smaller. The strip shows everyone's avatars.
 - Call log: a group entry shows the group's name and calls the group back. `CallLogEntry.isGroup`.
-- Tests (Robolectric): the layout for 2, 3 and 4, the banner's states, the picker's cap.
+- Tests (Robolectric): the layout for 2, 3 and 4, an enlarged tile, the docked grid, the banner's
+  states, the picker's cap.
 - Docs: `SPEC.md`, `FEATURE-MAP.md`, `BACKLOG.md`, CHANGELOG `Added` — **Group calls**.
 
 ## Verification
@@ -528,25 +616,27 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   because the pocketbase stubs follow every signature change.
 - **After step 1:** one voice call between the phone and the emulator, both directions. The log says
   direct or relayed.
-- **After step 4, phone and emulator:** start as voice and turn the camera on from each side. Start
-  as video. Camera off shows the avatar on the other side, and the camera indicator goes out. Flip.
+- **After step 4a, phone and emulator:** start as voice and turn the camera on from each side. Start
+  as video. Answer a video call with each of the two buttons. Swipe up: the chat opens with the
+  card, the video does not blink, and a message can be typed and sent with the keyboard open. Pull
+  the card down and the stage is back. A docked voice call rests as the strip. Camera off shows the avatar on the other side, and the camera indicator goes out. Flip.
   Refuse the camera permission and confirm the call goes on. Leave the screen and confirm
   picture-in-picture; close the small window and confirm the camera pauses. Answer from the lock
   screen. A headset connected during video takes the audio. The call log and the bubble say *video*.
 - **After step 5:** a call on mobile data runs through `turn.cloudflare.com`.
 - **After step 8:** three devices in one call; one leaves and rejoins; one is killed and its tile
   goes within a minute.
-- **After step 9:** a group of five rings only the picked people; a late join from the banner.
+- **After step 9:** a group of five rings only the picked people; a late join from the banner. Three
+  and four people show the grid, a tap enlarges a tile, and the docked card shows the grid.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): two phones on
   mobile data, a Bluetooth headset during video, heat and battery in a four-person call, a phone with
   an older app version as the partner.
 
 ## Run
 
-The prototype comes first, in an interactive session: *build the prototype per
-`docs/plans/video-calls.md` § Prototype first*. After the verdict is in steps 4 and 9:
-
 ```bash
 scripts/run-plan.sh docs/plans/video-calls.md --dry-run
 scripts/run-plan.sh docs/plans/video-calls.md --to 4
 ```
+
+`--to 4` runs steps 1 to 4a and stops at the checkpoint.

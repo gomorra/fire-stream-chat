@@ -431,3 +431,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   skill names its sources (`shared/live-sources.md`); before a model, effort or price decision
   rests on a bundled number, fetch the live page and quote that, with the date. This is what
   `scripts/plan-runner/benchmark.md` does.
+
+- **Under `set -o pipefail`, never pipe into a reader that can stop early.**
+  `writer | grep -q PATTERN` fails at random although the pattern matches. `grep -q` exits at
+  its first match, the writer's next write dies of SIGPIPE, and pipefail reports the writer's
+  141 as the pipeline's status. `grep -m1`, `head` and `sed q` do the same. The miss rate
+  grows with what the writer still has to write, so a short fixture passes every time.
+  Capture the text and match it from a here-string instead:
+  `text=$(writer); grep -q PATTERN <<< "$text"`. Where only the output matters, `|| true`
+  after the pipeline is enough. `grep PATTERN >/dev/null` is not a fix to rely on: GNU grep
+  stops matching at the first match there too, and only its own draining of the pipe keeps
+  the writer alive. `scripts/plan-runner/lib.sh` read a shipped plan step as not shipped
+  about one time in thirteen this way (2026-10-03, `efab2741`).
