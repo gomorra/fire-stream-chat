@@ -17,6 +17,7 @@ import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
 import com.firestream.chat.ui.components.destinationLabel
+import com.firestream.chat.ui.components.stickerLabel
 
 internal class ChatMessageActions(
     private val chatId: String,
@@ -175,6 +176,8 @@ internal class ChatMessageActions(
             ?: "📍 $LOCATION_DEFAULT_CONTENT"
         MessageType.CALL -> message.content.takeIf { it.isNotBlank() } ?: "Call"
         MessageType.TIMER -> message.content.takeIf { it.isNotBlank() } ?: "Timer"
+        MessageType.STICKER -> stickerLabel(message.content)
+        MessageType.GIF -> message.content.takeIf { it.isNotBlank() } ?: "GIF"
         MessageType.TEXT -> message.content
     }
 }

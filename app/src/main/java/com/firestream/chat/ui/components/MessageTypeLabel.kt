@@ -22,5 +22,13 @@ internal val MessageType.placeholderLabel: String
         MessageType.CALL -> "Call"
         MessageType.LIST -> "List"
         MessageType.TIMER -> "Timer"
+        MessageType.STICKER -> "Sticker"
+        MessageType.GIF -> "GIF"
         MessageType.TEXT -> ""
     }
+
+/**
+ * A sticker's line in a preview. A sticker message's content is its emoji,
+ * which alone would read as a text message, so the word follows it.
+ */
+internal fun stickerLabel(emoji: String): String = if (emoji.isBlank()) "Sticker" else "$emoji Sticker"

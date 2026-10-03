@@ -38,6 +38,9 @@ interface StickerDao {
     @Query("SELECT * FROM stickers WHERE id IN (:ids)")
     suspend fun getStickers(ids: List<String>): List<StickerEntity>
 
+    @Query("SELECT * FROM stickers WHERE id = :id")
+    suspend fun getSticker(id: String): StickerEntity?
+
     @Query("SELECT * FROM sticker_packs WHERE id = :packId")
     suspend fun getPack(packId: String): StickerPackEntity?
 
@@ -66,6 +69,10 @@ interface StickerDao {
 
     @Update
     suspend fun updateSticker(sticker: StickerEntity)
+
+    /** Where the backend holds the sticker's file. A pack does not change by it, so no pack is touched. */
+    @Query("UPDATE stickers SET remoteUrl = :remoteUrl WHERE id = :id")
+    suspend fun setRemoteUrl(id: String, remoteUrl: String)
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPack(pack: StickerPackEntity)

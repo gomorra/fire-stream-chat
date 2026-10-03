@@ -7,10 +7,15 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
+import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.StickerObjectSource
+import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.ImageResult
 import com.firestream.chat.data.util.DocumentFiles
@@ -21,6 +26,7 @@ import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.StickerFormat
 import io.mockk.MockKMatcherScope
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -61,6 +67,9 @@ class OutboxSenderTest {
     private val preferencesDataStore = mockk<PreferencesDataStore>(relaxed = true)
     private val outboxFiles = mockk<OutboxFiles>(relaxed = true)
     private val documentFiles = mockk<DocumentFiles>(relaxed = true)
+    private val stickerDao = mockk<StickerDao>(relaxed = true)
+    private val stickerFiles = mockk<StickerFiles>()
+    private val stickerObjectSource = mockk<StickerObjectSource>()
 
     /** The messages table, keyed by id. */
     private val rows = mutableMapOf<String, MessageEntity>()
@@ -83,7 +92,16 @@ class OutboxSenderTest {
         val ciphertext: String? = null,
         /** What the row held in `outboxCiphertext` at the moment of the write. */
         val ciphertextOnRow: String? = null,
+        /** Recorded for a plaintext write only. */
+        val sticker: StickerRef? = null,
     )
+
+    /** The `stickers` table, keyed by id. */
+    private val stickers = mutableMapOf<String, StickerEntity>()
+
+    /** Every sticker id `ensureUploaded` was asked for, in order. */
+    private val stickerUploads = mutableListOf<String>()
+    private val stickerFile = File.createTempFile("sticker", ".webp").apply { deleteOnExit() }
 
     private lateinit var sender: OutboxSender
 
@@ -162,6 +180,18 @@ class OutboxSenderTest {
         // Only the media dir is a place the app keeps files; a staged copy or a cache path is not.
         every { outboxFiles.isDurable(any()) } answers { firstArg<String>().startsWith("/media/") }
         every { outboxFiles.mimeTypeOf(any()) } returns null
+        // A relaxed mock would answer with a mock pair, not with "no bounds".
+        coEvery { documentFiles.imageBounds(any()) } returns null
+        coEvery { stickerDao.getSticker(any()) } answers { stickers[firstArg()] }
+        coEvery { stickerDao.setRemoteUrl(any(), any()) } answers {
+            val id = firstArg<String>()
+            stickers[id] = stickers.getValue(id).copy(remoteUrl = secondArg())
+        }
+        every { stickerFiles.fileFor(any(), any()) } returns stickerFile
+        coEvery { stickerObjectSource.ensureUploaded(any(), any(), any(), any()) } answers {
+            stickerUploads += firstArg<String>()
+            stickerUrl(firstArg())
+        }
 
         sender = newSender(buildEncrypts = false)
     }
@@ -175,7 +205,24 @@ class OutboxSenderTest {
         messageDao, chatDao, messageSource, storageSource,
         MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts),
         outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore, documentFiles,
+        stickerDao, stickerFiles, stickerObjectSource,
     )
+
+    private fun stickerUrl(stickerId: String) = "https://storage.example/stickers/$stickerId.webp"
+
+    /** Puts a sticker into the library, with [remoteUrl] when an earlier send uploaded it. */
+    private fun librarySticker(id: String, remoteUrl: String? = null) {
+        stickers[id] = StickerEntity(
+            id = id, format = StickerFormat.WEBP.name, width = 512, height = 512, isAnimated = false,
+            emojis = listOf("😀"), createdAt = 1L, remoteUrl = remoteUrl,
+        )
+    }
+
+    /** A sticker message as the repository inserts it: the library file as `localUri`, the url only when known. */
+    private fun stickerMessage(id: String, stickerId: String, mediaUrl: String? = null) =
+        sending(id, MessageType.STICKER, localUri = stickerFile.path).copy(
+            content = "😀", stickerId = stickerId, stickerPackId = "pack1", mediaUrl = mediaUrl, mimeType = "image/webp",
+        )
 
     /** Records every plaintext write in [writes]. A test that stubs a failing write calls it again to recover. */
     private fun recordPlainWrites() {
@@ -186,7 +233,8 @@ class OutboxSenderTest {
                 mediaUrl = arg(7),
                 mediaThumbnailUrl = arg(8),
                 duration = arg(10),
-                ifAbsent = arg(19),
+                sticker = arg(19),
+                ifAbsent = arg(20),
             )
             arg<String>(2)
         }
@@ -202,7 +250,7 @@ class OutboxSenderTest {
                 mediaUrl = arg(8),
                 mediaThumbnailUrl = arg(9),
                 duration = arg(11),
-                ifAbsent = arg(20),
+                ifAbsent = arg(21),
                 ciphertext = arg(3),
                 ciphertextOnRow = rows[id]?.outboxCiphertext,
             )
@@ -213,13 +261,13 @@ class OutboxSenderTest {
     /** Any plaintext write, positional in `MessageSource.sendPlainMessage` order. */
     private suspend fun MockKMatcherScope.anyPlainWrite() = messageSource.sendPlainMessage(
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Any encrypted write, positional in `MessageSource.sendMessage` order. */
     private suspend fun MockKMatcherScope.anyEncryptedWrite() = messageSource.sendMessage(
         any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
-        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+        any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
     )
 
     /** Inserts [message] as the repository does, recording its target — and, for a re-attempt, earlier runs. */
@@ -336,7 +384,7 @@ class OutboxSenderTest {
     fun `a write whose row was deleted meanwhile does not undelete it, and leaves the tombstone owed`() = runTest {
         store(sending("msg1", MessageType.TEXT))
         coEvery { anyPlainWrite() } answers {
-            writes += Write(arg(2), arg(4), arg(7), arg(8), arg(10), ifAbsent = arg(19))
+            writes += Write(arg(2), arg(4), arg(7), arg(8), arg(10), ifAbsent = arg(20))
             rows["msg1"] = rows.getValue("msg1").let { it.copy(record = it.record.copy(deletedAt = 5_000L, content = "")) }
             arg<String>(2)
         }
@@ -846,6 +894,141 @@ class OutboxSenderTest {
         coVerify(exactly = 0) { documentFiles.audioDurationSeconds(any()) }
     }
 
+    // ── stickers ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `a sticker no one has sent yet gets its url from the shared object, kept on the message and the library row`() = runTest {
+        librarySticker(STICKER_ID)
+        every { outboxFiles.isDurable(stickerFile.path) } returns true
+        store(stickerMessage("st1", STICKER_ID))
+
+        sender.send("st1")
+
+        assertEquals(listOf(STICKER_ID), stickerUploads)
+        // Nothing went up under the message id: a sticker has no bytes of its own.
+        assertTrue(uploads.isEmpty())
+        val write = writes.single()
+        assertEquals(stickerUrl(STICKER_ID), write.mediaUrl)
+        assertEquals(StickerRef(STICKER_ID, "pack1"), write.sticker)
+        assertEquals(stickerUrl(STICKER_ID), stickers.getValue(STICKER_ID).remoteUrl)
+        // The library file is the app's own, so the SENT row goes on pointing at it.
+        assertEquals(stickerFile.path, stored("st1").localUri)
+    }
+
+    @Test
+    fun `the second send of a sticker uploads nothing`() = runTest {
+        librarySticker(STICKER_ID)
+        // Both rows were inserted before either send ran, so neither has a url yet.
+        store(stickerMessage("st1", STICKER_ID))
+        store(stickerMessage("st2", STICKER_ID))
+
+        sender.send("st1")
+        sender.send("st2")
+
+        assertEquals(listOf(STICKER_ID), stickerUploads)
+        assertEquals(listOf(stickerUrl(STICKER_ID), stickerUrl(STICKER_ID)), writes.map { it.mediaUrl })
+    }
+
+    @Test
+    fun `a sticker row that already has its url reads no library row and asks no backend`() = runTest {
+        store(stickerMessage("st1", STICKER_ID, mediaUrl = stickerUrl(STICKER_ID)))
+
+        sender.send("st1")
+
+        assertTrue(stickerUploads.isEmpty())
+        coVerify(exactly = 0) { stickerDao.getSticker(any()) }
+        assertEquals(stickerUrl(STICKER_ID), writes.single().mediaUrl)
+    }
+
+    @Test
+    fun `a sticker whose upload failed stores no url, and the retry asks again`() = runTest {
+        librarySticker(STICKER_ID)
+        store(stickerMessage("st1", STICKER_ID))
+        coEvery { stickerObjectSource.ensureUploaded(any(), any(), any(), any()) } throws IOException("offline")
+
+        runCatching { sender.send("st1") }
+
+        assertNull(stored("st1").mediaUrl)
+        assertNull(stickers.getValue(STICKER_ID).remoteUrl)
+        assertTrue(writes.isEmpty())
+
+        coEvery { stickerObjectSource.ensureUploaded(any(), any(), any(), any()) } answers { stickerUrl(firstArg()) }
+        sender.send("st1")
+
+        assertEquals(stickerUrl(STICKER_ID), writes.single().mediaUrl)
+        assertTrue(writes.single().ifAbsent)
+    }
+
+    @Test
+    fun `a sticker message that names no library sticker is refused before any upload`() = runTest {
+        store(stickerMessage("st1", STICKER_ID))
+        store(stickerMessage("st2", "../../etc/passwd"))
+
+        assertTrue(runCatching { sender.send("st1") }.exceptionOrNull() is IllegalStateException)
+        assertTrue(runCatching { sender.send("st2") }.exceptionOrNull() is IllegalStateException)
+
+        assertTrue(stickerUploads.isEmpty())
+        assertTrue(writes.isEmpty())
+    }
+
+    // ── GIFs ────────────────────────────────────────────────────────────────
+
+    // A GIF takes the document route: the staged bytes go up as they are. The
+    // compressor and the media dir are strict mocks here, so a call to either
+    // would fail the test by itself; the verifies say so out loud.
+    @Test
+    fun `a GIF is uploaded as it is under its own type, and its SENT row keeps the copy in the documents dir`() = runTest {
+        val staged = "/data/outbox/gif1.gif"
+        val kept = "/data/documents/gif1.gif"
+        every { outboxFiles.isStaged(staged) } returns true
+        every { outboxFiles.isDurable(kept) } returns true
+        coEvery { documentFiles.imageBounds(staged) } returns (320 to 240)
+        coEvery { documentFiles.adopt("gif1", staged, null, "image/gif") } returns kept
+        // "Keep original images" is about photos. A GIF never reaches the compressor either way.
+        every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
+        store(sending("gif1", MessageType.GIF, localUri = staged).copy(content = "look", mimeType = "image/gif"))
+
+        sender.send("gif1")
+
+        assertEquals(listOf(Upload("gif1", "image/gif", reportsProgress = true)), uploads)
+        coVerify(exactly = 0) { imageCompressor.processImage(any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.copyToLocal(any(), any(), any(), any()) }
+        val sent = stored("gif1")
+        assertEquals(320, sent.mediaWidth)
+        assertEquals(240, sent.mediaHeight)
+        assertEquals(kept, sent.localUri)
+        assertEquals(MessageType.GIF, writes.single().type)
+    }
+
+    @Test
+    fun `a GIF whose upload failed keeps its bounds, and the retry uploads without reading them again`() = runTest {
+        val staged = "/data/outbox/gif1.gif"
+        coEvery { documentFiles.imageBounds(staged) } returns (320 to 240)
+        store(sending("gif1", MessageType.GIF, localUri = staged).copy(mimeType = "image/gif"))
+        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } throws IOException("offline")
+
+        runCatching { sender.send("gif1") }
+
+        assertEquals(320, stored("gif1").mediaWidth)
+        assertNull(stored("gif1").mediaUrl)
+
+        coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } returns "https://storage.example/gif1"
+        sender.send("gif1")
+
+        coVerify(exactly = 1) { documentFiles.imageBounds(any()) }
+        assertEquals("https://storage.example/gif1", writes.single().mediaUrl)
+    }
+
+    @Test
+    fun `a GIF whose bounds cannot be read is still sent`() = runTest {
+        store(sending("gif1", MessageType.GIF, localUri = "/data/outbox/gif1.gif").copy(mimeType = "image/gif"))
+
+        sender.send("gif1")
+
+        assertNull(stored("gif1").mediaWidth)
+        assertEquals(listOf(Upload("gif1", "image/gif", reportsProgress = true)), uploads)
+    }
+
     @Test
     fun `a voice message uploads as aac without progress and is written with its duration`() = runTest {
         store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac").copy(duration = 5))
@@ -905,3 +1088,6 @@ class OutboxSenderTest {
         coVerify(exactly = 0) { messageDao.acknowledge(any(), any()) }
     }
 }
+
+/** A well-formed sticker id: 64 lowercase hex digits. */
+private val STICKER_ID = "a".repeat(64)

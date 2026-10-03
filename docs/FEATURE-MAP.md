@@ -615,8 +615,13 @@ A sticker is an immutable file named by the SHA-256 of its bytes, kept in `files
 A pack is an ordered list of sticker ids. Room holds the library, and `StickerRepository` is the
 only way into it. Stickers arrive by import: from WhatsApp's sticker folder through a folder grant,
 or from picked `.webp` files and `.wastickers` archives. Every imported byte is untrusted, so the
-parsers check sizes against the buffer and the archive reader works under caps. Nothing is sent or
-uploaded yet. Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
+parsers check sizes against the buffer and the archive reader works under caps.
+
+A `STICKER` message points at a sticker by that hash and carries no bytes of its own. The file is
+one shared Storage object, `stickers/<id>.<ext>`, uploaded the first time anyone sends the sticker.
+A receiver hashes what it downloads before storing it. A `GIF` message is plain media sent as it
+is: one upload per message, and the file is kept in `filesDir/documents/`, not in the gallery.
+No screen sends either type yet. Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
 
 The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
 under *Image / Media Pipeline*.
@@ -627,7 +632,16 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/domain/model/StickerPack.kt` | `StickerPack`, `StickerPackKind`, `WhatsAppStickerFile`, `StickerImportResult` |
 | `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, favourite, pack and sticker edits, `markUsed` |
 | `app/src/main/java/com/firestream/chat/domain/util/WebpContainer.kt` | Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk |
-| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `open` for a uri |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `open` for a uri, and `rowLock`, which keeps a file and its `stickers` row together |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerDownloads.kt` | A received sticker's local copy: fetched once, hashed against the id the message claims, stored with its row. A mismatch stores nothing |
+| `app/src/main/java/com/firestream/chat/data/remote/source/StickerObjectSource.kt` | `ensureUploaded`: the url of a sticker's shared object, uploading only when the backend does not hold it |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSource.kt` | `stickers/<id>.<ext>` in Firebase Storage: look up, then upload when missing |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseStickerObjectSource.kt` | Uploads through this flavor's `StorageSource`, which is a stub in v0 |
+| `app/src/main/java/com/firestream/chat/data/remote/source/StickerRef.kt` | A message's sticker id and pack id, crossing the `MessageSource` boundary as one value |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendStickerMessage` (the row is built from the library; which pack ids are shared) and `sendGifMessage` (the 8 MB guard) |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `withStickerUrl` (library url, else look up, else upload, one sticker at a time) and the GIF's document route |
+| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles` |
+| `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
 | `app/src/main/java/com/firestream/chat/data/sticker/WaStickerMetadata.kt` | Pack id, name, publisher and emojis out of a WhatsApp WebP's EXIF chunk |
 | `app/src/main/java/com/firestream/chat/data/sticker/StickerPackArchive.kt` | `.wastickers` / zip reader under caps on entry count, bytes per entry and total bytes |
 | `app/src/main/java/com/firestream/chat/data/sticker/WhatsAppStickerFolder.kt` | One child-documents query over the granted folder, newest first |
@@ -646,6 +660,10 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/data/sticker/WaStickerMetadataTest.kt` | Metadata present, absent and malformed |
 | `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesTest.kt` | Hash naming, the limits, the `cacheDir` fence of `open` |
 | `app/src/test/java/com/firestream/chat/data/sticker/StickerPackArchiveTest.kt` | Each cap, entry names, title and author |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerDownloadsTest.kt` | The hash mismatch, the refusals, a repeat receive, and a receive during a refused archive's undo |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryStickerGifSendTest.kt` | What is queued for a sticker and a GIF, the shared pack kinds, the GIF size guard |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSourceTest.kt` | Look up first, upload when missing, an upload refused because the object exists by now |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxSenderTest.kt` | The second send of a sticker uploads nothing; a GIF is never compressed; both resume points |
 | `app/src/test/java/com/firestream/chat/data/sticker/WhatsAppStickerFolderTest.kt` | The folder filter and sort |
 | `app/src/test/java/com/firestream/chat/data/local/dao/StickerDaoTest.kt` | Ordering queries and the transaction methods |
 | `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryImplTest.kt` | Grouping, de-duplication, a refused archive, pack edits |
@@ -654,6 +672,8 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryScreenTest.kt` | The empty state, the loading state, the unnamed packs' labels |
 
 **Entry point:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`.
+
+**Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
 
 ## Adding a feature here
 

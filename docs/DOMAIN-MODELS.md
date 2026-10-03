@@ -40,7 +40,7 @@ data class Message(
     val chatId: String,
     val senderId: String,
     val content: String,
-    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION
+    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION | TIMER | STICKER | GIF
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
     val localUri: String?,                   // local file path for media (offline-first)
@@ -48,7 +48,9 @@ data class Message(
     val mediaHeight: Int?,                   // original image height for aspect ratio
     val fileName: String?,                   // DOCUMENT: display name as picked (null for other types)
     val fileSize: Long?,                     // DOCUMENT: size in bytes
-    val mimeType: String?,                   // DOCUMENT: type as picked
+    val mimeType: String?,                   // DOCUMENT: type as picked. STICKER, GIF: the file's type
+    val stickerId: String?,                  // STICKER: SHA-256 of the sticker's bytes; the sender's claim on receive
+    val stickerPackId: String?,              // STICKER: the pack it was sent from, when the sender shared one
     val status: MessageStatus,   // SENDING | SENT | DELIVERED | READ | FAILED
     val replyToId: String?,
     val timestamp: Long,

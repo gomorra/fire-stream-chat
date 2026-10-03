@@ -4,13 +4,20 @@ import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.firestream.chat.data.sticker.StoredSticker
 import com.firestream.chat.data.util.parseStickerFormat
 import com.firestream.chat.data.util.parseStickerPackKind
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerPack
 
-/** One sticker file the library knows. [id] is the SHA-256 of its bytes, which is also its file name. */
+/**
+ * One sticker file the library knows. [id] is the SHA-256 of its bytes, which is also its file name.
+ *
+ * [remoteUrl] is where the backend holds the file, and is null until this device
+ * has uploaded it or found it there (`StickerObjectSource.ensureUploaded`). It is
+ * never taken from a received message: a send would hand that url on to every chat.
+ */
 @Entity(tableName = "stickers")
 data class StickerEntity(
     @PrimaryKey val id: String,
@@ -20,6 +27,7 @@ data class StickerEntity(
     val isAnimated: Boolean,
     val emojis: List<String>,
     val createdAt: Long,
+    val remoteUrl: String? = null,
 ) {
     /** [localPath] says where a file of the sticker's format lives; the row does not know the directory. */
     fun toDomain(localPath: (StickerFormat) -> String): Sticker {
@@ -32,6 +40,19 @@ data class StickerEntity(
             isAnimated = isAnimated,
             emojis = emojis,
             localPath = localPath(format),
+        )
+    }
+
+    companion object {
+        /** The row of a file `StickerFiles` has just stored, tagged with the [emojis] its metadata names. */
+        fun of(stored: StoredSticker, emojis: List<String>, now: Long) = StickerEntity(
+            id = stored.id,
+            format = stored.format.name,
+            width = stored.width,
+            height = stored.height,
+            isAnimated = stored.isAnimated,
+            emojis = emojis,
+            createdAt = now,
         )
     }
 }

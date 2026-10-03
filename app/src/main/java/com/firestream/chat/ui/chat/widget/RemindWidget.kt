@@ -59,6 +59,8 @@ import com.firestream.chat.domain.command.CommandPayload
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.ui.chat.SnoozeOptionsList
+import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.stickerLabel
 import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -156,8 +158,9 @@ class RemindWidget @Inject constructor() : ChatCommandWidget {
 @Composable
 private fun TargetPreview(message: Message, senderName: String?) {
     val snippet = when (message.type) {
-        MessageType.IMAGE -> message.content.take(80).ifBlank { "Photo" }
-        MessageType.VIDEO -> message.content.take(80).ifBlank { "Video" }
+        MessageType.IMAGE, MessageType.VIDEO, MessageType.GIF ->
+            message.content.take(80).ifBlank { message.type.placeholderLabel }
+        MessageType.STICKER -> stickerLabel(message.content.take(80))
         else -> message.content.take(80).ifBlank { "Message" }
     }
     Row(

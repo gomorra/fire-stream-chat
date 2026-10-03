@@ -48,7 +48,7 @@ import com.firestream.chat.data.local.entity.UserEntity
         StickerPackEntity::class,
         StickerPackItemEntity::class
     ],
-    version = 30,
+    version = 31,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

@@ -1,7 +1,9 @@
 // region: AGENT-NOTE
 // Responsibility: The sticker library on this device — packs, their stickers,
 //   favourites and recents — and the import of sticker files and pack archives
-//   into it. No remote yet: nothing here uploads, and nothing restores.
+//   into it. Nothing here uploads or restores: a sticker's file reaches the
+//   backend when it is first sent (OutboxSender), and a received one arrives
+//   through StickerDownloads.
 // Owns: which pack an imported sticker joins (its WhatsApp metadata, an archive's
 //   title, else the caller's loose pack or SAVED); the import key that lets a
 //   second import find the same pack; the import counts. One import runs at a time.
@@ -150,8 +152,13 @@ class StickerRepositoryImpl @Inject constructor(
             }
         } catch (e: Exception) {
             val fresh = stored.filter { it.isNew }
-            val known = stickerDao.getStickers(fresh.map { it.entity.id }).mapTo(HashSet()) { it.id }
-            fresh.filterNot { it.entity.id in known }.forEach { stickerFiles.discard(it.entity.id, it.format) }
+            // Under the row lock: a sticker received meanwhile (StickerDownloads) may have
+            // found one of these files already there. Its row is written under the same
+            // lock, so it is either seen here or the file it stores comes after this delete.
+            stickerFiles.rowLock.withLock {
+                val known = stickerDao.getStickers(fresh.map { it.entity.id }).mapTo(HashSet()) { it.id }
+                fresh.filterNot { it.entity.id in known }.forEach { stickerFiles.discard(it.entity.id, it.format) }
+            }
             throw e
         }
         val archivePack = summary.title?.let { Target.archive(it, summary.author) }
@@ -166,15 +173,7 @@ class StickerRepositoryImpl @Inject constructor(
      */
     private fun found(stored: StoredSticker, loosePackName: String?, now: Long): Found {
         val metadata = WaStickerMetadata.parse(stored.exif)
-        val entity = StickerEntity(
-            id = stored.id,
-            format = stored.format.name,
-            width = stored.width,
-            height = stored.height,
-            isAnimated = stored.isAnimated,
-            emojis = metadata?.emojis.orEmpty(),
-            createdAt = now,
-        )
+        val entity = StickerEntity.of(stored, metadata?.emojis.orEmpty(), now)
         return Found(entity, stored.format, targetFor(metadata, loosePackName), stored.isNew)
     }
 

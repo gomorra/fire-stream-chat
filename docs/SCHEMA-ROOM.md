@@ -24,7 +24,7 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 Version 28 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
 
-**The sticker library is three tables (version 30).** `stickers` holds one row per sticker file. Its `id` is the SHA-256 of the file's bytes, which is also the file's name under `filesDir/stickers/`. `sticker_packs` holds the packs, and `sticker_pack_items` puts a sticker into a pack at a `position`. A sticker can be in several packs and is in each at most once.
+**The sticker library is three tables.** `stickers` holds one row per sticker file. Its `id` is the SHA-256 of the file's bytes, which is also the file's name under `filesDir/stickers/`. `sticker_packs` holds the packs, and `sticker_pack_items` puts a sticker into a pack at a `position`. A sticker can be in several packs and is in each at most once.
 
 | Column | Meaning |
 |---|---|
@@ -34,8 +34,11 @@ Version 28 is reached by destructive migration, like every `AppDatabase` bump ex
 | `sticker_packs.sortOrder` | The pack's place in the user's order |
 | `sticker_packs.syncState` | `PENDING` or `SYNCED`. Every `StickerDao` write that changes a pack or its items sets `PENDING` and moves `updatedAt`. Nothing reads it yet |
 | `sticker_pack_items.position` | Order inside the pack, ascending. A favourite is added in front, so positions can be negative |
+| `stickers.remoteUrl` | Where the backend holds the file. `null` until this device has uploaded the sticker or found it there (`StickerObjectSource.ensureUploaded`). Never taken from a received message |
 
-Removing a sticker from a pack, or deleting a pack, deletes item rows only. The `stickers` row and the file stay.
+Removing a sticker from a pack, or deleting a pack, deletes item rows only. The `stickers` row and the file stay. A received sticker has a `stickers` row and no pack item.
+
+**A `STICKER` message names its sticker (version 31).** `messages.stickerId` is the sticker's hash and `messages.stickerPackId` the pack it was sent from, or `null`. Both are part of `MessageRecord`, so a snapshot writes them. On a received row they are the sender's claim: the id is checked with `StickerFiles.isValidId` before it reaches a path, and against the downloaded bytes before a file is stored. The row's `localUri` is the sticker's file in `filesDir/stickers/`, shared by every message that points at that sticker. A `GIF` row's `localUri` is its copy in `filesDir/documents/`.
 
 ```mermaid
 erDiagram
@@ -88,6 +91,8 @@ erDiagram
         String fileName
         Long fileSize
         String mimeType
+        String stickerId
+        String stickerPackId
         Long timestamp
         Long editedAt
         Boolean isStarred
@@ -140,6 +145,7 @@ erDiagram
         Boolean isAnimated
         String emojisJSON
         Long createdAt
+        String remoteUrl
     }
 
     sticker_packs {

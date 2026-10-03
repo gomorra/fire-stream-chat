@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.outlined.Gif
+import androidx.compose.material.icons.outlined.StickyNote2
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,6 +43,7 @@ import com.firestream.chat.domain.model.User
 import com.firestream.chat.ui.components.ChatPickerLabels
 import com.firestream.chat.ui.components.ChatPickerOverlay
 import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.stickerLabel
 
 /**
  * "Forward to…" — the chat picker, opened over the conversation.
@@ -106,6 +109,10 @@ private fun BoxScope.ForwardMessagePreview(message: Message) {
                 .align(Alignment.TopStart)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
+        )
+        MessageType.STICKER -> LabelledPreview(
+            icon = message.type.previewIcon,
+            label = stickerLabel(message.content),
         )
         else -> LabelledPreview(
             icon = message.type.previewIcon,
@@ -174,6 +181,8 @@ private val MessageType.previewIcon: ImageVector
         MessageType.TIMER -> Icons.Default.Timer
         MessageType.LIST -> Icons.AutoMirrored.Filled.List
         MessageType.CALL -> Icons.Default.Call
+        MessageType.STICKER -> Icons.Outlined.StickyNote2
+        MessageType.GIF -> Icons.Outlined.Gif
         // Handled by their own branches in ForwardMessagePreview.
         MessageType.TEXT, MessageType.IMAGE, MessageType.VIDEO -> Icons.Default.Description
     }

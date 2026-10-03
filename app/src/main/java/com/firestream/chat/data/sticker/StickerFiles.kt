@@ -3,9 +3,12 @@
 //   filesDir/stickers/<sha256 of the bytes>.<ext> — and the only way a file gets
 //   there: checked for size and format, hashed, written to a temp file and renamed.
 // Owns: the stickers directory; the 1 MB and 2048 px caps; the id rule (64
-//   lowercase hex digits), which is what keeps an id from steering a path.
+//   lowercase hex digits), which is what keeps an id from steering a path; the
+//   lock that keeps a file and its row together (rowLock).
 // Collaborators: StickerRepositoryImpl (store() per imported file or archive
-//   entry, discard() to undo a refused archive), WebpContainer (the format check).
+//   entry, discard() to undo a refused archive), StickerDownloads (store() for a
+//   sticker a message points at), OutboxSender and MessageRepositoryImpl
+//   (fileFor() of a sticker being sent), WebpContainer (the format check).
 // Don't put here: pack membership or any Room access (StickerRepositoryImpl),
 //   archive reading (StickerPackArchive), message media (MediaFileManager,
 //   DocumentFiles).
@@ -19,6 +22,7 @@ import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.util.WebpContainer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -55,6 +59,14 @@ class StickerFiles @Inject constructor(
 
     val dir: File
         get() = File(context.filesDir, DIR_NAME)
+
+    /**
+     * Held while a file is stored together with its `stickers` row, and while
+     * files that have no row are deleted. A refused archive deletes the files it
+     * wrote that no row names. A sticker received in between is such a file until
+     * its row is written, so both sides take this lock.
+     */
+    val rowLock = Mutex()
 
     /** The file the sticker [id] lives in. Throws for an [id] that is not a SHA-256 in lowercase hex. */
     fun fileFor(id: String, format: StickerFormat): File {
@@ -120,7 +132,8 @@ class StickerFiles @Inject constructor(
         }
     }
 
-    private fun readCapped(input: InputStream): ByteArray? {
+    /** The bytes of [input], or `null` when it holds more than [MAX_BYTES]. No more than that is read. The stream is not closed. */
+    fun readCapped(input: InputStream): ByteArray? {
         val out = ByteArrayOutputStream()
         val buffer = ByteArray(16 * 1024)
         while (true) {

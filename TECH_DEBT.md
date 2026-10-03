@@ -574,14 +574,38 @@ even when no pack holds the sticker any more. A destructive `AppDatabase` bump d
 and leaves every file. `StickerFiles.store` writes through a `.part` temp file, and a process
 death between the write and the rename leaves that file too.
 
+A received sticker adds a `stickers` row and a file that no pack holds (`StickerDownloads`).
+
 **Why we haven't fixed it.** A file is at most 1 MB and is shared: the same sticker can sit
-in several packs and in the recents list. `docs/plans/stickers-and-gifs.md` step 3 adds a
-third holder, the messages that point at a sticker, and step 6 restores rows whose files are
-fetched later. Which files are unreferenced can only be decided once those two exist.
+in several packs, in the recents list and in any number of messages, whose `localUri` is the
+file's path. Step 6 of `docs/plans/stickers-and-gifs.md` restores rows whose files are fetched
+later. Which files are unreferenced can only be decided once that exists.
 
 **When to revisit.** After step 6 of the plan, or when the directory's size shows up in a
 storage report. The fix is a sweep that deletes files no pack item, recent or message names,
 and every `.part` file.
+
+---
+
+### Nothing on the backend checks that a sticker object matches its name
+
+**The smell.** A sticker's Storage object is `stickers/<sha256>.<ext>`, create-only. Storage
+rules cannot hash a file, so a signed-in user can create the object for a hash with other
+bytes. Everyone who sends that sticker afterwards gets that object's url from
+`StickerObjectSource.ensureUploaded`, which looks the object up and uploads nothing.
+
+**Why we haven't fixed it.** A receiver hashes what it downloads and stores only a match
+(`StickerDownloads`), so the library and every later send from it stay honest. What a wrong
+object costs is a sticker that renders from its url as the wrong picture, for everyone, until
+the object is deleted by hand. A device that stored that object's url in `stickers.remoteUrl`
+keeps sending it after the deletion, because nothing clears the column. The user base is
+closed, and the plan accepted this
+(`docs/plans/stickers-and-gifs.md`, open risk 2). The rules themselves are kept in the Firebase
+console and are not in this repo.
+
+**When to revisit.** Before the app is opened to users who are not trusted, or when step 10
+adds Cloud Functions that could own the upload. The fix is an upload through a function that
+hashes the bytes and writes the object itself, with client writes to `stickers/` closed.
 
 ---
 
