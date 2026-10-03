@@ -95,6 +95,9 @@ class ChatRepositoryImpl @Inject constructor(
 
         val existing = chatSource.findIndividualChat(participants, uid)
         if (existing != null) {
+            // The chat-list sync may not have stored this chat yet, and a send needs its row.
+            // upsertRemote, not insertChat: a REPLACE insert would wipe the local-only fields.
+            chatDao.upsertRemote(listOf(ChatEntity.fromDomain(existing)))
             existing
         } else {
             val chatData = hashMapOf<String, Any?>(
