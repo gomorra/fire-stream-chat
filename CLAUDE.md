@@ -32,30 +32,29 @@ cd functions && npm install && firebase deploy --only functions
 cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 ```
 
-> **Cloud sessions (Claude Code on the web): Gradle works — run the gate.** Verified
-> 2026-09-09: `./gradlew :app:testFirebaseDebugUnitTest` runs the full suite (910 tests)
-> in a cloud container. A previous version of this note claimed the egress policy blocked
-> `dl.google.com`; that was wrong, or has since changed. Google Maven, Maven Central, the
-> Gradle plugin portal and `dl.google.com/android/repository` all resolve.
+> **Cloud sessions (Claude Code on the web): run the gate. Gradle works there.**
+> The full suite runs in a cloud container, and all dependency hosts resolve.
 >
-> Three things a fresh container lacks, all handled by `.claude/hooks/session-start.sh`
-> — if you hit one of them, the hook did not run (check `CLAUDE_CODE_REMOTE`), so run it
-> by hand rather than working around it:
-> 1. **No Android SDK.** Every Android task dies with `SDK location not found`.
+> A fresh container lacks three things. `.claude/hooks/session-start.sh` supplies all
+> three. If you hit one, the hook did not run: check `CLAUDE_CODE_REMOTE` and run the
+> hook by hand. Don't work around it.
+> 1. **No Android SDK.** Every Android task fails with `SDK location not found`.
 >    `scripts/install-android-sdk.sh` installs it and writes `sdk.dir` to `local.properties`.
-> 2. **No `google-services.json`.** The plugin is applied module-wide, so *every* variant
->    fails at `processGoogleServices`. The hook writes a build-only placeholder.
-> 3. **No UTF-8 locale.** `LANG` is unset, so `sun.jnu.encoding` is ASCII and the Kotlin
->    compiler cannot write class files for the test names containing an em dash —
->    it reports only `Internal compiler error`. `LANG`/`LC_ALL` are set in
->    `.claude/settings.json`; the daemon inherits them from the shell, so exporting them
->    inside a hook or a single command is not enough (`./gradlew --stop` first if you do).
+> 2. **No `google-services.json`.** The plugin applies to the whole module, so every
+>    variant fails at `processGoogleServices`. The hook writes a build-only placeholder.
+> 3. **No UTF-8 locale.** Without `LANG`, the Kotlin compiler cannot write class files
+>    for test names that contain an em dash. It reports only `Internal compiler error`.
+>    `.claude/settings.json` sets `LANG`/`LC_ALL`. The Gradle daemon inherits them from
+>    the shell that started it, so exporting them in a hook or a single command is not
+>    enough. If you do, run `./gradlew --stop` first.
 >
-> Use the **firebase** flavor (`:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`);
-> bare `test` also builds pocketbase, which is not maintained yet. One test fails in a
-> cloud container and only there: `ApkDownloaderTest.unresolvable host maps to friendly
-> No internet connection message` expects a DNS failure, and the sandbox's HTTP proxy
-> answers `403` on CONNECT instead. It passes locally and in CI. Any *other* failure is real.
+> Use the firebase flavor (`:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`).
+> Bare `test` also builds pocketbase, which is not maintained yet.
+>
+> One test fails only in cloud containers:
+> `ApkDownloaderTest.unresolvable host maps to friendly No internet connection message`.
+> It expects a DNS failure, but the sandbox proxy answers `403` instead. Any other
+> failure is real.
 
 - JVM target: 17
 - `minSdk = 31`, `targetSdk = 35`, `compileSdk = 35`
@@ -69,12 +68,12 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 
 Plans do not include per-step model/effort tables. Principles:
 
-- **Planning, and anything security-adjacent, concurrency-heavy, or architecture-defining** belongs on the strongest available model tier (currently Fable/Opus).
-- **Everything else** is fine on the current mid-tier model — quality on small steps is enforced by the test+build gate, not model choice; using the stronger model is always safe.
-- **Spawned `Agent` calls**: choose each call's `model` by the same judgment (stronger models for security/concurrency-shaped review work).
-- **Report the model per sub-agent** — whenever an `Agent` call is made, state which model that sub-agent runs on (the explicit `model` override, or the agent definition's default if omitted), both when launching it and when summarizing its results. `subagent_type: "fork"` always inherits the parent's model — say so explicitly too. When several agents launch in parallel, list the model per agent, not once for the batch.
+- **Planning, and anything security-adjacent, concurrency-heavy, or architecture-defining** belongs on the strongest available model tier (currently Opus at `xhigh` for max and `high` for strong; mid is Opus at `medium`).
+- **Everything else** runs on the current mid tier. The test and build gate enforces quality on small steps. The stronger tier is always safe to use.
+- **Spawned `Agent` calls:** choose each call's `model` by the same rule. Security- or concurrency-shaped review work gets the stronger tier.
+- **Report the model per sub-agent.** When you launch an `Agent` and when you summarize its results, state its model: the `model` override, or the agent definition's default. A `fork` always inherits the parent's model; say so. For parallel agents, list the model for each one.
 
-Name tiers, not versions — do not hard-code model version numbers in this file.
+Name tiers, not versions. Don't hard-code model version numbers in this file.
 
 ## Plan Execution Workflow
 
@@ -86,7 +85,7 @@ Plans must include an **Order** line that defines the build sequence:
 - `‖` = checkpoint (stop after the step to its left and wait for the human — sign-off on departures, `/code-review ultra` if wanted)
 - Example: `Order: 1 → 2 → 3+4 ‖ 5` — steps 3 and 4 run in parallel after 2; the run pauses for the human before step 5
 
-Step headings may carry tags after the title: `skills: code-review, simplify` (mandatory skills for that step), `model: max | strong | mid` (tier; untagged = mid), `effort: low | medium | high | xhigh | max` (only where the tier's default — xhigh for max/strong, medium for mid — is wrong for the step: a large mechanical step, or a small subtle one), `budget: <USD>`. See *Plan runner* below.
+Step headings may carry tags after the title: `skills: code-review, simplify` (mandatory skills for that step), `model: max | strong | mid` (tier; untagged = mid), `effort: low | medium | high | xhigh | max` (only where the tier's default — xhigh for max, high for strong, medium for mid — is wrong for the step: a large mechanical step, or a small subtle one), `budget: <USD>`. See *Plan runner* below.
 
 **Never infer parallelism.** Only parallelize steps the plan explicitly joins with `+`. When in doubt, sequential is safer.
 
@@ -105,7 +104,12 @@ Do not reimplement either with a custom review prompt.
 1. **Write unit tests** when the step/phase introduced **non-trivial logic** (state machines, parsers, permission checks, complex mapping). Skip tests for pass-through ViewModels, simple CRUD repositories, and UI-only changes. Bug fixes always get a regression test, written *before* the fix — see Change Safety below.
 2. `./gradlew test` — unit tests must pass
 3. `./gradlew assembleDebug` — build must be clean
-4. **Review skills — floor, intent, re-decision.** A step's `skills:` tag is the floor: those run unconditionally. On top of it, *before touching code* decide which further skills the step is worth (one reason each; none is a legitimate answer for a small step), and *after the gate is green* re-decide against the real diff — add freely, drop only what you added yourself and only with a reason. `/simplify` is worth it when one of these holds: (a) concurrency-/state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering); (b) security-adjacent (Signal/crypto, permission checks, auth); (c) cross-cutting across many layers (DI + repo + multiple ViewModels + workers); (d) large (>~600 changed lines). `/code-review` is worth it on (a), (b), the sync path, and any bug fix in those areas. Invoke via `Skill(skill: "simplify")` / `Skill(skill: "code-review")`; `/simplify`'s Phase 2 spawns three parallel reviewers via the `Agent` tool — each call's `model` parameter is chosen by judgment, not a fixed pin, and never above the step's tier.
+4. **Review skills (floor, intent, re-decision).** The skills in a step's `skills:` tag always run. Beyond those:
+   - *Before touching code*, decide which other skills the step needs, with one reason each. "None" is a fine answer for a small step.
+   - *After the gate is green*, decide again against the real diff. You may add skills freely. You may drop only a skill you added yourself, and only with a reason.
+   - `/simplify` is worth it when the diff is (a) concurrency- or state-machine-heavy (coroutine scoping, flow chains, cancellation, lock ordering), (b) security-adjacent (Signal/crypto, permission checks, auth), (c) cross-cutting (DI + repo + several ViewModels + workers), or (d) large (over ~600 changed lines).
+   - `/code-review` is worth it for (a), (b), the sync path, and any bug fix in those areas.
+   - Invoke them with `Skill(skill: "simplify")` / `Skill(skill: "code-review")`. `/simplify` spawns three parallel reviewers; choose each one's `model` by judgment, never above the step's tier.
    - **If `/simplify` changed anything, re-run steps 2–3.** Its fixes are production code and must not be committed unverified.
 5. `git commit` — **commit immediately once green; do not wait for user instruction.** One commit, carrying the code *and* its tests. Never split logic into one commit and its tests into the next: every commit must stand on its own as green.
 6. Update MEMORY.md — record what was done, key patterns established, remove stale entries. Interactive sessions only: a runner step session has no memory store and routes facts to the tracked docs instead (`docs/GOTCHAS.md`, `docs/PATTERNS.md`, `docs/BACKLOG.md`, `TECH_DEBT.md`).
@@ -117,7 +121,22 @@ Do not reimplement either with a custom review prompt.
 
 ### Plan runner
 
-Multi-step plans run unattended with `scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--variant <name>] [--base <ref>]` from a terminal (not from inside a Claude session). One fresh headless session per step in a dedicated worktree on `plan/<name>`; the plan file is the state — a step is done when a `**Shipped**` block sits under its heading, written by the step session in a `docs(plan):` commit after its green code commit. The driver stops for `needs_decision` (resume the printed session to answer), `blocked`, and every `‖` checkpoint; it never pushes. A plan finished partly by hand needs `**Shipped**` lines for its done steps or `--from N` — always `--dry-run` first. A step that is still invalid after its one nudge, or gives up on the gate, is re-run once one effort rung up (the failed attempt is kept on a `plan-attempts/` branch); a missed skill is repaired by a fresh review session. `--variant NAME` runs the plan under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log (pass it on every re-run), `--base REF` pins where a new plan branch starts, and `scripts/plan-runner/report.sh <run-id>…` prints the per-step cost/turns/nudges/grades table. Contract and design: `docs/plans/done/plan-runner.md` (§5 for everything since the first real step); result schemas, prompt templates, variants, self-check and the stubbed end-to-end check: `scripts/plan-runner/`.
+Multi-step plans run unattended from a terminal, not from inside a Claude session:
+
+```bash
+scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--budget <USD>] [--variant <name>] [--base <ref>]
+```
+
+- **One session per step.** Each step gets a fresh headless session in a dedicated worktree on `plan/<name>`.
+- **The plan file is the state.** A step is done when a `**Shipped**` block sits under its heading. The step session writes it in a `docs(plan):` commit after its green code commit.
+- **Stops.** The driver stops on `needs_decision` (resume the printed session to answer), on `blocked`, and at every `‖` checkpoint. It never pushes.
+- **Partly hand-finished plans** need `**Shipped**` lines for their done steps, or `--from N`. Always `--dry-run` first.
+- **Retries.** A step that is still invalid after its one nudge, or gives up on the gate, re-runs once at the next effort level. The failed attempt is kept on a `plan-attempts/` branch. A fresh review session repairs a missed skill.
+- **`--variant NAME`** runs under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log. Pass it on every re-run.
+- **`--base REF`** sets where a new plan branch starts.
+- **`scripts/plan-runner/report.sh <run-id>…`** prints cost, turns, nudges and grades per step.
+
+Contract and design: `docs/plans/done/plan-runner.md` (§5 covers everything since the first real step). Result schemas, prompt templates, variants, self-check and the stubbed end-to-end check live in `scripts/plan-runner/`.
 
 ## Architecture
 
@@ -168,7 +187,7 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
 - **Image edits rasterize per screen** — each editor screen flattens its layer to a new JPEG in `cacheDir/edits/`; the chain of files is the undo history and overlay geometry is normalized to the image. → [PATTERNS.md#image-edits-rasterize-per-screen-overlay-geometry-is-normalized](docs/PATTERNS.md#image-edits-rasterize-per-screen-overlay-geometry-is-normalized)
 - **`MediaProcessingLimiter` owns the concurrency bound** — decode/compress/transcode is capped process-wide at 2; batch callers own *ordering* only, never their own semaphore. → [PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering](docs/PATTERNS.md#mediaprocessinglimiter-owns-the-concurrency-bound-callers-own-ordering)
 - **One chat picker, three hosts** — every "send this to a chat" surface renders `ChatPickerPanel`; a send is addressed to a recipient only in a 1:1 (`sendRecipientId`), never in a group. → [PATTERNS.md#one-chat-picker-three-hosts](docs/PATTERNS.md#one-chat-picker-three-hosts)
-- **Sends are idempotent by client id and drained by `OutboxWorker`** — a retryable send is a `SENDING` row plus one unique work per message id; the repository stops at `OutboxScheduler.enqueue`, a queued row is only ever written by a `MessageRecord` upsert, a column update or the worker, and nothing flips `SENDING` to `FAILED` for looking old. → [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](docs/PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker)
+- **Sends are idempotent by client id and drained by `OutboxWorker`** — a retryable send is a `SENDING` row plus one unique work per message id. The repository stops at `OutboxScheduler.enqueue`. Only a `MessageRecord` upsert, a column update or the worker writes a queued row. Nothing flips `SENDING` to `FAILED` because it looks old. → [PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker](docs/PATTERNS.md#sends-are-idempotent-by-client-id-and-drained-by-outboxworker)
 
 ### Discovery & maintenance
 
@@ -184,6 +203,16 @@ Each pattern below is a one-line pointer; for the rule's *example, trap, and whe
   The `.claude/hooks/promote-memory.sh` PostToolUse hook raises this question automatically on any write into the store; it is a reminder, not a gate.
 - **Plans** — in-flight plans live in `docs/plans/`; shipped plans archive to `docs/plans/done/` (or are deleted if `MEMORY.md` already captures the outcome). Keep plans at this repo path, not `~/.claude/plans/` — the home directory is invisible to cloud sessions, so a plan a cloud agent must execute has to be committed here first.
 - **Anchor headers** — managers, repository impls, Firestore sources, both Room databases, and `NavGraph.kt` open with a `// region: AGENT-NOTE` block above the package declaration. Cite the relevant pattern by name in the `Don't put here:` line. New anchor files should follow the same shape.
+
+### Writing docs
+
+Applies to this file, `docs/`, KDoc and `// region: AGENT-NOTE` blocks. Every session reads them, and their style carries into what gets written next.
+
+- **Describe the current state.** Don't record what an earlier version said or how a rule came about; git keeps that history.
+- **One rule per sentence.** Put the rule first and the reason after it. Split a sentence that chains several clauses with dashes or semicolons.
+- **Keep provenance out of rules.** Commit hashes and dates go at the end of an entry, or nowhere. `CHANGELOG.md` entries still end with their hash.
+- **Plain words.** Name the file, class or command. Avoid shorthand only the author knows.
+- **Rewrite on touch.** Tidy a section when you edit it for another reason. Don't do repo-wide style passes.
 
 ## Navigation
 
@@ -206,10 +235,10 @@ Four functions in `functions/index.js` (Node.js 20) — push notifications for m
 
 - **Everything lives in `app/src/test/`** — JUnit 4 + MockK + `kotlinx-coroutines-test`, all running on the JVM under `./gradlew test`. There is no `app/src/androidTest/` source set.
 - **Compose UI tests run under Robolectric**, in that same unit source set — not as instrumentation tests. `@RunWith(RobolectricTestRunner::class)` + `createComposeRule()`; see `ui/chatlist/ChatListItemUiTest.kt` for the canonical shape. → [PATTERNS.md#compose-ui-tests-run-under-robolectric](docs/PATTERNS.md#compose-ui-tests-run-under-robolectric)
-- **Instrumentation tests: none written.** The `androidTestImplementation` espresso / `compose-ui-test-junit4` deps and a `testInstrumentationRunner` are declared (`app/build.gradle.kts:495`) but unused. Prefer a Robolectric test in `app/src/test/`; a real `androidTest` needs a device and is **not** in the CI gate.
-- **Unit tests are debug-only** — the release unit-test component is disabled outright, because the Robolectric Compose tests need `ui-test-manifest`'s ComponentActivity (wired as `debugImplementation`). Rationale in `app/build.gradle.kts:248`.
+- **Instrumentation tests: none written.** The `androidTestImplementation` espresso / `compose-ui-test-junit4` deps and a `testInstrumentationRunner` are declared in `app/build.gradle.kts` but unused. Prefer a Robolectric test in `app/src/test/`; a real `androidTest` needs a device and is **not** in the CI gate.
+- **Unit tests are debug-only** — the release unit-test component is disabled outright, because the Robolectric Compose tests need `ui-test-manifest`'s ComponentActivity (wired as `debugImplementation`). The rationale is in the `androidComponents` block of `app/build.gradle.kts`.
 - Test pattern: `@Before` setup with mocked repositories, `runTest` for coroutines, `coEvery`/`coVerify` for suspend functions. Prefer the fakes in `test/fakes/` for the Message/Chat/User repos.
-- **Don't keep a coverage list here** — it rots. `find app/src/test -name '*Test.kt'` is the source of truth (~96 classes; heaviest in `ui/chat` and `data/repository`).
+- **Don't keep a coverage list here** — it rots. `find app/src/test -name '*Test.kt'` is the source of truth (heaviest in `ui/chat` and `data/repository`).
 - **Per-feature requirements** — what a given feature owes in tests (unit / Compose / integration), coverage intent, and security-specific testing live in [`docs/TESTING.md`](docs/TESTING.md). The non-negotiable gate is Change Safety below.
 - **Architecture rules are executable** — `app/src/test/java/com/firestream/chat/architecture/ArchitectureTest.kt` (Konsist) enforces domain purity, the data⇏ui/navigation direction, the UI→data system-boundary allowlist, and Chat\*Manager isolation across all production source sets. If a rule fails on code you intend to keep, the decision belongs in `TECH_DEBT.md` (new baseline or allowlist entry) — never weaken a rule silently.
 
