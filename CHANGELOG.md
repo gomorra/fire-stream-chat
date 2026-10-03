@@ -2,7 +2,15 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.35.4] — 2026-09-26
+## [UNRELEASED] [1.36.0] — 2026-10-03
+
+### Added
+
+- **Chat font size setting.** Settings → Chat → Font Size sets the size of message text and of the composer, from 12 to 22 in half steps, with a live preview. The default stays at 15.
+
+### Changed
+
+- **The composer grows to ten lines and keeps its text clear of the border.** It used to stop at four lines, and the first and last line sat right against the rounded outline and looked cut off.
 
 ### Fixed
 

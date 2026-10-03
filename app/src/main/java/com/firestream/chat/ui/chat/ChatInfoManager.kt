@@ -57,6 +57,7 @@ internal class ChatInfoManager(
         observeReadReceiptsAllowed()
         loadChatInfo()
         observeRecentEmojis()
+        observeChatFontSize()
         if (recipientId.isNotBlank()) {
             seedRecipientFromCache()
             observeRecipient()
@@ -250,6 +251,16 @@ internal class ChatInfoManager(
                     // per open session (see EmojiHandlerPanel), so no debounce is needed
                     // here and reopening always reflects the latest taps immediately.
                     _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
+                }
+        }
+    }
+
+    private fun observeChatFontSize() {
+        scope.launch {
+            preferencesDataStore.chatFontSizeFlow
+                .distinctUntilChanged()
+                .collect { sizeSp ->
+                    _uiState.update { it.copy(session = it.session.copy(chatFontSizeSp = sizeSp)) }
                 }
         }
     }
