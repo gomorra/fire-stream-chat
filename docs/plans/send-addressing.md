@@ -444,6 +444,39 @@ Departures (for sign-off):
   `ChatTimerReactorTest`.
 - `refactor(chat): name the chat route's partner argument for what it is` — no CHANGELOG entry.
 
+**Approach**
+- Code as it stands matches the spec and the step-2 and step-4 annotations. `ChatViewModel.recipientId`
+  is at :123, the three managers take it as a constructor parameter, and `Chat.sendRecipientId` has
+  three callers, all navigation. Nothing contradicts §0 or §2.
+- Order: (1) `NavGraph.kt` (route placeholder, `navArgument`, the read, `Routes.chat`'s parameter);
+  (2) `ChatViewModel` with the decision-10 KDoc, then `ChatInfoManager`, `ChatMessageActions`,
+  `ChatTimerReactor` and `ChatScreen`'s four reads; (3) `ChatTargets.kt`, `ChatListScreen`,
+  `SharePickerViewModel.send`'s `onDone` and `SharePickerScreen`; (4) tests; (5) gate.
+- The step-2 question: `ChatListPendingAction.OpenChat.recipientId` follows the rename, because it is
+  handed straight to `Routes.chat`. `MainActivity.EXTRA_SENDER_ID` and `DeepLinkRequest.senderId`
+  keep their names: they name what the intent carries, and `notificationPartnerHint` is the one
+  place that decides what goes into it.
+- `Reminder.recipientId`, `setLastOpenChat`'s parameter and the producers' lambda parameter names
+  stay, as the spec says.
+- Tests: no new ones, the step changes no behaviour. The six `ChatViewModel*Test` classes build a
+  `SavedStateHandle` with the key `"recipientId"`, which the spec does not list. They follow the
+  route placeholder, or `checkNotNull` throws.
+- `CLAUDE.md`'s Navigation example and the `CHAT` row in `docs/ARCHITECTURE.md` name the parameter,
+  so they follow in the same commit.
+- Further skills: `code-review`. `ChatViewModel` and `SharePickerViewModel` both change, so the
+  tripwire asks for it. It runs after the gate.
+
+**Shipped** `8ea45884` (2026-10-03) — tier: mid. skills: app-ui-design, code-review. Reviewer models: code-review: sonnet, sonnet.
+Gate: `:app:testFirebaseDebugUnitTest` and `assembleFirebaseDebug` green. The pocketbase flavor was not built.
+Departures (for sign-off):
+- The step-2 question is decided as **Approach** says. `ChatListPendingAction.OpenChat.recipientId` is `partnerIdHint`. `MainActivity.EXTRA_SENDER_ID` and `DeepLinkRequest.senderId` keep their names.
+- The six `ChatViewModel*Test` classes build their `SavedStateHandle` with the key `"partnerIdHint"`. The spec did not list them.
+- `SharePickerScreen`'s `onDone` parameter follows `SharePickerViewModel.send`'s. `CLAUDE.md`'s Navigation example and the `CHAT` row of `docs/ARCHITECTURE.md` follow `Routes.chat`'s parameter.
+- `Reminder.recipientId`, `GlobalSearchUiState.recipientIdFor`, `setLastOpenChat`'s parameter and the route producers' lambda parameter names keep the old word. /code-review named the split vocabulary as a judgement call. The spec leaves them to candidate 2.
+- /code-review findings not acted on here, because later steps own them: `sendRecipientId` in `CLAUDE.md:189`, `docs/PATTERNS.md:194` and `:203` (step 6) and `docs/FEATURE-MAP.md:544–554` (step 7). Both are annotated below.
+- The local `val partnerIdHint` in the `CHAT` nav entry (`NavGraph.kt:489`) is never read. It was unused under the old name too, and it stays.
+- `docs/agents/issue-tracker.md` does not exist; the `code-review` skill asks for `/setup-matt-pocock-skills` in that case. The spec was passed by path, so neither review axis was skipped.
+
 ### Step 6 — Make the rule a test, and write it down
 
 - `ArchitectureTest` gains two rules (shape from the design pass):
@@ -491,6 +524,10 @@ Departures (for sign-off):
   had that shape in step 4.
 - **(step-4 /code-review)** `docs/PATTERNS.md:194` also still lists `Chat.sendRecipientId` among the
   panel's rules as an addressing rule. No caller addresses a send with it any more.
+- **(step-5)** The helper is `Chat.partnerIdHint(currentUserId)` in `ui/components/ChatTargets.kt`.
+  Its callers are `ChatListScreen` (twice) and `SharePickerViewModel.send`, all navigation.
+  `CLAUDE.md:189` (the *One chat picker* line) is the only place in `CLAUDE.md` that still says
+  `sendRecipientId`. The Navigation example already reads `Routes.chat(chatId, partnerIdHint)`.
 
 ### Step 7 — Docs that move with the code
 
@@ -520,6 +557,9 @@ Departures (for sign-off):
 - **(step-3)** One more item for the on-device list: (d) retry a message that failed in a 1:1 chat —
   it goes to the same person; a failed timer's retry shows a banner and stays failed (see the
   `TECH_DEBT.md` entry).
+- **(step-5 /code-review)** `docs/FEATURE-MAP.md` names `sendRecipientId` at :544, :552 and :554.
+  The function is `Chat.partnerIdHint` now and is navigation only. `TECH_DEBT.md` names the old
+  helper too, so check the entries this step rewrites for it.
 
 ## 4. Gates
 
