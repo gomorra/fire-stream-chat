@@ -9,6 +9,14 @@ supersedes its §3–§6). Grilled with the human and designed twice on 2026-10-
 The checkpoint after step 3 is the human's sign-off on the send-entry change (and a
 `/code-review ultra` if they want one). Steps 4–7 are mechanical once 3 holds.
 
+**Encryption is opt-in today.** A send is encrypted only in a release build of the firebase
+flavor *and* with the user's E2E toggle on — `MessageWriter.kt:51` (`buildEncrypts`) and
+`:64–68`; the toggle defaults to `false` (`PreferencesDataStore.kt:130–132`). So for most users
+a wrong recipient does not mis-encrypt anything today; it does point the **block check** at the
+wrong user (a group send refused because of one member you blocked). This plan fixes the
+addressing so that both are right now, and so that switching encryption on — per user or by
+default — needs no further decision about who a send is for.
+
 ## 0. Decisions (signed off 2026-10-03 — do not re-litigate)
 
 | # | Question | Decision |
@@ -54,8 +62,9 @@ The brief's §1 holds; drift and four facts it lacked:
 - **A second live instance of the bug.** `FCMService.kt:236` puts the message's *sender* into
   the tap intent for every chat type. A group notification tap lands on
   `Routes.chat(chatId, senderId)`; `ChatViewModel.recipientId` is then a group member and every
-  send from that screen is addressed `Peer(member)` — in a release build, encrypted to that
-  member alone. `MainActivity.deepLinkFromIntent` (:133–138) **requires** the extra to be
+  send from that screen is addressed `Peer(member)`: the block check asks about that member
+  (a member you blocked makes every group send fail), and with encryption on (release build +
+  E2E toggle) the message is encrypted to that member alone. `MainActivity.deepLinkFromIntent` (:133–138) **requires** the extra to be
   present, so the fix writes `""`, it does not omit it.
 - **The timer never encrypts.** `sendTimerMessage` is a direct plaintext write
   (`messageSource.sendTimerMessage`); its recipient only feeds `ensureNotBlocked`.
@@ -210,12 +219,14 @@ someone you already have a 1:1 with, on an install whose chat-list sync has not 
   `recipientId = ""` (the route already accepts an empty segment — `NavGraph.kt:611/623` pass `""`).
 - Commit `fix(notifications): open a group from its notification without a 1:1 partner`.
   CHANGELOG *Fixed* (patch bump per the `changelog-release` skill): tapping a group
-  notification opened the group addressed to the message's sender — in a release build, sends
-  from that screen were encrypted to that one member.
+  notification opened the group addressed to the message's sender, so sends from that screen
+  were refused when you had blocked that member, and — with end-to-end encryption switched on —
+  were encrypted for that one member only.
 
 ### Step 3 — The repository decides who a send is for; skills: code-review; model: max
 
-The Signal-path step. §2 is the spec. **The regression tests come first and must be seen
+The step that decides who every send is addressed to — the block check's peer always, and the
+Signal session whenever encryption is on (see the note under **Order**). §2 is the spec. **The regression tests come first and must be seen
 failing** against the current code, inside this step (a red commit is not allowed — write,
 watch fail, implement, green, one commit).
 
@@ -255,11 +266,14 @@ watch fail, implement, green, one commit).
    is ignored until step 4 removes it, and where the target comes from); rewrite
    `SendTarget.kt`'s AGENT-NOTE and class KDoc ("the UI's recipient id enters through `of`" is
    false now).
-6. `/code-review` is mandatory (Signal path). Commit `fix(send): the repository decides who a
-   send is for`. CHANGELOG *Fixed*, patch bump: a send's encryption target now comes from the
-   chat itself, so no screen can address a group message to one member; a chat that is not in
-   the local store yet refuses with *"This chat isn't ready yet"* instead of guessing. Hashes:
-   this commit and step 1's.
+6. `/code-review` is mandatory (it decides the block check's peer and, with encryption on, the
+   Signal session). Commit `fix(send): the repository decides who a send is for`. CHANGELOG
+   *Fixed*, patch bump: who a message is addressed to now comes from the chat itself, so no
+   screen can address a group message to one member — today that means a group send is never
+   refused because of one member's block; once end-to-end encryption is switched on, it means a
+   group message is never encrypted for one member only. A chat that is not in the local store
+   yet refuses with *"This chat isn't ready yet"* instead of guessing. Say in the entry that
+   encryption itself stays opt-in. Hashes: this commit and step 1's.
 
 ### Step 4 — Drop `recipientId` from the seven send members; skills: code-review
 
@@ -338,7 +352,8 @@ Mechanical; behaviour already lives in step 3.
   broadcast list) with its trigger: candidate 2, or any second caller of `sendBroadcastMessage`.
 - `docs/FEATURE-MAP.md` (:544–554): `sendRecipientId` is no longer the panel's load-bearing rule;
   `ChatMessageActions` forwards by chat id; `SendTarget.kt` is where addressing lives.
-- `docs/BACKLOG.md` § *Pending on-device verification*: release build — (a) tap a group
+- `docs/BACKLOG.md` § *Pending on-device verification*: release build **with the E2E toggle
+  on** — (a) tap a group
   notification, send, a second member can read it; (b) forward into a group from a release build,
   every member can read it; (c) fresh install, open a chat from Contacts before the list syncs —
   the send goes through (step 1) or refuses with the banner, never as plaintext to a 1:1.
@@ -349,7 +364,9 @@ Mechanical; behaviour already lives in step 3.
 
 Every step: `./gradlew :app:testFirebaseDebugUnitTest` and `./gradlew assembleFirebaseDebug`
 green before its commit (cloud containers: CLAUDE.md's note on the one known
-`ApkDownloaderTest` DNS failure). Steps 3 and 4 run `/code-review`; step 3 is `model: max`.
+`ApkDownloaderTest` DNS failure). Steps 3 and 4 run `/code-review`; step 3 is `model: max`
+because it decides who every send is addressed to, not because encryption is on by default (it
+is not — see the note under **Order**).
 
 ## 5. Revisit triggers
 
