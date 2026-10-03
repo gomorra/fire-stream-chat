@@ -53,6 +53,7 @@ ALLOWED_TOOLS=(
     "Bash(diff *)" "Bash(stat *)" "Bash(file *)" "Bash(test *)" "Bash(echo *)" "Bash(printf *)"
     "Bash(mkdir *)" "Bash(cp *)" "Bash(mv *)" "Bash(touch *)" "Bash(date *)" "Bash(dexdump *)"
     "Bash(rm -rf app/build/*)"
+    "Bash(scripts/plan-runner/selfcheck.sh*)" "Bash(scripts/plan-runner/e2e.sh*)"   # the gate of a plan that changes the runner
 )
 # Deny wins over allow. Prefix patterns cannot express "outside the worktree";
 # the prompt forbids leaving it and the run log shows every denial.
