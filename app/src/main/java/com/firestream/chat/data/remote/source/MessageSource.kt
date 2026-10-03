@@ -131,11 +131,13 @@ interface MessageSource {
 
     suspend fun closePoll(chatId: String, messageId: String)
 
+    /** The log entry of a finished call. [video] is how the call was started, not whether a camera ran. */
     suspend fun sendCallMessage(
         chatId: String,
         senderId: String,
         endReason: String,
         durationSeconds: Int,
+        video: Boolean,
         timestamp: Long
     ): String
 

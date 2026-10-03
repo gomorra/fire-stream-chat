@@ -12,7 +12,7 @@ import javax.inject.Singleton
 /** Step 4 stub. Stays a stub through v0; calls are out of scope. */
 @Singleton
 class PocketBaseCallSignalingSource @Inject constructor() : CallSignalingSource {
-    override suspend fun createCallDocument(callerId: String, calleeId: String): String =
+    override suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String =
         throw NotImplementedError("PB v0 stub")
 
     override suspend fun updateCallStatus(callId: String, status: String, endReason: String?): Unit =

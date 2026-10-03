@@ -35,11 +35,11 @@ class CallRepositoryImpl @Inject constructor(
     private val sendClock: SendClock,
 ) : CallRepository {
 
-    override suspend fun createCall(calleeId: String): Result<String> {
+    override suspend fun createCall(calleeId: String, video: Boolean): Result<String> {
         return try {
             val callerId = authSource.currentUserId
                 ?: return Result.failure(Exception("Not authenticated"))
-            val callId = callSource.createCallDocument(callerId, calleeId)
+            val callId = callSource.createCallDocument(callerId, calleeId, video)
             Result.success(callId)
         } catch (e: Exception) {
             Result.failure(e)
@@ -132,12 +132,17 @@ class CallRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int): Result<Unit> {
+    override suspend fun logCallMessage(
+        chatId: String,
+        endReason: String,
+        durationSeconds: Int,
+        video: Boolean
+    ): Result<Unit> {
         return try {
             val callerId = authSource.currentUserId
                 ?: return Result.failure(Exception("Not authenticated"))
             val timestamp = sendClock.next()
-            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, timestamp)
+            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, video, timestamp)
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
             Result.success(Unit)
         } catch (e: Exception) {

@@ -34,6 +34,18 @@ mocked `PeerConnection`. These need a phone and the emulator:
 4. Hang up at the moment the call connects, a few times. Media audio afterwards (a video, a voice
    message) plays through the speaker at normal quality, not in call mode.
 
+### The call's kind in the push, the call document and the call log (2026-10-04)
+
+`docs/plans/video-calls.md` step 2. Nothing starts a call as video until step 4, so these wait for
+it. The app upgrade wipes the local message database (`AppDatabase` 29 → 30), and messages sync
+back from Firestore.
+1. After the upgrade, chats and the call log fill again, and old call entries read as voice calls.
+2. `firebase deploy --only functions`, then a voice call still rings with *Incoming Voice Call*.
+3. With step 4: a call started as video rings with *Incoming Video Call*, and its `CALL` message
+   in Firestore has `video: true`.
+4. With step 4, before the functions are deployed: the ring starts as *Incoming Voice Call* and
+   changes to *Incoming Video Call* without a second vibration or a second full-screen launch.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two

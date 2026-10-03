@@ -83,13 +83,15 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `MessageEntity` delegates 33 columns through the `MessageColumns` interface
+### `MessageEntity` delegates 34 columns through the `MessageColumns` interface
 
 **The smell.** `messages` is split into the embedded `MessageRecord` (the backend's columns, Room's partial entity) and the local-only columns on `MessageEntity`, and the entity implements `MessageColumns by record` so `entity.status` keeps compiling everywhere. Every backend column is therefore declared three times — in `MessageRecord`, in the interface, and implicitly through the delegation — and a caller that changes a record field on an entity in hand writes `entity.copy(record = entity.record.copy(…))`.
 
 **Why we haven't fixed it.** The split is what makes a snapshot upsert unable to reach `localUri`, the star or the outbox columns (the trap step 6 of the offline outbox removed), and the delegation kept a 53-file diff from also touching every reader of an entity field. The `/simplify` altitude review on that step called it a source-compatibility shim and asked that it be recorded rather than left implicit.
 
 **When to revisit.** The next time a backend column is added to `messages`. Either drop the interface and let readers say `entity.record.x`, or generate the delegation; do not add a fourth declaration.
+
+**Deferred once.** `isVideoCall` was added through the same three declarations. Dropping the interface touches every reader of an entity field, which does not belong in a plan step that adds one boolean. The trigger stands for the next column. (`docs/plans/video-calls.md` step 2.)
 
 ---
 

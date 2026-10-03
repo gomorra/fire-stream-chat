@@ -50,6 +50,8 @@ class CallService : Service() {
         const val EXTRA_REMOTE_NAME = "remote_name"
         const val EXTRA_REMOTE_AVATAR_URL = "remote_avatar_url"
         const val EXTRA_AUDIO_ROUTE = "audio_route"
+        /** How the call was started: true for a video call. Absent means a voice call. */
+        const val EXTRA_VIDEO = "video"
 
         private const val TAG = "CallService"
         private const val RING_TIMEOUT_MS = 30_000L
@@ -60,7 +62,8 @@ class CallService : Service() {
             chatId: String,
             remoteUserId: String,
             remoteName: String,
-            remoteAvatarUrl: String?
+            remoteAvatarUrl: String?,
+            video: Boolean
         ) {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START_OUTGOING
@@ -69,6 +72,7 @@ class CallService : Service() {
                 putExtra(EXTRA_REMOTE_USER_ID, remoteUserId)
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_REMOTE_AVATAR_URL, remoteAvatarUrl)
+                putExtra(EXTRA_VIDEO, video)
             }
             context.startForegroundService(intent)
         }
@@ -78,7 +82,8 @@ class CallService : Service() {
             callId: String,
             remoteUserId: String,
             remoteName: String,
-            remoteAvatarUrl: String?
+            remoteAvatarUrl: String?,
+            video: Boolean
         ) {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START_INCOMING
@@ -86,6 +91,7 @@ class CallService : Service() {
                 putExtra(EXTRA_REMOTE_USER_ID, remoteUserId)
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_REMOTE_AVATAR_URL, remoteAvatarUrl)
+                putExtra(EXTRA_VIDEO, video)
             }
             context.startForegroundService(intent)
         }
@@ -130,6 +136,12 @@ class CallService : Service() {
     private var remoteName: String? = null
     private var remoteAvatarUrl: String? = null
     private var isCaller: Boolean = false
+
+    /**
+     * How the current call was started. Set to true only on the main thread: by the intent, or
+     * when the callee's side learns it later from the call document. Read from [serviceScope] too.
+     */
+    @Volatile private var callVideo: Boolean = false
     private var callConnectedAt: Long? = null
     private var callMessageWritten: Boolean = false
 
@@ -157,6 +169,8 @@ class CallService : Service() {
      */
     private val audioSessionLock = Any()
 
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -173,14 +187,16 @@ class CallService : Service() {
                 val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopAndReturn()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
-                startOutgoingCall(callId, chatId, userId, name, avatar)
+                val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+                startOutgoingCall(callId, chatId, userId, name, avatar, video)
             }
             ACTION_START_INCOMING -> {
                 val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopAndReturn()
                 val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopAndReturn()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
-                startIncomingCall(callId, userId, name, avatar)
+                val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+                startIncomingCall(callId, userId, name, avatar, video)
             }
             ACTION_ANSWER -> answerIncomingCall()
             ACTION_DECLINE -> declineIncomingCall()
@@ -195,7 +211,15 @@ class CallService : Service() {
     // Outgoing Call Flow
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun startOutgoingCall(callId: String, chatId: String, userId: String, name: String, avatar: String?) {
+    private fun startOutgoingCall(
+        callId: String,
+        chatId: String,
+        userId: String,
+        name: String,
+        avatar: String?,
+        video: Boolean
+    ) {
+        callVideo = video
         currentCallId = callId
         currentChatId = chatId
         remoteUserId = userId
@@ -205,7 +229,7 @@ class CallService : Service() {
         callMessageWritten = false
 
         callStateHolder.updateState(
-            CallState.OutgoingRinging(callId, userId, name, avatar, localAvatarPathFor(userId))
+            CallState.OutgoingRinging(callId, userId, name, avatar, localAvatarPathFor(userId), video)
         )
 
         val notification = notificationManager!!.buildOutgoingCallNotification(name)
@@ -224,7 +248,8 @@ class CallService : Service() {
     // Incoming Call Flow
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun startIncomingCall(callId: String, userId: String, name: String, avatar: String?) {
+    private fun startIncomingCall(callId: String, userId: String, name: String, avatar: String?, video: Boolean) {
+        callVideo = video
         currentCallId = callId
         remoteUserId = userId
         remoteName = name
@@ -232,10 +257,10 @@ class CallService : Service() {
         isCaller = false
 
         callStateHolder.updateState(
-            CallState.IncomingRinging(callId, userId, name, avatar, localAvatarPathFor(userId))
+            CallState.IncomingRinging(callId, userId, name, avatar, localAvatarPathFor(userId), video)
         )
 
-        val notification = notificationManager!!.buildIncomingCallNotification(name)
+        val notification = notificationManager!!.buildIncomingCallNotification(name, video)
         // API 34+ enforces RECORD_AUDIO at startForeground() for MICROPHONE type;
         // use SHORT_SERVICE during ringing since the mic isn't needed yet.
         // Pre-34 doesn't enforce this, and SHORT_SERVICE doesn't exist, so MICROPHONE is safe.
@@ -256,7 +281,9 @@ class CallService : Service() {
         ringTimeoutJob?.cancel()
 
         callStateHolder.updateState(
-            CallState.Connecting(callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId))
+            CallState.Connecting(
+                callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId), callVideo
+            )
         )
 
         val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
@@ -295,6 +322,7 @@ class CallService : Service() {
             callRepository.observeCallDocument(callId)
                 .catch { e -> Log.e(TAG, "Signaling listener error", e) }
                 .collectLatest { data ->
+                    if (data.video) onCallDocumentSaysVideo(callId)
                     when (data.status) {
                         "answered" -> {
                             if (isCaller) {
@@ -318,6 +346,34 @@ class CallService : Service() {
         }
     }
 
+    /**
+     * The call document says the call was started as video. The push normally says so first. A
+     * function deployed before the kind existed does not, and then the ring starts as a voice call
+     * until this arrives.
+     */
+    private fun onCallDocumentSaysVideo(callId: String) {
+        // Fast path: every later snapshot of the document says the same.
+        if (callVideo) return
+        // On the main thread, where the intents run. A call that starts or is answered there
+        // cannot interleave: a late write must not reach the next call, and answering posts the
+        // ongoing notification under the id the ring uses.
+        mainHandler.post {
+            if (callVideo || currentCallId != callId) return@post
+            callVideo = true
+            val ringing = callStateHolder.markVideo(callId) as? CallState.IncomingRinging ?: return@post
+            val manager = notificationManager ?: return@post
+            manager.updateNotification(
+                manager.buildIncomingCallNotification(ringing.callerName, video = true),
+                CallNotificationManager.NOTIFICATION_ID_ONGOING
+            )
+            // cleanup() can run on serviceScope. If the call ended while the ring was posted,
+            // the post may have landed after the foreground notification was removed.
+            if (callStateHolder.callState.value != ringing) {
+                manager.cancelNotification(CallNotificationManager.NOTIFICATION_ID_ONGOING)
+            }
+        }
+    }
+
     /** The callee picked up. The session applies the answer; this only moves the call's state on. */
     private fun onCallAnswered(callId: String) {
         ringTimeoutJob?.cancel()
@@ -327,7 +383,7 @@ class CallService : Service() {
         // a later snapshot of an answered call must not take the screen back.
         val ringing = callStateHolder.callState.value as? CallState.OutgoingRinging ?: return
         val connecting = CallState.Connecting(
-            callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId)
+            callId, remoteUserId ?: "", remoteName ?: "", remoteAvatarUrl, localAvatarPathFor(remoteUserId), callVideo
         )
         if (!callStateHolder.compareAndSetState(ringing, connecting)) return
 
@@ -404,9 +460,12 @@ class CallService : Service() {
                 remoteName ?: "",
                 remoteAvatarUrl,
                 System.currentTimeMillis(),
-                localAvatarPathFor(remoteUserId)
+                localAvatarPathFor(remoteUserId),
+                callVideo
             )
         )
+        // The kind can arrive on the main thread between the read above and the write.
+        if (callVideo) callStateHolder.markVideo(callId)
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -485,7 +544,7 @@ class CallService : Service() {
         am.requestAudioFocus(audioFocusRequest!!)
 
         // Only now, in MODE_IN_COMMUNICATION, does the OS list communication devices.
-        val router = CallAudioRouter(am, Handler(Looper.getMainLooper()))
+        val router = CallAudioRouter(am, mainHandler)
         val proximity = ProximityLock(getSystemService(PowerManager::class.java))
         audioRouter = router
         proximityLock = proximity
@@ -550,8 +609,10 @@ class CallService : Service() {
         val durationSeconds = callConnectedAt?.let {
             ((System.currentTimeMillis() - it) / 1000).toInt()
         } ?: 0
+        // Read here: cleanup() resets it before the launched write runs.
+        val video = callVideo
         serviceScope.launch {
-            callRepository.logCallMessage(chatId, reason.name.lowercase(), durationSeconds)
+            callRepository.logCallMessage(chatId, reason.name.lowercase(), durationSeconds, video)
         }
     }
 
@@ -579,6 +640,7 @@ class CallService : Service() {
         remoteAvatarUrl = null
         callConnectedAt = null
         callMessageWritten = false
+        callVideo = false
 
         notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_INCOMING)
 

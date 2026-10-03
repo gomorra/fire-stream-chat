@@ -493,6 +493,7 @@ class FirestoreMessageSource @Inject constructor(
         senderId: String,
         endReason: String,
         durationSeconds: Int,
+        video: Boolean,
         timestamp: Long
     ): String {
         val data = hashMapOf(
@@ -502,6 +503,7 @@ class FirestoreMessageSource @Inject constructor(
             "status" to MessageStatus.SENT.name,
             "timestamp" to timestamp,
             "duration" to durationSeconds,
+            "video" to video,
             "reactions" to emptyMap<String, String>(),
             "isForwarded" to false
         )
@@ -726,6 +728,7 @@ class FirestoreMessageSource @Inject constructor(
             fileName = data["fileName"] as? String,
             fileSize = (data["fileSize"] as? Number)?.toLong(),
             mimeType = data["mimeType"] as? String,
+            isVideoCall = data["video"] as? Boolean ?: false,
             hasPendingWrites = hasPendingWrites,
         )
     }

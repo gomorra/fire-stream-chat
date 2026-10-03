@@ -22,7 +22,9 @@ The app uses **two Room databases** so that destructive schema migrations on the
 | `outboxPeerIdentity` | The peer identity key that ciphertext was encrypted for; a later attempt reuses the bytes only while the peer still publishes it (`SignalManager.isCurrentIdentity`), and encrypts again after a re-registration |
 | `outboxAttempts` | Pipeline runs started for the row; above 0 an earlier write may have landed, so the next write is create-if-absent |
 
-Version 28 is reached by destructive migration, like every `AppDatabase` bump except 18 → 19.
+Every `AppDatabase` version is reached by destructive migration, except 18 → 19. The current version is the `version` in `AppDatabase.kt`.
+
+`isVideoCall` is a backend column on `MessageRecord`. It is true for a `CALL` message whose call was started as video, and it mirrors the Firestore field `video`.
 
 ```mermaid
 erDiagram
@@ -91,6 +93,7 @@ erDiagram
         String emojiSizesJSON
         String listId
         String listDiffJSON
+        Boolean isVideoCall
         String outboxRecipientId
         String outboxCiphertext
         Int outboxSignalType

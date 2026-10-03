@@ -6,6 +6,7 @@ import com.firestream.chat.domain.model.CallUiControls
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.updateAndGet
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,6 +31,16 @@ class CallStateHolder @Inject constructor() {
      */
     fun compareAndSetState(expected: CallState, next: CallState): Boolean =
         _callState.compareAndSet(expected, next)
+
+    /**
+     * Record that the call [callId] was started as a video call, as one step, whatever live state
+     * it is in. Does nothing when another call is current, when the call has ended, or with none.
+     *
+     * @return the state after the write.
+     */
+    fun markVideo(callId: String): CallState = _callState.updateAndGet { state ->
+        if (state is CallState.Live && state.callId == callId && !state.video) state.withVideo() else state
+    }
 
     fun updateControls(controls: CallUiControls) {
         _uiControls.value = controls

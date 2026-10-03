@@ -118,6 +118,7 @@ interface MessageColumns {
     val fileName: String?
     val fileSize: Long?
     val mimeType: String?
+    val isVideoCall: Boolean
 }
 
 /**
@@ -169,6 +170,7 @@ data class MessageRecord(
     override val fileName: String? = null,
     override val fileSize: Long? = null,
     override val mimeType: String? = null,
+    override val isVideoCall: Boolean = false,
 ) : MessageColumns {
 
     /** The domain message, with the local columns the caller holds beside this record. */
@@ -212,6 +214,7 @@ data class MessageRecord(
         fileName = fileName,
         fileSize = fileSize,
         mimeType = mimeType,
+        isVideoCall = isVideoCall,
     )
 
     companion object {
@@ -254,6 +257,7 @@ data class MessageRecord(
             fileName = message.fileName,
             fileSize = message.fileSize,
             mimeType = message.mimeType,
+            isVideoCall = message.isVideoCall,
         )
 
         private fun pollToJson(poll: Poll): String {

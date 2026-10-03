@@ -31,12 +31,13 @@ class FirestoreCallSource @Inject constructor(
 ) : CallSignalingSource {
     private val callsCollection get() = firestore.collection("calls")
 
-    override suspend fun createCallDocument(callerId: String, calleeId: String): String {
+    override suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String {
         val callId = callsCollection.document().id
         val data = hashMapOf(
             "callerId" to callerId,
             "calleeId" to calleeId,
             "status" to "ringing",
+            "video" to video,
             "createdAt" to System.currentTimeMillis(),
             "endedAt" to null,
             "endReason" to null,
@@ -144,7 +145,9 @@ class FirestoreCallSource @Inject constructor(
             answer = answerMap?.let { SdpData(it["sdp"] as? String ?: "", it["type"] as? String ?: "") },
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: 0L,
             endedAt = (data["endedAt"] as? Number)?.toLong(),
-            endReason = data["endReason"] as? String
+            endReason = data["endReason"] as? String,
+            // An older app writes no kind: its calls are voice calls.
+            video = data["video"] as? Boolean ?: false
         )
     }
 }

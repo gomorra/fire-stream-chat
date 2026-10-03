@@ -101,7 +101,8 @@ class CallNotificationManager(private val context: Context) {
             .build()
     }
 
-    fun buildIncomingCallNotification(callerName: String): Notification {
+    /** The ring. [video] is how the caller started the call, and only picks the title. */
+    fun buildIncomingCallNotification(callerName: String, video: Boolean): Notification {
         val fullScreenIntent = buildCallActivityIntent()
         val fullScreenPending = PendingIntent.getActivity(
             context, 1, fullScreenIntent,
@@ -127,8 +128,10 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Incoming Voice Call")
+            .setContentTitle(if (video) "Incoming Video Call" else "Incoming Voice Call")
             .setContentText(callerName)
+            // The service posts the ring a second time when it learns the kind late.
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setFullScreenIntent(fullScreenPending, true)

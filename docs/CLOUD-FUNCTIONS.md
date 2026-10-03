@@ -23,7 +23,10 @@ Four functions in `functions/index.js` (Node.js 20 runtime):
 - **Trigger**: Firestore document creation at `calls/{callId}` where `status == "ringing"`
 - Fetches caller and callee user documents
 - Sends a high-priority FCM data message to the callee
-- **FCM Payload**: `type: "call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`
+- Skips the push when the callee has blocked the caller or has no `fcmToken`
+- **FCM Payload**: `type: "incoming_call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`, `video`
+- `video` is the string `"true"` or `"false"`, from the call document's `video` field. A document without the field is a voice call.
+- The app also reads `video` from the call document. A deployed function that does not send it yet only delays the *video call* label on the ring.
 
 ### `syncPresenceToFirestore`
 

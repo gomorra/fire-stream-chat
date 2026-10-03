@@ -55,7 +55,7 @@ data class Message(
     val editedAt: Long?,
     val reactions: Map<String, String>,   // userId → emoji
     val isForwarded: Boolean,
-    val duration: Int?,                   // voice message seconds
+    val duration: Int?,                   // voice message seconds; CALL: seconds connected
     val isStarred: Boolean,
     val readBy: Map<String, Long>,        // userId → timestamp (group chats)
     val deliveredTo: Map<String, Long>,   // userId → timestamp (group chats)
@@ -67,7 +67,8 @@ data class Message(
     val listDiff: ListDiff?,               // list mutation summary for LIST messages
     val isPinned: Boolean,
     val latitude: Double?,                // location sharing
-    val longitude: Double?                // location sharing
+    val longitude: Double?,               // location sharing
+    val isVideoCall: Boolean              // CALL: the call was started as video
 )
 ```
 
@@ -155,13 +156,15 @@ data class ListData(
 enum class CallDirection { OUTGOING, INCOMING, MISSED }
 
 data class CallLogEntry(
-    val callId: String,
-    val remoteUserId: String,
-    val remoteName: String,
-    val remoteAvatarUrl: String?,
+    val messageId: String,                // the CALL message the entry is built from
+    val chatId: String,
+    val otherPartyId: String,
+    val displayName: String,
+    val avatarUrl: String?,
     val direction: CallDirection,
+    val durationSeconds: Int?,
     val timestamp: Long,
-    val durationSeconds: Int?
+    val video: Boolean                    // the call was started as video
 )
 ```
 
@@ -170,10 +173,10 @@ data class CallLogEntry(
 ```kotlin
 sealed interface CallState {
     data object Idle : CallState
-    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl) : CallState
-    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl) : CallState
-    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl) : CallState
-    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime) : CallState
+    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl, calleeLocalAvatarPath, video) : CallState
+    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl, callerLocalAvatarPath, video) : CallState
+    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl, remoteLocalAvatarPath, video) : CallState
+    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime, remoteLocalAvatarPath, video) : CallState
     data class Ended(callId, reason: EndReason) : CallState
 }
 
@@ -190,6 +193,8 @@ data class CallUiControls(
 )
 ```
 
+The four states between `Idle` and `Ended` implement `CallState.Live` (`callId`, `video`, `withVideo()`). `video` says how the call was started. It sets the ring text and the call log entry. It is not the live camera state.
+
 ### SdpData / IceCandidateData / CallSignalingData
 
 Defined in `domain/model/CallSignalingData.kt`:
@@ -197,7 +202,12 @@ Defined in `domain/model/CallSignalingData.kt`:
 ```kotlin
 data class SdpData(val sdp: String, val type: String)
 data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp: String)
-data class CallSignalingData(val callId: String, val callerId: String, val calleeId: String, val status: String)
+data class CallSignalingData(
+    val callId: String, val callerId: String, val calleeId: String, val status: String,
+    val offer: SdpData?, val answer: SdpData?,
+    val createdAt: Long, val endedAt: Long?, val endReason: String?,
+    val video: Boolean                    // how the call was started; false when the document has no such field
+)
 ```
 
 ---

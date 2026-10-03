@@ -165,6 +165,25 @@ class CallsViewModelTest {
     }
 
     @Test
+    fun `an entry carries the kind the call was started as`() = runTest {
+        val video = Message(
+            id = "m1", chatId = chatId, senderId = currentUserId,
+            type = MessageType.CALL, content = "hangup", duration = 30, isVideoCall = true
+        )
+        val voice = Message(
+            id = "m2", chatId = chatId, senderId = otherUserId,
+            type = MessageType.CALL, content = "hangup", duration = 30
+        )
+        every { messageRepository.getCallLog() } returns flowOf(listOf(video, voice))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
+
+        val vm = buildViewModel()
+        advanceUntilIdle()
+
+        assertEquals(listOf(true, false), vm.uiState.value.entries.map { it.video })
+    }
+
+    @Test
     fun `display name resolved from contacts map`() = runTest {
         val message = Message(
             id = "m1", chatId = chatId, senderId = otherUserId,

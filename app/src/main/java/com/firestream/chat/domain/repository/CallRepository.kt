@@ -6,7 +6,7 @@ import com.firestream.chat.domain.model.SdpData
 import kotlinx.coroutines.flow.Flow
 
 interface CallRepository {
-    suspend fun createCall(calleeId: String): Result<String>
+    suspend fun createCall(calleeId: String, video: Boolean): Result<String>
     suspend fun answerCall(callId: String): Result<Unit>
     suspend fun declineCall(callId: String): Result<Unit>
     suspend fun endCall(callId: String, reason: String): Result<Unit>
@@ -17,5 +17,5 @@ interface CallRepository {
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>
     suspend fun getCallById(callId: String): Result<CallSignalingData>
-    suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int): Result<Unit>
+    suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int, video: Boolean): Result<Unit>
 }

@@ -85,7 +85,10 @@ exports.sendCallPushNotification = onDocumentCreated(
                     callId: callId,
                     callerId: callerId,
                     callerName: callerName,
-                    callerAvatarUrl: callerAvatarUrl
+                    callerAvatarUrl: callerAvatarUrl,
+                    // FCM data values are strings. A call document without the
+                    // field comes from an older app and is a voice call.
+                    video: callData.video === true ? "true" : "false"
                 },
                 android: {
                     priority: "high"

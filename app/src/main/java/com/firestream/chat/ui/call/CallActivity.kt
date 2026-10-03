@@ -42,6 +42,8 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CALLEE_NAME = "callee_name"
         const val EXTRA_CALLEE_AVATAR_URL = "callee_avatar_url"
         const val EXTRA_CHAT_ID = "chat_id"
+        /** With [ACTION_OUTGOING]: start the call as a video call. Absent means a voice call. */
+        const val EXTRA_VIDEO = "video"
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
     }
@@ -113,11 +115,12 @@ class CallActivity : ComponentActivity() {
         val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
         val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
         val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
+        val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
 
         activityScope.launch {
-            callRepository.createCall(calleeId).onSuccess { callId ->
+            callRepository.createCall(calleeId, video).onSuccess { callId ->
                 CallService.startOutgoing(
-                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl
+                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl, video
                 )
             }
         }

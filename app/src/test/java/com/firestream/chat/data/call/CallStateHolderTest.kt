@@ -50,6 +50,41 @@ class CallStateHolderTest {
     }
 
     @Test
+    fun `markVideo flips the kind of the current call in every live state`() {
+        val live = listOf(
+            CallState.OutgoingRinging("call1", "user2", "Alice", null),
+            CallState.IncomingRinging("call1", "user2", "Alice", null),
+            CallState.Connecting("call1", "user2", "Alice", null),
+            CallState.Connected("call1", "user2", "Alice", null, 1L),
+        )
+        val expected = listOf(
+            CallState.OutgoingRinging("call1", "user2", "Alice", null, video = true),
+            CallState.IncomingRinging("call1", "user2", "Alice", null, video = true),
+            CallState.Connecting("call1", "user2", "Alice", null, video = true),
+            CallState.Connected("call1", "user2", "Alice", null, 1L, video = true),
+        )
+
+        val marked = live.map { state ->
+            holder.updateState(state)
+            holder.markVideo("call1").also { assertEquals(it, holder.callState.value) }
+        }
+
+        assertEquals(expected, marked)
+    }
+
+    @Test
+    fun `markVideo leaves another call, an ended call and no call alone`() {
+        val other = CallState.IncomingRinging("call2", "user3", "Bob", null)
+        val ended = CallState.Ended("call1", EndReason.HANGUP)
+
+        for (state in listOf(other, ended, CallState.Idle)) {
+            holder.updateState(state)
+            assertEquals(state, holder.markVideo("call1"))
+            assertEquals(state, holder.callState.value)
+        }
+    }
+
+    @Test
     fun `toggleMute flips isMuted`() {
         assertFalse(holder.uiControls.value.isMuted)
         holder.toggleMute()

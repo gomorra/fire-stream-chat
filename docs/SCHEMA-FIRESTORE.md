@@ -48,10 +48,12 @@ chats/{chatId}
     ├── emojiSizes: { charIndex → multiplier }
     ├── pollData: { options[], isMultipleChoice, isClosed }
     ├── listId, listDiff: { added[], removed[], checked[], ... }
-    └── latitude, longitude                     # LOCATION messages
+    ├── latitude, longitude                     # LOCATION messages
+    └── video                                   # CALL only — the call was started as video; absent = voice
 
 calls/{callId}
 ├── callerId, calleeId, status, createdAt, endedAt, endReason
+├── video                                      # how the call was started; absent = voice (an older app)
 ├── offer: { sdp, type }                       # WebRTC SDP offer
 ├── answer: { sdp, type }                      # WebRTC SDP answer
 ├── callerCandidates/{id}                      # subcollection — ICE candidates

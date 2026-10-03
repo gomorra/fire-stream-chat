@@ -64,4 +64,7 @@ data class Message(
     val fileName: String? = null,
     val fileSize: Long? = null,
     val mimeType: String? = null,
+    // A CALL that was started as a video call. False for a voice call, for every
+    // other type, and for call messages written before the field existed.
+    val isVideoCall: Boolean = false,
 )

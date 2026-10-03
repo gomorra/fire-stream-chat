@@ -14,5 +14,7 @@ data class CallSignalingData(
     val answer: SdpData?,
     val createdAt: Long,
     val endedAt: Long?,
-    val endReason: String?
+    val endReason: String?,
+    /** How the call was started. Not the live camera state. */
+    val video: Boolean = false
 )

@@ -179,12 +179,15 @@ class FCMService : FirebaseMessagingService() {
         val callerId = data["callerId"] ?: return
         val callerName = data["callerName"] ?: "Unknown"
         val callerAvatarUrl = data["callerAvatarUrl"]
+        // A function deployed before the kind existed sends none. The service then takes it
+        // from the call document.
+        val video = data["video"] == "true"
 
         // Don't start if already in a call
         val currentState = callStateHolder.callState.value
         if (currentState !is CallState.Idle && currentState !is CallState.Ended) return
 
-        CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
+        CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl, video)
     }
 
     private fun showNotification(

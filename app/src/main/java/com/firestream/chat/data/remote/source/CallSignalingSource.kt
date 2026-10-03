@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
  * ICE candidate streams. Stub on the pocketbase flavor in v0.
  */
 interface CallSignalingSource {
-    suspend fun createCallDocument(callerId: String, calleeId: String): String
+    suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String
     suspend fun updateCallStatus(callId: String, status: String, endReason: String? = null)
     suspend fun setOffer(callId: String, sdp: SdpData)
     suspend fun setAnswer(callId: String, sdp: SdpData)

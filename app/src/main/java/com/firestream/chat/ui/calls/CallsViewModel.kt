@@ -85,7 +85,8 @@ class CallsViewModel @Inject constructor(
                 avatarUrl = contact?.avatarUrl,
                 direction = deriveDirection(message.senderId, message.content),
                 durationSeconds = message.duration,
-                timestamp = message.timestamp
+                timestamp = message.timestamp,
+                video = message.isVideoCall
             )
         }
     }
