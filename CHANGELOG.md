@@ -6,11 +6,11 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **Chat font size setting.** Settings → Chat → Font Size sets the size of message text and of the composer, from 12 to 22 in half steps, with a live preview. The default stays at 15.
+- **Chat font size setting.** Settings → Chat → Font Size sets the size of message text and of the composer, from 12 to 22 in half steps, with a live preview. The default stays at 15. (`e3b25489`)
 
 ### Changed
 
-- **The composer grows to ten lines and keeps its text clear of the border.** It used to stop at four lines, and the first and last line sat right against the rounded outline and looked cut off.
+- **The composer grows to ten lines and keeps its text clear of the border.** It used to stop at four lines, and the first and last line sat right against the rounded outline and looked cut off. (`e3b25489`)
 
 ### Fixed
 
