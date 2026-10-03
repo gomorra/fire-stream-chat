@@ -6,6 +6,7 @@ import com.firestream.chat.domain.model.AppUpdate
 import com.firestream.chat.domain.repository.DownloadProgress
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import okhttp3.Dns
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -21,6 +22,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.net.Proxy
+import java.net.UnknownHostException
 import java.security.MessageDigest
 
 @RunWith(RobolectricTestRunner::class)
@@ -168,7 +171,18 @@ class ApkDownloaderTest {
             mandatory = false
         )
 
-        val emissions = downloader.download(unresolvable).toList()
+        // The lookup fails in-process: a real one is not the same everywhere. Behind
+        // an HTTP proxy (the cloud sandbox sets one through JAVA_TOOL_OPTIONS) the
+        // name is never resolved locally — the proxy answers the CONNECT with a 403
+        // instead — so the test pins no-proxy plus a resolver that always misses.
+        val offline = client.newBuilder()
+            .proxy(Proxy.NO_PROXY)
+            .dns(object : Dns {
+                override fun lookup(hostname: String) = throw UnknownHostException(hostname)
+            })
+            .build()
+
+        val emissions = ApkDownloader(context, offline).download(unresolvable).toList()
 
         val terminal = emissions.last()
         assertTrue("Expected Failed but got $terminal", terminal is DownloadProgress.Failed)

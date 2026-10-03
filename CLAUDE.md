@@ -51,10 +51,9 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 > Use the firebase flavor (`:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`).
 > Bare `test` also builds pocketbase, which is not maintained yet.
 >
-> One test fails only in cloud containers:
-> `ApkDownloaderTest.unresolvable host maps to friendly No internet connection message`.
-> It expects a DNS failure, but the sandbox proxy answers `403` instead. Any other
-> failure is real.
+> The whole suite passes in cloud containers too (since 2026-10-03:
+> `ApkDownloaderTest`'s unresolvable-host case no longer does a real lookup, which the
+> sandbox proxy answered with `403`). Every failure is real.
 
 - JVM target: 17
 - `minSdk = 31`, `targetSdk = 35`, `compileSdk = 35`
