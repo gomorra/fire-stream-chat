@@ -191,7 +191,7 @@ When adding a new convention, append a section here in the same shape: **definit
 
 ## One chat picker, three hosts
 
-**Definition.** Every "send this to a chat" surface renders `ui/components/ChatPickerPanel.kt`: the share intent (`ui/share/SharePickerScreen`), forwarding a message (`ui/chat/ForwardMessagePanel`) and sharing a list (`ui/lists/ShareListPanel`). The panel owns the bar, the search field *and the filtering behind it*, the rows, the checkboxes and the send button; the host supplies a `preview` slot for *what* is being sent, a `ChatPickerState` and a `ChatPickerCallbacks`. A host that mounts it over an existing screen goes through `ChatPickerOverlay`, which owns the slide in and out, the back press, the latched target, the search query, the ticked chats and the one-send-per-opening latch. The rules in `ui/components/ChatTargets.kt` come with it and are not to be re-derived: `Chat.pickerDisplayName` (own name → the 1:1 partner's profile name → `"Chat"`, never a raw uid), `Chat.sendRecipientId` (the other participant **only** for `ChatType.INDIVIDUAL`, `""` otherwise) and `List<Chat>.destinationLabel` (the confirmation's tail). That file holds no Compose, so a ViewModel can call it.
+**Definition.** Every "send this to a chat" surface renders `ui/components/ChatPickerPanel.kt`: the share intent (`ui/share/SharePickerScreen`), forwarding a message (`ui/chat/ForwardMessagePanel`) and sharing a list (`ui/lists/ShareListPanel`). The panel owns the bar, the search field *and the filtering behind it*, the rows, the checkboxes and the send button; the host supplies a `preview` slot for *what* is being sent, a `ChatPickerState` and a `ChatPickerCallbacks`. A host that mounts it over an existing screen goes through `ChatPickerOverlay`, which owns the slide in and out, the back press, the latched target, the search query, the ticked chats and the one-send-per-opening latch. The rules in `ui/components/ChatTargets.kt` come with it and are not to be re-derived: `Chat.pickerDisplayName` (own name → the 1:1 partner's profile name → `"Chat"`, never a raw uid), `Chat.partnerIdHint` (the partner argument of the chat route: the other participant **only** for `ChatType.INDIVIDUAL`, `""` otherwise) and `List<Chat>.destinationLabel` (the confirmation's tail). That file holds no Compose, so a ViewModel can call it. The picker hands over chats. It does not address them: a host sends by chat id, and the repository decides who each send is for (see *The repository decides who a send is for*). `partnerIdHint` is for navigation only.
 
 **Use when.** Adding any surface that asks the user to choose chats to send something into. A host mounted over an existing screen passes a nullable target to `ChatPickerOverlay`; a host that is a destination of its own (the share intent) renders the panel directly. The fan-out across the picked chats belongs to the host's ViewModel or manager, not to the picker's callback — see `ChatMessageActions.forwardMessage` and `ListsViewModel.shareListToChats`.
 **Don't use when.** The question is *membership* rather than *sending* — `ui/lists/ListShareSheet` toggles which chats a list is shared with, and stays a bottom sheet.
@@ -200,7 +200,31 @@ When adding a new convention, append a section here in the same shape: **definit
 
 **Trap (two).** A tab of `MainScreen`'s pager that mounts the overlay must raise `onOverlayVisibleChange` so the pager locks; a panel that swallows horizontal drags itself hides the conflict from the composable that owns the pager, and forecloses any gesture the panel later wants.
 
-And computing the recipient as `participants.firstOrNull { it != currentUserId }` regardless of chat type. It reads as "the other person" and is right for a 1:1, but for a group it names one arbitrary member — and `SendTarget.of(recipientId)` takes a non-empty recipient as "encrypt to this Signal session", so in a release build the rest of the group receives something they cannot read. Debug builds send plaintext, so this is invisible until it ships. That was a live bug in the forward dialog this panel replaced.
+And computing "the other person" as `participants.firstOrNull { it != currentUserId }` regardless of chat type. It is right for a 1:1, but for a group it names one arbitrary member. Use `Chat.partnerIdHint`, which is empty for a group, so the chat a host navigates to opens without a partner. The value cannot address a send: no send member takes a recipient.
+
+---
+
+## The repository decides who a send is for
+
+**Definition.** A send takes a chat id and never a recipient. `MessageRepositoryImpl.sendTargetFor` reads the chat's Room row once per send, before any message row is built, and `SendTarget.forChat` (`data/outbox/SendTarget.kt`) turns that row into a `SendTarget`. A 1:1 chat resolves to `Peer(theOtherParticipant)`: the Signal session the body is encrypted for and the user the block check asks about. A group or broadcast chat resolves to `NoPeer`. The target is recorded on the message row as `outboxRecipientId`, and the outbox reads it back with `SendTarget.fromColumn`. Retry uses the recorded target and reads no chat.
+
+Doubt is refused, never guessed. `forChat` throws `ChatNotReadyException` for a missing chat row, a 1:1 chat with no other participant or with several, a 1:1 chat whose other participant has a blank id, and a chat type the app does not know. The blank id is refused because the column stores `NoPeer` as `""`, so a blank peer would be read back as nobody. The exception maps to `AppError.Validation` and the user sees *"This chat isn't ready yet"*. Nothing is written: no row, no FAILED bubble, no plaintext.
+
+**Use when.** Adding a send path, or a screen that sends. The new `MessageRepository` member takes the chat id. A path that writes a row goes through `queueSend`, or calls `sendTargetFor` itself before its first write, as `forwardMessage` and `sendTimerMessage` do.
+**Don't use when.** The broadcast fan-out. `sendBroadcastMessage` takes the list's members from its caller, builds a `Peer` per member and writes each copy directly, with no row. A wrong list there sends to the wrong people, but never in plaintext. It is the one allowlisted exception.
+
+**Example.** `app/src/main/java/com/firestream/chat/data/outbox/SendTarget.kt` (`forChat`, `fromColumn`), `data/repository/MessageRepositoryImpl.kt` (`sendTargetFor`, `queueSend`), `data/local/entity/MessageEntity.kt` (`sendTarget`). Tests: `data/outbox/SendTargetTest`, and `MessageRepositoryBlockTest`, which seeds a `ChatEntity` and asserts the `outboxRecipientId` recorded on the inserted row.
+
+**The fence.** Three rules in `ArchitectureTest` fail the gate on a violation:
+- No `MessageRepository` member has a parameter named `recipientId`.
+- `Peer(`, `NoPeer` and `SendTarget.of(` appear in production code only in `SendTarget.kt` and in the body of `sendBroadcastMessage`.
+- `forChat(` has one caller, `MessageRepositoryImpl.sendTargetFor`.
+
+**Trap (three).** A caller computing the recipient. The forward dialog passed `participants.firstOrNull { it != currentUserId }` for a group, so the message was addressed to one arbitrary member (2026-09-18). A group notification put the message's sender into the chat route, so every send from that screen was addressed to that member (2026-10-03). With encryption on, such a message is encrypted for one member only. With it off, the block check asks about the wrong user. Debug builds send plaintext, so the encryption half is invisible until it ships.
+
+Reading the chat through `ChatEntity.toDomain()`. It maps an unknown type to `INDIVIDUAL`. `forChat` compares the `type` string itself.
+
+Removing a `String` parameter from a member whose next parameter is also a `String`. A positional call such as `sendMessage(chatId, text, "recipient1")` still compiles and binds the old recipient to `replyToId` (`caption` on `sendMediaMessage`). The fence does not see this. Check every call site by hand, tests included.
 
 ---
 
