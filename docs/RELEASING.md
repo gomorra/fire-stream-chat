@@ -92,6 +92,7 @@ The script automates the flow below — read this if something fails, or if you 
 
 1. **Preflight** — fails fast, before touching anything, unless all of these hold:
    - you're inside the repo, on branch `main`, with a clean working tree
+   - local `main` holds every commit on `origin/main`. The script fetches to check. If it is behind, pull or merge first.
    - tag `vX.Y.Z` doesn't already exist, locally or on `origin`
    - `CHANGELOG.md`'s top section is exactly `## [UNRELEASED] [X.Y.Z] — YYYY-MM-DD` with entries — the version and date live in this combined working header, decided per-commit as entries land (see `CLAUDE.md` Changelog section). If the version in the header doesn't match `X.Y.Z`, or the `[UNRELEASED] ` prefix is already gone, the script says so and stops.
 2. **Rewrite the header** — drops the `[UNRELEASED] ` prefix, leaving `## [X.Y.Z] — YYYY-MM-DD` (today's date, preserving the em dash style already in the file).
@@ -100,8 +101,10 @@ The script automates the flow below — read this if something fails, or if you 
    ```bash
    git commit -m "chore(release): vX.Y.Z"
    git tag vX.Y.Z
-   git push origin main vX.Y.Z
+   git push --atomic origin main vX.Y.Z
    ```
+
+   The push is atomic so the tag never reaches `origin` without the branch. A tag on its own starts the release build from a commit that is not on `origin/main`.
 
 The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings. Users who enable **Settings → Auto-download updates on Wi-Fi** (opt-in, off by default) have the new APK downloaded automatically in the background when the daily check runs on an unmetered network, so it's already on-device and only the tap-to-install step remains.
 
