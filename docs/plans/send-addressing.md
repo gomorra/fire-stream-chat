@@ -314,6 +314,43 @@ watch fail, implement, green, one commit).
    **(step-1)** Step 1's hash is `d63ae9b1`. It has no CHANGELOG entry and no version bump of
    its own, so this entry is the only place it is recorded.
 
+**Approach**
+- Code as it stands matches §2: the seven `SendTarget.of(recipientId)` sites are at
+  `MessageRepositoryImpl.kt` :241 (timer, via `ensureNotBlocked`), :523, :614, :633 (retry
+  fallback), :665, :705, :1023; `chatDao` is injected. Nothing contradicts §0 or §2.
+- Order: (1) the factory's `chats` + `testChat`, then the two red tests (forward and `sendMessage`
+  into a seeded GROUP with a member id), run and seen failing; (2) `SendTarget.forChat` /
+  `fromColumn`, `ChatNotReadyException` + its `AppError.from` arm; (3) `sendTargetFor` +
+  `queueSend`, forward, timer, retry in `MessageRepositoryImpl`, KDoc and AGENT-NOTE rewrites;
+  (4) the rest of the test surface; (5) gate, `/code-review`, CHANGELOG.
+- Tests: new `data/outbox/SendTargetTest`; `MessageRepositoryBlockTest` (recorded target per row
+  path for INDIVIDUAL and GROUP, unresolvable chat refused with no insert);
+  `MessageRepositoryTimerTest` (GROUP never asks, INDIVIDUAL asks the resolved peer, refused chat
+  writes no row); `MessageRepositoryRetryTest` (no recorded target ⇒ refused before
+  `requeueForRetry`); `AppErrorTest`.
+- Three places where the spec's wording does not fit the code, none touching §0 or §2:
+  `OutboxSenderTest.store` defaults its recipient to `""`, so `SendTarget.of` there cannot become a
+  bare `Peer(` — the helper takes a `SendTarget` (default `NoPeer`). `MessageRepositoryRetryTest`
+  has a case pinning the fallback decision 4 removes; it is replaced by the refusal case.
+  `MessageRepositoryMediaSendFailureTest` asserts `outboxRecipientId == ""` for `"chat1"`, which is
+  the default INDIVIDUAL chat now, so it asserts the resolved peer.
+- Further skills: `changelog-release` (a user-visible *Fixed* entry, bump decision). `simplify`
+  is intended because the diff is security-adjacent; re-decided against the real diff.
+
+**Shipped** `f411a330` (2026-10-03) — tier: max. skills: code-review, simplify, changelog-release. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+CHANGELOG: *Fixed* entry in `[UNRELEASED] [1.35.4]`, hashes `f411a330` and step 1's `d63ae9b1` (this commit's hash added in the `docs(plan):` commit); the section was already a patch, so no version change.
+Red run, before the implementation: `MessageRepositoryForwardTest` forward into a seeded GROUP failed with `expected:<[]> but was:<[member1]>`; `MessageRepositoryBlockTest` `sendMessage` into a seeded GROUP failed with `RecipientBlockedException`. That second case now lives in the every-row-path group test.
+Gate: `:app:testFirebaseDebugUnitTest`, `:app:testPocketbaseDebugUnitTest` and `assembleDebug` (both flavors) green.
+Departures (for sign-off):
+- **(/code-review)** `SendTarget.forChat` also refuses a 1:1 chat whose one other participant has a blank id. `Peer("")` is stored as `""`, which `fromColumn` reads back as `NoPeer`: plaintext and no block check. §2.1's snippet had that gap. The test was seen failing before the fix.
+- `sendTargetFor` logs the refusal (`Log.w`) and rethrows; §2.2 shows a one-liner. Without it decision 2's "reason string for the log" reaches no log.
+- Retry is `checkNotNull(entity.sendTarget)` then `enqueueSend(queued, retry = true)`; §2.2 writes `blockTarget = target`. Same value, since the default is the row's recorded target (/simplify).
+- The three wording mismatches named in **Approach**: `OutboxSenderTest.store` takes a `SendTarget`; the retry fallback case became the refusal case; `MessageRepositoryMediaSendFailureTest` asserts the resolved peer.
+- `testChat`'s `type` is a `String`, so a test can seed a type the app does not know. It is built over `TestData.chat`.
+- /simplify findings not applied: resolving the target first in the four `queueSend` paths (§2.2 fixes the order, "Media keeps its video-limit guard first" — a refused chat with an over-limit video reports the video limit); calling `BootRestoreLogic.resolveOtherUserId` from `forChat` (decision 6); dropping the forward group case (item 1 names it).
+- Three `TECH_DEBT.md` entries for findings outside the plan: *An unsent message keeps the target it recorded, even a wrong one*; *An unknown chat type from the backend is stored as a 1:1 chat*; *A failed timer shows a retry button that cannot retry it*. The first is the one to read before merging: a row left `SENDING` or `FAILED` by an older build is not re-addressed.
+- `docs/agents/issue-tracker.md` does not exist; the `code-review` skill asks for `/setup-matt-pocock-skills` in that case. The spec was passed by path, so neither review axis was skipped.
+
 ### Step 4 — Drop `recipientId` from the seven send members; skills: code-review
 
 Mechanical; behaviour already lives in step 3.
@@ -334,6 +371,18 @@ Mechanical; behaviour already lives in step 3.
   positionally) and every ViewModel/manager test asserting on those fields.
 - `refactor(send): drop recipientId from the send API` — no CHANGELOG entry, no bump.
   Two ViewModels change, so the tripwire asks for `code-review` regardless.
+- **(step-3)** The "ignored" KDoc sits in three places in `MessageRepositoryImpl`: the
+  `@param recipientId` of `sendMessage`, the `@param recipientId` of `sendMediaMessage`, and the
+  last sentence of `forwardMessage`'s KDoc. `sendMessage`'s paragraph on where the target comes
+  from stays.
+- **(step-3)** Tests that pass a contradicting recipient on purpose lose that argument and the
+  "whatever recipient the caller names" clause of their names, and keep their assertions:
+  `MessageRepositoryBlockTest.rowPaths(chatId, recipientId)` and its three every-row-path cases,
+  two cases in `MessageRepositoryTimerTest`, one in `MessageRepositoryForwardTest`, two in
+  `MessageRepositoryRetryTest`. The factory's `chats` / `testChat` stay as they are.
+- **(step-3)** Retry no longer passes a `blockTarget`: `retryFailedMessage` is
+  `checkNotNull(entity.sendTarget)` then `enqueueSend(queued, retry = true)`. Dropping the
+  parameter touches the signature only.
 
 ### Step 5 — The surviving nav argument says what it is: `partnerIdHint`
 
@@ -388,6 +437,18 @@ Mechanical; behaviour already lives in step 3.
   picker* line ("a send is addressed to a recipient only in a 1:1 (`sendRecipientId`)" is no
   longer how it works).
 - `test(architecture): fence send addressing inside SendTarget` — test + docs, no CHANGELOG.
+- **(step-3)** Token census after step 3: `SendTarget.of` no longer exists, so its alternative in
+  `TARGET_BUILD` only guards against the name coming back. `Peer(` / `NoPeer` appear in
+  `SendTarget.kt`, in `sendBroadcastMessage` (`MessageRepositoryImpl.kt:930`) and in a KDoc link in
+  `MessageWriter.kt:57`. The two factories are `SendTarget.forChat(`, called only from
+  `MessageRepositoryImpl.sendTargetFor`, and `SendTarget.fromColumn(`, called only from
+  `MessageEntity.sendTarget`. Decision 5 ("exactly one place") is worth a third assertion: `forChat(`
+  has one caller.
+- **(step-3 /code-review)** The PATTERNS entry's "refuse on doubt" list has one more case than
+  decision 2: a 1:1 chat whose one other participant has a blank id. The column stores `NoPeer` as
+  `""`, so a blank peer id would be read back as nobody.
+- **(step-3)** `docs/PATTERNS.md:203` (in *One chat picker, three hosts*) still explains the trap
+  through `SendTarget.of(recipientId)`, which is deleted.
 
 ### Step 7 — Docs that move with the code
 
@@ -405,6 +466,16 @@ Mechanical; behaviour already lives in step 3.
   the send goes through (step 1) or refuses with the banner, never as plaintext to a 1:1.
 - `docs/plans/send-addressing-brief.md`: one line under its title — superseded by this plan.
 - `docs(send): addressing lives in the repository` — docs only, no gate run needed.
+- **(step-3)** `TECH_DEBT.md` gained three entries after *"Who is the other participant…"*: *An
+  unsent message keeps the target it recorded, even a wrong one*, *An unknown chat type from the
+  backend is stored as a 1:1 chat*, *A failed timer shows a retry button that cannot retry it*.
+  Keep them. The line numbers above (:386, :396, :402) are unchanged.
+- **(step-3)** `docs/ARCHITECTURE.md:409` describes `SendTarget.kt` as "Peer / NoPeer, the
+  outboxRecipientId column in one place". It also holds the rule that turns a chat row into a
+  target now (`forChat`), as `docs/FEATURE-MAP.md:278` should say too.
+- **(step-3)** One more item for the on-device list: (d) retry a message that failed in a 1:1 chat —
+  it goes to the same person; a failed timer's retry shows a banner and stays failed (see the
+  `TECH_DEBT.md` entry).
 
 ## 4. Gates
 
