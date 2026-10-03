@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–3 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, steps 1–4 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
 
 ## Context
 
@@ -316,6 +316,23 @@ Departures (for sign-off):
 
 ### Step 4 — Bubbles for stickers and GIFs (UI)
 
+**Approach**
+- Order: `coil-gif` in the catalog and the build file, then `ui/components/StickerImage.kt` with the per-request
+  animated decoder, then `MessageBubble.kt`, then the reply, forward and starred previews, then `StickerThumbnail`.
+- `StickerImage` takes an `animated` flag. A request without the decoder shows the first frame, which is what the
+  previews and the library grids use.
+- The `STICKER` branch lives in its own composable, `StickerBubbleContent`, so `MessageBubble` and `MessageBubbleBody`
+  gain few registers. The dex register count is checked on the built APK (`docs/GOTCHAS.md`).
+- A sticker bubble drops the fill, the tail and the padding, and is 160 dp wide. Time and ticks stay in the shared
+  metadata row, which follows the grouping rule of every other bubble. A deleted sticker is the usual tombstone bubble.
+- The `GIF` branch is the `IMAGE` branch with the animated request and a badge. The 4:3 fallback shape for missing
+  dimensions is already there.
+- New callback: `MessageBubbleCallbacks.onStickerClick`, a no-op until step 5 wires the sheet. A tap on a GIF does
+  nothing, because the fullscreen viewer has no animated decoder and its gallery lists photos only.
+- Tests: `MessageBubbleStickerGifTest` (Robolectric) for the type dispatch, the tap, the badge, the tombstone and
+  the reply preview.
+- Further skills intended: none. UI only, one file per surface, no ViewModel, no concurrency.
+
 - `coil-gif` in `gradle/libs.versions.toml` and `app/build.gradle.kts`.
   `ui/components/StickerImage.kt`: the one composable every surface draws a sticker with, attaching
   `ImageDecoderDecoder.Factory()` per request. Step 7 adds Lottie inside it.
@@ -335,6 +352,17 @@ Departures (for sign-off):
 - **(step-3)** `ui/components/MessageTypeLabel.kt` has `stickerLabel(emoji)`. `ForwardMessagePanel` shows a labelled
   icon for both types until this step gives it the first frame.
 - Test: one Robolectric test for the type dispatch.
+
+**Shipped** `da2eaf18` (2026-10-03) — tier: mid, tagged mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- A tap on a GIF does nothing. The fullscreen viewer has no animated decoder and its gallery lists photos only, so it would show a still. A GIF has no *Save image* either.
+- `MessageBubbleCallbacks.onStickerClick` exists and `ChatScreen` does not set it. Step 5 wires the sheet.
+- Time and ticks under a sticker follow the grouping rule of every bubble: they show on the last message of a group.
+- A sticker's forwarded line and reply preview sit above it on the chat background, 160 dp wide. A deleted sticker is the usual tombstone bubble.
+- `StickerImage(model, animated)` shows the first frame with `animated = false`. The library grids, and every preview through `ReplyImageThumbnail`, are still. The starred list got a 40 dp thumbnail for both types.
+- The reply preview moved into `ReplyPreviewRow`, to take register pressure off `MessageBubble`.
+- The dex register check from `docs/GOTCHAS.md` did not run: the session's allowlist refused `unzip` and `dexdump`. `javap` shows `MessageBubble` at 216 locals and 32 stack slots, which is 4 locals fewer than before the move. A debug build on a device is the real check (`docs/BACKLOG.md`).
+- Not user-visible, because no screen sends either type yet. No CHANGELOG entry and no version bump; step 5 carries both. Nothing ran on a device.
 
 ### Step 5 — Stickers tab in the composer (UI + state)
 
@@ -365,6 +393,9 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 - **(step-3)** A received sticker has a `stickers` row and no pack item once its file is downloaded and checked, so
   `setFavourite` works for it. A message whose `localUri` is null has no row yet. Call
   `MessageRepository.ensureLocalFile(message)` first; it fails for a sticker that was refused.
+- **(step-4)** The tap on a sticker bubble is `MessageBubbleCallbacks.onStickerClick`, which `ChatScreen` does not set
+  yet. Grid cells use `StickerImage(animated = false)` through `StickerThumbnail`. This step carries the CHANGELOG
+  entry for the bubbles too, and should run the dex register check on `MessageBubble` (`docs/GOTCHAS.md`).
 - Tests: `StickerSearchTest`, `PickerPanelTest` (two tabs draw the island; one-tab hosts unchanged),
   `ChatInfoManager` and `ChatMessageSender` tests.
 - Docs: rewrite `docs/BACKLOG.md` §4.6, add *Pending on-device verification* items.
@@ -432,6 +463,9 @@ returns; a second account adds a pack from a received sticker.
   a zip must be told from a `.wastickers` pack by its entries. `StickerPackArchive.read` hands over `.webp`
   entries only, and `WhatsAppStickerFolder` lists `.webp` names only.
 - `StickerImage` switches on format, so the bubble, the picker and the library all render Lottie.
+- **(step-4)** `StickerImage` takes `model: Any` and no format. The bubble has `Message.mimeType` and the library has
+  `Sticker.format`; give it a format parameter. `ReplyImageThumbnail` and the forward preview draw the first frame
+  with a plain `AsyncImage`, which cannot read Lottie, so they need the PNG thumbnail.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
 ### Step 8 — Make your own stickers
