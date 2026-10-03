@@ -593,6 +593,28 @@ Departures (for sign-off):
   that allowlist. `ArchitectureTest`'s header KDoc asks for a `TECH_DEBT.md` entry behind every
   baseline, and this one has none until step 7 writes it.
 
+**Approach**
+- Docs only, no production or test file. The spec and the annotations match the docs as they stand:
+  the `TECH_DEBT.md` entries sit at :386 and :396 with the *Partly resolved* paragraph at :402, and
+  `docs/FEATURE-MAP.md` names `sendRecipientId` at :544, :552 and :554. Nothing contradicts §0 or §2.
+- Order: (1) `TECH_DEBT.md`: delete the :386 entry, rewrite *Partly resolved*, add the decision-8
+  entry after the three step-3 entries; (2) `docs/FEATURE-MAP.md`: the Chat Picker paragraph and
+  rows, and the `SendTarget.kt` row at :278; (3) `docs/ARCHITECTURE.md:409`; (4) `docs/BACKLOG.md`
+  § *Pending on-device verification*, items (a) to (d); (5) the superseded line in the brief.
+- The decision-8 entry names `ArchitectureTest`'s `BROADCAST_FAN_OUT` allowlist and the one caller
+  chain (`ChatInfoManager` computes the list, `ChatMessageSender` passes it).
+- Tests: none, and no gate run, as the spec says. No file under `app/` changes.
+- Further skills: none. Neither tripwire applies to a docs diff.
+
+**Shipped** `195512c4` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+Gate: not run. The commit changes no file under `app/`, and the spec says no gate run is needed.
+Departures (for sign-off):
+- `docs/BACKLOG.md` carries a fifth check, (e): with one group member blocked, a group send is not refused. It is the effect the plan names for users with encryption off, and it holds in any build.
+- `docs/FEATURE-MAP.md`: the two test rows of the Chat Picker section follow as well (`ChatPickerTargetsTest`, `ChatMessageActionsForwardTest`). They described a group send as "addressed to nobody".
+- `TECH_DEBT.md`: the *Partly resolved* paragraph lists the hand-rolled copies as they are now, which adds `ChatListItem` and `ArchivedChatsScreen`. Two stale line numbers in the entry's first paragraph were corrected.
+- Not done, because it is a test file and this step is docs only: three test names in `ChatPickerTargetsTest` still say a chat "is addressed to" someone (`a group is addressed to nobody so it sends as plaintext`). They assert `partnerIdHint`, the navigation hint. Rename them with the next change to that file.
+- `CHANGELOG.md` has no entry for this step; it is docs only.
+
 ## 4. Gates
 
 Every step: `./gradlew :app:testFirebaseDebugUnitTest` and `./gradlew assembleFirebaseDebug`
