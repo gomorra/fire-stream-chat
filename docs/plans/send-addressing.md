@@ -4,10 +4,12 @@ Plan from `docs/plans/send-addressing-brief.md` (read its §0–§2 for the why;
 supersedes its §3–§6). Grilled with the human and designed twice on 2026-10-03 against
 `main` at `c50979e`; line numbers below are from that commit — re-verify before editing.
 
-**Order: 1 → 2 → 3 ‖ 4 → 5 → 6 → 7**
+**Order: 1 → 2 → 3 → 4 → 5 → 6 → 7**
 
-The checkpoint after step 3 is the human's sign-off on the send-entry change (and a
-`/code-review ultra` if they want one). Steps 4–7 are mechanical once 3 holds.
+No checkpoint (removed 2026-10-03): the runner never pushes and encryption is opt-in, so the
+human reviews step 3's commit (`git show` the hash on its **Shipped** line, plus a
+`/code-review ultra` if wanted) before merging `plan/send-addressing`. Step 3 still runs its
+mandatory `/code-review` in-session. Steps 4–7 are mechanical once 3 holds.
 
 **Encryption is opt-in today.** A send is encrypted only in a release build of the firebase
 flavor *and* with the user's E2E toggle on — `MessageWriter.kt:51` (`buildEncrypts`) and
