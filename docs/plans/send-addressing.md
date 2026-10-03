@@ -384,6 +384,31 @@ Mechanical; behaviour already lives in step 3.
   `checkNotNull(entity.sendTarget)` then `enqueueSend(queued, retry = true)`. Dropping the
   parameter touches the signature only.
 
+**Approach**
+- Code as it stands matches the spec. The parameter sits on seven `MessageRepository` members and
+  is read by none of the `MessageRepositoryImpl` overrides. Nothing contradicts §0 or §2.
+- Order: (1) `MessageRepository.kt` and the `MessageRepositoryImpl` overrides, with the three
+  "ignored" KDoc passages; (2) callers: `ChatMessageSender` (and its constructor parameter, with
+  the argument in `ChatViewModel`), the `ChatViewModel` timer call, `ChatMessageActions.forwardMessage`
+  (its KDoc names `sendRecipientId` as the addressing rule, which is no longer true),
+  `SharePickerViewModel.sendToChat`; (3) `FakeMessageRepository`; (4) the test call sites the
+  compiler names; (5) gate, `/code-review`.
+- Tests: no new ones, the step changes no behaviour. The cases that passed a contradicting
+  recipient lose the argument and the clause in their names, and keep their assertions.
+  `ChatMessageSenderOfflineTest`, `SharePickerViewModelTest` and `ChatMessageActionsForwardTest`
+  assert on fake fields that go away; each assertion is restated on what the fake still records.
+- Further skills: none. The diff is a signature change the compiler checks end to end.
+
+**Shipped** `58de0f05` (2026-10-03) — tier: mid. skills: code-review. Reviewer models: code-review: sonnet, sonnet.
+Gate: `:app:testFirebaseDebugUnitTest` and `assembleFirebaseDebug` green. The pocketbase flavor was not built; it has no `MessageRepository` implementation or caller of its own.
+Departures (for sign-off):
+- The compiler does not check this change end to end, as **Approach** claimed. Every member has a `String` parameter behind the removed one, so a positional call such as `sendMessage(chatId, text, "recipient1")` still compiles and binds the old recipient to `replyToId` (`caption` on `sendMediaMessage`). Eight test calls had that shape. All were fixed by hand, and the /code-review standards pass re-checked every call site of the seven members and found none left.
+- Three assertions on fake fields that no longer exist were restated, not dropped: `ChatMessageSenderOfflineTest` asserts the sent message's chat id; `ChatMessageActionsForwardTest` asserts the forwarded chat ids for a 1:1 and a group; `SharePickerViewModelTest`'s group case asserts the chat id sent to and that `onDone` hands back `""` as the partner.
+- The negative checks on the contradicting recipient (`isUserBlocked(any(), "someone-else")`, `"peer-from-screen"`) went with the argument. The `NoPeer` retry case now stubs every block check as blocked and still asserts none is asked.
+- `ChatMessageActions.forwardMessage`'s KDoc named `sendRecipientId` as the addressing rule and linked the picker pattern. It now says the repository decides; the unused import went too.
+- /code-review findings not acted on here, because later steps own them: stale `sendRecipientId` wording in `docs/PATTERNS.md`, `docs/FEATURE-MAP.md` and `CLAUDE.md` (steps 6 and 7), and the `onDone` parameter name (step 5). Both are annotated below.
+- `docs/agents/issue-tracker.md` does not exist; the `code-review` skill asks for `/setup-matt-pocock-skills` in that case. The spec was passed by path, so neither review axis was skipped.
+
 ### Step 5 — The surviving nav argument says what it is: `partnerIdHint`
 
 - `ChatViewModel.recipientId` (:123) → `partnerIdHint`, with the §0-10 KDoc; the constructor
@@ -406,6 +431,17 @@ Mechanical; behaviour already lives in step 3.
   `ReminderNotificationPoster` (:66, the reminder's stored `recipientId`, which is whatever the
   chat screen held when the reminder was set) and `TimerAlarmReceiver` (:257). Step 2 did not
   touch them: after step 3 neither can address a send.
+- **(step-4)** `Chat.sendRecipientId` has three callers left, not one: `SharePickerViewModel.kt:166`
+  and `ChatListScreen.kt:238` and `:259`, all navigation. The header comment of `ChatTargets.kt`
+  (:10) names the chat list as a caller. `ChatMessageActions` no longer imports it.
+- **(step-4 /code-review)** `SharePickerViewModel.send`'s callback is
+  `onDone: (singleChatId: String?, recipientId: String?)` (:141). Its second argument is the
+  navigation hint, so it follows the rename.
+- **(step-4)** `ChatMessageSender` no longer takes the argument, so the `ChatViewModel` call sites to
+  rename are `ChatMessageActions`, `ChatInfoManager`, `ChatTimerReactor` and `setLastOpenChat`. The
+  test builders that pass `recipientId =` by name follow: `ChatMessageActionsForwardTest`,
+  `ChatMessageActionsEditTest`, `ChatInfoManagerTest`, `ChatInfoManagerRecentEmojiTest`,
+  `ChatTimerReactorTest`.
 - `refactor(chat): name the chat route's partner argument for what it is` — no CHANGELOG entry.
 
 ### Step 6 — Make the rule a test, and write it down
@@ -449,6 +485,12 @@ Mechanical; behaviour already lives in step 3.
   `""`, so a blank peer id would be read back as nobody.
 - **(step-3)** `docs/PATTERNS.md:203` (in *One chat picker, three hosts*) still explains the trap
   through `SendTarget.of(recipientId)`, which is deleted.
+- **(step-4)** The first rule can be fooled by nothing now, but the PATTERNS entry should name the
+  trap it does not catch: a positional `String` argument left behind when a parameter is removed
+  still compiles and binds to the next `String` parameter (`replyToId`, `caption`). Eight test calls
+  had that shape in step 4.
+- **(step-4 /code-review)** `docs/PATTERNS.md:194` also still lists `Chat.sendRecipientId` among the
+  panel's rules as an addressing rule. No caller addresses a send with it any more.
 
 ### Step 7 — Docs that move with the code
 
@@ -473,6 +515,8 @@ Mechanical; behaviour already lives in step 3.
 - **(step-3)** `docs/ARCHITECTURE.md:409` describes `SendTarget.kt` as "Peer / NoPeer, the
   outboxRecipientId column in one place". It also holds the rule that turns a chat row into a
   target now (`forChat`), as `docs/FEATURE-MAP.md:278` should say too.
+- **(step-4 /code-review)** `docs/FEATURE-MAP.md:554` says `ChatMessageActions` addresses each
+  forward by `sendRecipientId`. Since step 4 it passes the chat id only.
 - **(step-3)** One more item for the on-device list: (d) retry a message that failed in a 1:1 chat —
   it goes to the same person; a failed timer's retry shows a banner and stays failed (see the
   `TECH_DEBT.md` entry).
