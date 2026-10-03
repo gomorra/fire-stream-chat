@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **A sticker library, filled from WhatsApp or from files.** Settings → Storage → *Import stickers* opens your sticker packs. *From WhatsApp* asks once for WhatsApp's sticker folder and shows every sticker you have sent or received there to pick from; *From files* takes `.webp` stickers and `.wastickers` packs. Stickers are sorted into the packs they name, and importing the same ones again adds nothing. Packs can be renamed, reordered and deleted, and stickers moved between packs or removed. Stickers cannot be sent in a chat yet.
+- **A sticker library, filled from WhatsApp or from files.** Settings → Storage → *Import stickers* opens your sticker packs. *From WhatsApp* asks once for WhatsApp's sticker folder and shows every sticker you have sent or received there to pick from; *From files* takes `.webp` stickers and `.wastickers` packs. Stickers are sorted into the packs they name, and importing the same ones again adds nothing. Packs can be renamed, reordered and deleted, and stickers moved between packs or removed. Stickers cannot be sent in a chat yet. (`4d0edd6d`)
 
 ## [1.37.0] — 2026-10-03
 

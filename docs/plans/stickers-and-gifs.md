@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, step 1 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, steps 1–2 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
 
 ## Context
 
@@ -180,6 +180,35 @@ Departures (for sign-off):
 
 ### Step 2 — Settings → Import stickers, and the library screen (UI)
 
+**Approach**
+- Order: `StickerLibraryViewModel` and its test first, then `StickerLibraryScreen.kt`, `WhatsAppImportScreen.kt`,
+  the `Routes.STICKERS` destination and the Settings row, then the docs.
+- One ViewModel and one route. The pack grid and the WhatsApp grid are views of the library screen, chosen by
+  `openPackId` and `whatsApp` in its state, each closed by the system back.
+- The WhatsApp grid shows the folder ungrouped, newest first. The import does the grouping, so no per-file
+  `peek` is added to the repository.
+- Packs reorder with *Move up* and *Move down* in the pack's menu, which call `reorderPacks`. No drag handle.
+- Stickers are selected by a long press in the pack grid, then moved to another pack or removed from the top bar.
+- The folder grant is taken in the composable and not stored. Every import from WhatsApp opens the folder picker.
+- The file picker offers every type, because `.wastickers` has no mime type. The repository checks the bytes.
+- Tests: `StickerLibraryViewModelTest` (MockK repository), `StickerLibraryScreenTest` (Robolectric, empty state).
+- Further skills intended: none. One ViewModel, no concurrency, crypto or sync path.
+
+**Shipped** `4d0edd6d` (2026-10-03) — tier: mid, tagged mid. skills: simplify. Reviewer models: simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- The WhatsApp grid is not grouped by pack. It shows the folder newest first, and the import sorts the stickers into packs. No per-file `peek` was added to the repository.
+- The pack grid and the WhatsApp grid are views inside `Routes.STICKERS`, switched by the screen's state and closed by the system back. `WhatsAppImportScreen` has no route of its own.
+- Packs reorder through *Move up* and *Move down* in a pack's menu. There is no drag handle.
+- The folder grant is taken and not stored. Each import from WhatsApp opens the folder picker again, inside the WhatsApp sticker folder.
+- The picker opens in `com.whatsapp` only. A WhatsApp Business folder has to be navigated to by hand.
+- The file picker offers every file type, because a `.wastickers` archive has no mime type. The repository refuses what is not a sticker and the summary line counts it.
+- An import runs in `viewModelScope`, so leaving the screen cancels it. The pack rows are written at the end of an import, so a cancelled one adds no stickers, and running it again imports them.
+- The *Favourites* pack is not offered as a target when moving stickers. Only the screen enforces that.
+- `/simplify` was added at the re-decision, because the diff passed 600 lines. It gave both screens one `StickerTopBar`, `StickerCell` and `EmptyHint`, and moved the labels into `StickerLabels.kt`.
+- `/simplify` findings not taken: an import-source enum in place of `loosePackName` (the plan fixes that signature), and one shared rule for which pack kinds have a name (it needs a change in `StickerRepositoryImpl`).
+- CHANGELOG: a new `[UNRELEASED] [1.38.0]` section, entry hash `4d0edd6d`. `docs/BACKLOG.md` has the device checklist.
+- Nothing ran on a device or an emulator. The folder grant under `Android/media` is the first thing to check.
+
 - `Routes.STICKERS` and its `NavGraph.kt` destination. A `SettingsItem` titled **Import stickers**
   beside *Auto-download Media* in `ui/settings/SettingsScreen.kt`.
 - `ui/stickers/StickerLibraryScreen.kt` + ViewModel: packs with icon, name and count; a pack's grid;
@@ -254,6 +283,8 @@ The outbox, the sync path and a new storage model change here.
   time and ticks beneath. A `GIF` branch that reuses the `IMAGE` layout and caption with the animated
   request and a small GIF badge. New callbacks go into `MessageBubbleCallbacks`.
 - Reply, forward and starred previews show the first frame.
+- **(step-2)** `ui/stickers/StickerLibraryScreen.kt` has a plain `StickerThumbnail(model: String)` over `AsyncImage`,
+  used by `StickerCell` and the pack rows. Replace its body with `StickerImage`, so there is one sticker renderer.
 - Test: one Robolectric test for the type dispatch.
 
 ### Step 5 — Stickers tab in the composer (UI + state)
@@ -276,6 +307,9 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 - `ChatInfoManager` mirrors packs and recents into `OverlaysState` in one `.update {}`.
   `ChatMessageSender.sendSticker` sends and calls `markUsed`.
 - Tapping a sticker bubble opens a sheet: **Add to favourites**.
+- **(step-2)** `ui/stickers/StickerLabels.kt` has `StickerPack.label()`, which names the `FAVOURITES` and `SAVED`
+  packs. `StickerCell` in `StickerLibraryScreen.kt` is the grid cell, with click callbacks that hand the id back.
+  Use both in the tab. `Routes.STICKERS` exists.
 - Tests: `StickerSearchTest`, `PickerPanelTest` (two tabs draw the island; one-tab hosts unchanged),
   `ChatInfoManager` and `ChatMessageSender` tests.
 - Docs: rewrite `docs/BACKLOG.md` §4.6, add *Pending on-device verification* items.
@@ -307,6 +341,13 @@ A sync engine and new security rules.
 - **(step-1 /simplify)** `StickerDao` leaves `insertItems`, `deleteItems` and `insertPack` public beside the
   transaction methods that mark a pack `PENDING` (`TECH_DEBT.md`). The worker and the restore must not
   change a pack through them without setting `syncState`.
+- **(step-2 /simplify)** `StickerLibraryViewModel.WHATSAPP_PACK_NAME` is the loose pack name the WhatsApp route
+  passes, and the repository stores it in the import key `loose:WhatsApp`. Once that key is backed up, the
+  constant must not change. Move it into the repository if the name is ever to be translated.
+- **(step-2)** Only the library screen keeps the `FAVOURITES` pack out of the move targets. `moveStickers` accepts
+  it. If favourites sync differently from packs, refuse it in the repository.
+- **(step-2)** An import runs in `viewModelScope`. If the sync worker is to start after an import, enqueue it from
+  the repository, not from the screen.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
@@ -339,6 +380,8 @@ returns; a second account adds a pack from a received sticker.
   and file it in `docs/BACKLOG.md`.
 - Without Play services the flow skips the cutout and offers crop only.
 - Entry points: **Create** on the library screen and a **+** in the picker's pack row.
+- **(step-2)** The library screen's import rows are the first items of `PackList` in `StickerLibraryScreen.kt`, and
+  its callbacks are the `StickerLibraryActions` bundle. **Create** goes next to them.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
