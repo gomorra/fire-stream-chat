@@ -5,7 +5,9 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import com.firestream.chat.BuildConfig
 import com.firestream.chat.ui.call.CallActivity
+import com.firestream.chat.ui.call.prototype.VideoCallPrototypeEntry
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -1039,6 +1041,13 @@ fun ChatScreen(
                     }
                 },
                 actions = {
+                    // PROTOTYPE (video calls): debug builds only, see ui/call/prototype/.
+                    if (BuildConfig.DEBUG && !uiState.session.isBroadcast) {
+                        VideoCallPrototypeEntry(
+                            chatName = uiState.session.chatName ?: "",
+                            isGroup = uiState.session.isGroupChat,
+                        )
+                    }
                     if (!uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                         IconButton(onClick = {
                             val callIntent = Intent(context, CallActivity::class.java).apply {
