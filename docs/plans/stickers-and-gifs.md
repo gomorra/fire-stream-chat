@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–4 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, steps 1–5 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -370,6 +370,25 @@ Stickers and GIFs are reached through the island panel. The emoji panel gains ta
 keyboard's place, as it does today. This is variant A of the prototype on branch
 `prototype/sticker-gif-picker`; `ui/chat/prototype/VariantAIsland.kt` there is the reference for layout.
 
+**Approach**
+- Order: `domain/util/StickerSearch.kt` and its test, then `PickerTab` / `PickerSelection`, `OverlaysState`, `ChatInfoManager`,
+  `ChatMessageSender` and `ChatMessageActions`, then `picker/StickerLibraryTab.kt`, `ComposerPickerPanel.kt`,
+  `StickerActionsSheet.kt`, then the `ChatScreen` and `NavGraph` wiring, then the docs.
+- `StickerSearch` stays pure, so it takes emojis, not a query. The tab turns the query into emojis with `EmojiSearchData`,
+  which lives in `ui/chat/picker`.
+- The composer declares two tabs, Emoji and Stickers. The GIFs tab is step 11's, behind its flag.
+- `ChatInfoManager` combines `observePacks` and `observeRecents` and writes packs, recents and the favourite ids in one update.
+- The favourite toggle lives in `ChatMessageActions`, which has `MessageRepository` for `ensureLocalFile`. It serves the
+  bubble's sheet and the grid's long press.
+- A suggestion is a sticker tagged with exactly the composer's text, so no emoji detection is needed. Picking one sends
+  it and clears the composer.
+- The Recents shelf is frozen per open panel (`docs/GOTCHAS.md`, list order), because every send reorders it.
+- `ChatScreen` gains one parameter, `onImportStickersClick`, and the new UI sits in its own composables to keep the
+  register count of `ChatScreen` down.
+- Tests: `StickerSearchTest`, two new cases in `PickerPanelTest`, `ChatInfoManagerStickerTest`, `ChatMessageSenderStickerTest`,
+  `ChatMessageActionsStickerTest`, `StickerLibraryTabTest` (Robolectric).
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
+
 - The picker row keeps `PickerPanel`'s left-aligned order: search button, island, backspace key.
   A centred island with the two buttons pinned to the edges was tried and rejected by the owner.
 - `PickerTab.STICKER_LIBRARY` and `PickerSelection.Sticker`. Refresh the `PickerTab` KDoc.
@@ -399,6 +418,27 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 - Tests: `StickerSearchTest`, `PickerPanelTest` (two tabs draw the island; one-tab hosts unchanged),
   `ChatInfoManager` and `ChatMessageSender` tests.
 - Docs: rewrite `docs/BACKLOG.md` §4.6, add *Pending on-device verification* items.
+
+**Shipped** `daf5a088` (2026-10-04) — tier: mid, tagged mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The composer declares two tabs, Emoji and Stickers. The GIFs tab of the prototype is step 11's, behind its flag.
+- `StickerSearch` takes emojis, not a query. `EmojiSearchData` lives in `ui/chat/picker`, and `domain/util` may not import it. `StickerLibraryTab` turns the query into emojis.
+- A suggestion is a sticker tagged with exactly the composer's text. No emoji detection runs. A text with a letter, a digit or a space offers nothing, so a keycap emoji offers nothing either.
+- A pick from the suggestion strip sends the sticker and clears the composer. The strip shows at most 24 stickers.
+- The favourite toggle is `ChatMessageActions.setStickerFavourite`, not in `ChatInfoManager`. It needs `MessageRepository.ensureLocalFile`. `ChatViewModel.toggleStickerFavourite` decides the direction from `OverlaysState.favouriteStickerIds`.
+- `OverlaysState` has a third field, `favouriteStickerIds`, written in the same update as packs and recents.
+- The sheet reads *Remove from favourites* for a sticker that is one. A long press in the grid toggles the same way. Each shows a snackbar.
+- The Recents shelf holds its order while the panel is open. It follows when a sticker joins it.
+- A shelf with no stickers is left out of the pack row. A search result is sent with the id of the first pack that holds it.
+- `ChatScreen` has a new parameter, `onImportStickersClick`. `EmojiHandlerPanel` gave its backspace key to a shared `PickerBackspaceKey`.
+- `StickerCell` sets a test tag, `sticker:<id>`, for every host (`/simplify`).
+- Tests: `ChatStickerManagersTest` covers the three managers in one file. `ComposerPickerPanelTest` covers the tab and the strip. `PickerPanelTest` already had the island and the one-tab cases, and is unchanged.
+- `/simplify` was intended from the start, because the diff passes 600 lines. It took: shared test builders, the named `when` branches in `ComposerPickerPanel`, the suggestion search keyed on the emoji and not on the text, one remembered pick function for the grid.
+- `/simplify` findings not taken: a `toggleFavourite` in `StickerRepository` (noted in step 6), deriving the favourite ids at the read sites, remembering `ComposerPickerCallbacks` (the screen builds its callback bundles inline everywhere), a search debounce, an index of tags per library.
+- The dex register check did not run: the allowlist refused `unzip` again. `javap` shows `ChatScreen` at 112 locals and 54 stack slots. `MessageBubble` is untouched. A debug build on a device is the real check (`docs/BACKLOG.md`).
+- CHANGELOG: one entry in `[UNRELEASED] [1.38.0]` for this step and the bubbles of step 4. The section was a `feat` already, so no bump. The entry's own hash is added in the `docs(plan)` commit.
+- Nothing ran on a device or an emulator. The checklist is in `docs/BACKLOG.md`.
+- The driver's first gate run was red: the test worker's JVM died with `SIGSEGV` in `libjvm.so` before any test reported (`app/hs_err_pid951948.log`, ignored by git). No code changed for it. `./gradlew test assembleDebug` passed on the same commit before and after that run.
 
 **‖ Checkpoint.** Sending and receiving stickers is complete. Device pass between two accounts.
 
@@ -445,6 +485,13 @@ A sync engine and new security rules.
   which one **View pack** opens, and what "already installed" compares.
 - **(step-3 /code-review)** A sticker forwarded from a device that does not hold it keeps the first sender's `mediaUrl`
   and `stickerPackId`.
+- **(step-5)** The sticker sheet is `ui/chat/StickerActionsSheet.kt`, opened from `stickerSheetMessage` in `ChatScreen`.
+  **View pack** is a second row there.
+- **(step-5)** The composer's Stickers tab draws `Sticker.localPath` through `StickerCell`. A restored row whose file
+  has not arrived shows the broken-image mark there, and a tap sends it. Fetch the file when the cell is first shown.
+- **(step-5 /simplify)** `ChatViewModel.toggleStickerFavourite` reads `OverlaysState.favouriteStickerIds` and then calls
+  `setFavourite`. Two quick taps both read the old state. If favourites sync, give `StickerRepository` a
+  `toggleFavourite` that decides inside its own transaction.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
@@ -466,6 +513,8 @@ returns; a second account adds a pack from a received sticker.
 - **(step-4)** `StickerImage` takes `model: Any` and no format. The bubble has `Message.mimeType` and the library has
   `Sticker.format`; give it a format parameter. `ReplyImageThumbnail` and the forward preview draw the first frame
   with a plain `AsyncImage`, which cannot read Lottie, so they need the PNG thumbnail.
+- **(step-5)** The composer's Stickers tab, its pack row and the suggestion strip draw `Sticker.localPath` through
+  `StickerCell` and `StickerThumbnail`. For a Lottie sticker they need the PNG thumbnail.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
 ### Step 8 — Make your own stickers
@@ -482,6 +531,9 @@ returns; a second account adds a pack from a received sticker.
 - Entry points: **Create** on the library screen and a **+** in the picker's pack row.
 - **(step-2)** The library screen's import rows are the first items of `PackList` in `StickerLibraryScreen.kt`, and
   its callbacks are the `StickerLibraryActions` bundle. **Create** goes next to them.
+- **(step-5)** The picker's pack row is the `LazyRow` in `ui/chat/picker/StickerLibraryTab.kt`. The **+** is a last item
+  there, and its callback is a new field of `ComposerPickerCallbacks`. `ChatScreen` hands it to `NavGraph` like
+  `onImportStickersClick`.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
@@ -502,6 +554,8 @@ returns; a second account adds a pack from a received sticker.
   empty when the sticker was already there, so find the sticker by its hash, not by the result.
 - **(step-3)** `sendGifMessage` refuses a type that is not an image type and a file over 8 MB (`MAX_GIF_BYTES`).
   `sendMediaMessage` still sends `image/gif` as an `IMAGE`; the branch this step adds goes there.
+- **(step-5)** A sticker from the keyboard is sent through `ChatViewModel.sendSticker(stickerId, packId = null)`, which
+  also marks it used.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -537,6 +591,12 @@ two functions. The `wizard` skill can script this.
 - A GIF pick downloads the full rendition through the proxy, then calls `sendGifMessage`.
 - **(step-1)** `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. Keep the
   download there, or the import refuses it.
+- **(step-5)** The composer's tabs are `COMPOSER_TABS` in `ui/chat/ComposerPickerPanel.kt`, and its `when` names
+  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the flag is on, and refresh the
+  `PickerTab` KDoc, which says nobody declares `GIF`.
+- **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
+  `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
+  `ComposerPickerCallbacks`.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 

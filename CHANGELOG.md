@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **Stickers can be sent in a chat.** The emoji panel has a second tab, *Stickers*, with your recent stickers, your favourites and each pack. A tap sends the sticker, a long press adds it to the favourites or takes it out, and the search finds stickers by what their emoji means. Typing a single emoji offers the stickers tagged with it above the composer. A sticker arrives without a bubble behind it, animated ones play, and tapping one in a chat adds it to your favourites. GIFs that arrive in a chat play in place. (`0f70776a`, `da2eaf18`)
+- **Stickers can be sent in a chat.** The emoji panel has a second tab, *Stickers*, with your recent stickers, your favourites and each pack. A tap sends the sticker, a long press adds it to the favourites or takes it out, and the search finds stickers by what their emoji means. Typing a single emoji offers the stickers tagged with it above the composer. A sticker arrives without a bubble behind it, animated ones play, and tapping one in a chat adds it to your favourites. GIFs that arrive in a chat play in place. (`0f70776a`, `da2eaf18`, `daf5a088`)
 - **A sticker library, filled from WhatsApp or from files.** Settings → Storage → *Import stickers* opens your sticker packs. *From WhatsApp* asks once for WhatsApp's sticker folder and shows every sticker you have sent or received there to pick from; *From files* takes `.webp` stickers and `.wastickers` packs. Stickers are sorted into the packs they name, and importing the same ones again adds nothing. Packs can be renamed, reordered and deleted, and stickers moved between packs or removed. (`4d0edd6d`)
 
 ## [1.37.0] — 2026-10-03
