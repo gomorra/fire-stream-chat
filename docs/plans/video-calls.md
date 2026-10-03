@@ -181,6 +181,8 @@ Built per the `prototype` skill's UI branch, before step 1. Work stops afterward
 - **Screenshots without a device:**
   `./gradlew :app:testFirebaseDebugUnitTest --tests '*VideoCallPrototypeShots*' -Proborazzi.test.record=true`
   writes every variant and scenario to `app/build/prototype-shots/`.
+- **Not checked on a device:** the camera icon in the chat top bar, C's composer with the real
+  keyboard, and the lock-screen flags. The owner's pass covers them.
 
 **What the verdict changes.** With A or B, steps 4 and 9 rebuild `CallScreen` inside `CallActivity`.
 With C, the in-call screen lives in the main activity and `CallActivity` keeps only ringing on the
