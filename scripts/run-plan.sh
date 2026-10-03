@@ -37,7 +37,7 @@ MODEL_STRONG=opus;   EFFORT_STRONG=high;  ADVISOR_STRONG=''   # ADVISOR_*: `clau
 MODEL_MID=opus;      EFFORT_MID=medium;   ADVISOR_MID=''       # 2026-10-03: one model, the tiers differ by effort only (was Fable for mid/max, set 2026-09-20 by scripts/plan-runner/benchmark.md)
 JUDGE_MODEL='';      JUDGE_EFFORT=high    # '' = no judge pass; see plan-runner/judge-prompt.md
 ESCALATE=1                 # 1 = a step that stays invalid after its nudge is re-run once, one effort rung up
-DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
+DEFAULT_BUDGET_USD=30      # per step; a `budget:` heading tag overrides, --budget overrides both
 NUDGE_BUDGET_USD=5         # the single fix-forward resume a step may get
 REVIEW_BUDGET_USD=8        # the fresh review session that stands in for the nudge when only skills are missing
 JUDGE_BUDGET_USD=7
