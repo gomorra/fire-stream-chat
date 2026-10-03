@@ -174,6 +174,7 @@ import com.firestream.chat.ui.components.UserAvatar
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerState
+import com.firestream.chat.ui.theme.ChatTextTheme
 import com.firestream.chat.ui.theme.FsSurface3
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
@@ -189,6 +190,9 @@ import java.util.Locale
 
 // Max emoji size multiplier shown in the input field — keeps tall emoji from overflowing maxLines.
 private const val INPUT_EMOJI_SIZE_CAP = 2.0f
+
+// The composer grows with its text up to this many lines, then scrolls.
+private const val COMPOSER_MAX_LINES = 10
 
 /**
  * Cap on a single gallery pick. Every picked item is decoded, compressed and
@@ -1273,6 +1277,8 @@ fun ChatScreen(
                             if (messages.none { it.replyToId != null }) emptyMap()
                             else messages.associateBy { it.id }
                         }
+                        // The chat font size setting scales the bubbles, not the screen chrome.
+                        ChatTextTheme(uiState.session.chatFontSizeSp) {
                         LazyColumn(
                             state = listState,
                             reverseLayout = true,
@@ -1475,6 +1481,7 @@ fun ChatScreen(
                                 } // outer Column wrapping separator + bubble
                             }
                         }
+                        } // ChatTextTheme
 
                         // Scroll-to-bottom FAB
                         androidx.compose.animation.AnimatedVisibility(
@@ -1827,7 +1834,7 @@ fun ChatScreen(
 
             // Input row — hidden when the user has blocked the recipient; the
             // "You blocked this contact" banner above replaces it.
-            if (uiState.composer.canSendMessages && !uiState.session.isRecipientBlocked) Row(
+            if (uiState.composer.canSendMessages && !uiState.session.isRecipientBlocked) ChatTextTheme(uiState.session.chatFontSizeSp) { Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1910,7 +1917,7 @@ fun ChatScreen(
                         // Enter inserts a line break instead of sending. Sending stays on the
                         // send button — an Enter-as-send composer can't type a multi-line message.
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Default),
-                        maxLines = 4,
+                        maxLines = COMPOSER_MAX_LINES,
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         decorationBox = { innerTextField ->
                             Box(
@@ -1918,6 +1925,9 @@ fun ChatScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .defaultMinSize(minHeight = 48.dp)
+                                    // Keeps the first and last line clear of the rounded
+                                    // border once the field grows past one line.
+                                    .padding(vertical = 12.dp)
                             ) {
                                 if (messageText.isEmpty()) {
                                     Text(
@@ -1993,7 +2003,7 @@ fun ChatScreen(
                         )
                     }
                 }
-            }
+            } }
 
             // Bottom region — the space "under" the composer that the keyboard
             // and the emoji panel share. Height = max(live IME overlap, animated

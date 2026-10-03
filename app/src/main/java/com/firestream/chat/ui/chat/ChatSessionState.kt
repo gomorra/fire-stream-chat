@@ -1,5 +1,6 @@
 package com.firestream.chat.ui.chat
 
+import com.firestream.chat.domain.model.ChatFontSize
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.User
@@ -18,6 +19,7 @@ internal data class SessionState(
     val availableChats: List<Chat> = emptyList(),
     val chatParticipants: Map<String, User> = emptyMap(),
     val readReceiptsAllowed: Boolean = true,
+    val chatFontSizeSp: Float = ChatFontSize.DEFAULT_SP,
     val isGroupChat: Boolean = false,
     val chatName: String? = null,
     val participantNameMap: Map<String, String> = emptyMap(),

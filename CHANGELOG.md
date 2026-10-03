@@ -2,13 +2,26 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.35.4] — 2026-10-03
+## [UNRELEASED] [1.36.1] — 2026-10-03
+
+### Fixed
+
+- **A group opened from its notification no longer treats the message's sender as a 1:1 partner.** Tapping a group notification opened the group addressed to whoever had sent the message. Sends from that screen were refused when you had blocked that member, and — with end-to-end encryption switched on — were encrypted for that one member only. A group notification now opens the group with no partner; a 1:1 notification is unchanged. (`7abdf337`)
+- **Who a message is addressed to now comes from the chat itself, not from the screen that sends it.** Every send — text, photo, voice note, location, forward, timer — took its recipient from whichever screen started it, so a screen that got it wrong addressed a group message to one member. The app now reads the chat it is sending into: a 1:1 chat is addressed to its other participant, a group or broadcast list to nobody in particular. Today that means a group send is never refused because you blocked one of its members; once end-to-end encryption is switched on, it means a group message is never encrypted for one member only. Encryption itself stays opt-in. A chat that is not in the phone's local store yet refuses the send with *"This chat isn't ready yet"* instead of guessing, and a 1:1 chat found on the server is now stored as soon as it is found, so starting a chat from Contacts on a fresh install does not run into that. (`f411a330`, `d63ae9b1`)
+
+## [1.36.0] — 2026-10-03
+
+### Added
+
+- **Chat font size setting.** Settings → Chat → Font Size sets the size of message text and of the composer, from 12 to 22 in half steps, with a live preview. The default stays at 15. (`e3b25489`)
+
+### Changed
+
+- **The composer grows to ten lines and keeps its text clear of the border.** It used to stop at four lines, and the first and last line sat right against the rounded outline and looked cut off. (`e3b25489`)
 
 ### Fixed
 
 - **"Message no longer available" no longer shows for a message that is still arriving.** Opening a chat from a notification or a reminder jumps to the message it names, and the app gave that message three seconds to appear before saying it was gone. After a cold start the chat can need longer than that to connect and decrypt, so the snackbar came up and the message showed up right after it. The app now asks the server before saying anything: the snackbar appears only when the message really has been removed, and a message that is still syncing is jumped to once it arrives — unless you have scrolled up more than a tenth of the screen in the meantime, in which case the chat keeps your place. The scroll-to-bottom button now appears at that same point, a tenth of the screen up instead of a fifth, so whenever the jump is skipped the button is there to take you down. (`aacdfbc0`, `a7b3b885`, `9d769ba1`)
-- **A group opened from its notification no longer treats the message's sender as a 1:1 partner.** Tapping a group notification opened the group addressed to whoever had sent the message. Sends from that screen were refused when you had blocked that member, and — with end-to-end encryption switched on — were encrypted for that one member only. A group notification now opens the group with no partner; a 1:1 notification is unchanged. (`7abdf337`)
-- **Who a message is addressed to now comes from the chat itself, not from the screen that sends it.** Every send — text, photo, voice note, location, forward, timer — took its recipient from whichever screen started it, so a screen that got it wrong addressed a group message to one member. The app now reads the chat it is sending into: a 1:1 chat is addressed to its other participant, a group or broadcast list to nobody in particular. Today that means a group send is never refused because you blocked one of its members; once end-to-end encryption is switched on, it means a group message is never encrypted for one member only. Encryption itself stays opt-in. A chat that is not in the phone's local store yet refuses the send with *"This chat isn't ready yet"* instead of guessing, and a 1:1 chat found on the server is now stored as soon as it is found, so starting a chat from Contacts on a fresh install does not run into that. (`f411a330`, `d63ae9b1`)
 
 ## [1.35.3] — 2026-09-24
 

@@ -147,10 +147,13 @@ if [ -n "$BASE_REF" ]; then
 fi
 
 # A driver launched from inside a Claude session would nest; scrub the markers
-# so the step sessions start clean either way.
+# so the step sessions start clean either way. CLAUDE_CODE_REMOTE_SESSION_ID is set
+# only in a cloud (claude.ai/code) container: left in place, every step session
+# adopts the host session's id (verified 2026-10-03), and a nudge's --resume would
+# land in the wrong session. Unset on a desktop, where it does not exist.
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION \
       CLAUDE_CODE_SSE_PORT CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN \
-      CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_PID CLAUDE_EFFORT 2>/dev/null || true
+      CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_REMOTE_SESSION_ID CLAUDE_PID CLAUDE_EFFORT 2>/dev/null || true
 export PLAN_RUNNER=1
 
 NL=$'\n'     # "${x:+$'\n'}" is not a newline inside double quotes; "${x:+$NL}" is

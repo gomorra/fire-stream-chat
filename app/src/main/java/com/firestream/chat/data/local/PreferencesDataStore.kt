@@ -5,9 +5,11 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.firestream.chat.domain.model.ChatFontSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -61,6 +63,7 @@ class PreferencesDataStore @Inject constructor(
 
     // Chat
     private val dictationLanguageKey = stringPreferencesKey("dictation_language")
+    private val chatFontSizeKey = floatPreferencesKey("chat_font_size_sp")
 
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
@@ -244,6 +247,17 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setDictationLanguage(language: DictationLanguage) {
         context.dataStore.edit { prefs -> prefs[dictationLanguageKey] = language.name }
+    }
+
+    val chatFontSizeFlow: Flow<Float> = context.dataStore.data.map { prefs ->
+        (prefs[chatFontSizeKey] ?: ChatFontSize.DEFAULT_SP)
+            .coerceIn(ChatFontSize.MIN_SP, ChatFontSize.MAX_SP)
+    }
+
+    suspend fun setChatFontSize(sizeSp: Float) {
+        context.dataStore.edit { prefs ->
+            prefs[chatFontSizeKey] = sizeSp.coerceIn(ChatFontSize.MIN_SP, ChatFontSize.MAX_SP)
+        }
     }
 
     // --- Emoji recents ---

@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
@@ -68,6 +69,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -94,7 +96,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.BuildConfig
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.domain.model.ChatFontSize
 import com.firestream.chat.data.local.DictationLanguage
+import com.firestream.chat.ui.theme.ChatTextTheme
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.VideoQualityOption
 import com.firestream.chat.data.util.ChangelogParser
@@ -123,6 +127,7 @@ fun SettingsScreen(
     var showAutoDownloadPicker by remember { mutableStateOf(false) }
     var showVideoQualityPicker by remember { mutableStateOf(false) }
     var showDictationLanguagePicker by remember { mutableStateOf(false) }
+    var showChatFontSizePicker by remember { mutableStateOf(false) }
     var showClearCacheDialog by remember { mutableStateOf(false) }
     var showDisableEncryptionDialog by remember { mutableStateOf(false) }
     var showBuildInfo by remember { mutableStateOf(false) }
@@ -368,6 +373,12 @@ fun SettingsScreen(
                 subtitle = dictationLanguageLabel,
                 onClick = { showDictationLanguagePicker = true }
             )
+            SettingsItem(
+                icon = Icons.Default.FormatSize,
+                title = "Font Size",
+                subtitle = chatFontSizeLabel(uiState.chatFontSizeSp),
+                onClick = { showChatFontSizePicker = true }
+            )
 
             // Storage section
             Spacer(Modifier.height(8.dp))
@@ -587,6 +598,17 @@ fun SettingsScreen(
                 showVideoQualityPicker = false
             },
             onDismiss = { showVideoQualityPicker = false }
+        )
+    }
+
+    if (showChatFontSizePicker) {
+        ChatFontSizeDialog(
+            currentSizeSp = uiState.chatFontSizeSp,
+            onConfirm = { sizeSp ->
+                viewModel.setChatFontSize(sizeSp)
+                showChatFontSizePicker = false
+            },
+            onDismiss = { showChatFontSizePicker = false }
         )
     }
 
@@ -1142,6 +1164,59 @@ private fun VideoQualityPickerDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+internal fun chatFontSizeLabel(sizeSp: Float): String {
+    val size = if (sizeSp % 1f == 0f) sizeSp.toInt().toString() else sizeSp.toString()
+    return if (sizeSp == ChatFontSize.DEFAULT_SP) "$size (default)" else size
+}
+
+@Composable
+private fun ChatFontSizeDialog(
+    currentSizeSp: Float,
+    onConfirm: (Float) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var sizeSp by remember { mutableStateOf(currentSizeSp) }
+    val steps = ((ChatFontSize.MAX_SP - ChatFontSize.MIN_SP) / ChatFontSize.STEP_SP).toInt() - 1
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Font Size") },
+        text = {
+            Column {
+                ChatTextTheme(sizeSp) {
+                    Text(
+                        text = "This is how messages will look in a chat.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        // Tall enough for two lines at the largest size, so the
+                        // slider below does not move while it is dragged.
+                        modifier = Modifier.fillMaxWidth().height(64.dp)
+                    )
+                }
+                Slider(
+                    value = sizeSp,
+                    // The slider's own steps are not exact in floating point.
+                    onValueChange = { sizeSp = Math.round(it / ChatFontSize.STEP_SP) * ChatFontSize.STEP_SP },
+                    valueRange = ChatFontSize.MIN_SP..ChatFontSize.MAX_SP,
+                    steps = steps,
+                )
+                Text(
+                    text = chatFontSizeLabel(sizeSp),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(sizeSp) }) { Text("OK") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { sizeSp = ChatFontSize.DEFAULT_SP }) { Text("Reset") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
         }
     )
 }

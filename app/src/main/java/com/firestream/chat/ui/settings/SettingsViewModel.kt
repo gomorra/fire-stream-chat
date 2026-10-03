@@ -16,6 +16,7 @@ import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.domain.model.ChatFontSize
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -74,6 +75,7 @@ data class SettingsUiState(
     val videoQuality: VideoQualityOption = VideoQualityOption.STANDARD,
     // Chat
     val dictationLanguage: DictationLanguage = DictationLanguage.GERMAN,
+    val chatFontSizeSp: Float = ChatFontSize.DEFAULT_SP,
     // App update auto-download (opt-in, Wi-Fi only)
     val autoDownloadUpdates: Boolean = false,
     // Media backfill
@@ -192,6 +194,11 @@ class SettingsViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            preferencesDataStore.chatFontSizeFlow.collect { sizeSp ->
+                _uiState.value = _uiState.value.copy(chatFontSizeSp = sizeSp)
+            }
+        }
+        viewModelScope.launch {
             preferencesDataStore.dictationLanguageFlow.collect { language ->
                 _uiState.value = _uiState.value.copy(dictationLanguage = language)
             }
@@ -268,6 +275,10 @@ class SettingsViewModel @Inject constructor(
     // Chat
     fun setDictationLanguage(language: DictationLanguage) {
         viewModelScope.launch { preferencesDataStore.setDictationLanguage(language) }
+    }
+
+    fun setChatFontSize(sizeSp: Float) {
+        viewModelScope.launch { preferencesDataStore.setChatFontSize(sizeSp) }
     }
 
     // App update

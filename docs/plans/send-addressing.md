@@ -618,8 +618,7 @@ Departures (for sign-off):
 ## 4. Gates
 
 Every step: `./gradlew :app:testFirebaseDebugUnitTest` and `./gradlew assembleFirebaseDebug`
-green before its commit (cloud containers: CLAUDE.md's note on the one known
-`ApkDownloaderTest` DNS failure). Steps 3 and 4 run `/code-review`; step 3 is `model: max`
+green before its commit, on a desktop and in a cloud container alike. Steps 3 and 4 run `/code-review`; step 3 is `model: max`
 because it decides who every send is addressed to, not because encryption is on by default (it
 is not — see the note under **Order**).
 
