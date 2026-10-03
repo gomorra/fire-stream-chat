@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, no step started. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, step 1 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
 
 ## Context
 
@@ -124,6 +124,40 @@ CHANGELOG entry and a bump through the `changelog-release` skill.
 
 Untrusted files and archives are parsed here.
 
+**Approach**
+- Order: pure parsers first (`WebpContainer`, `WaStickerMetadata`, `StickerPackArchive`), then
+  `StickerFiles`, the Room tables and `StickerDao`, then `StickerRepositoryImpl` and its DI bindings.
+- Pack ids are random UUIDs, because step 6 makes a pack id a Firestore document id that only its
+  owner may write. A re-import finds its pack through a new `importKey` column instead.
+- `importFrom` takes a second argument, `loosePackName`. Files without pack metadata go to a pack of
+  that name (the WhatsApp route passes *WhatsApp*), or to the `SAVED` pack when it is null.
+- An import sniffs the first bytes to tell an archive from a WebP. A file name or a mime type from
+  another app decides nothing.
+- `StickerFiles` reads at most 1 MB + 1 byte into memory, hashes and parses that, then writes a
+  temp file and renames it. One pass, and the cap bounds the buffer.
+- Recents are `PreferencesDataStore.recentStickerIdsFlow`, next to the emoji recents.
+- `domain/model/StickerPack` shares its simple name with the bundled editor pack,
+  `domain/util/StickerPack`. They live in different packages and no file in this step needs both.
+- Tests: the five the step lists, plus `StickerDaoTest` for the ordering queries and a small
+  `WhatsAppStickerFolderTest` for the filter and sort.
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
+
+**Shipped** `f7c6640c` (2026-10-03) — tier: strong, tagged strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- `importFrom(uris, loosePackName)` has a second argument. Stickers without pack metadata join a pack of that name, or the `SAVED` pack when it is null.
+- Pack ids are random UUIDs. A new `sticker_packs.importKey` column, unique, is what a re-import finds its pack by. `FAVOURITES` and `SAVED` have the fixed keys `kind:FAVOURITES` and `kind:SAVED`.
+- A WhatsApp pack is keyed by id, name and publisher together, because two sticker apps can reuse a pack id.
+- `StickerFiles` reads at most 1 MB + 1 byte into memory and writes through a temp file. It does not hash while streaming to disk.
+- `StickerFiles` also refuses a sticker wider or taller than 2048 px, and `WebpContainer` refuses a frame larger than its canvas. The plan named only the 1 MB cap.
+- `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. A uri can come from another app.
+- An archive is recognised by its first bytes. A zip with no `.webp` entry, an entry name that is not UTF-8, or a broken cap refuses the whole archive, counts as one rejected input and deletes the files it had stored.
+- `sticker_packs.syncState` exists and every `StickerDao` pack write sets it to `PENDING`. Nothing reads it. `stickers` has no remote-url column yet.
+- Removing a sticker or deleting a pack deletes item rows only. Files and `stickers` rows stay (`TECH_DEBT.md`, *Sticker files are never deleted*).
+- `listWhatsAppFolder` returns uri, name, size and date. It reads no pack metadata, which is read at import.
+- `domain/model/StickerPack` shares its simple name with the editor's `domain/util/StickerPack`. Neither was renamed.
+- `PreferencesDataStore` got one shared helper pair for the emoji and the sticker recents (`/simplify`).
+- Extra tests: `StickerDaoTest`, `WhatsAppStickerFolderTest`. Not user-visible, so no CHANGELOG entry and no version bump.
+
 - `domain/model/Sticker.kt`, `StickerPack.kt` (kinds above, `StickerFormat`), and
   `domain/repository/StickerRepository.kt`: observe packs and recents, `listWhatsAppFolder(treeUri)`,
   `importFrom(uris): ImportResult`, favourite, rename / reorder / delete pack, move and remove
@@ -156,8 +190,20 @@ Untrusted files and archives are parsed here.
 - **From files:** `OpenMultipleDocuments`, validated after the pick.
 - Launchers stay in the composable, as in `ChatScreen.kt`. The ViewModel sees `StickerRepository`
   only, so the UI→data allowlist in `ArchitectureTest` is untouched. Errors are `AppError`.
+- **(step-1)** The WhatsApp route calls `importFrom(uris, loosePackName = "WhatsApp")`. The files route passes no name.
+- **(step-1)** `listWhatsAppFolder` returns uri, name, size and date only. Pack metadata is read at import, so the
+  grid cannot group by pack without a new repository call that reads each file. Either add one (a bounded,
+  per-file `peek`), or show the folder ungrouped and let the import do the grouping.
+- **(step-1)** The `FAVOURITES` and `SAVED` packs have an empty `name`. Label them by `kind`. `renamePack` fails for both.
+- **(step-1)** `observePacks()` maps the whole library on every emission, once per collector. Collect it once in the
+  ViewModel with `stateIn`.
+- **(step-1)** A failed edit is a `Result.failure` whose message is fit to show (`That pack no longer exists`,
+  `A pack needs a name`). `AppError.from` turns it into `Unknown` with that message.
 - Tests: `StickerLibraryViewModelTest`, one Robolectric test for the empty state.
-- Docs: new *Stickers & GIFs* section in `docs/FEATURE-MAP.md`.
+- Docs: new *Stickers & GIFs* section in `docs/FEATURE-MAP.md`. **(step-1)** It also lists step 1's files:
+  `domain/model/Sticker.kt` and `StickerPack.kt`, `domain/repository/StickerRepository.kt`,
+  `domain/util/WebpContainer.kt`, the five files in `data/sticker/`, `StickerDao`, `StickerEntity.kt`,
+  `StickerRepositoryImpl` and their tests.
 
 **‖ Checkpoint.** The owner imports from the real folder and reports whether packs came out grouped.
 
@@ -179,6 +225,15 @@ The outbox, the sync path and a new storage model change here.
   step table in the KDoc.
 - Receiving: a sticker downloads into `StickerFiles`, verified against `stickerId`. A mismatch keeps
   the remote render and logs. `MediaFileManager.downloadFor` routes GIFs to `DocumentFiles`.
+- **(step-1)** `stickers` has no remote-url column. Add it with the 30 → 31 bump.
+- **(step-1)** A sticker id from a message is untrusted. Check it with `StickerFiles.isValidId` before
+  `fileFor`, which throws for anything that is not 64 lowercase hex digits. `StickerFiles.store` computes the
+  id from the bytes, so the receive path compares the returned id with `stickerId`. Its 1 MB, 2048 px and
+  WebP-only checks apply to a received sticker too.
+- **(step-1 /code-review)** The undo of a refused archive in `StickerRepositoryImpl.readArchive` deletes every
+  file that archive wrote and that has no `stickers` row. A received sticker stored during an import would be
+  such a file. The receive path must write the `stickers` row in the same step as the file, or store under
+  the repository's import lock. Add a test for the interleaving.
 - `OutboxJob.UPLOAD_TYPES` (GIF only), `AUTO_DOWNLOAD_TYPES`, and the three type lists in `MessageDao`.
 - Labels: `lastContentFor` in both flavors, `FCMService`, `MessageTypeLabel.placeholderLabel`, and
   the `when`s in `SnoozePickerSheet`, `ForwardMessagePanel`, `ChatMessageActions.snapshotContentFor`,
@@ -239,6 +294,19 @@ A sync engine and new security rules.
   fetched when first displayed. Sign-out clears the library rows.
 - The sticker sheet gains **View pack**: fetch the message's `stickerPackId`, preview it, **Add pack**
   copies it as `INSTALLED`. A pack already installed says so.
+- **(step-1)** `StickerDao.deletePack` deletes the row outright, so a delete leaves nothing to sync. Add a
+  tombstone state to `StickerSyncState` and filter it out of `observePacks`.
+- **(step-1 /code-review)** `sticker_packs.importKey` is unique. Back it up in the manifest and restore by it:
+  a restored pack whose key a local pack already has must merge into that row, not insert beside it. This
+  is also what keeps one `FAVOURITES` and one `SAVED` pack (keys `kind:FAVOURITES`, `kind:SAVED`) when a
+  favourite was made before the restore arrived. Without the key in the backup, a re-import after a restore
+  makes a second pack.
+- **(step-1)** A restored `stickers` row arrives before its file. `Sticker.localPath` names where the file will
+  be, so a renderer must handle a path with no file yet. Validate restored sticker ids with
+  `StickerFiles.isValidId`; `StickerRepositoryImpl` drops rows that fail it.
+- **(step-1 /simplify)** `StickerDao` leaves `insertItems`, `deleteItems` and `insertPack` public beside the
+  transaction methods that mark a pack `PENDING` (`TECH_DEBT.md`). The worker and the restore must not
+  change a pack through them without setting `syncState`.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
@@ -252,6 +320,10 @@ returns; a second account adds a pack from a received sticker.
 - `lottie-compose` dependency. `StickerFormat.LOTTIE`. `data/sticker/LottieContainer.kt`: gzip or zip
   to the animation JSON, with a size cap and a parse guard.
 - Importers accept `.was` and `.tgs`. A first-frame PNG thumbnail is written at import for grids.
+- **(step-1)** The importer tells inputs apart by their first bytes, not by name: `StickerPackArchive.isArchive`
+  for a zip, else `StickerFiles.store`, which accepts WebP only. Add the gzip header there. A `.was` that is
+  a zip must be told from a `.wastickers` pack by its entries. `StickerPackArchive.read` hands over `.webp`
+  entries only, and `WhatsAppStickerFolder` lists `.webp` names only.
 - `StickerImage` switches on format, so the bubble, the picker and the library all render Lottie.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
@@ -281,6 +353,10 @@ returns; a second account adds a pack from a received sticker.
   `SAVED` pack and sent with `sendStickerMessage`.
 - `sendMediaMessage` sends an unedited `image/gif` as a `GIF`, which covers the gallery and the share
   sheet. An edited one is a JPEG by then and stays an `IMAGE`.
+- **(step-1)** `StickerFiles.store` refuses anything that is not WebP, and Gboard stickers are often PNG. Either
+  add PNG to `StickerFormat` with its own container check, or convert before the import.
+- **(step-1)** `importFrom(listOf(uri))` with no pack name is the import into `SAVED`. Its result's `packIds` is
+  empty when the sticker was already there, so find the sticker by its hash, not by the result.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -314,6 +390,8 @@ two functions. The `wizard` skill can script this.
 - Stickers tab: an **Online** entry in the pack row and a *More online* section under a local search.
   A pick is downloaded, imported into `SAVED` and sent; long-press adds it to favourites or a pack.
 - A GIF pick downloads the full rendition through the proxy, then calls `sendGifMessage`.
+- **(step-1)** `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. Keep the
+  download there, or the import refuses it.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 
