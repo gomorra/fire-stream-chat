@@ -12,6 +12,7 @@ import com.firestream.chat.data.repository.ContactRepositoryImpl
 import com.firestream.chat.data.repository.ListRepositoryImpl
 import com.firestream.chat.data.repository.MessageRepositoryImpl
 import com.firestream.chat.data.repository.PollRepositoryImpl
+import com.firestream.chat.data.repository.StickerRepositoryImpl
 import com.firestream.chat.data.repository.UserRepositoryImpl
 import com.firestream.chat.data.reminder.AndroidDateTimeDetector
 import com.firestream.chat.data.reminder.ReminderAlarmScheduler
@@ -29,6 +30,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.util.ConnectivityObserver
 import com.firestream.chat.domain.util.FilePreviewSource
@@ -89,6 +91,10 @@ abstract class AppModule {
     @Binds
     @Singleton
     abstract fun bindReminderRepository(impl: ReminderRepositoryImpl): ReminderRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindStickerRepository(impl: StickerRepositoryImpl): StickerRepository
 
     @Binds
     @Singleton

@@ -566,6 +566,41 @@ twin together, never one alone.
 
 ---
 
+### Sticker files are never deleted
+
+**The smell.** `StickerRepositoryImpl.removeStickers` and `deletePack` delete rows of
+`sticker_pack_items` only. The `stickers` row and the file under `filesDir/stickers/` stay,
+even when no pack holds the sticker any more. A destructive `AppDatabase` bump drops the rows
+and leaves every file. `StickerFiles.store` writes through a `.part` temp file, and a process
+death between the write and the rename leaves that file too.
+
+**Why we haven't fixed it.** A file is at most 1 MB and is shared: the same sticker can sit
+in several packs and in the recents list. `docs/plans/stickers-and-gifs.md` step 3 adds a
+third holder, the messages that point at a sticker, and step 6 restores rows whose files are
+fetched later. Which files are unreferenced can only be decided once those two exist.
+
+**When to revisit.** After step 6 of the plan, or when the directory's size shows up in a
+storage report. The fix is a sweep that deletes files no pack item, recent or message names,
+and every `.part` file.
+
+---
+
+### `StickerDao` exposes the writes its sync rule depends on
+
+**The smell.** Every change to a pack must set `syncState = PENDING`. `StickerDao`'s
+transaction methods (`addToPack`, `removeFromPack`, `moveBetweenPacks`, `reorderPacks`) do
+that through `touchPack`, but `insertItems`, `deleteItems` and `insertPack` are public on the
+same interface, so a caller can change a pack and leave it unmarked.
+
+**Why we haven't fixed it.** Nothing reads `syncState` yet, and the one caller,
+`StickerRepositoryImpl`, uses only the transaction methods. Hiding the single-statement
+writes needs an abstract-class DAO with protected members, which no DAO in this repo is.
+
+**When to revisit.** In step 6 of `docs/plans/stickers-and-gifs.md`, when `StickerSyncWorker`
+starts to read the column. A missed mark is then a pack change that never reaches the backup.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

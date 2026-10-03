@@ -149,6 +149,43 @@ data class ListData(
 )
 ```
 
+### Sticker / StickerPack
+
+```kotlin
+enum class StickerFormat(val extension: String, val mimeType: String) { WEBP("webp", "image/webp") }
+enum class StickerPackKind { USER, INSTALLED, FAVOURITES, SAVED }
+
+data class Sticker(
+    val id: String,                   // SHA-256 of the file's bytes, lowercase hex
+    val format: StickerFormat,
+    val width: Int,
+    val height: Int,
+    val isAnimated: Boolean,
+    val emojis: List<String>,
+    val localPath: String             // filesDir/stickers/<id>.<ext>
+)
+
+data class StickerPack(
+    val id: String,                   // random UUID
+    val name: String,                 // "" for FAVOURITES and SAVED; a screen labels those by kind
+    val publisher: String?,
+    val kind: StickerPackKind,
+    val originPackId: String?,        // the source pack of an INSTALLED one
+    val stickers: List<Sticker>,      // in pack order
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+data class StickerImportResult(
+    val imported: Int,                // stickers added to a pack
+    val duplicates: Int,              // stickers the target pack already held
+    val rejected: Int,                // unreadable, not a sticker, too large; a refused archive counts once
+    val packIds: List<String>         // packs that gained a sticker
+)
+
+data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes: Long, val lastModified: Long)
+```
+
 ### CallLogEntry
 
 ```kotlin

@@ -393,8 +393,9 @@ com.firestream.chat/
 │   │   ├── SignalManager.kt
 │   │   └── SignalProtocolStoreImpl.kt
 │   ├── local/
-│   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, SignalDao, UserDao
-│   │   ├── entity/              # 5 core (Chat, Contact, List, Message + its embedded MessageRecord, User) + 6 Signal entities + SignalTrustedIdentity
+│   │   ├── dao/                 # ChatDao, ContactDao, ListDao, MessageDao, ReminderDao, SignalDao, StickerDao, UserDao
+│   │   ├── entity/              # Chat, Contact, List, Message + its embedded MessageRecord, Reminder, User,
+│   │   │                        # Sticker + StickerPack + StickerPackItem, 6 Signal entities + SignalTrustedIdentity
 │   │   ├── AppDatabase.kt       # fire_stream_chat.db — application data
 │   │   ├── SignalDatabase.kt    # signal.db — Signal Protocol key material (split from AppDatabase)
 │   │   ├── Converters.kt
@@ -408,6 +409,12 @@ com.firestream.chat/
 │   │   ├── MessageWriter.kt     # Encrypt-or-plaintext decision + the MessageSource write
 │   │   ├── SendTarget.kt        # Peer / NoPeer: resolved from the chat row (forChat), read back from outboxRecipientId
 │   │   └── SendClock.kt         # Strictly increasing send timestamps
+│   ├── sticker/
+│   │   ├── StickerFiles.kt      # filesDir/stickers/<sha256>.<ext>; size, format and dimension checks before a file lands
+│   │   ├── StickerPackArchive.kt # .wastickers / zip reader under entry, per-entry and total-byte caps
+│   │   ├── StickerText.kt       # The one cleaning rule for pack names, publishers and pack ids
+│   │   ├── WaStickerMetadata.kt # Pack id, name, publisher and emojis out of a WebP's EXIF chunk
+│   │   └── WhatsAppStickerFolder.kt # One child-documents query over the granted WhatsApp sticker folder
 │   ├── util/
 │   │   ├── AndroidConnectivityObserver.kt # Default-network callback; validated-only, so a captive portal is offline
 │   │   ├── ImageCompressor.kt   # EXIF-aware compression, memory-safe decode
@@ -438,7 +445,7 @@ com.firestream.chat/
 │   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
 │   │                            # ChatRepositoryImpl, ContactRepositoryImpl,
 │   │                            # ListRepositoryImpl, MessageRepositoryImpl,
-│   │                            # PollRepositoryImpl, PollMapper,
+│   │                            # PollRepositoryImpl, PollMapper, StickerRepositoryImpl,
 │   │                            # UserRepositoryImpl, AppUpdateRepositoryImpl
 │   └── share/
 │       ├── SharedContentHolder.kt
@@ -451,16 +458,18 @@ com.firestream.chat/
 │   │                            # ListData, ListItem, ListDiff, ListType, GenericListStyle,
 │   │                            # ListHistoryEntry, HistoryAction, MediaAttachment,
 │   │                            # SharedContent, MessageStatus, MessageType, ChatType,
-│   │                            # AppUpdate, UpdateCheckResult
+│   │                            # AppUpdate, UpdateCheckResult, Sticker, StickerFormat,
+│   │                            # StickerPack, StickerPackKind, StickerImportResult, WhatsAppStickerFile
 │   ├── repository/              # AuthRepository, CallRepository, ChatRepository, ContactRepository,
 │   │                            # ListRepository, MessageRepository, PollRepository, UserRepository,
-│   │                            # AppUpdateRepository
+│   │                            # AppUpdateRepository, StickerRepository
 │   ├── usecase/
 │   │   ├── chat/                # CheckGroupPermissionUseCase
 │   │   ├── list/                # SendListUpdateToChatsUseCase
 │   │   └── message/             # SearchMessagesUseCase
 │   └── util/
 │       ├── MentionParser.kt
+│       ├── WebpContainer.kt     # Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk
 │       └── ConnectivityObserver.kt # Validated-network StateFlow — display only, never the send path
 ├── navigation/NavGraph.kt
 ├── ui/

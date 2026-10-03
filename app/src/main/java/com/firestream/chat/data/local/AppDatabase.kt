@@ -1,6 +1,7 @@
 // region: AGENT-NOTE
 // Responsibility: Application-data Room database (`fire_stream_chat.db`).
-//   6 entities: Users, Messages, Chats, Contacts, Lists, Reminders. Signal Protocol tables
+//   9 entities: Users, Messages, Chats, Contacts, Lists, Reminders, and the sticker
+//   library's Stickers, StickerPacks and StickerPackItems. Signal Protocol tables
 //   were split out into SignalDatabase (`signal.db`) at version 19 so destructive
 //   migrations on this DB no longer wipe key material.
 // Owns: @Database `version` field — bump on any column/table add/remove/rename
@@ -23,12 +24,16 @@ import com.firestream.chat.data.local.dao.ContactDao
 import com.firestream.chat.data.local.dao.ListDao
 import com.firestream.chat.data.local.dao.MessageDao
 import com.firestream.chat.data.local.dao.ReminderDao
+import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.local.entity.ContactEntity
 import com.firestream.chat.data.local.entity.ListEntity
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.ReminderEntity
+import com.firestream.chat.data.local.entity.StickerEntity
+import com.firestream.chat.data.local.entity.StickerPackEntity
+import com.firestream.chat.data.local.entity.StickerPackItemEntity
 import com.firestream.chat.data.local.entity.UserEntity
 
 @Database(
@@ -38,9 +43,12 @@ import com.firestream.chat.data.local.entity.UserEntity
         ChatEntity::class,
         ContactEntity::class,
         ListEntity::class,
-        ReminderEntity::class
+        ReminderEntity::class,
+        StickerEntity::class,
+        StickerPackEntity::class,
+        StickerPackItemEntity::class
     ],
-    version = 29,
+    version = 30,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -51,6 +59,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun contactDao(): ContactDao
     abstract fun listDao(): ListDao
     abstract fun reminderDao(): ReminderDao
+    abstract fun stickerDao(): StickerDao
 
     companion object {
         // Signal Protocol tables moved to a dedicated SignalDatabase so that destructive
