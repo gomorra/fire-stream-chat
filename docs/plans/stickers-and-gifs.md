@@ -118,7 +118,7 @@ Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./g
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
 CHANGELOG entry and a bump through the `changelog-release` skill.
 
-### 1. Sticker library: packs, files, importers — model: strong, skills: code-review
+### Step 1 — Sticker library: packs, files, importers — skills: code-review; model: strong
 
 Untrusted files and archives are parsed here.
 
@@ -142,7 +142,7 @@ Untrusted files and archives are parsed here.
   metadata-free files), `StickerFilesTest`, `StickerPackArchiveTest` (each cap), a repository test
   for grouping, dedup and pack edits.
 
-### 2. Settings → Import stickers, and the library screen (UI)
+### Step 2 — Settings → Import stickers, and the library screen (UI)
 
 - `Routes.STICKERS` and its `NavGraph.kt` destination. A `SettingsItem` titled **Import stickers**
   beside *Auto-download Media* in `ui/settings/SettingsScreen.kt`.
@@ -159,7 +159,7 @@ Untrusted files and archives are parsed here.
 
 **‖ Checkpoint.** The owner imports from the real folder and reports whether packs came out grouped.
 
-### 3. `STICKER` and `GIF` as messages — model: max, skills: code-review
+### Step 3 — `STICKER` and `GIF` as messages — skills: code-review; model: max
 
 The outbox, the sync path and a new storage model change here.
 
@@ -188,7 +188,7 @@ The outbox, the sync path and a new storage model change here.
 - **Owner, before the device pass:** add to the Storage rules in the console —
   `match /stickers/{file} { allow read: if request.auth != null; allow create: if request.auth != null && resource == null && request.resource.size < 1024 * 1024; }`
 
-### 4. Bubbles for stickers and GIFs (UI)
+### Step 4 — Bubbles for stickers and GIFs (UI)
 
 - `coil-gif` in `gradle/libs.versions.toml` and `app/build.gradle.kts`.
   `ui/components/StickerImage.kt`: the one composable every surface draws a sticker with, attaching
@@ -199,7 +199,7 @@ The outbox, the sync path and a new storage model change here.
 - Reply, forward and starred previews show the first frame.
 - Test: one Robolectric test for the type dispatch.
 
-### 5. Stickers tab in the composer (UI + state)
+### Step 5 — Stickers tab in the composer (UI + state)
 
 Stickers and GIFs are reached through the island panel. The emoji panel gains tabs and takes the
 keyboard's place, as it does today. This is variant A of the prototype on branch
@@ -225,7 +225,7 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 
 **‖ Checkpoint.** Sending and receiving stickers is complete. Device pass between two accounts.
 
-### 6. Backup, restore and sharing packs — model: max, skills: code-review
+### Step 6 — Backup, restore and sharing packs — skills: code-review; model: max
 
 A sync engine and new security rules.
 
@@ -243,7 +243,7 @@ A sync engine and new security rules.
 **‖ Checkpoint.** The owner deploys `firestore.rules`. Device: reinstall and confirm the library
 returns; a second account adds a pack from a received sticker.
 
-### 7. Lottie stickers
+### Step 7 — Lottie stickers
 
 - **Spike first:** open real `.was` files from the owner's folder and confirm the container. If it
   cannot be read, ship `.tgs` only and report `needs_decision`.
@@ -253,7 +253,7 @@ returns; a second account adds a pack from a received sticker.
 - `StickerImage` switches on format, so the bubble, the picker and the library all render Lottie.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
-### 8. Make your own stickers
+### Step 8 — Make your own stickers
 
 - `play-services-mlkit-subject-segmentation`. `ui/stickers/create/`: pick a photo, cut out the
   subject, toggle cutout / original, crop, outline on or off, choose emojis and a pack.
@@ -269,7 +269,7 @@ returns; a second account adds a pack from a received sticker.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
 
-### 9. GIFs and stickers from the keyboard
+### Step 9 — GIFs and stickers from the keyboard
 
 - **Spike first:** confirm on the emulator that `Modifier.contentReceiver` delivers Gboard content to
   the composer's `BasicTextField`. Fallback: `InterceptPlatformTextInput` wrapping the input connection
@@ -281,7 +281,7 @@ returns; a second account adds a pack from a received sticker.
   sheet. An edited one is a JPEG by then and stays an `IMAGE`.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
-### 10. Media proxy Cloud Functions — model: strong, skills: code-review
+### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
 
 Authentication and an outbound fetch on user-supplied input.
 
@@ -299,7 +299,7 @@ Authentication and an outbound fetch on user-supplied input.
 **‖ Checkpoint (owner).** Get a Klipy key, `firebase functions:secrets:set KLIPY_API_KEY`, deploy the
 two functions. The `wizard` skill can script this.
 
-### 11. GIFs tab and the online sticker catalogue
+### Step 11 — GIFs tab and the online sticker catalogue
 
 - `BuildConfig.SUPPORTS_ONLINE_MEDIA` per flavor, like `SUPPORTS_SIGNAL`.
   `data/remote/source/OnlineMediaSource.kt` with a Firebase implementation (the `firebase-functions`
