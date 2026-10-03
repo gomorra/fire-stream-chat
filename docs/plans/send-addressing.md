@@ -529,6 +529,32 @@ Departures (for sign-off):
   `CLAUDE.md:189` (the *One chat picker* line) is the only place in `CLAUDE.md` that still says
   `sendRecipientId`. The Navigation example already reads `Routes.chat(chatId, partnerIdHint)`.
 
+**Approach**
+- Token census re-verified, and it matches the step-3 annotation. `Peer(` / `NoPeer` appear in
+  `SendTarget.kt`, once in `sendBroadcastMessage` (`MessageRepositoryImpl.kt:924`) and in a KDoc link
+  in `MessageWriter.kt:57`. `forChat(` has one caller (`MessageRepositoryImpl.kt:281`), `fromColumn(`
+  one (`MessageEntity.kt:62`). No `MessageRepository` member has a `recipientId` parameter. Nothing
+  contradicts §0 or §2.
+- Order: (1) three rules in `ArchitectureTest`: the two the spec names and the step-3 one, that
+  `forChat(` has a single caller; (2) each rule seen failing against a temporary violation, then the
+  violation removed; (3) `docs/PATTERNS.md`: the new entry and the edit to *One chat picker, three
+  hosts*; (4) the two `CLAUDE.md` Key Conventions lines; (5) gate.
+- Each rule also asserts that it found what it reasons about (one `MessageRepository` interface, one
+  `sendBroadcastMessage`, a non-empty `SendTarget.kt`), so a rename cannot switch it off.
+- No production file changes. `SendTarget.kt`'s AGENT-NOTE gains nothing: it already names the rule.
+- Further skills: none. The diff is one test file and two docs, and neither tripwire applies.
+
+**Shipped** `f3b058dc` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+Gate: `:app:testFirebaseDebugUnitTest` and `assembleFirebaseDebug` green. The pocketbase flavor was not built.
+Each rule was seen failing against a temporary violation, all three in one run: a `MessageRepository` member with a `recipientId` parameter, a `SendTarget.Peer(id)` in `MessageRepositoryImpl` outside `sendBroadcastMessage`, and a second `SendTarget.forChat(` call there. The violations were reverted before the gate.
+Departures (for sign-off):
+- A third rule, `one place derives a SendTarget from a chat`, pins `forChat(` to one caller. The spec names two rules; the step-3 annotation proposed this one for decision 5.
+- The rules use JUnit `assertEquals` on a list of offenders, not Konsist's `assertFalse`, so the failure message names the offending member or file and the PATTERNS anchor.
+- The second rule also asserts that `SendTarget.kt` still matches `TARGET_BUILD` and that exactly one `sendBroadcastMessage` exists and its text can be cut out of its file. A rename of `Peer` or of the fan-out then fails the rule instead of emptying it.
+- The comment stripper is a regex, as the spec gives it. It also removes anything after `//` inside a string literal such as a URL, so a target built on the same line as such a string would be missed. No production line has that shape.
+- The PATTERNS entry carries the two bug dates in its trap paragraph, because the spec asks for them by date.
+- In *One chat picker, three hosts* the second trap now ends on `Chat.partnerIdHint`. Its encryption consequence moved to the new entry.
+
 ### Step 7 — Docs that move with the code
 
 - `TECH_DEBT.md`: delete *"The 'who is this send addressed to' rule is enforced by a UI
@@ -560,6 +586,12 @@ Departures (for sign-off):
 - **(step-5 /code-review)** `docs/FEATURE-MAP.md` names `sendRecipientId` at :544, :552 and :554.
   The function is `Chat.partnerIdHint` now and is navigation only. `TECH_DEBT.md` names the old
   helper too, so check the entries this step rewrites for it.
+- **(step-6)** The pattern's anchor is `docs/PATTERNS.md#the-repository-decides-who-a-send-is-for`.
+  The `TECH_DEBT.md` entry for decision 8 and the `docs/FEATURE-MAP.md` rows can link to it. The
+  decision-8 entry should also say that `ArchitectureTest` allowlists the body of
+  `sendBroadcastMessage` by function name (`BROADCAST_FAN_OUT`), so closing decision 8 means deleting
+  that allowlist. `ArchitectureTest`'s header KDoc asks for a `TECH_DEBT.md` entry behind every
+  baseline, and this one has none until step 7 writes it.
 
 ## 4. Gates
 
