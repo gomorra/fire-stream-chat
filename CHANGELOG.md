@@ -2,11 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.35.4] — 2026-09-26
+## [UNRELEASED] [1.35.4] — 2026-10-03
 
 ### Fixed
 
 - **"Message no longer available" no longer shows for a message that is still arriving.** Opening a chat from a notification or a reminder jumps to the message it names, and the app gave that message three seconds to appear before saying it was gone. After a cold start the chat can need longer than that to connect and decrypt, so the snackbar came up and the message showed up right after it. The app now asks the server before saying anything: the snackbar appears only when the message really has been removed, and a message that is still syncing is jumped to once it arrives — unless you have scrolled up more than a tenth of the screen in the meantime, in which case the chat keeps your place. The scroll-to-bottom button now appears at that same point, a tenth of the screen up instead of a fifth, so whenever the jump is skipped the button is there to take you down. (`aacdfbc0`, `a7b3b885`, `9d769ba1`)
+- **A group opened from its notification no longer treats the message's sender as a 1:1 partner.** Tapping a group notification opened the group addressed to whoever had sent the message. Sends from that screen were refused when you had blocked that member, and — with end-to-end encryption switched on — were encrypted for that one member only. A group notification now opens the group with no partner; a 1:1 notification is unchanged.
 
 ## [1.35.3] — 2026-09-24
 

@@ -70,6 +70,21 @@ class ChatListPendingActionTest {
     }
 
     @Test
+    fun `an empty sender still opens the chat, with no partner`() {
+        // A group notification carries "" as its sender (notificationPartnerHint):
+        // present, so the chat opens, and empty, so no member becomes the partner.
+        val action = resolve(
+            pendingChatId = "g1",
+            pendingSenderId = "",
+            pendingFromNotification = true,
+        )
+        assertEquals(
+            ChatListPendingAction.OpenChat(chatId = "g1", recipientId = "", fromNotification = true),
+            action,
+        )
+    }
+
+    @Test
     fun `list detail when no chat is pending`() {
         val action = resolve(pendingListId = "l1")
         assertEquals(ChatListPendingAction.OpenListDetail("l1"), action)
