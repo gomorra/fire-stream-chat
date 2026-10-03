@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.38.0] — 2026-10-03
+
+### Added
+
+- **A sticker library, filled from WhatsApp or from files.** Settings → Storage → *Import stickers* opens your sticker packs. *From WhatsApp* asks once for WhatsApp's sticker folder and shows every sticker you have sent or received there to pick from; *From files* takes `.webp` stickers and `.wastickers` packs. Stickers are sorted into the packs they name, and importing the same ones again adds nothing. Packs can be renamed, reordered and deleted, and stickers moved between packs or removed. Stickers cannot be sent in a chat yet.
+
 ## [1.37.0] — 2026-10-03
 
 ### Added

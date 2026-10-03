@@ -607,6 +607,54 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 
 **Entry point:** `MessageBubble` DOCUMENT branch → `FileMessageBubble` → `MessageBubbleCallbacks.onOpenFile` → `ChatViewModel.openFile` → `ChatFileActions.request` → `MessageRepository.ensureLocalFile` → `ChatViewModel.fileLaunches` → `ChatScreen` → `FileIntents.open`.
 
+---
+
+## Stickers & GIFs
+
+A sticker is an immutable file named by the SHA-256 of its bytes, kept in `filesDir/stickers/`.
+A pack is an ordered list of sticker ids. Room holds the library, and `StickerRepository` is the
+only way into it. Stickers arrive by import: from WhatsApp's sticker folder through a folder grant,
+or from picked `.webp` files and `.wastickers` archives. Every imported byte is untrusted, so the
+parsers check sizes against the buffer and the archive reader works under caps. Nothing is sent or
+uploaded yet. Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
+
+The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
+under *Image / Media Pipeline*.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/model/Sticker.kt` | `Sticker` and `StickerFormat` (extension and mime type) |
+| `app/src/main/java/com/firestream/chat/domain/model/StickerPack.kt` | `StickerPack`, `StickerPackKind`, `WhatsAppStickerFile`, `StickerImportResult` |
+| `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, favourite, pack and sticker edits, `markUsed` |
+| `app/src/main/java/com/firestream/chat/domain/util/WebpContainer.kt` | Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `open` for a uri |
+| `app/src/main/java/com/firestream/chat/data/sticker/WaStickerMetadata.kt` | Pack id, name, publisher and emojis out of a WhatsApp WebP's EXIF chunk |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerPackArchive.kt` | `.wastickers` / zip reader under caps on entry count, bytes per entry and total bytes |
+| `app/src/main/java/com/firestream/chat/data/sticker/WhatsAppStickerFolder.kt` | One child-documents query over the granted folder, newest first |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerText.kt` | Cleans a pack name or publisher read from a file |
+| `app/src/main/java/com/firestream/chat/data/local/dao/StickerDao.kt` | Pack and item queries; every multi-statement write is one transaction that marks the pack `PENDING` |
+| `app/src/main/java/com/firestream/chat/data/local/entity/StickerEntity.kt` | `stickers`, `sticker_packs`, `sticker_pack_items` |
+| `app/src/main/java/com/firestream/chat/data/repository/StickerRepositoryImpl.kt` | Which pack an imported sticker joins, the import key a re-import finds its pack by, the counts |
+| `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `recentStickerIdsFlow`, device-only |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryViewModel.kt` | The library screen's state: packs, the open pack and its selection, the WhatsApp folder view |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLabels.kt` | A pack's shown name (the unnamed kinds included), whether it can be renamed, the import summary line |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryScreen.kt` | The pack list, a pack's grid, the folder and file pickers, rename / move / delete dialogs, the shared `StickerCell` and `StickerTopBar` |
+| `app/src/main/java/com/firestream/chat/ui/stickers/WhatsAppImportScreen.kt` | The granted folder as a multi-select grid with *Select all* and *Import N* |
+| `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | The *Import stickers* row |
+| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.STICKERS` |
+| `app/src/test/java/com/firestream/chat/domain/util/WebpContainerTest.kt` | Byte fixtures, truncated and oversize chunks |
+| `app/src/test/java/com/firestream/chat/data/sticker/WaStickerMetadataTest.kt` | Metadata present, absent and malformed |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesTest.kt` | Hash naming, the limits, the `cacheDir` fence of `open` |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerPackArchiveTest.kt` | Each cap, entry names, title and author |
+| `app/src/test/java/com/firestream/chat/data/sticker/WhatsAppStickerFolderTest.kt` | The folder filter and sort |
+| `app/src/test/java/com/firestream/chat/data/local/dao/StickerDaoTest.kt` | Ordering queries and the transaction methods |
+| `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryImplTest.kt` | Grouping, de-duplication, a refused archive, pack edits |
+| `app/src/test/java/com/firestream/chat/test/WebpFixtures.kt` | Builders for WebP, EXIF and zip test bytes |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryViewModelTest.kt` | Selection, pack reorder, both import routes, the summary line |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryScreenTest.kt` | The empty state, the loading state, the unnamed packs' labels |
+
+**Entry point:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`.
+
 ## Adding a feature here
 
 Create an entry only when the feature spans 4+ packages. Otherwise let the package layout speak for itself. New entries follow the same shape: one-paragraph description → table of files with one-line roles → entry point.

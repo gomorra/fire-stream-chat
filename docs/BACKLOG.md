@@ -21,6 +21,25 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Sticker library and import (2026-10-03)
+
+`docs/plans/stickers-and-gifs.md` steps 1–2. JVM/Robolectric tests cover the parsers, the import
+and the screen's state. Nothing has run on a device:
+1. Settings → Storage → *Import stickers* → *From WhatsApp*. The folder picker opens inside
+   `Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers`, or says why it cannot.
+   Android may refuse a grant for a folder under `Android/media`; if it does, the route needs
+   another way in.
+2. The grid lists the folder newest first and stays smooth with a few thousand files.
+   *Select all*, then *Import N*: the summary line is right and the packs come out grouped by
+   the pack each sticker names. Stickers without metadata land in one *WhatsApp* pack.
+3. Import the same selection again: nothing is added.
+4. *From files* with a `.webp` and a `.wastickers` archive, then with a photo: the photo is
+   counted as not imported.
+5. Rename, move up, move down and delete a pack. In a pack, long-press to select, move to
+   another pack, remove.
+6. WhatsApp Business keeps its stickers under `com.whatsapp.w4b`. The picker does not open
+   there by itself; navigate to it by hand and import.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two

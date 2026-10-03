@@ -513,6 +513,7 @@ com.firestream.chat/
 │   ├── settings/                # SettingsScreen, SettingsViewModel
 │   ├── share/                   # SharePickerScreen, SharePickerViewModel
 │   ├── starred/                 # StarredMessagesScreen, StarredMessagesViewModel
+│   ├── stickers/                # StickerLibraryScreen, StickerLibraryViewModel, WhatsAppImportScreen, StickerLabels
 │   └── theme/                   # Color, Shape, Theme, Type
 ├── AppLifecycleObserver.kt      # Process-level lifecycle — drives RTDB online/offline presence
 ├── FireStreamApp.kt
