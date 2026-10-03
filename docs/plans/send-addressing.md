@@ -241,6 +241,25 @@ Departures (for sign-off): none
   were refused when you had blocked that member, and — with end-to-end encryption switched on —
   were encrypted for that one member only.
 
+**Approach**
+- Code as it stands matches the spec: `FCMService.showNotification` is at :190–257 and writes the
+  sender into `EXTRA_SENDER_ID` at :236 for every chat type. Both callers (:127, :165–173) pass
+  `isGroup = chatType == ChatType.GROUP.name`. Nothing contradicts §0 or §2.
+- Order: the two tests first, seen failing (the pure function does not exist yet, so the test
+  source set does not compile); then the function and the one-line change at :236; then the gate.
+- `notificationPartnerHint(isGroup, senderId)` goes into `FCMService.kt` as a top-level
+  `internal fun`, so no new production file and no FEATURE-MAP change.
+- Tests: new `data/remote/fcm/NotificationPartnerHintTest` (group → `""`, individual → sender);
+  one `ChatListPendingActionTest` case (`pendingSenderId = ""` ⇒ `OpenChat(recipientId = "")`).
+- CHANGELOG: a *Fixed* entry appended to the open `[UNRELEASED] [1.35.4]` section, date moved to
+  today; the section is already a patch, so the version stays.
+- Further skills: none. One production file under `data/remote/fcm/`, no concurrency or crypto in
+  the diff, and neither tripwire applies.
+
+**Shipped** `7abdf337` (2026-10-03) — tier: mid. skills: changelog-release. Reviewer models: none.
+CHANGELOG: *Fixed* entry in `[UNRELEASED] [1.35.4]`, hash `7abdf337` (added in the `docs(plan):` commit); the section was already a patch, so no version change.
+Departures (for sign-off): none
+
 ### Step 3 — The repository decides who a send is for; skills: code-review; model: max
 
 The step that decides who every send is addressed to — the block check's peer always, and the
@@ -331,6 +350,13 @@ Mechanical; behaviour already lives in step 3.
   they still pin the navigation hint).
 - Re-verify `ChatInfoManager` / `ChatTimerReactor` / `ChatMessageActions` treat `""` as
   "no partner" everywhere they read it (they did at `c50979e`: `isNotBlank` / `takeIf { it.isNotEmpty() }`).
+- **(step-2)** `notificationPartnerHint` (bottom of `FCMService.kt`) already carries the new name.
+  The intent extra `MainActivity.EXTRA_SENDER_ID`, `DeepLinkRequest.senderId` and
+  `ChatListPendingAction.OpenChat.recipientId` still carry the old ones; they feed `Routes.chat`,
+  so decide here whether they follow the rename. The other two writers of the extra are
+  `ReminderNotificationPoster` (:66, the reminder's stored `recipientId`, which is whatever the
+  chat screen held when the reminder was set) and `TimerAlarmReceiver` (:257). Step 2 did not
+  touch them: after step 3 neither can address a send.
 - `refactor(chat): name the chat route's partner argument for what it is` — no CHANGELOG entry.
 
 ### Step 6 — Make the rule a test, and write it down
