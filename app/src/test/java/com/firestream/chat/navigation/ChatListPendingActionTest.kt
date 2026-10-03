@@ -64,7 +64,7 @@ class ChatListPendingActionTest {
             pendingListId = "l1",
         )
         assertEquals(
-            ChatListPendingAction.OpenChat(chatId = "c1", recipientId = "r1", fromNotification = true),
+            ChatListPendingAction.OpenChat(chatId = "c1", partnerIdHint = "r1", fromNotification = true),
             action,
         )
     }
@@ -79,7 +79,7 @@ class ChatListPendingActionTest {
             pendingFromNotification = true,
         )
         assertEquals(
-            ChatListPendingAction.OpenChat(chatId = "g1", recipientId = "", fromNotification = true),
+            ChatListPendingAction.OpenChat(chatId = "g1", partnerIdHint = "", fromNotification = true),
             action,
         )
     }

@@ -23,7 +23,7 @@ class ChatPickerTargetsTest {
     fun `a 1-1 chat is addressed to the other participant`() {
         val chat = TestData.chat(participants = listOf(me, "user-2"))
 
-        assertEquals("user-2", chat.sendRecipientId(me))
+        assertEquals("user-2", chat.partnerIdHint(me))
     }
 
     @Test
@@ -34,7 +34,7 @@ class ChatPickerTargetsTest {
             participants = listOf(me, "user-2", "user-3"),
         )
 
-        assertEquals("", chat.sendRecipientId(me))
+        assertEquals("", chat.partnerIdHint(me))
     }
 
     @Test
@@ -45,7 +45,7 @@ class ChatPickerTargetsTest {
             participants = listOf(me, "user-2", "user-3"),
         )
 
-        assertEquals("", chat.sendRecipientId(me))
+        assertEquals("", chat.partnerIdHint(me))
     }
 
     @Test

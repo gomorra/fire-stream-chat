@@ -123,7 +123,7 @@ object Routes {
     const val OTP = "otp/{verificationId}/{phoneNumber}"
     const val PROFILE_SETUP = "profile_setup"
     const val CHAT_LIST = "chat_list"
-    const val CHAT = "chat/{chatId}/{recipientId}?fromNotification={fromNotification}&restored={restored}&targetMessageId={targetMessageId}"
+    const val CHAT = "chat/{chatId}/{partnerIdHint}?fromNotification={fromNotification}&restored={restored}&targetMessageId={targetMessageId}"
     const val CONTACTS = "contacts"
     const val MESSAGE_INFO = "message_info/{messageId}/{chatId}"
     // Phase 2 routes
@@ -148,11 +148,11 @@ object Routes {
 
     fun chat(
         chatId: String,
-        recipientId: String,
+        partnerIdHint: String,
         fromNotification: Boolean = false,
         restored: Boolean = false,
         targetMessageId: String? = null,
-    ) = "chat/$chatId/$recipientId?fromNotification=$fromNotification&restored=$restored" +
+    ) = "chat/$chatId/$partnerIdHint?fromNotification=$fromNotification&restored=$restored" +
         "&targetMessageId=${targetMessageId ?: ""}"
 
     fun messageInfo(messageId: String, chatId: String) =
@@ -402,7 +402,7 @@ fun FireStreamNavGraph(
                         navController.navigate(
                             Routes.chat(
                                 action.chatId,
-                                action.recipientId,
+                                action.partnerIdHint,
                                 action.fromNotification,
                                 restored = !action.fromNotification,
                                 targetMessageId = action.targetMessageId,
@@ -466,7 +466,7 @@ fun FireStreamNavGraph(
             route = Routes.CHAT,
             arguments = listOf(
                 navArgument("chatId") { type = NavType.StringType },
-                navArgument("recipientId") { type = NavType.StringType },
+                navArgument("partnerIdHint") { type = NavType.StringType },
                 navArgument("fromNotification") {
                     type = NavType.BoolType
                     defaultValue = false
@@ -486,7 +486,7 @@ fun FireStreamNavGraph(
             )
         ) { backStackEntry ->
             val chatId = backStackEntry.arguments?.getString("chatId") ?: ""
-            val recipientId = backStackEntry.arguments?.getString("recipientId") ?: ""
+            val partnerIdHint = backStackEntry.arguments?.getString("partnerIdHint") ?: ""
             val fromNotification = backStackEntry.arguments?.getBoolean("fromNotification") ?: false
             ChatScreen(
                 onContentSettled = onLaunchSettled,

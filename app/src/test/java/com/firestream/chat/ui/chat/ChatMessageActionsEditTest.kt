@@ -39,7 +39,7 @@ class ChatMessageActionsEditTest {
 
     private fun actions() = ChatMessageActions(
         chatId = chatId,
-        recipientId = "recipient1",
+        partnerIdHint = "recipient1",
         messageRepository = repository,
         reminderRepository = reminderRepository,
         dateTimeDetector = dateTimeDetector,

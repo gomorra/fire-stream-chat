@@ -14,7 +14,7 @@ import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.ui.components.sendRecipientId
+import com.firestream.chat.ui.components.partnerIdHint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -138,7 +138,7 @@ class SharePickerViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(searchQuery = query)
     }
 
-    fun send(onDone: (singleChatId: String?, recipientId: String?) -> Unit) {
+    fun send(onDone: (singleChatId: String?, partnerIdHint: String?) -> Unit) {
         val state = _uiState.value
         if (state.selectedChatIds.isEmpty() || state.isSending) return
         val content = state.sharedContent
@@ -163,7 +163,7 @@ class SharePickerViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isSending = false)
                 if (selectedChats.size == 1) {
                     val chat = selectedChats[0]
-                    onDone(chat.id, chat.sendRecipientId(state.currentUserId))
+                    onDone(chat.id, chat.partnerIdHint(state.currentUserId))
                 } else {
                     onDone(null, null)
                 }

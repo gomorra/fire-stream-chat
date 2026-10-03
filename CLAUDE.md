@@ -220,7 +220,7 @@ Routes are string constants in `navigation/NavGraph.kt` (`Routes` object). Use h
 
 ```kotlin
 Routes.otp(verificationId, phoneNumber)
-Routes.chat(chatId, recipientId)
+Routes.chat(chatId, partnerIdHint)
 Routes.messageInfo(messageId, chatId)
 Routes.userProfile(userId)
 ```

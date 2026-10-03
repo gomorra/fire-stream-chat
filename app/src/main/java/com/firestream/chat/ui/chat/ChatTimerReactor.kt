@@ -31,7 +31,7 @@ import kotlinx.coroutines.launch
 
 internal class ChatTimerReactor(
     private val chatId: String,
-    private val recipientId: String,
+    private val partnerIdHint: String,
     private val scheduler: TimerAlarmScheduler,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope,
@@ -102,7 +102,7 @@ internal class ChatTimerReactor(
             fireAtMs = fireAt,
             caption = msg.content.takeIf { it.isNotBlank() },
             chatId = chatId,
-            otherUserId = recipientId.takeIf { it.isNotEmpty() },
+            otherUserId = partnerIdHint.takeIf { it.isNotEmpty() },
             style = msg.timerAlarmStyle,
             sound = msg.timerAlarmSound,
         )

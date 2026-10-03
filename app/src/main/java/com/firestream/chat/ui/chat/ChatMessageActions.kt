@@ -20,7 +20,7 @@ import com.firestream.chat.ui.components.destinationLabel
 
 internal class ChatMessageActions(
     private val chatId: String,
-    private val recipientId: String,
+    private val partnerIdHint: String,
     private val messageRepository: MessageRepository,
     private val reminderRepository: ReminderRepository,
     private val dateTimeDetector: DateTimeDetector,
@@ -128,7 +128,7 @@ internal class ChatMessageActions(
             id = message.id,
             messageId = message.id,
             chatId = chatId,
-            recipientId = recipientId,
+            recipientId = partnerIdHint,
             fireAtMs = fireAtMs,
             messageSnapshot = snapshotContentFor(message),
             // Snapshotted, not resolved at fire time: the notification must

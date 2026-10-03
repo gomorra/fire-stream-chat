@@ -34,9 +34,9 @@ class ChatInfoManagerTest {
 
     private val connectivityObserver = FakeConnectivityObserver()
 
-    private fun manager(recipientId: String = "recipient1") = ChatInfoManager(
+    private fun manager(partnerIdHint: String = "recipient1") = ChatInfoManager(
         chatId = "chat1",
-        recipientId = recipientId,
+        partnerIdHint = partnerIdHint,
         chatRepository = chatRepository,
         listRepository = listRepository,
         userRepository = userRepository,
@@ -76,12 +76,12 @@ class ChatInfoManagerTest {
     }
 
     @Test
-    fun `refreshBlockState is no-op for blank recipientId (group chats)`() = runTest {
+    fun `refreshBlockState is no-op for blank partnerIdHint (group chats)`() = runTest {
         // Querying an empty userId would target a non-existent Firestore document; skip entirely.
         userRepository.setBlocked("", true) // would be true if we asked
 
         val initialState = uiState.value
-        manager(recipientId = "").refreshBlockState()
+        manager(partnerIdHint = "").refreshBlockState()
 
         assertEquals(initialState, uiState.value)
     }
@@ -120,12 +120,12 @@ class ChatInfoManagerTest {
     }
 
     @Test
-    fun `start does not seed for blank recipientId (group chats)`() = runTest {
+    fun `start does not seed for blank partnerIdHint (group chats)`() = runTest {
         // A cache entry exists under the empty id, but the group-chat path must
         // not query it — chatName stays null until loadChatInfo fills it.
         userRepository.setUser(User(uid = "", displayName = "ShouldNotAppear"))
 
-        manager(recipientId = "").start()
+        manager(partnerIdHint = "").start()
 
         assertNull(uiState.value.session.chatName)
     }
@@ -163,9 +163,9 @@ class ChatInfoManagerTest {
 
     @Test
     fun `connectivity is observed in group chats too`() = runTest {
-        // observeConnectivity must sit outside the recipientId guard — a group
+        // observeConnectivity must sit outside the partnerIdHint guard — a group
         // chat has no 1:1 recipient but queues sends the same way.
-        manager(recipientId = "").start()
+        manager(partnerIdHint = "").start()
 
         connectivityObserver.setOnline(false)
 

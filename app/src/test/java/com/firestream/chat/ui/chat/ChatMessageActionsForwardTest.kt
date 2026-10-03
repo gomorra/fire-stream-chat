@@ -59,7 +59,7 @@ class ChatMessageActionsForwardTest {
 
     private fun actions() = ChatMessageActions(
         chatId = "chat1",
-        recipientId = "user-2",
+        partnerIdHint = "user-2",
         messageRepository = repository,
         reminderRepository = reminderRepository,
         dateTimeDetector = dateTimeDetector,

@@ -60,7 +60,7 @@ import com.firestream.chat.ui.components.ChatPickerState
 
 @Composable
 fun SharePickerScreen(
-    onDone: (chatId: String?, recipientId: String?) -> Unit,
+    onDone: (chatId: String?, partnerIdHint: String?) -> Unit,
     onBackClick: () -> Unit,
     viewModel: SharePickerViewModel = hiltViewModel()
 ) {

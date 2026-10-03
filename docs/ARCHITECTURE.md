@@ -360,7 +360,7 @@ graph TD
 | `OTP`              | verificationId, phoneNumber  | OTP verification                   |
 | `PROFILE_SETUP`    | —                            | Initial profile creation           |
 | `CHAT_LIST`        | —                            | Main screen (renders `MainScreen`) |
-| `CHAT`             | chatId, recipientId          | Chat conversation                  |
+| `CHAT`             | chatId, partnerIdHint        | Chat conversation                  |
 | `CONTACTS`         | —                            | Contact list for new chat          |
 | `MESSAGE_INFO`     | messageId, chatId            | Delivery/read timestamps           |
 | `SETTINGS`         | —                            | App settings                       |

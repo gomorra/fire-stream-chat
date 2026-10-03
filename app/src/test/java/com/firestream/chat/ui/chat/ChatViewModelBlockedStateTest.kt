@@ -89,7 +89,7 @@ class ChatViewModelBlockedStateTest {
     }
 
     private fun buildViewModel() = ChatViewModel(
-        savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "recipientId" to "recipient1")),
+        savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "partnerIdHint" to "recipient1")),
         checkGroupPermissionUseCase = checkGroupPermissionUseCase,
         searchMessagesUseCase = searchMessagesUseCase,
         linkPreviewSource = linkPreviewSource,

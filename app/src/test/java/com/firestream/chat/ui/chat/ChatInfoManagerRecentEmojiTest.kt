@@ -41,7 +41,7 @@ class ChatInfoManagerRecentEmojiTest {
 
     private fun manager() = ChatInfoManager(
         chatId = "chat1",
-        recipientId = "",
+        partnerIdHint = "",
         chatRepository = FakeChatRepository(),
         listRepository = mockk<ListRepository>(relaxed = true),
         userRepository = FakeUserRepository(),

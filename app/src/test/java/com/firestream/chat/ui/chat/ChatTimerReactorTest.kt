@@ -38,7 +38,7 @@ class ChatTimerReactorTest {
 
     private fun reactor(scope: kotlinx.coroutines.CoroutineScope) = ChatTimerReactor(
         chatId = "chat-1",
-        recipientId = "user-recipient",
+        partnerIdHint = "user-recipient",
         scheduler = scheduler,
         _uiState = state,
         scope = scope,
@@ -142,7 +142,7 @@ class ChatTimerReactorTest {
     fun `passes empty recipient id as null`() = runTest(UnconfinedTestDispatcher()) {
         val reactor = ChatTimerReactor(
             chatId = "chat-1",
-            recipientId = "",
+            partnerIdHint = "",
             scheduler = scheduler,
             _uiState = state,
             scope = backgroundScope,

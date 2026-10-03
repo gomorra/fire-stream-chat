@@ -946,7 +946,7 @@ fun ChatScreen(
                     Row(
                         modifier = Modifier.clickable {
                             if (uiState.session.isGroupChat) onGroupSettingsClick()
-                            else if (!uiState.session.isBroadcast) onProfileClick(viewModel.recipientId)
+                            else if (!uiState.session.isBroadcast) onProfileClick(viewModel.partnerIdHint)
                         },
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -1003,7 +1003,7 @@ fun ChatScreen(
                         IconButton(onClick = {
                             val callIntent = Intent(context, CallActivity::class.java).apply {
                                 putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.partnerIdHint)
                                 putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
                                 putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
                                 putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
@@ -1407,7 +1407,7 @@ fun ChatScreen(
                                                     {
                                                         val callIntent = Intent(context, CallActivity::class.java).apply {
                                                             putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                                            putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.recipientId)
+                                                            putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.partnerIdHint)
                                                             putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
                                                             putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
                                                             putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
@@ -1682,7 +1682,7 @@ fun ChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .clickable { onProfileClick(viewModel.recipientId) }
+                        .clickable { onProfileClick(viewModel.partnerIdHint) }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
