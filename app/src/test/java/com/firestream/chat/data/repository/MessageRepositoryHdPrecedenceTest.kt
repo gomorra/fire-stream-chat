@@ -66,7 +66,6 @@ class MessageRepositoryHdPrecedenceTest {
             chatId = "chat1",
             uri = "content://pick/1",
             mimeType = "image/jpeg",
-            recipientId = "recipient1",
             caption = "",
             isHd = isHd,
         )
@@ -114,7 +113,7 @@ class MessageRepositoryHdPrecedenceTest {
         // sheet among them — compiling and behaving exactly as before.
         every { preferencesDataStore.sendImagesFullQualityFlow } returns flowOf(true)
 
-        repository.sendMediaMessage("chat1", "content://pick/1", "image/jpeg", "recipient1")
+        repository.sendMediaMessage("chat1", "content://pick/1", "image/jpeg")
 
         assertEquals(true, insertedEntities.single().isHd)
     }

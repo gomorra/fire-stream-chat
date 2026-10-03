@@ -14,7 +14,7 @@ import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.UserRepository
-import com.firestream.chat.ui.components.sendRecipientId
+import com.firestream.chat.ui.components.partnerIdHint
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -138,7 +138,7 @@ class SharePickerViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(searchQuery = query)
     }
 
-    fun send(onDone: (singleChatId: String?, recipientId: String?) -> Unit) {
+    fun send(onDone: (singleChatId: String?, partnerIdHint: String?) -> Unit) {
         val state = _uiState.value
         if (state.selectedChatIds.isEmpty() || state.isSending) return
         val content = state.sharedContent
@@ -153,8 +153,7 @@ class SharePickerViewModel @Inject constructor(
             val selectedChats = state.chats.filter { it.id in state.selectedChatIds }
 
             val results: List<Result<Unit>> = selectedChats.map { chat ->
-                val recipientId = chat.sendRecipientId(state.currentUserId)
-                async { sendToChat(chat.id, recipientId, content) }
+                async { sendToChat(chat.id, content) }
             }.awaitAll()
 
             val failures = results.count { it.isFailure }
@@ -164,7 +163,7 @@ class SharePickerViewModel @Inject constructor(
                 _uiState.value = _uiState.value.copy(isSending = false)
                 if (selectedChats.size == 1) {
                     val chat = selectedChats[0]
-                    onDone(chat.id, chat.sendRecipientId(state.currentUserId))
+                    onDone(chat.id, chat.partnerIdHint(state.currentUserId))
                 } else {
                     onDone(null, null)
                 }
@@ -192,12 +191,11 @@ class SharePickerViewModel @Inject constructor(
      */
     private suspend fun sendToChat(
         chatId: String,
-        recipientId: String,
         content: SharedContent
     ): Result<Unit> = runCatching {
         when (content) {
             is SharedContent.Text -> {
-                messageRepository.sendMessage(chatId, content.text, recipientId).getOrThrow()
+                messageRepository.sendMessage(chatId, content.text).getOrThrow()
             }
             is SharedContent.Media -> {
                 // Sequential so the images land in the chat in the order the user
@@ -211,13 +209,8 @@ class SharePickerViewModel @Inject constructor(
                 content.items.forEach { item ->
                     // The cache copy is named by a random id; the original name
                     // is what a document is sent under.
-                    messageRepository.sendMediaMessage(
-                        chatId,
-                        item.cachedUri,
-                        item.mimeType,
-                        recipientId,
-                        fileName = item.fileName,
-                    ).onFailure { e -> if (firstFailure == null) firstFailure = e }
+                    messageRepository.sendMediaMessage(chatId, item.cachedUri, item.mimeType, fileName = item.fileName)
+                        .onFailure { e -> if (firstFailure == null) firstFailure = e }
                 }
                 firstFailure?.let { throw it }
             }

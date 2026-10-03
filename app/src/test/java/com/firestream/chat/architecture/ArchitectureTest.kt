@@ -140,7 +140,103 @@ private val CHAT_MANAGERS = listOf(
     "ChatSearchManager",
 )
 
+/**
+ * "The repository decides who a send is for"
+ * (docs/PATTERNS.md#the-repository-decides-who-a-send-is-for). A send target is
+ * built in `data/outbox/SendTarget.kt` and nowhere else. The broadcast fan-out is
+ * the one exception, allowlisted by function so the other send paths of
+ * `MessageRepositoryImpl` stay covered.
+ */
+private const val SEND_ADDRESSING_PATTERN = "docs/PATTERNS.md#the-repository-decides-who-a-send-is-for"
+private const val SEND_TARGET_FILE = "data/outbox/SendTarget.kt"
+private const val MESSAGE_REPOSITORY_IMPL_FILE = "data/repository/MessageRepositoryImpl.kt"
+private const val BROADCAST_FAN_OUT = "sendBroadcastMessage"
+
+// `SendTarget.of(` no longer exists; its alternative keeps the name from coming back.
+private val TARGET_BUILD = Regex("""\bPeer\(|\bNoPeer\b|\bSendTarget\.of\(""")
+private val TARGET_FROM_CHAT = Regex("""\bforChat\(""")
+
+/** The file's text without comments: a KDoc link to `SendTarget.NoPeer` builds nothing. */
+private fun String.code() = replace(Regex("""//[^\n]*|/\*[\s\S]*?\*/"""), "")
+
+private fun KoFileDeclaration.relativePath() = path.removePrefix(checkoutRoot).removePrefix("/")
+
 class ArchitectureTest {
+
+    @Test
+    fun `no MessageRepository member takes a caller-computed recipientId`() {
+        val repositories = production.flatMap { it.interfaces() }.filter { it.name == "MessageRepository" }
+        assertEquals(
+            "Expected exactly one MessageRepository interface, or this rule checks nothing. See $SEND_ADDRESSING_PATTERN",
+            1,
+            repositories.size,
+        )
+        val members = repositories.single().functions()
+        assertTrue("MessageRepository has no members to check. See $SEND_ADDRESSING_PATTERN", members.isNotEmpty())
+        val offenders = members.filter { member -> member.parameters.any { it.name == "recipientId" } }.map { it.name }
+        assertEquals(
+            "A MessageRepository member takes a recipientId. A send takes a chat id, and the repository " +
+                "resolves who it is for from the chat's local row. See $SEND_ADDRESSING_PATTERN",
+            emptyList<String>(),
+            offenders,
+        )
+    }
+
+    @Test
+    fun `a SendTarget is built only from a chat row or a stored column`() {
+        val sendTargetFile = production.single { it.isFile(SEND_TARGET_FILE) }
+        assertTrue(
+            "$SEND_TARGET_FILE builds no SendTarget, so TARGET_BUILD no longer matches what it fences. " +
+                "See $SEND_ADDRESSING_PATTERN",
+            TARGET_BUILD.containsMatchIn(sendTargetFile.text.code()),
+        )
+        val fanOut = production.single { it.isFile(MESSAGE_REPOSITORY_IMPL_FILE) }
+            .classes().flatMap { it.functions() }.filter { it.name == BROADCAST_FAN_OUT }
+        assertEquals(
+            "Expected exactly one $BROADCAST_FAN_OUT in $MESSAGE_REPOSITORY_IMPL_FILE, the one allowlisted " +
+                "place that builds a SendTarget.Peer per recipient. See $SEND_ADDRESSING_PATTERN",
+            1,
+            fanOut.size,
+        )
+        val fanOutText = fanOut.single().text
+
+        val offenders = production
+            .filterNot { it.isFile(SEND_TARGET_FILE) }
+            .filter { file ->
+                // Allowlisted per function, not per file: every other send path in
+                // MessageRepositoryImpl stays under the rule.
+                val text = if (file.isFile(MESSAGE_REPOSITORY_IMPL_FILE)) {
+                    assertTrue(
+                        "$BROADCAST_FAN_OUT's text is not a verbatim part of its file, so it cannot be cut out",
+                        file.text.contains(fanOutText),
+                    )
+                    file.text.replace(fanOutText, "")
+                } else {
+                    file.text
+                }
+                TARGET_BUILD.containsMatchIn(text.code())
+            }
+            .map { it.relativePath() }
+        assertEquals(
+            "A SendTarget is built outside $SEND_TARGET_FILE. Use SendTarget.forChat (from the chat's row) " +
+                "or SendTarget.fromColumn (from the stored column). See $SEND_ADDRESSING_PATTERN",
+            emptyList<String>(),
+            offenders,
+        )
+    }
+
+    @Test
+    fun `one place derives a SendTarget from a chat`() {
+        val callers = production
+            .filterNot { it.isFile(SEND_TARGET_FILE) }
+            .flatMap { file -> TARGET_FROM_CHAT.findAll(file.text.code()).map { file.relativePath() } }
+        assertEquals(
+            "SendTarget.forChat has exactly one caller, MessageRepositoryImpl.sendTargetFor. A second one " +
+                "is a second place that decides who a send is for. See $SEND_ADDRESSING_PATTERN",
+            listOf("app/src/main/java/com/firestream/chat/$MESSAGE_REPOSITORY_IMPL_FILE"),
+            callers,
+        )
+    }
 
     @Test
     fun `domain layer imports only stdlib, coroutines, javax inject, and domain itself`() {

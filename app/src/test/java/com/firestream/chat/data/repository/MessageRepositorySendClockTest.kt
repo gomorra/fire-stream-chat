@@ -46,18 +46,18 @@ class MessageRepositorySendClockTest {
     @Test
     fun `a batch sent within one millisecond gets strictly increasing timestamps`() = runTest {
         repeat(3) {
-            repository.sendMediaMessage("chat1", "content://docs/$it.pdf", "application/pdf", "", "", null)
+            repository.sendMediaMessage("chat1", "content://docs/$it.pdf", "application/pdf", "", null)
         }
-        repository.sendMessage("chat1", "all three attached", "")
+        repository.sendMessage("chat1", "all three attached")
 
         assertEquals(listOf(5_000L, 5_001L, 5_002L, 5_003L), inserted.map { it.timestamp })
     }
 
     @Test
     fun `a wall clock set back does not stamp the next send before the last one`() = runTest {
-        repository.sendMessage("chat1", "first", "")
+        repository.sendMessage("chat1", "first")
         now = 4_000L
-        repository.sendMessage("chat1", "second", "")
+        repository.sendMessage("chat1", "second")
 
         assertEquals(listOf(5_000L, 5_001L), inserted.map { it.timestamp })
     }

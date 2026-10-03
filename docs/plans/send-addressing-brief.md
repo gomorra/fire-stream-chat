@@ -1,5 +1,7 @@
 # Send addressing — the repository decides who a send is for
 
+**Superseded by [`send-addressing.md`](send-addressing.md).** That plan carries the decisions, the design and what shipped; §0–§2 below remain the why.
+
 Brief for removing `recipientId: String` from `MessageRepository`'s seven send members
 and resolving the send target inside the repository from the chat row. Written
 2026-09-20 from an architecture review of `main` at `9d28ed2` (two explorer agents,

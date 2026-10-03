@@ -36,7 +36,7 @@ import com.firestream.chat.domain.util.ConnectivityObserver
 
 internal class ChatInfoManager(
     private val chatId: String,
-    private val recipientId: String,
+    private val partnerIdHint: String,
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
     private val userRepository: UserRepository,
@@ -57,7 +57,8 @@ internal class ChatInfoManager(
         observeReadReceiptsAllowed()
         loadChatInfo()
         observeRecentEmojis()
-        if (recipientId.isNotBlank()) {
+        observeChatFontSize()
+        if (partnerIdHint.isNotBlank()) {
             seedRecipientFromCache()
             observeRecipient()
             refreshBlockState()
@@ -79,7 +80,7 @@ internal class ChatInfoManager(
      */
     private fun seedRecipientFromCache() {
         scope.launch {
-            val cached = userRepository.getUserById(recipientId).getOrNull() ?: return@launch
+            val cached = userRepository.getUserById(partnerIdHint).getOrNull() ?: return@launch
             _uiState.update { state ->
                 if (state.session.recipientAvatarUrl != null || !state.session.chatName.isNullOrBlank()) {
                     state
@@ -118,9 +119,9 @@ internal class ChatInfoManager(
      * toggled the block state in the profile screen and navigated back.
      */
     fun refreshBlockState() {
-        if (recipientId.isBlank()) return
+        if (partnerIdHint.isBlank()) return
         scope.launch {
-            val blocked = runCatching { userRepository.isUserBlocked(recipientId) }
+            val blocked = runCatching { userRepository.isUserBlocked(partnerIdHint) }
                 .getOrDefault(false)
             _uiState.update { it.copy(session = it.session.copy(isRecipientBlocked = blocked)) }
         }
@@ -177,7 +178,7 @@ internal class ChatInfoManager(
 
     private fun observeRecipient() {
         scope.launch {
-            userRepository.observeUser(recipientId)
+            userRepository.observeUser(partnerIdHint)
                 .catch { /* non-fatal */ }
                 .collect { user ->
                     val avatar = ParticipantAvatar(user.displayName, user.avatarUrl, user.localAvatarPath)
@@ -250,6 +251,16 @@ internal class ChatInfoManager(
                     // per open session (see EmojiHandlerPanel), so no debounce is needed
                     // here and reopening always reflects the latest taps immediately.
                     _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
+                }
+        }
+    }
+
+    private fun observeChatFontSize() {
+        scope.launch {
+            preferencesDataStore.chatFontSizeFlow
+                .distinctUntilChanged()
+                .collect { sizeSp ->
+                    _uiState.update { it.copy(session = it.session.copy(chatFontSizeSp = sizeSp)) }
                 }
         }
     }

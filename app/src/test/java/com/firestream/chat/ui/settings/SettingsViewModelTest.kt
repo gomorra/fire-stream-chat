@@ -3,6 +3,7 @@ package com.firestream.chat.ui.settings
 import android.content.Context
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
+import com.firestream.chat.domain.model.ChatFontSize
 import com.firestream.chat.data.local.DictationLanguage
 import com.firestream.chat.data.local.NotificationSound
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -105,6 +106,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(false)
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.STANDARD)
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
+        every { preferencesDataStore.chatFontSizeFlow } returns flowOf(ChatFontSize.DEFAULT_SP)
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(false)
     }
 
@@ -467,6 +469,24 @@ class SettingsViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { preferencesDataStore.setAutoDownload(AutoDownloadOption.WIFI_ONLY) }
+    }
+
+    @Test
+    fun `setChatFontSize calls datastore`() = runTest {
+        coEvery { preferencesDataStore.setChatFontSize(any()) } returns Unit
+        advanceUntilIdle()
+
+        viewModel.setChatFontSize(17.5f)
+        advanceUntilIdle()
+
+        coVerify(exactly = 1) { preferencesDataStore.setChatFontSize(17.5f) }
+    }
+
+    @Test
+    fun `chatFontSizeLabel drops a trailing zero and marks the default`() {
+        assertEquals("15 (default)", chatFontSizeLabel(ChatFontSize.DEFAULT_SP))
+        assertEquals("15.5", chatFontSizeLabel(15.5f))
+        assertEquals("18", chatFontSizeLabel(18f))
     }
 
     @Test

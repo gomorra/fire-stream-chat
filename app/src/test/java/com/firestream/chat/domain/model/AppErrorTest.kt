@@ -33,6 +33,15 @@ class AppErrorTest {
         assertSame(cause, (error as AppError.Unknown).cause)
     }
 
+    // An intentional refusal with a message for the user, not an unknown failure:
+    // the banner shows the message, and the reason stays out of it.
+    @Test
+    fun `ChatNotReadyException maps to Validation with its message and without its reason`() {
+        val error = AppError.from(ChatNotReadyException(chatId = "chat1", reason = "no local chat row"))
+
+        assertEquals(AppError.Validation("This chat isn't ready yet"), error)
+    }
+
     @Test
     fun `Unknown exposes cause message when present`() {
         assertEquals("boom", AppError.Unknown(RuntimeException("boom")).message)

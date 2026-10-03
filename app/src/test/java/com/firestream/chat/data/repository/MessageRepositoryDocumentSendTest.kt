@@ -58,7 +58,7 @@ class MessageRepositoryDocumentSendTest {
 
     @Test
     fun `a picked document is queued with its name, size and type, and the caption stays the caption`() = runTest {
-        repository.sendMediaMessage("chat1", "content://pick/report", "application/pdf", "", caption = "for Monday", isHd = null)
+        repository.sendMediaMessage("chat1", "content://pick/report", "application/pdf", caption = "for Monday", isHd = null)
 
         val row = inserted.single().toDomain()
         assertEquals(MessageType.DOCUMENT, row.type)
@@ -70,7 +70,7 @@ class MessageRepositoryDocumentSendTest {
 
     @Test
     fun `a photo carries no file fields and never asks for a description`() = runTest {
-        repository.sendMediaMessage("chat1", "content://pick/photo", "image/jpeg", "", caption = "", isHd = null)
+        repository.sendMediaMessage("chat1", "content://pick/photo", "image/jpeg", caption = "", isHd = null)
 
         val row = inserted.single().toDomain()
         assertNull(row.fileName)
@@ -83,7 +83,7 @@ class MessageRepositoryDocumentSendTest {
     fun `a document over the size limit is refused before any row is written`() = runTest {
         coEvery { documentFiles.describe("content://pick/huge") } returns DocumentInfo("backup.zip", MAX_DOCUMENT_BYTES + 1)
 
-        val result = repository.sendMediaMessage("chat1", "content://pick/huge", "application/zip", "", caption = "", isHd = null)
+        val result = repository.sendMediaMessage("chat1", "content://pick/huge", "application/zip", caption = "", isHd = null)
 
         assertTrue(result.exceptionOrNull() is MediaLimitException)
         assertTrue(inserted.isEmpty())
@@ -99,7 +99,7 @@ class MessageRepositoryDocumentSendTest {
         try {
             coEvery { documentFiles.describe(huge.absolutePath) } returns DocumentInfo("backup.bin", null)
 
-            val result = repository.sendMediaMessage("chat1", huge.absolutePath, "application/octet-stream", "", caption = "", isHd = null)
+            val result = repository.sendMediaMessage("chat1", huge.absolutePath, "application/octet-stream", caption = "", isHd = null)
 
             assertTrue(result.exceptionOrNull() is MediaLimitException)
             val id = inserted.single().id

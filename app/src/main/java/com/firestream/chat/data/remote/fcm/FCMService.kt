@@ -233,7 +233,7 @@ class FCMService : FirebaseMessagingService() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
-            putExtra(MainActivity.EXTRA_SENDER_ID, senderId)
+            putExtra(MainActivity.EXTRA_SENDER_ID, notificationPartnerHint(isGroup, senderId))
             // MessagingStyle bundles per chat and the PendingIntent is rebuilt with
             // FLAG_UPDATE_CURRENT on every push, so the extra always reflects the
             // latest message — tap lands on and highlights the newest message.
@@ -256,3 +256,12 @@ class FCMService : FirebaseMessagingService() {
         notificationManager.notify(notifId, notification)
     }
 }
+
+/**
+ * The chat partner a message notification's tap intent names: the sender in a
+ * 1:1 chat, `""` in a group. A group has no partner, and naming the sender would
+ * open the group with one member as its 1:1 partner. The extra is always written,
+ * because `MainActivity.deepLinkFromIntent` ignores an intent without it.
+ */
+internal fun notificationPartnerHint(isGroup: Boolean, senderId: String): String =
+    if (isGroup) "" else senderId

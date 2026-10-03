@@ -32,9 +32,9 @@ done
 
 # ---- tunables (the only place model ids and effort levels live) -------------
 # A --variant file may override the keys lib.sh's PR_VARIANT_KEYS lists, nothing else.
-MODEL_MAX=fable;     EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
-MODEL_STRONG=opus;   EFFORT_STRONG=xhigh; ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
-MODEL_MID=fable;     EFFORT_MID=medium;   ADVISOR_MID=''       # set 2026-09-20 by scripts/plan-runner/benchmark.md; variants/mid-opus-high.env is the fallback when the account's Fable share is used up
+MODEL_MAX=opus;      EFFORT_MAX=xhigh;    ADVISOR_MAX=''      # a step's `effort:` tag overrides the tier's effort
+MODEL_STRONG=opus;   EFFORT_STRONG=high;  ADVISOR_STRONG=''   # ADVISOR_*: `claude --advisor`, '' = none
+MODEL_MID=opus;      EFFORT_MID=medium;   ADVISOR_MID=''       # 2026-10-03: one model, the tiers differ by effort only (was Fable for mid/max, set 2026-09-20 by scripts/plan-runner/benchmark.md)
 JUDGE_MODEL='';      JUDGE_EFFORT=high    # '' = no judge pass; see plan-runner/judge-prompt.md
 ESCALATE=1                 # 1 = a step that stays invalid after its nudge is re-run once, one effort rung up
 DEFAULT_BUDGET_USD=25      # per step; a `budget:` heading tag overrides, --budget overrides both
@@ -147,10 +147,13 @@ if [ -n "$BASE_REF" ]; then
 fi
 
 # A driver launched from inside a Claude session would nest; scrub the markers
-# so the step sessions start clean either way.
+# so the step sessions start clean either way. CLAUDE_CODE_REMOTE_SESSION_ID is set
+# only in a cloud (claude.ai/code) container: left in place, every step session
+# adopts the host session's id (verified 2026-10-03), and a nudge's --resume would
+# land in the wrong session. Unset on a desktop, where it does not exist.
 unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION \
       CLAUDE_CODE_SSE_PORT CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN \
-      CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_PID CLAUDE_EFFORT 2>/dev/null || true
+      CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_REMOTE_SESSION_ID CLAUDE_PID CLAUDE_EFFORT 2>/dev/null || true
 export PLAN_RUNNER=1
 
 NL=$'\n'     # "${x:+$'\n'}" is not a newline inside double quotes; "${x:+$NL}" is

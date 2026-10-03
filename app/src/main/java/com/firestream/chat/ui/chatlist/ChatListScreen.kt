@@ -69,7 +69,7 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.ui.chat.FullscreenImageArgsSaver
 import com.firestream.chat.ui.chat.FullscreenImageViewer
-import com.firestream.chat.ui.components.sendRecipientId
+import com.firestream.chat.ui.components.partnerIdHint
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -235,7 +235,7 @@ fun ChatListScreen(
                                     currentUserId = uiState.currentUserId,
                                     contacts = uiState.contacts,
                                     onlineUserIds = uiState.onlineUserIds,
-                                    onClick = { onChatClick(chat.id, chat.sendRecipientId(uiState.currentUserId)) },
+                                    onClick = { onChatClick(chat.id, chat.partnerIdHint(uiState.currentUserId)) },
                                     onAvatarClick = { openAvatarFullscreen(chat) },
                                     onDelete = { viewModel.requestDeleteChat(chat.id) },
                                     onPin = { viewModel.togglePin(chat.id, chat.isPinned) },
@@ -256,7 +256,7 @@ fun ChatListScreen(
                                 currentUserId = uiState.currentUserId,
                                 contacts = uiState.contacts,
                                 onlineUserIds = uiState.onlineUserIds,
-                                onClick = { onChatClick(chat.id, chat.sendRecipientId(uiState.currentUserId)) },
+                                onClick = { onChatClick(chat.id, chat.partnerIdHint(uiState.currentUserId)) },
                                 onAvatarClick = { openAvatarFullscreen(chat) },
                                 onDelete = { viewModel.requestDeleteChat(chat.id) },
                                 onPin = { viewModel.togglePin(chat.id, chat.isPinned) },

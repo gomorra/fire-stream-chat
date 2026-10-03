@@ -7,6 +7,7 @@ import com.firestream.chat.data.outbox.OutboxFiles
 import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -55,6 +56,10 @@ class MessageRepositoryForwardTest {
 
         repository = messageRepository(
             messageDao = messageDao,
+            chats = listOf(
+                testChat("chat2"),
+                testChat("group1", ChatType.GROUP.name, listOf("uid1", "member1", "member2")),
+            ),
             messageSource = messageSource,
             authSource = authSource,
             messageWriter = messageWriter,
@@ -84,7 +89,7 @@ class MessageRepositoryForwardTest {
             isHd = true,
         )
 
-        val result = repository.forwardMessage(video, targetChatId = "chat2", recipientId = "recipient1")
+        val result = repository.forwardMessage(video, targetChatId = "chat2")
 
         assertTrue("forward should queue: ${result.exceptionOrNull()}", result.isSuccess)
         assertEquals(MessageStatus.SENDING, result.getOrThrow().status)
@@ -112,17 +117,27 @@ class MessageRepositoryForwardTest {
     // attempt count 1. Now the worker's write is the first attempt.
     @Test
     fun `a forward records its target and starts with no attempts, so the worker's write is the first one`() = runTest {
-        repository.forwardMessage(source(MessageType.TEXT), targetChatId = "chat2", recipientId = "recipient1")
+        repository.forwardMessage(source(MessageType.TEXT), targetChatId = "chat2")
 
         assertEquals("recipient1", inserted.captured.outboxRecipientId)
         assertEquals(0, inserted.captured.outboxAttempts)
+    }
+
+    // Regression: the forward dialog once named one member of the target group
+    // as the recipient, and the row recorded that member as the peer to encrypt
+    // for. The target comes from the target chat's row, not from the caller.
+    @Test
+    fun `a forward into a group records no peer`() = runTest {
+        repository.forwardMessage(source(MessageType.TEXT), targetChatId = "group1")
+
+        assertEquals("", inserted.captured.outboxRecipientId)
     }
 
     @Test
     fun `a forward's media is already uploaded, so nothing is staged`() = runTest {
         val photo = source(MessageType.IMAGE).copy(mediaUrl = "https://storage.example/p", localUri = "/media/src1.jpg")
 
-        repository.forwardMessage(photo, targetChatId = "chat2", recipientId = "recipient1")
+        repository.forwardMessage(photo, targetChatId = "chat2")
 
         coVerify(exactly = 0) { outboxFiles.stage(any(), any(), any()) }
         assertEquals("/media/src1.jpg", inserted.captured.localUri)
@@ -132,7 +147,7 @@ class MessageRepositoryForwardTest {
     fun `a forwarded location keeps its coordinates on the row`() = runTest {
         val location = source(MessageType.LOCATION).copy(latitude = 52.52, longitude = 13.40)
 
-        repository.forwardMessage(location, targetChatId = "chat2", recipientId = "recipient1")
+        repository.forwardMessage(location, targetChatId = "chat2")
 
         assertEquals(52.52, inserted.captured.latitude!!, 0.0)
         assertEquals(13.40, inserted.captured.longitude!!, 0.0)
@@ -146,7 +161,7 @@ class MessageRepositoryForwardTest {
             replyToId = "earlier",
         )
 
-        repository.forwardMessage(text, targetChatId = "chat2", recipientId = "recipient1")
+        repository.forwardMessage(text, targetChatId = "chat2")
 
         with(inserted.captured) {
             assertTrue(mentions.isEmpty())

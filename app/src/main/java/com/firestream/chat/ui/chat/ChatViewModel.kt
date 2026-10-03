@@ -126,7 +126,12 @@ class ChatViewModel @Inject constructor(
 ) : ViewModel() {
 
     val chatId: String = checkNotNull(savedStateHandle["chatId"])
-    val recipientId: String = checkNotNull(savedStateHandle["recipientId"])
+    /**
+     * The 1:1 partner the chat was opened with. Display and navigation only,
+     * `""` for a non-1:1 chat, never an addressing input: the repository
+     * decides who a send is for.
+     */
+    val partnerIdHint: String = checkNotNull(savedStateHandle["partnerIdHint"])
 
     // Set when the chat is opened from a reminder/message notification deep link
     // (see Routes.chat(targetMessageId = …)). ChatScreen consumes it once to
@@ -183,7 +188,7 @@ class ChatViewModel @Inject constructor(
         chatId, searchMessagesUseCase, linkPreviewSource, _uiState, viewModelScope
     )
     private val messageActions = ChatMessageActions(
-        chatId, recipientId, messageRepository, reminderRepository, dateTimeDetector, _uiState, viewModelScope,
+        chatId, partnerIdHint, messageRepository, reminderRepository, dateTimeDetector, _uiState, viewModelScope,
         onReminderScheduled = { outcome ->
             if (outcome == ReminderScheduleOutcome.INEXACT_FALLBACK) {
                 commandsManager.setExactAlarmBannerVisible(true)
@@ -191,14 +196,14 @@ class ChatViewModel @Inject constructor(
         },
     )
     private val messageSender = ChatMessageSender(
-        chatId, recipientId, chatRepository, messageRepository, _uiState, viewModelScope
+        chatId, chatRepository, messageRepository, _uiState, viewModelScope
     )
     private val messageLoader = ChatMessageLoader(
         chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, reminderRepository,
         context, _uiState, viewModelScope
     )
     private val infoManager = ChatInfoManager(
-        chatId, recipientId, chatRepository, listRepository, userRepository, preferencesDataStore,
+        chatId, partnerIdHint, chatRepository, listRepository, userRepository, preferencesDataStore,
         checkGroupPermissionUseCase, connectivityObserver, _uiState, viewModelScope
     )
     private val dictationManager = ChatDictationManager(
@@ -207,7 +212,7 @@ class ChatViewModel @Inject constructor(
     private val commandsManager = ChatCommandsManager(commandRegistry, _uiState)
     private val timerReactor = ChatTimerReactor(
         chatId = chatId,
-        recipientId = recipientId,
+        partnerIdHint = partnerIdHint,
         scheduler = timerAlarmScheduler,
         _uiState = _uiState,
         scope = viewModelScope,
@@ -265,7 +270,7 @@ class ChatViewModel @Inject constructor(
         // on the chat list. @ApplicationScope so the write survives immediate
         // process death after entry.
         appScope.launch {
-            preferencesDataStore.setLastOpenChat(chatId, recipientId)
+            preferencesDataStore.setLastOpenChat(chatId, partnerIdHint)
         }
         viewModelScope.launch {
             preferencesDataStore.dictationLanguageFlow.collect { language ->
@@ -700,7 +705,6 @@ class ChatViewModel @Inject constructor(
                 chatId,
                 payload.durationMs,
                 payload.caption,
-                recipientId,
                 style = payload.style,
                 sound = payload.sound,
             )

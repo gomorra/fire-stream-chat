@@ -29,10 +29,10 @@ internal class FakeMessageRepository : MessageRepository {
 
     val markAsReadCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
     val markAsDeliveredCalls: MutableList<Pair<String, List<String>>> = mutableListOf()
-    val retryCalls: MutableList<Pair<String, String>> = mutableListOf()
+    /** The message id of every retry that reached the repository. */
+    val retryCalls: MutableList<String> = mutableListOf()
     val ensureLocalCopiesCalls: MutableList<String> = mutableListOf()
     var lastSentMessage: Message? = null
-    var lastSentRecipientId: String? = null
     var lastSentMimeType: String? = null
 
     /** The filter the last in-chat search was issued with — lets a test assert it reached the repo unchanged. */
@@ -46,7 +46,6 @@ internal class FakeMessageRepository : MessageRepository {
         val chatId: String,
         val uri: String,
         val mimeType: String,
-        val recipientId: String,
         val caption: String,
         /** null = "follow the global preference"; see MessageRepository.sendMediaMessage. */
         val isHd: Boolean? = null,
@@ -70,7 +69,6 @@ internal class FakeMessageRepository : MessageRepository {
         retryCalls.clear()
         ensureLocalCopiesCalls.clear()
         lastSentMessage = null
-        lastSentRecipientId = null
         lastSentMimeType = null
         lastSearchFilter = null
         searchTruncated = false
@@ -114,7 +112,6 @@ internal class FakeMessageRepository : MessageRepository {
     override suspend fun sendMessage(
         chatId: String,
         content: String,
-        recipientId: String,
         replyToId: String?,
         mentions: List<String>,
         emojiSizes: Map<Int, Float>,
@@ -131,7 +128,6 @@ internal class FakeMessageRepository : MessageRepository {
             status = MessageStatus.SENT,
         )
         lastSentMessage = msg
-        lastSentRecipientId = recipientId
         messagesByChat.value = messagesByChat.value.toMutableMap().also { map ->
             map[chatId] = (map[chatId].orEmpty()) + msg
         }
@@ -182,7 +178,6 @@ internal class FakeMessageRepository : MessageRepository {
         chatId: String,
         uri: String,
         mimeType: String,
-        recipientId: String,
         caption: String,
         isHd: Boolean?,
         fileName: String?,
@@ -191,8 +186,7 @@ internal class FakeMessageRepository : MessageRepository {
         val msg = Message(id = UUID.randomUUID().toString(), chatId = chatId, content = caption)
         lastSentMessage = msg
         lastSentMimeType = mimeType
-        lastSentRecipientId = recipientId
-        sentMedia += SentMedia(chatId, uri, mimeType, recipientId, caption, isHd, fileName)
+        sentMedia += SentMedia(chatId, uri, mimeType, caption, isHd, fileName)
         return Result.success(msg)
     }
 
@@ -215,15 +209,14 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(Unit)
     }
 
-    /** Every forward that reached the repository, as `chatId to recipientId`. */
-    val forwardedTargets = mutableListOf<Pair<String, String>>()
+    /** The target chat id of every forward that reached the repository. */
+    val forwardedTargets = mutableListOf<String>()
 
     override suspend fun forwardMessage(
         message: Message,
         targetChatId: String,
-        recipientId: String,
     ): Result<Message> {
-        forwardedTargets += targetChatId to recipientId
+        forwardedTargets += targetChatId
         consumeFailure()?.let { return it }
         val forwarded = message.copy(id = UUID.randomUUID().toString(), chatId = targetChatId, isForwarded = true)
         lastSentMessage = forwarded
@@ -233,7 +226,6 @@ internal class FakeMessageRepository : MessageRepository {
     override suspend fun sendVoiceMessage(
         chatId: String,
         uri: String,
-        recipientId: String,
         durationSeconds: Int,
     ): Result<Message> {
         consumeFailure()?.let { return it }
@@ -340,7 +332,6 @@ internal class FakeMessageRepository : MessageRepository {
         chatId: String,
         latitude: Double,
         longitude: Double,
-        recipientId: String,
         comment: String,
     ): Result<Message> {
         consumeFailure()?.let { return it }
@@ -368,7 +359,6 @@ internal class FakeMessageRepository : MessageRepository {
         chatId: String,
         durationMs: Long,
         caption: String?,
-        recipientId: String,
         style: com.firestream.chat.domain.model.TimerAlarmStyle,
         sound: com.firestream.chat.domain.model.TimerAlarmSound,
     ): Result<Message> {
@@ -412,8 +402,8 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(Unit)
     }
 
-    override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> {
-        retryCalls.add(messageId to recipientId)
+    override suspend fun retryFailedMessage(messageId: String): Result<Message> {
+        retryCalls.add(messageId)
         consumeFailure()?.let { return it }
         // Find the failed message across all chats; flip it to SENT in place.
         val matching = messagesByChat.value

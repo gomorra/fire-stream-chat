@@ -76,7 +76,7 @@ class MessageRepositoryRetryTest {
         val original = MessageEntity.outbox(storedTextMessage(), SendTarget.NoPeer).copy(outboxAttempts = 8)
         stubStored(original)
 
-        val result = repository.retryFailedMessage(original.id, recipientId = "")
+        val result = repository.retryFailedMessage(original.id)
 
         assertEquals(MessageStatus.SENDING, result.getOrThrow().status)
         coVerifyOrder {
@@ -87,24 +87,42 @@ class MessageRepositoryRetryTest {
     }
 
     // The row records its target at insert and OutboxSender encrypts for it,
-    // so the block check must ask about the same one, not whatever the screen passes.
+    // so the block check must ask about the same one.
     @Test
     fun `retry checks the block list against the target recorded on the row`() = runTest {
         stubStored(MessageEntity.outbox(storedTextMessage(), SendTarget.Peer("peer-on-row")))
 
-        repository.retryFailedMessage("failed-msg-1", recipientId = "peer-from-screen")
+        repository.retryFailedMessage("failed-msg-1")
 
         coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "peer-on-row") }
-        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "peer-from-screen") }
     }
 
     @Test
-    fun `retry of a row that recorded no target asks about the screen's recipient`() = runTest {
+    fun `retry of a row addressed to nobody asks nobody's block list`() = runTest {
+        stubStored(MessageEntity.outbox(storedTextMessage(), SendTarget.NoPeer))
+        coEvery { userSource.isUserBlocked(any(), any()) } returns true
+
+        val result = repository.retryFailedMessage("failed-msg-1")
+
+        assertTrue("retry should queue: ${result.exceptionOrNull()}", result.isSuccess)
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
+        verify(exactly = 1) { outboxScheduler.retryNow("failed-msg-1", uploads = false) }
+    }
+
+    // A row with no recorded target has nothing to say who it is for: the
+    // worker would refuse the row too.
+    // Refused before the flip, so the bubble never leaves FAILED.
+    @Test
+    fun `retry of a row that recorded no target is refused and the row stays FAILED`() = runTest {
         stubStored(MessageEntity.fromDomain(storedTextMessage()))
 
-        repository.retryFailedMessage("failed-msg-1", recipientId = "peer-from-screen")
+        val result = repository.retryFailedMessage("failed-msg-1")
 
-        coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "peer-from-screen") }
+        assertTrue(result.isFailure)
+        coVerify(exactly = 0) { messageDao.requeueForRetry(any()) }
+        assertTrue(statusUpdates.isEmpty())
+        verify(exactly = 0) { outboxScheduler.retryNow(any(), any()) }
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
     }
 
     @Test
@@ -112,7 +130,7 @@ class MessageRepositoryRetryTest {
         stubStored(MessageEntity.outbox(storedTextMessage(), SendTarget.Peer("peer1")))
         coEvery { userSource.isUserBlocked("uid1", "peer1") } returns true
 
-        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "peer1")
+        val result = repository.retryFailedMessage("failed-msg-1")
 
         assertTrue(result.isFailure)
         coVerify(exactly = 1) { messageDao.requeueForRetry("failed-msg-1") }
@@ -125,7 +143,7 @@ class MessageRepositoryRetryTest {
         stubStored(MessageEntity.outbox(storedTextMessage(), SendTarget.NoPeer))
         every { outboxScheduler.retryNow(any(), any()) } throws IllegalStateException("WorkManager is not initialized")
 
-        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "")
+        val result = repository.retryFailedMessage("failed-msg-1")
 
         assertTrue(result.isFailure)
         coVerify(exactly = 1) { messageDao.requeueForRetry("failed-msg-1") }
@@ -136,7 +154,7 @@ class MessageRepositoryRetryTest {
     fun `retry of non-FAILED message returns failure without IO`() = runTest {
         stubStored(MessageEntity.fromDomain(storedTextMessage(status = MessageStatus.SENT)))
 
-        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "")
+        val result = repository.retryFailedMessage("failed-msg-1")
 
         assertTrue(result.isFailure)
         assertTrue(statusUpdates.isEmpty())
@@ -148,7 +166,7 @@ class MessageRepositoryRetryTest {
     fun `retry of unknown message id returns failure`() = runTest {
         coEvery { messageDao.getMessageById("ghost") } returns null
 
-        val result = repository.retryFailedMessage("ghost", recipientId = "")
+        val result = repository.retryFailedMessage("ghost")
 
         assertTrue(result.isFailure)
         assertTrue(statusUpdates.isEmpty())
@@ -161,7 +179,7 @@ class MessageRepositoryRetryTest {
         val inserted = slot<MessageEntity>()
         coEvery { messageDao.insertOutbox(capture(inserted)) } just Runs
 
-        val result = repository.sendMessage("chat1", "hi", recipientId = "recipient1")
+        val result = repository.sendMessage("chat1", "hi")
 
         assertTrue("send should succeed: ${result.exceptionOrNull()}", result.isSuccess)
         assertEquals(MessageStatus.SENDING, result.getOrThrow().status)

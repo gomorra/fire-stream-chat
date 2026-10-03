@@ -10,7 +10,7 @@ internal sealed interface ChatListPendingAction {
     data class OpenSettings(val focusUpdate: Boolean) : ChatListPendingAction
     data class OpenChat(
         val chatId: String,
-        val recipientId: String,
+        val partnerIdHint: String,
         val fromNotification: Boolean,
         val targetMessageId: String? = null,
     ) : ChatListPendingAction
@@ -52,7 +52,7 @@ internal fun resolveChatListPendingAction(
 
     pendingChatId != null && pendingSenderId != null -> ChatListPendingAction.OpenChat(
         chatId = pendingChatId,
-        recipientId = pendingSenderId,
+        partnerIdHint = pendingSenderId,
         fromNotification = pendingFromNotification,
         targetMessageId = pendingTargetMessageId,
     )

@@ -105,7 +105,7 @@ class ChatViewModelViewerEditTest {
     }
 
     private fun buildViewModel(): ChatViewModel = ChatViewModel(
-        savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "recipientId" to "recipient1")),
+        savedStateHandle = SavedStateHandle(mapOf("chatId" to "chat1", "partnerIdHint" to "recipient1")),
         checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>(relaxed = true),
         searchMessagesUseCase = mockk<SearchMessagesUseCase>(relaxed = true),
         linkPreviewSource = linkPreviewSource,

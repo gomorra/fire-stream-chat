@@ -59,7 +59,7 @@ class ChatMessageActionsForwardTest {
 
     private fun actions() = ChatMessageActions(
         chatId = "chat1",
-        recipientId = "user-2",
+        partnerIdHint = "user-2",
         messageRepository = repository,
         reminderRepository = reminderRepository,
         dateTimeDetector = dateTimeDetector,
@@ -68,11 +68,11 @@ class ChatMessageActionsForwardTest {
     )
 
     @Test
-    fun `a group forward is addressed to nobody, a 1-1 to the other participant`() = runTest {
+    fun `a forward names each picked chat by its id, a group like a 1-1`() = runTest {
         actions().forwardMessage(TestData.message(), listOf(oneToOne, group))
         advanceUntilIdle()
 
-        assertEquals(listOf("c1" to "user-2", "c2" to ""), repository.forwardedTargets)
+        assertEquals(listOf("c1", "c2"), repository.forwardedTargets)
     }
 
     @Test
@@ -109,6 +109,6 @@ class ChatMessageActionsForwardTest {
         actions().forwardMessage(TestData.message(), emptyList())
         advanceUntilIdle()
 
-        assertEquals(emptyList<Pair<String, String>>(), repository.forwardedTargets)
+        assertEquals(emptyList<String>(), repository.forwardedTargets)
     }
 }

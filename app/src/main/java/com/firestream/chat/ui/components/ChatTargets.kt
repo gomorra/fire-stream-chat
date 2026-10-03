@@ -5,9 +5,10 @@ import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.User
 
 // region: AGENT-NOTE
-// "Which chat is this, and who is a send to it addressed to" — answered once,
-// for every surface that asks. The chat pickers are the main callers;
-// ChatListScreen asks sendRecipientId for the chat route it navigates to.
+// "Which chat is this, and who is its 1:1 partner" — answered once, for every
+// surface that asks. The chat pickers are the main callers. ChatListScreen and
+// SharePickerViewModel ask partnerIdHint for the chat route they navigate to.
+// Who a send is addressed to is not answered here: the repository decides.
 // Deliberately free of Compose, so a ViewModel can call them
 // (ui/share/SharePickerViewModel does) and so they can be unit-tested without
 // Robolectric — see ui/components/ChatPickerTargetsTest.
@@ -43,15 +44,14 @@ internal fun Chat.pickerDisplayName(profile: User?): String =
         ?: UNNAMED_CHAT
 
 /**
- * The recipient a send to this chat is addressed to — the other participant of a
- * 1:1, and **empty for a group or broadcast**.
+ * The partner argument of the chat route for this chat: the other participant of
+ * a 1:1, and **empty for a group or broadcast**.
  *
- * Signal sessions are 1:1. A group has to go through the plaintext branch in
- * `MessageRepositoryImpl` so every participant can read it; naming one arbitrary
- * member as the recipient would encrypt a group message to that member alone.
- * That was a live bug in the forward dialog the chat picker replaced.
+ * Navigation only. The chat screen uses it for the partner's profile, presence
+ * and calls. It never addresses a send: the repository resolves the target from
+ * the chat itself.
  */
-internal fun Chat.sendRecipientId(currentUserId: String): String =
+internal fun Chat.partnerIdHint(currentUserId: String): String =
     if (type == ChatType.INDIVIDUAL) otherParticipantId(currentUserId) else ""
 
 /** The rows matching [query] by display name; the whole list when it is blank. */

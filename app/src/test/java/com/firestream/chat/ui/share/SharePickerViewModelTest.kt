@@ -116,7 +116,7 @@ class SharePickerViewModelTest {
     }
 
     @Test
-    fun `send to group uses empty recipientId`() = runTest {
+    fun `send to a group names the group chat and hands back no partner`() = runTest {
         every { sharedContentHolder.consumeIntent() } returns mockk<Intent>()
         coEvery { shareContentResolver.resolve(any()) } returns SharedContent.Text("hi")
 
@@ -125,12 +125,17 @@ class SharePickerViewModelTest {
         viewModel.toggleChatSelection(groupChat.id)
 
         var doneChatId: String? = null
-        viewModel.send { chatId, _ -> doneChatId = chatId }
+        var donePartner: String? = null
+        viewModel.send { chatId, partner ->
+            doneChatId = chatId
+            donePartner = partner
+        }
         advanceUntilIdle()
 
         assertEquals(groupChat.id, doneChatId)
-        // Confirms the group branch passed "" and NOT otherGroupMember.
-        assertEquals("", messageRepository.lastSentRecipientId)
+        assertEquals(groupChat.id, messageRepository.lastSentMessage?.chatId)
+        // The navigation hint for a group is "" and NOT otherGroupMember.
+        assertEquals("", donePartner)
     }
 
     // Regression: the share sheet's cache copy is named by a random id, so a

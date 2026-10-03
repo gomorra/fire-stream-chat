@@ -7,11 +7,11 @@
 #   scripts/cut-release.sh X.Y.Z [--dry-run]
 #
 # What it does:
-#   1. Runs preflight checks (git repo, branch, clean tree, tag collision,
-#      CHANGELOG header state).
+#   1. Runs preflight checks (git repo, branch, clean tree, not behind
+#      origin/main, tag collision, CHANGELOG header state).
 #   2. Rewrites the CHANGELOG.md "## [UNRELEASED] [X.Y.Z] — ..." header to
 #      "## [X.Y.Z] — YYYY-MM-DD".
-#   3. Commits, tags vX.Y.Z, and pushes main + the tag.
+#   3. Commits, tags vX.Y.Z, and pushes main + the tag in one atomic push.
 #
 # --dry-run runs every preflight check (which can still fail) but performs
 # no mutation — it only prints what would happen.
@@ -104,6 +104,14 @@ if [[ -n "$(git status --porcelain)" ]]; then
     die "working tree is not clean — commit or stash changes before cutting a release"
 fi
 
+# The push at the end sends main and the tag together. A local main that lacks
+# a commit from origin would be rejected there, after the commit and tag exist.
+git fetch --quiet origin main \
+    || die "could not fetch origin/main — check the network before cutting a release"
+BEHIND="$(git rev-list --count HEAD..origin/main)"
+[[ "$BEHIND" -eq 0 ]] \
+    || die "local main is $BEHIND commit(s) behind origin/main — pull (or merge origin/main) and re-run"
+
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
     die "tag $TAG already exists locally"
 fi
@@ -194,7 +202,9 @@ run git add CHANGELOG.md
 # git commit — a repo hook blocks heredoc commits and hangs otherwise.
 run git commit -m "chore(release): $TAG"
 run git tag "$TAG"
-run git push origin main "$TAG"
+# --atomic: the tag must never reach origin without the branch. A tag alone
+# starts the release build from a commit that is not on origin/main.
+run git push --atomic origin main "$TAG"
 
 # ---------------------------------------------------------------------------
 # Epilogue (always printed, including under --dry-run)
