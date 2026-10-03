@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, step 1 shipped. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
+Status: approved, steps 1 and 2 shipped. The prototype is built on `prototype/video-call` and waits for the owner's verdict. Steps 4 and 9 wait for that verdict.
 
 ## Context
 
@@ -262,6 +262,45 @@ Departures (for sign-off):
 
 The message sync path and a Room column change here.
 
+**Approach**
+
+1. Domain first: `CallSignalingData.video`, `CallState.*.video`, `Message.isVideoCall`,
+   `CallLogEntry.video`, and the two `CallRepository` signatures.
+2. Signalling: `CallSignalingSource.createCallDocument`, `FirestoreCallSource` (write, and read with
+   a missing field as false), the pocketbase stub, `CallRepositoryImpl`.
+3. The `CALL` message: `MessageColumns` / `MessageRecord.isVideoCall`, `RawMessage.isVideoCall`,
+   `MessageSource.sendCallMessage`, the Firestore field `video` in `FirestoreMessageSource`,
+   `RawMessage.toMessage` in `MessageRepositoryImpl`, and `AppDatabase` 29 → 30.
+4. The ring: `CallActivity.EXTRA_VIDEO` and `CallService.EXTRA_VIDEO`, `FCMService`, the function's
+   payload, and the notification title. The service keeps the call's kind in one field. When the
+   call document says video and the service did not know, the service takes it on the main thread:
+   `CallStateHolder.markVideo` flips the current state and the ring notification is posted again.
+5. `CallsViewModel.buildEntries` fills `CallLogEntry.video`.
+6. Tests: `CallsViewModelTest`, a new `MessageEntityCallMappingTest`, `FirestoreMessageSourceTest`
+   (write and read), a new `FirestoreCallSourceTest`, `CallStateHolderTest` for `markVideo`, and a
+   new Robolectric `CallNotificationManagerTest` for the two titles.
+7. Nothing in the code contradicts the spec. The three hand-built outgoing intents stay as they are;
+   `CallActivity` reads `EXTRA_VIDEO` with false as the default, and step 4 replaces the intents.
+8. Skills: `code-review` (tagged), and `simplify` because the diff reaches 600 lines and the
+   service gains a cross-thread field.
+
+**Shipped** `05093267` (2026-10-04) — tier: strong, tagged strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- No CHANGELOG entry and no version bump. Nothing starts a call as video yet, so nothing a user sees changes.
+- The ring's title is *Incoming Video Call* or *Incoming Voice Call*, in the title case the voice ring already had.
+- The upgrade wipes the local message database (`AppDatabase` 29 → 30). Messages sync back from Firestore.
+- `CallState.Live` is new: the ringing, connecting and connected states implement it (`callId`, `video`, `withVideo()`). /simplify asked for it in place of four identical branches in `CallStateHolder.markVideo`.
+- The three hand-built outgoing intents are unchanged. `CallActivity` reads `EXTRA_VIDEO` with false as the default.
+- The ring notification now sets `setOnlyAlertOnce`, because the service posts it a second time when it learns the kind from the call document.
+- /code-review found three races in the first version of that late path: a ring posted after the call ended, a kind leaking into the next call, and a kind lost when the call connects at the same moment. The path now runs on the main thread, cancels a ring that lost the race, and marks the state again after `Connected`. Step 7 has a note to delete all of it.
+- `TECH_DEBT.md`: the `MessageColumns` entry said to drop the interface with the next backend column. `isVideoCall` was added the old way and the entry records that.
+- Not done, from /code-review: one name for the concept (`video`, `isVideoCall`, `callVideo`), and a type for the caller's id, name, avatar and kind that travel together.
+- Not done, from /simplify: `CallState` as the only store of the kind. The service still needs it after the state is `Ended`, for the call message.
+- `docs/DOMAIN-MODELS.md` and `docs/CLOUD-FUNCTIONS.md` had stale call sections (`CallLogEntry`'s fields, the push type). They were rewritten.
+- `node --check functions/index.js` was refused by the session's permissions. The change there is one payload property and was checked by reading.
+- No test covers `CallService`'s late path or `FCMService`. Neither class has a test today.
+- Nothing ran on a device. The checks are in `docs/BACKLOG.md` § *Pending on-device verification*.
+
 - `CallSignalingData.video`. `CallSignalingSource.createCallDocument(callerId, calleeId, video)` and
   `CallRepository.createCall(calleeId, video)`. `FirestoreCallSource` writes and reads `video`; a
   missing field is false. The pocketbase stub follows the signature.
@@ -320,6 +359,11 @@ The message sync path and a Room column change here.
   call document. The `media` writes of this step make an answered call emit many snapshots.
   `onCallAnswered` is safe against that. Check the `"declined"` and `"ended"` branches, or collect
   the status through `distinctUntilChanged()` and the media separately.
+- **(step-2)** `CallService.observeCallDocument` already reads the document on every snapshot for
+  the call's kind (`onCallDocumentSaysVideo`). It returns at once when the kind is known, so the
+  `media` snapshots cost nothing there.
+- **(step-2)** The ringing, connecting and connected states implement `CallState.Live` (`callId`,
+  `video`, `withVideo()`). State that every live call carries belongs on that interface.
 - Tests: `PeerSessionTest` (directions, `setCamera`, availability with an old peer on either side),
   `CallVideoSinksTest` (bind, rebind, the drop-before-dispose order), new rows in
   `CallAudioRoutePolicyTest`, `ProximityLockTest`, `CallStateHolderTest`.
@@ -347,6 +391,10 @@ The message sync path and a Room column change here.
   `CallActivity.outgoingIntent(…, video)` replaces the three hand-built intents.
 - Call log and bubble: `CallsScreen` rows and the `CALL` bubble show a camera icon and say
   *video call* for video entries. A row calls back with the kind it was.
+- **(step-2)** The kind is there to read: `CallLogEntry.video`, `Message.isVideoCall` and
+  `CallState.Live.video`. `CallActivity.EXTRA_VIDEO` starts a call as video, and nothing sets it
+  yet. The ring's title is *Incoming Video Call* or *Incoming Voice Call*; the two ongoing-call
+  notifications still say *Voice Call* for every call.
 - `ArchitectureTest`: add `CallVideoSinks` to `UI_ALLOWED_DATA_IMPORTS` and name it in the
   allowlist entry of `TECH_DEBT.md`.
 - Tests (Robolectric): the camera button's three states, avatar or tile per participant state, the
@@ -437,6 +485,11 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
 - **(step-1)** `PeerSession.events` has one collector, and a closed session still delivers events
   queued before the close. The owner must check by identity that the session is still the current
   one for that person, as `CallService.onSessionEvent` does.
+- **(step-2 /simplify)** The call's kind is stored twice: in `CallService.callVideo` and in
+  `CallState.Live.video`. `onCallDocumentSaysVideo` posts to the main thread, checks the call id
+  again and cancels a ring that lost a race with `cleanup()`. `onSessionConnected` calls
+  `markVideo` a second time. All of that exists only because the call's state has no single
+  thread. Delete it when the serial dispatcher lands, and keep one store.
 - Tests: `MeshCoordinatorTest` (join, leave, reopen, second failure, the cap), `CallQualityTest`.
 
 ### Step 8 — Ringing a group — skills: code-review; model: strong
