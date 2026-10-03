@@ -69,7 +69,7 @@ class MessageRepositoryTimerTest {
         coEvery { messageDao.upsertRecord(capture(optimisticSlot)) } just Runs
         coEvery { messageDao.markSent(any(), capture(replacedSlot), any()) } returns true
 
-        val result = repository.sendTimerMessage("chat1", 30_000L, "Pizza", "recipient1")
+        val result = repository.sendTimerMessage("chat1", 30_000L, "Pizza")
 
         assertTrue(result.isSuccess)
         val sent = result.getOrThrow()
@@ -90,7 +90,7 @@ class MessageRepositoryTimerTest {
     fun `sendTimerMessage rejects non-positive duration`() = runTest {
         coEvery { userSource.isUserBlocked(any(), any()) } returns false
 
-        val result = repository.sendTimerMessage("chat1", 0L, null, "recipient1")
+        val result = repository.sendTimerMessage("chat1", 0L, null)
 
         assertTrue(result.isFailure)
         coVerify(exactly = 0) { messageSource.sendTimerMessage(any(), any(), any(), any(), any()) }
@@ -100,7 +100,7 @@ class MessageRepositoryTimerTest {
     fun `sendTimerMessage fails when recipient is blocked`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
 
-        val result = repository.sendTimerMessage("chat1", 30_000L, null, "recipient1")
+        val result = repository.sendTimerMessage("chat1", 30_000L, null)
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
@@ -111,28 +111,27 @@ class MessageRepositoryTimerTest {
     // decides whose block list is asked. That comes from the chat's row.
 
     @Test
-    fun `a timer into a 1-to-1 chat asks about the chat's other participant, whatever recipient the caller names`() = runTest {
+    fun `a timer into a 1-to-1 chat asks about the chat's other participant`() = runTest {
         coEvery { userSource.isUserBlocked(any(), any()) } returns false
         coEvery {
             messageSource.sendTimerMessage("chat1", "uid1", 1_000L, null, any())
         } returns TimerSendResult("remoteId", 1L)
 
-        val result = repository.sendTimerMessage("chat1", 1_000L, null, recipientId = "someone-else")
+        val result = repository.sendTimerMessage("chat1", 1_000L, null)
 
         assertTrue("sent: ${result.exceptionOrNull()}", result.isSuccess)
         coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "recipient1") }
-        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "someone-else") }
     }
 
     @Test
-    fun `a timer into a group asks nobody's block list and is sent, whatever recipient the caller names`() = runTest {
-        // The member the caller names is one the sender has blocked.
+    fun `a timer into a group asks nobody's block list and is sent`() = runTest {
+        // A group member the sender has blocked.
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
         coEvery {
             messageSource.sendTimerMessage("group1", "uid1", 1_000L, null, any())
         } returns TimerSendResult("remoteId", 1L)
 
-        val result = repository.sendTimerMessage("group1", 1_000L, null, recipientId = "recipient1")
+        val result = repository.sendTimerMessage("group1", 1_000L, null)
 
         assertTrue("sent: ${result.exceptionOrNull()}", result.isSuccess)
         coVerify(exactly = 1) { messageSource.sendTimerMessage("group1", "uid1", 1_000L, null, any()) }
@@ -141,7 +140,7 @@ class MessageRepositoryTimerTest {
 
     @Test
     fun `a timer into a chat with no local row is refused before any row is written`() = runTest {
-        val refusal = repository.sendTimerMessage("not-synced-yet", 1_000L, null, "recipient1").exceptionOrNull()
+        val refusal = repository.sendTimerMessage("not-synced-yet", 1_000L, null).exceptionOrNull()
 
         assertTrue("$refusal", refusal is ChatNotReadyException)
         coVerify(exactly = 0) { messageDao.upsertRecord(any()) }

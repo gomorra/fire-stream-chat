@@ -112,7 +112,7 @@ class MessageRepositoryBlockTest {
         blockCheckThrows()
         stubOptimisticRow()
 
-        val result = repository.sendMessage("chat1", "hello", "recipient1")
+        val result = repository.sendMessage("chat1", "hello")
 
         assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
         assertEquals("hello", inserted.captured.content)
@@ -125,7 +125,7 @@ class MessageRepositoryBlockTest {
         stubOptimisticRow()
 
         val result = repository.sendMediaMessage(
-            "chat1", "content://docs/report.pdf", "application/pdf", "recipient1", "caption", null
+            "chat1", "content://docs/report.pdf", "application/pdf", "caption", null
         )
 
         assertTrue(result.isSuccess)
@@ -138,7 +138,7 @@ class MessageRepositoryBlockTest {
         blockCheckThrows()
         stubOptimisticRow()
 
-        val result = repository.sendVoiceMessage("chat1", "file:///tmp/v.aac", "recipient1", 5)
+        val result = repository.sendVoiceMessage("chat1", "file:///tmp/v.aac", 5)
 
         assertTrue(result.isSuccess)
         assertRowInsertedThenQueued()
@@ -149,7 +149,7 @@ class MessageRepositoryBlockTest {
         blockCheckThrows()
         stubOptimisticRow()
 
-        val result = repository.sendLocationMessage("chat1", 1.0, 2.0, "recipient1", "")
+        val result = repository.sendLocationMessage("chat1", 1.0, 2.0, "")
 
         assertTrue(result.isSuccess)
         assertRowInsertedThenQueued()
@@ -160,7 +160,7 @@ class MessageRepositoryBlockTest {
         blockCheckThrows()
         stubOptimisticRow()
 
-        val result = repository.forwardMessage(sentText(), "chat2", "recipient1")
+        val result = repository.forwardMessage(sentText(), "chat2")
 
         assertTrue(result.isSuccess)
         assertRowInsertedThenQueued()
@@ -175,7 +175,7 @@ class MessageRepositoryBlockTest {
         coEvery { messageDao.upsertRecord(capture(timerRow)) } just Runs
         coEvery { messageDao.updateMessageStatus(any(), any()) } just Runs
 
-        val result = repository.sendTimerMessage("chat1", 30_000L, null, "recipient1")
+        val result = repository.sendTimerMessage("chat1", 30_000L, null)
 
         assertTrue(result.isFailure)
         assertEquals(MessageStatus.SENDING.name, timerRow.captured.status)
@@ -190,7 +190,7 @@ class MessageRepositoryBlockTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
         stubOptimisticRow()
 
-        val result = repository.sendMessage("chat1", "hello", "recipient1")
+        val result = repository.sendMessage("chat1", "hello")
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
@@ -202,7 +202,7 @@ class MessageRepositoryBlockTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns false
         stubOptimisticRow()
 
-        val result = repository.sendMessage("chat1", "hello", "recipient1")
+        val result = repository.sendMessage("chat1", "hello")
 
         assertTrue(result.isSuccess)
         coVerify(exactly = 1) { messageDao.insertOutbox(any()) }
@@ -212,17 +212,17 @@ class MessageRepositoryBlockTest {
     // ── who a row is addressed to ───────────────────────────────────────────
     // The target a row records is who OutboxSender encrypts for and who the
     // worker's block check asks about. It comes from the chat's row on every
-    // path that writes one; the recipient argument is not an input.
+    // path that writes one; a caller names the chat and nothing else.
 
-    /** Every send that writes an outbox row, into [chatId], naming [recipientId] as the caller's recipient. */
-    private fun rowPaths(chatId: String, recipientId: String): Map<String, suspend () -> Result<Message>> = mapOf(
-        "text" to { repository.sendMessage(chatId, "hello", recipientId) },
+    /** Every send that writes an outbox row, into [chatId]. */
+    private fun rowPaths(chatId: String): Map<String, suspend () -> Result<Message>> = mapOf(
+        "text" to { repository.sendMessage(chatId, "hello") },
         "media" to {
-            repository.sendMediaMessage(chatId, "content://docs/report.pdf", "application/pdf", recipientId, "caption", null)
+            repository.sendMediaMessage(chatId, "content://docs/report.pdf", "application/pdf", "caption", null)
         },
-        "voice" to { repository.sendVoiceMessage(chatId, "file:///tmp/v.aac", recipientId, 5) },
-        "location" to { repository.sendLocationMessage(chatId, 1.0, 2.0, recipientId, "") },
-        "forward" to { repository.forwardMessage(sentText(), chatId, recipientId) },
+        "voice" to { repository.sendVoiceMessage(chatId, "file:///tmp/v.aac", 5) },
+        "location" to { repository.sendLocationMessage(chatId, 1.0, 2.0, "") },
+        "forward" to { repository.forwardMessage(sentText(), chatId) },
     )
 
     /** Runs each path and asserts that it queued a row recording [expected] as its `outboxRecipientId`. */
@@ -237,24 +237,22 @@ class MessageRepositoryBlockTest {
     }
 
     @Test
-    fun `every row path into a 1-to-1 chat records the chat's other participant, whatever recipient the caller names`() = runTest {
+    fun `every row path into a 1-to-1 chat records the chat's other participant`() = runTest {
         stubOptimisticRow()
 
-        assertEachRecords("recipient1", rowPaths("chat1", recipientId = "someone-else"))
-
-        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "someone-else") }
+        assertEachRecords("recipient1", rowPaths("chat1"))
     }
 
     // Regression: a screen that named one group member as the recipient (a group
     // opened from its notification did) had the send addressed to that member —
     // refused when the sender had blocked them, encrypted for them alone otherwise.
     @Test
-    fun `every row path into a group records no peer and asks nobody's block list, whatever recipient the caller names`() = runTest {
-        // The member the caller names is one the sender has blocked.
+    fun `every row path into a group records no peer and asks nobody's block list`() = runTest {
+        // A group member the sender has blocked.
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
         stubOptimisticRow()
 
-        assertEachRecords("", rowPaths("group1", recipientId = "recipient1"))
+        assertEachRecords("", rowPaths("group1"))
 
         coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
     }
@@ -264,7 +262,7 @@ class MessageRepositoryBlockTest {
     // would also fail the send with something other than the refusal.
     @Test
     fun `every row path into a chat with no local row is refused before any row is written`() = runTest {
-        rowPaths("not-synced-yet", recipientId = "recipient1").forEach { (path, send) ->
+        rowPaths("not-synced-yet").forEach { (path, send) ->
             val refusal = send().exceptionOrNull()
 
             assertTrue("$path: $refusal", refusal is ChatNotReadyException)
@@ -281,7 +279,7 @@ class MessageRepositoryBlockTest {
     fun `forwardMessage fails before any insert when recipient is blocked by sender`() = runTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
 
-        val result = repository.forwardMessage(sentText(), "chat2", "recipient1")
+        val result = repository.forwardMessage(sentText(), "chat2")
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
@@ -296,7 +294,7 @@ class MessageRepositoryBlockTest {
         coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
         stubOptimisticRow()
 
-        val result = repository.sendVoiceMessage("chat1", "file:///tmp/v.aac", "recipient1", 5)
+        val result = repository.sendVoiceMessage("chat1", "file:///tmp/v.aac", 5)
 
         assertTrue(result.isFailure)
         assertEquals("Cannot send messages to a blocked user", result.exceptionOrNull()?.message)
@@ -311,7 +309,7 @@ class MessageRepositoryBlockTest {
         stubOptimisticRow()
 
         val result = repository.sendMediaMessage(
-            "chat1", "content://docs/report.pdf", "application/pdf", "recipient1", "caption", null
+            "chat1", "content://docs/report.pdf", "application/pdf", "caption", null
         )
 
         assertTrue(result.isFailure)

@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface MessageRepository {
     val uploadProgress: StateFlow<Map<String, Float>>
     fun getMessages(chatId: String): Flow<List<Message>>
-    suspend fun sendMessage(chatId: String, content: String, recipientId: String, replyToId: String? = null, mentions: List<String> = emptyList(), emojiSizes: Map<Int, Float> = emptyMap()): Result<Message>
+    suspend fun sendMessage(chatId: String, content: String, replyToId: String? = null, mentions: List<String> = emptyList(), emojiSizes: Map<Int, Float> = emptyMap()): Result<Message>
     suspend fun deleteMessage(chatId: String, messageId: String): Result<Unit>
     suspend fun updateMessageStatus(chatId: String, messageId: String, status: String): Result<Unit>
     suspend fun editMessage(chatId: String, messageId: String, newContent: String, emojiSizes: Map<Int, Float> = emptyMap()): Result<Unit>
@@ -23,7 +23,7 @@ interface MessageRepository {
      *   global "send images in HD" preference, which is what every caller that
      *   does not offer the choice wants.
      */
-    suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String = "", isHd: Boolean? = null): Result<Message>
+    suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, caption: String = "", isHd: Boolean? = null): Result<Message>
     /**
      * Re-drive the send pipeline for a previously-failed message, mutating the
      * existing Room row in place (no new optimistic placeholder, no duplicate
@@ -31,15 +31,15 @@ interface MessageRepository {
      * [com.firestream.chat.domain.model.MessageStatus.FAILED]; any other state
      * fails fast. Supported types: TEXT, IMAGE, DOCUMENT, VOICE, LOCATION.
      */
-    suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message>
+    suspend fun retryFailedMessage(messageId: String): Result<Message>
     // Phase 1: reactions
     suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit>
     suspend fun removeReaction(chatId: String, messageId: String, userId: String): Result<Unit>
     // Phase 1: forwarding
-    suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message>
+    suspend fun forwardMessage(message: Message, targetChatId: String): Result<Message>
     // Phase 1: voice messages
     /** @param uri URI string (e.g. `content://...` or `file://...`). Parsed in the data layer. */
-    suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message>
+    suspend fun sendVoiceMessage(chatId: String, uri: String, durationSeconds: Int): Result<Message>
     // Phase 2: starred messages
     suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit>
     fun getStarredMessages(): Flow<List<Message>>
@@ -83,7 +83,7 @@ interface MessageRepository {
     // Call log
     fun getCallLog(): Flow<List<Message>>
     // Location sharing
-    suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, recipientId: String, comment: String = ""): Result<Message>
+    suspend fun sendLocationMessage(chatId: String, latitude: Double, longitude: Double, comment: String = ""): Result<Message>
     // Background sync
     suspend fun syncAllChatMessages(chatIds: List<String>)
     /**
@@ -106,7 +106,6 @@ interface MessageRepository {
         chatId: String,
         durationMs: Long,
         caption: String?,
-        recipientId: String,
         style: TimerAlarmStyle = TimerAlarmStyle.DEFAULT,
         sound: TimerAlarmSound = TimerAlarmSound.DEFAULT,
     ): Result<Message>

@@ -17,7 +17,6 @@ import com.firestream.chat.domain.util.MentionParser
 
 internal class ChatMessageSender(
     private val chatId: String,
-    private val recipientId: String,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val _uiState: MutableStateFlow<ChatUiState>,
@@ -80,7 +79,7 @@ internal class ChatMessageSender(
             } else {
                 val replyToId = state.composer.replyToMessage?.id
                 val mentions = if (state.session.isGroupChat) MentionParser.extractMentions(content, state.displayNameToUserId) else emptyList()
-                messageRepository.sendMessage(chatId, content, recipientId, replyToId, mentions, emojiSizes)
+                messageRepository.sendMessage(chatId, content, replyToId, mentions, emojiSizes)
                     .onFailure { e ->
                         _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
                     }
@@ -112,7 +111,6 @@ internal class ChatMessageSender(
                     chatId,
                     item.uri.toString(),
                     item.mimeType,
-                    recipientId,
                     item.caption,
                     item.isHd,
                 ).onFailure { e -> if (firstError == null) firstError = AppError.from(e) }
@@ -130,7 +128,7 @@ internal class ChatMessageSender(
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
         scope.launch {
             _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
-            messageRepository.sendVoiceMessage(chatId, uri.toString(), recipientId, durationSeconds)
+            messageRepository.sendVoiceMessage(chatId, uri.toString(), durationSeconds)
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(
@@ -151,7 +149,7 @@ internal class ChatMessageSender(
                     messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1)
                 )
             }
-            messageRepository.sendLocationMessage(chatId, latitude, longitude, recipientId, comment)
+            messageRepository.sendLocationMessage(chatId, latitude, longitude, comment)
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(
@@ -167,7 +165,7 @@ internal class ChatMessageSender(
     fun retrySend(message: Message) {
         scope.launch {
             _uiState.update { it.copy(composer = it.composer.copy(isSending = true)) }
-            messageRepository.retryFailedMessage(message.id, recipientId)
+            messageRepository.retryFailedMessage(message.id)
                 .onFailure { e ->
                     _uiState.update {
                         it.copy(

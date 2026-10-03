@@ -33,19 +33,19 @@ class ChatMessageSenderOfflineTest {
     @Test
     fun `text send reaches the repository while the typing write never completes`() = runTest {
         chatRepository.typingGate = CompletableDeferred() // never completed: offline
-        val sender = ChatMessageSender("chat-1", "peer-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
 
         sender.sendMessage("hello")
         runCurrent()
 
         assertEquals("hello", messageRepository.lastSentMessage?.content)
-        assertEquals("peer-1", messageRepository.lastSentRecipientId)
+        assertEquals("chat-1", messageRepository.lastSentMessage?.chatId)
     }
 
     @Test
     fun `three sends in a row all reach the repository while offline`() = runTest {
         chatRepository.typingGate = CompletableDeferred()
-        val sender = ChatMessageSender("chat-1", "peer-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
 
         sender.sendMessage("one")
         sender.sendMessage("two")
@@ -58,7 +58,7 @@ class ChatMessageSenderOfflineTest {
     @Test
     fun `typing-off is still requested alongside the send`() = runTest {
         chatRepository.typingGate = CompletableDeferred()
-        val sender = ChatMessageSender("chat-1", "peer-1", chatRepository, messageRepository, uiState, backgroundScope)
+        val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, uiState, backgroundScope)
 
         sender.sendMessage("hello")
         runCurrent()

@@ -153,8 +153,7 @@ class SharePickerViewModel @Inject constructor(
             val selectedChats = state.chats.filter { it.id in state.selectedChatIds }
 
             val results: List<Result<Unit>> = selectedChats.map { chat ->
-                val recipientId = chat.sendRecipientId(state.currentUserId)
-                async { sendToChat(chat.id, recipientId, content) }
+                async { sendToChat(chat.id, content) }
             }.awaitAll()
 
             val failures = results.count { it.isFailure }
@@ -192,12 +191,11 @@ class SharePickerViewModel @Inject constructor(
      */
     private suspend fun sendToChat(
         chatId: String,
-        recipientId: String,
         content: SharedContent
     ): Result<Unit> = runCatching {
         when (content) {
             is SharedContent.Text -> {
-                messageRepository.sendMessage(chatId, content.text, recipientId).getOrThrow()
+                messageRepository.sendMessage(chatId, content.text).getOrThrow()
             }
             is SharedContent.Media -> {
                 // Sequential so the images land in the chat in the order the user
@@ -209,12 +207,8 @@ class SharePickerViewModel @Inject constructor(
                 // still lets the rest through.
                 var firstFailure: Throwable? = null
                 content.items.forEach { item ->
-                    messageRepository.sendMediaMessage(
-                        chatId,
-                        item.cachedUri,
-                        item.mimeType,
-                        recipientId
-                    ).onFailure { e -> if (firstFailure == null) firstFailure = e }
+                    messageRepository.sendMediaMessage(chatId, item.cachedUri, item.mimeType)
+                        .onFailure { e -> if (firstFailure == null) firstFailure = e }
                 }
                 firstFailure?.let { throw it }
             }

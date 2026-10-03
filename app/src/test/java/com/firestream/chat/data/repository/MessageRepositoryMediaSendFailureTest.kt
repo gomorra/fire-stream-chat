@@ -100,7 +100,6 @@ class MessageRepositoryMediaSendFailureTest {
             chatId = "chat1",
             uri = "content://media/picker/0/photo.jpg",
             mimeType = "image/jpeg",
-            recipientId = "",
             caption = "look at this"
         )
 
@@ -129,7 +128,6 @@ class MessageRepositoryMediaSendFailureTest {
             chatId = "chat1",
             uri = "content://docs/report.pdf",
             mimeType = "application/pdf",
-            recipientId = "",
             caption = ""
         )
 
@@ -154,7 +152,6 @@ class MessageRepositoryMediaSendFailureTest {
             chatId = "chat1",
             uri = "content://media/picker/0/clip.mp4",
             mimeType = "video/mp4",
-            recipientId = "",
             caption = "my clip"
         )
 
@@ -179,7 +176,7 @@ class MessageRepositoryMediaSendFailureTest {
         }
 
         sending = launch {
-            repository.sendMediaMessage("chat1", "content://docs/report.pdf", "application/pdf", "", "")
+            repository.sendMediaMessage("chat1", "content://docs/report.pdf", "application/pdf", "")
         }
         sending.join()
 
@@ -201,7 +198,6 @@ class MessageRepositoryMediaSendFailureTest {
             chatId = "chat1",
             uri = "content://media/picker/0/long.mp4",
             mimeType = "video/mp4",
-            recipientId = "",
             caption = "too long"
         )
 

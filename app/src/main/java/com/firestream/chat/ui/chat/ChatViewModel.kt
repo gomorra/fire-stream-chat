@@ -185,7 +185,7 @@ class ChatViewModel @Inject constructor(
         },
     )
     private val messageSender = ChatMessageSender(
-        chatId, recipientId, chatRepository, messageRepository, _uiState, viewModelScope
+        chatId, chatRepository, messageRepository, _uiState, viewModelScope
     )
     private val messageLoader = ChatMessageLoader(
         chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, reminderRepository,
@@ -668,7 +668,6 @@ class ChatViewModel @Inject constructor(
                 chatId,
                 payload.durationMs,
                 payload.caption,
-                recipientId,
                 style = payload.style,
                 sound = payload.sound,
             )

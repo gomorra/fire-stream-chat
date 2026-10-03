@@ -522,15 +522,10 @@ class MessageRepositoryImpl @Inject constructor(
      * for, or nobody for a group or broadcast chat — comes from the chat's local
      * row ([sendTargetFor]). A chat that row cannot address is refused with
      * [ChatNotReadyException] before anything is written.
-     *
-     * @param recipientId Ignored, here and on every other send: no caller's idea
-     *   of the recipient is an addressing input. The parameter is still on the
-     *   signatures only until it is removed from `MessageRepository`.
      */
     override suspend fun sendMessage(
         chatId: String,
         content: String,
-        recipientId: String,
         replyToId: String?,
         mentions: List<String>,
         emojiSizes: Map<Int, Float>
@@ -593,12 +588,11 @@ class MessageRepositoryImpl @Inject constructor(
     /**
      * Send a media (image / video / document) message to a chat.
      *
-     * @param recipientId Ignored — see [sendMessage].
      * @param isHd per-image override from the send preview; `null` falls back to
      *   the global preference, so a caller that never offers the choice — the
      *   share sheet, a retry — behaves exactly as it did before per-image HD.
      */
-    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, recipientId: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
+    override suspend fun sendMediaMessage(chatId: String, uri: String, mimeType: String, caption: String, isHd: Boolean?): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
@@ -641,7 +635,7 @@ class MessageRepositoryImpl @Inject constructor(
         queueSend(placeholder, mimeType)
     }
 
-    override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> = resultOf {
+    override suspend fun retryFailedMessage(messageId: String): Result<Message> = resultOf {
         val entity = messageDao.getMessageById(messageId)
             ?: throw IllegalStateException("Cannot retry unknown message $messageId")
         if (entity.status != MessageStatus.FAILED.name) {
@@ -688,9 +682,9 @@ class MessageRepositoryImpl @Inject constructor(
      * A forward is a queued send like any other: the source message's row, re-stamped
      * for the target chat, goes through the outbox. Its media is already uploaded
      * (`mediaUrl` set), so the worker skips straight to the write. It is addressed
-     * from the target chat's row, like every send; [recipientId] is ignored.
+     * from the target chat's row, like every send.
      */
-    override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
+    override suspend fun forwardMessage(message: Message, targetChatId: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val target = sendTargetFor(targetChatId, senderId)
         // Before the insert: the source message stays in its chat, so a refusal
@@ -716,7 +710,7 @@ class MessageRepositoryImpl @Inject constructor(
         enqueueSend(row, blockTarget = null)
     }
 
-    override suspend fun sendVoiceMessage(chatId: String, uri: String, recipientId: String, durationSeconds: Int): Result<Message> = resultOf {
+    override suspend fun sendVoiceMessage(chatId: String, uri: String, durationSeconds: Int): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
@@ -1029,7 +1023,6 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         latitude: Double,
         longitude: Double,
-        recipientId: String,
         comment: String
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
@@ -1055,7 +1048,6 @@ class MessageRepositoryImpl @Inject constructor(
         chatId: String,
         durationMs: Long,
         caption: String?,
-        recipientId: String,
         style: TimerAlarmStyle,
         sound: TimerAlarmSound,
     ): Result<Message> = resultOf {
