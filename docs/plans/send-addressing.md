@@ -207,6 +207,22 @@ someone you already have a 1:1 with, on an install whose chat-list sync has not 
   its own — its user-visible point is step 3's; step 3's *Fixed* entry carries this hash too.
   Untagged → no `skills:` floor.
 
+**Approach**
+- Code as it stands matches the spec: `getOrCreateChat` is at `ChatRepositoryImpl.kt:92–117`, the
+  found branch returns `existing` with no local write, and `ChatDao.upsertRemote` (:47–68) is the
+  merge the spec names. Nothing contradicts §0 or §2.
+- Order: the regression test first, run alone and seen failing on the found-chat case; then the
+  one-line write in `ChatRepositoryImpl`; then the full gate.
+- Test: new `data/repository/ChatRepositoryImplGetOrCreateTest`, MockK for the six constructor
+  dependencies. Found chat ⇒ `upsertRemote(listOf(ChatEntity.fromDomain(existing)))`, never
+  `insertChat`, no `createChat`, the same `Chat` returned. No chat found ⇒ `createChat` +
+  `insertChat` as today, never `upsertRemote`, the returned `Chat` carries the new id.
+- Touches one production file under `data/repository/`, so no further skills: the diff is a single
+  local write with no concurrency or crypto in it, and neither tripwire applies.
+
+**Shipped** `d63ae9b1` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+Departures (for sign-off): none
+
 ### Step 2 — A group notification no longer names a member as the chat partner
 
 - `FCMService.showNotification` (:190–), the tap intent at :234–241: write
@@ -276,6 +292,8 @@ watch fail, implement, green, one commit).
    group message is never encrypted for one member only. A chat that is not in the local store
    yet refuses with *"This chat isn't ready yet"* instead of guessing. Say in the entry that
    encryption itself stays opt-in. Hashes: this commit and step 1's.
+   **(step-1)** Step 1's hash is `d63ae9b1`. It has no CHANGELOG entry and no version bump of
+   its own, so this entry is the only place it is recorded.
 
 ### Step 4 — Drop `recipientId` from the seven send members; skills: code-review
 
