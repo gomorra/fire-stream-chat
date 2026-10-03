@@ -64,6 +64,14 @@ check_rc "inline 'Shipped' prose does not count" 1 pr_step_shipped "$PLAN" 5
 check_rc "Shipped under a ## heading counts for no step" 1 pr_step_shipped "$PLAN" 6
 check_rc "step 3 has a pending decision"      0 pr_step_decision_pending "$PLAN" 3
 check_rc "step 2 has no pending decision"     1 pr_step_decision_pending "$PLAN" 2
+# A block far longer than a pipe buffer below the marker: a reader that stops at the first
+# match would kill the writer, and pipefail would report the step as not shipped.
+awk 'BEGIN {
+    print "### Step 1 — long\n\n**Shipped** `abc1234`"; for (i = 0; i < 200000; i++) print "departure line"
+    print "### Step 2 — long\n\n**Decision needed**";   for (i = 0; i < 200000; i++) print "option line"
+}' > "$TMP/long.md"
+check_rc "a long block after Shipped still counts"         0 pr_step_shipped "$TMP/long.md" 1
+check_rc "a long block after Decision needed still counts" 0 pr_step_decision_pending "$TMP/long.md" 2
 check "shipped commit of step 1"              "abc1234" "$(pr_shipped_commit "$PLAN" 1)"
 check "shipped commit of step 7"              "0123abc" "$(pr_shipped_commit "$PLAN" 7)"
 check "shipped commit of unshipped step 2"    "" "$(pr_shipped_commit "$PLAN" 2)"
@@ -228,7 +236,7 @@ check "dry run prompt has no placeholders left" "0" "$(cat "$TMP/runs/plan.step2
 check "dry run without a variant attaches no advisor" "0" "$(printf '%s' "$dry" | grep -c -- '--advisor' || true)"
 check "dry run shows the escalation rung (medium → high on step 5) and the judge" "1" "$(printf '%s' "$dry" | grep -c 'one re-run at effort high | judge: off' || true)"
 dryb=$(PLAN_RUNNER_RUNS_DIR=$TMP/runs "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant b 2>"$TMP/dryb.err") || { echo "  variant dry-run exit $? — stderr:"; sed 's/^/    /' "$TMP/dryb.err"; fail=$((fail + 1)); }
-check "variant b: untagged step 5 runs opus/medium with the advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort medium, budget \$25, advisor fable' || true)"
+check "variant b: untagged step 5 runs opus/medium with the advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort medium, budget \$30, advisor fable' || true)"
 check "variant b: the effort tag still wins on step 6" "1" "$(printf '%s' "$dryb" | grep -c 'tier mid (tagged mid) → model opus, effort low' || true)"
 check "variant b: a strong step keeps its tier and gets no advisor" "1" "$(printf '%s' "$dryb" | grep -c 'tier strong (tagged strong) → model opus, effort high, budget \$12, advisor none' || true)"
 check "variant b: --advisor is passed for the mid steps only (5, 6)" "2" "$(printf '%s' "$dryb" | grep -c -- '--advisor fable' || true)"

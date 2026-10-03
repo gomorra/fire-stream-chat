@@ -103,15 +103,17 @@ pr_step_section() {
 }
 
 # pr_step_shipped <plan> <id>  → exit 0 when a **Shipped** line sits under the heading.
+# Not `grep -q`: it stops reading at the first match, the awk writer dies of SIGPIPE on a
+# long block, and under pipefail the step reads as not shipped.
 pr_step_shipped() {
-    pr_step_section "$1" "$2" | grep -qE '^\*\*Shipped\*\*'
+    pr_step_section "$1" "$2" | grep -E '^\*\*Shipped\*\*' >/dev/null
 }
 
 # pr_step_decision_pending <plan> <id>  → exit 0 when a **Decision needed** block
 # is under the heading (an earlier attempt stopped; the human has not answered).
 # An answered block is renamed **Decision taken** by the human and no longer blocks.
 pr_step_decision_pending() {
-    pr_step_section "$1" "$2" | grep -qE '^\*\*Decision needed\*\*'
+    pr_step_section "$1" "$2" | grep -E '^\*\*Decision needed\*\*' >/dev/null
 }
 
 # pr_shipped_commit <plan> <id>  → the hash named by the **Shipped** line, or nothing.
