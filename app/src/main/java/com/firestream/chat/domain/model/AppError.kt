@@ -77,6 +77,7 @@ sealed interface AppError {
             is SocketTimeoutException,
             is IOException -> Network
             is MediaLimitException -> Validation(throwable.message ?: "Media exceeds the allowed limit")
+            is ChatNotReadyException -> Validation(throwable.message ?: "This chat isn't ready yet")
             else -> Unknown(throwable)
         }
     }
@@ -101,3 +102,16 @@ class MediaLimitException(message: String) : Exception(message)
  * shows [message] verbatim, as it always has.
  */
 class RecipientBlockedException : Exception("Cannot send messages to a blocked user")
+
+/**
+ * Thrown by a send into a chat the local store cannot address: no local row for
+ * [chatId] yet, a 1:1 chat without exactly one other participant, or a chat type
+ * the app does not know. The repository throws it before any row is written, so
+ * there is no bubble and nothing to retry. [AppError.from] maps it to
+ * [AppError.Validation], so the banner shows [message] verbatim.
+ *
+ * [reason] is for the log only. It is in [toString], never in [message].
+ */
+class ChatNotReadyException(val chatId: String, val reason: String) : Exception("This chat isn't ready yet") {
+    override fun toString() = "ChatNotReadyException(chat=$chatId): $reason"
+}

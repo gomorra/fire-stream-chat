@@ -7,6 +7,8 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.TimerSendResult
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.domain.model.ChatNotReadyException
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.TimerState
 import com.firestream.chat.domain.repository.ChatRepository
@@ -41,6 +43,10 @@ class MessageRepositoryTimerTest {
         every { messageSource.lastContentFor(any(), any()) } answers { "preview" }
         repository = messageRepository(
             messageDao = messageDao,
+            chats = listOf(
+                testChat("chat1"),
+                testChat("group1", ChatType.GROUP.name, listOf("uid1", "recipient1", "member2")),
+            ),
             messageSource = messageSource,
             authSource = authSource,
             chatRepository = chatRepository,
@@ -101,15 +107,46 @@ class MessageRepositoryTimerTest {
         coVerify(exactly = 0) { messageSource.sendTimerMessage(any(), any(), any(), any(), any()) }
     }
 
+    // A timer is written directly and never encrypted, so who it is for only
+    // decides whose block list is asked. That comes from the chat's row.
+
     @Test
-    fun `sendTimerMessage skips block check for empty recipient (group chats)`() = runTest {
+    fun `a timer into a 1-to-1 chat asks about the chat's other participant, whatever recipient the caller names`() = runTest {
+        coEvery { userSource.isUserBlocked(any(), any()) } returns false
         coEvery {
             messageSource.sendTimerMessage("chat1", "uid1", 1_000L, null, any())
         } returns TimerSendResult("remoteId", 1L)
 
-        val result = repository.sendTimerMessage("chat1", 1_000L, null, recipientId = "")
+        val result = repository.sendTimerMessage("chat1", 1_000L, null, recipientId = "someone-else")
 
-        assertTrue(result.isSuccess)
+        assertTrue("sent: ${result.exceptionOrNull()}", result.isSuccess)
+        coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "recipient1") }
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "someone-else") }
+    }
+
+    @Test
+    fun `a timer into a group asks nobody's block list and is sent, whatever recipient the caller names`() = runTest {
+        // The member the caller names is one the sender has blocked.
+        coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
+        coEvery {
+            messageSource.sendTimerMessage("group1", "uid1", 1_000L, null, any())
+        } returns TimerSendResult("remoteId", 1L)
+
+        val result = repository.sendTimerMessage("group1", 1_000L, null, recipientId = "recipient1")
+
+        assertTrue("sent: ${result.exceptionOrNull()}", result.isSuccess)
+        coVerify(exactly = 1) { messageSource.sendTimerMessage("group1", "uid1", 1_000L, null, any()) }
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
+    }
+
+    @Test
+    fun `a timer into a chat with no local row is refused before any row is written`() = runTest {
+        val refusal = repository.sendTimerMessage("not-synced-yet", 1_000L, null, "recipient1").exceptionOrNull()
+
+        assertTrue("$refusal", refusal is ChatNotReadyException)
+        coVerify(exactly = 0) { messageDao.upsertRecord(any()) }
+        coVerify(exactly = 0) { messageDao.updateMessageStatus(any(), any()) }
+        coVerify(exactly = 0) { messageSource.sendTimerMessage(any(), any(), any(), any(), any()) }
         coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
     }
 

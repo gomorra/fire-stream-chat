@@ -7,6 +7,7 @@ import com.firestream.chat.data.outbox.OutboxFiles
 import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -55,6 +56,10 @@ class MessageRepositoryForwardTest {
 
         repository = messageRepository(
             messageDao = messageDao,
+            chats = listOf(
+                testChat("chat2"),
+                testChat("group1", ChatType.GROUP.name, listOf("uid1", "member1", "member2")),
+            ),
             messageSource = messageSource,
             authSource = authSource,
             messageWriter = messageWriter,
@@ -116,6 +121,16 @@ class MessageRepositoryForwardTest {
 
         assertEquals("recipient1", inserted.captured.outboxRecipientId)
         assertEquals(0, inserted.captured.outboxAttempts)
+    }
+
+    // Regression: the forward dialog once named one member of the target group
+    // as the recipient, and the row recorded that member as the peer to encrypt
+    // for. The target comes from the target chat's row, not from the caller.
+    @Test
+    fun `a forward into a group records no peer, whatever recipient the caller names`() = runTest {
+        repository.forwardMessage(source(MessageType.TEXT), targetChatId = "group1", recipientId = "member1")
+
+        assertEquals("", inserted.captured.outboxRecipientId)
     }
 
     @Test

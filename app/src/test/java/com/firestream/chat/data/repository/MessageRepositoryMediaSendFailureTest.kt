@@ -136,7 +136,8 @@ class MessageRepositoryMediaSendFailureTest {
         assertEquals(MessageStatus.SENDING, result.getOrThrow().status)
         val placeholder = insertedEntities.single()
         assertEquals("DOCUMENT", placeholder.type)
-        assertEquals("", placeholder.outboxRecipientId)
+        // The factory's default "chat1" is a 1:1 chat with "recipient1".
+        assertEquals("recipient1", placeholder.outboxRecipientId)
         coVerify(exactly = 1) { messageDao.updateLocalUri(placeholder.id, "/data/outbox/${placeholder.id}.pdf") }
         verify(exactly = 1) { outboxScheduler.enqueue(placeholder.id, uploads = true) }
         assertTrue(statusUpdates.isEmpty())

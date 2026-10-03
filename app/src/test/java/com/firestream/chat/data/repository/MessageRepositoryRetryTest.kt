@@ -99,12 +99,31 @@ class MessageRepositoryRetryTest {
     }
 
     @Test
-    fun `retry of a row that recorded no target asks about the screen's recipient`() = runTest {
+    fun `retry of a row addressed to nobody asks nobody's block list, whatever recipient the screen names`() = runTest {
+        stubStored(MessageEntity.outbox(storedTextMessage(), SendTarget.NoPeer))
+        coEvery { userSource.isUserBlocked("uid1", "peer-from-screen") } returns true
+
+        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "peer-from-screen")
+
+        assertTrue("retry should queue: ${result.exceptionOrNull()}", result.isSuccess)
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
+        verify(exactly = 1) { outboxScheduler.retryNow("failed-msg-1", uploads = false) }
+    }
+
+    // A row with no recorded target has nothing to say who it is for, and the
+    // screen's recipient is not an answer: the worker would refuse the row too.
+    // Refused before the flip, so the bubble never leaves FAILED.
+    @Test
+    fun `retry of a row that recorded no target is refused and the row stays FAILED`() = runTest {
         stubStored(MessageEntity.fromDomain(storedTextMessage()))
 
-        repository.retryFailedMessage("failed-msg-1", recipientId = "peer-from-screen")
+        val result = repository.retryFailedMessage("failed-msg-1", recipientId = "peer-from-screen")
 
-        coVerify(exactly = 1) { userSource.isUserBlocked("uid1", "peer-from-screen") }
+        assertTrue(result.isFailure)
+        coVerify(exactly = 0) { messageDao.requeueForRetry(any()) }
+        assertTrue(statusUpdates.isEmpty())
+        verify(exactly = 0) { outboxScheduler.retryNow(any(), any()) }
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
     }
 
     @Test

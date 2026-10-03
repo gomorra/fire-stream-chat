@@ -7,6 +7,8 @@ import com.firestream.chat.data.outbox.OutboxScheduler
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.domain.model.ChatNotReadyException
+import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -34,6 +36,10 @@ import org.junit.Test
  * answered — offline, the block list not cached — no longer refuses: the row
  * queues, and `OutboxWorker` asks again once it is online (`OutboxWorkerTest`).
  * A timer is written directly and keeps the strict rule.
+ *
+ * Who the check asks about, and who the row is addressed to, comes from the
+ * chat's row: the other participant of a 1:1 chat, nobody for a group. A chat
+ * the row cannot address is refused before anything is written.
  */
 class MessageRepositoryBlockTest {
 
@@ -54,6 +60,11 @@ class MessageRepositoryBlockTest {
         every { authSource.currentUserId } returns "uid1"
         repository = messageRepository(
             messageDao = messageDao,
+            chats = listOf(
+                testChat("chat1"),
+                testChat("chat2"),
+                testChat("group1", ChatType.GROUP.name, listOf("uid1", "recipient1", "member2")),
+            ),
             messageSource = messageSource,
             authSource = authSource,
             outboxScheduler = outboxScheduler,
@@ -198,13 +209,69 @@ class MessageRepositoryBlockTest {
         assertRowInsertedThenQueued()
     }
 
+    // ── who a row is addressed to ───────────────────────────────────────────
+    // The target a row records is who OutboxSender encrypts for and who the
+    // worker's block check asks about. It comes from the chat's row on every
+    // path that writes one; the recipient argument is not an input.
+
+    /** Every send that writes an outbox row, into [chatId], naming [recipientId] as the caller's recipient. */
+    private fun rowPaths(chatId: String, recipientId: String): Map<String, suspend () -> Result<Message>> = mapOf(
+        "text" to { repository.sendMessage(chatId, "hello", recipientId) },
+        "media" to {
+            repository.sendMediaMessage(chatId, "content://docs/report.pdf", "application/pdf", recipientId, "caption", null)
+        },
+        "voice" to { repository.sendVoiceMessage(chatId, "file:///tmp/v.aac", recipientId, 5) },
+        "location" to { repository.sendLocationMessage(chatId, 1.0, 2.0, recipientId, "") },
+        "forward" to { repository.forwardMessage(sentText(), chatId, recipientId) },
+    )
+
+    /** Runs each path and asserts that it queued a row recording [expected] as its `outboxRecipientId`. */
+    private suspend fun assertEachRecords(expected: String, paths: Map<String, suspend () -> Result<Message>>) {
+        paths.forEach { (path, send) ->
+            inserted.clear()
+            val result = send()
+            assertTrue("$path should queue: ${result.exceptionOrNull()}", result.isSuccess)
+            assertTrue("$path should insert a row", inserted.isCaptured)
+            assertEquals(path, expected, inserted.captured.outboxRecipientId)
+        }
+    }
+
     @Test
-    fun `sendMessage skips block check for empty recipientId (group chats)`() = runTest {
+    fun `every row path into a 1-to-1 chat records the chat's other participant, whatever recipient the caller names`() = runTest {
         stubOptimisticRow()
 
-        val result = repository.sendMessage("chat1", "hello", "")
+        assertEachRecords("recipient1", rowPaths("chat1", recipientId = "someone-else"))
 
-        assertTrue(result.isSuccess)
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), "someone-else") }
+    }
+
+    // Regression: a screen that named one group member as the recipient (a group
+    // opened from its notification did) had the send addressed to that member —
+    // refused when the sender had blocked them, encrypted for them alone otherwise.
+    @Test
+    fun `every row path into a group records no peer and asks nobody's block list, whatever recipient the caller names`() = runTest {
+        // The member the caller names is one the sender has blocked.
+        coEvery { userSource.isUserBlocked("uid1", "recipient1") } returns true
+        stubOptimisticRow()
+
+        assertEachRecords("", rowPaths("group1", recipientId = "recipient1"))
+
+        coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
+    }
+
+    // A refused send writes nothing: no bubble, no FAILED row, nothing a retry
+    // could later send in plaintext. messageDao is a strict mock, so a write
+    // would also fail the send with something other than the refusal.
+    @Test
+    fun `every row path into a chat with no local row is refused before any row is written`() = runTest {
+        rowPaths("not-synced-yet", recipientId = "recipient1").forEach { (path, send) ->
+            val refusal = send().exceptionOrNull()
+
+            assertTrue("$path: $refusal", refusal is ChatNotReadyException)
+        }
+
+        coVerify(exactly = 0) { messageDao.insertOutbox(any()) }
+        verify(exactly = 0) { outboxScheduler.enqueue(any(), any()) }
         coVerify(exactly = 0) { userSource.isUserBlocked(any(), any()) }
     }
 

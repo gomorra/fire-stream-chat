@@ -1,14 +1,16 @@
 // region: AGENT-NOTE
 // Responsibility: Message CRUD across all message types — text / image / voice /
 //   document / poll / location / list / call. A queued send (text, media, voice,
-//   location, forward) is validate → optimistic insert → block check → stage the
-//   input → OutboxScheduler.enqueue; the row returns SENDING at once and
-//   OutboxWorker delivers it (docs/PATTERNS.md "Sends are idempotent by client
-//   id and drained by OutboxWorker"). Also media download with in-flight dedup,
+//   location, forward) is validate → resolve who it is for from the chat's local
+//   row (sendTargetFor) → optimistic insert → block check → stage the input →
+//   OutboxScheduler.enqueue; the row returns SENDING at once and OutboxWorker
+//   delivers it (docs/PATTERNS.md "Sends are idempotent by client id and drained
+//   by OutboxWorker"). Also media download with in-flight dedup,
 //   per-chat backfill scan, block-state filtering and Signal decryption on
 //   receive — over three receive paths: the open chat's listener, the chat-list
 //   sync, and the one message a push names (reconcileFromPush).
-// Owns: MessageEntity rows; FAILED marking of what fails before the enqueue
+// Owns: MessageEntity rows; the one read that addresses a send
+//   (sendTargetFor); FAILED marking of what fails before the enqueue
 //   (failSendOnError); the split between a definite block (refused) and an
 //   unanswerable block check (queued — the worker asks again online); the
 //   tombstone path of a message deleted while queued; the decision to hand a
@@ -16,6 +18,7 @@
 //   fan-out (forEachReceipt) and its forward-only local mark — a delivery
 //   receipt never takes a row back from READ (MessageDao.markDeliveredBatch).
 // Collaborators: MessageDao, ChatDao, FirestoreMessageSource, FirestoreUserSource,
+//   SendTarget (forChat: the rule that turns a chat row into a target),
 //   BlockCheck (the cached block-list read, shared with OutboxWorker),
 //   OutboxScheduler (enqueue / retryNow), OutboxFiles (staging), OutboxSender
 //   (uploadProgress only), MessageWriter (the broadcast fan-out's direct write),
@@ -24,8 +27,11 @@
 //   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check),
 //   ActiveChatTracker (a push reconcile yields to the open chat's listener),
 //   MediaBackfillScheduler (the failed-download retry).
-// Don't put here: poll vote/close (PollRepositoryImpl), list mutations
-//   (ListRepositoryImpl), call signalling (CallRepositoryImpl), the upload / write
+// Don't put here: a send target built from a caller's recipient id. A send is
+//   addressed from the chat's row (sendTargetFor). The broadcast fan-out, which
+//   addresses each list member, is the one exception. Nor poll vote/close
+//   (PollRepositoryImpl), list mutations (ListRepositoryImpl), call signalling
+//   (CallRepositoryImpl), the upload / write
 //   / resume steps of a send (OutboxSender), the attempt's error policy
 //   (OutboxWorker). Class is large (~1340 LOC) — Phase 2 plan adds a
 //   section-comment TOC and 1100-LOC ceiling. See docs/PATTERNS.md for the
@@ -70,6 +76,7 @@ import com.firestream.chat.data.util.parseTimerState
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.worker.MediaBackfillScheduler
+import com.firestream.chat.domain.model.ChatNotReadyException
 import com.firestream.chat.domain.model.ListDiff
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageAvailability
@@ -237,8 +244,8 @@ class MessageRepositoryImpl @Inject constructor(
      * The strict rule, for a send written directly (a timer): a definite block and
      * an unanswerable check both refuse it — nothing would ask again later.
      */
-    private suspend fun ensureNotBlocked(senderId: String, recipientId: String) {
-        when (val verdict = blockVerdict(senderId, SendTarget.of(recipientId))) {
+    private suspend fun ensureNotBlocked(senderId: String, target: SendTarget) {
+        when (val verdict = blockVerdict(senderId, target)) {
             BlockVerdict.Blocked -> throw RecipientBlockedException()
             is BlockVerdict.Unknown -> throw verdict.cause
             BlockVerdict.Clear -> Unit
@@ -259,6 +266,29 @@ class MessageRepositoryImpl @Inject constructor(
                 Log.w(TAG, "block check unanswerable for target=$target — queuing, the worker asks again online", verdict.cause)
             BlockVerdict.Clear -> Unit
         }
+    }
+
+    /**
+     * Who a send by [senderId] into [chatId] is for, from the chat's local row.
+     * Every send that writes a row gets its target here: once per send, before
+     * the row is built, so a refusal ([ChatNotReadyException]) leaves nothing
+     * behind. Read fresh every time, since a cached answer could outlive a change
+     * of the chat. The broadcast fan-out writes no row and addresses each list
+     * member itself.
+     */
+    private suspend fun sendTargetFor(chatId: String, senderId: String): SendTarget =
+        try {
+            SendTarget.forChat(chatId, chatDao.getChatById(chatId), senderId)
+        } catch (e: ChatNotReadyException) {
+            Log.w(TAG, "send refused — $e")
+            throw e
+        }
+
+    /** Text, media, voice and location: resolve the target, record it on the row, queue. */
+    private suspend fun queueSend(message: Message, mimeType: String? = null): Message {
+        val row = MessageEntity.outbox(message, sendTargetFor(message.chatId, message.senderId))
+        messageDao.insertOutbox(row)
+        return enqueueSend(row, mimeType)
     }
 
     /**
@@ -488,13 +518,14 @@ class MessageRepositoryImpl @Inject constructor(
     /**
      * Send a text message to a chat.
      *
-     * @param recipientId The 1:1 peer user id for INDIVIDUAL chats, used by the
-     *   block check and Signal encryption. **For GROUP and BROADCAST chats,
-     *   callers must pass an empty string** — Signal sessions are 1:1, so
-     *   group/broadcast messages must travel through the plaintext branch of
-     *   [MessageWriter.encode]. Passing an arbitrary group member
-     *   as the recipient will encrypt the message for that single member and
-     *   leave every other participant unable to read it.
+     * Who it is for — the peer the block check asks about and Signal encrypts
+     * for, or nobody for a group or broadcast chat — comes from the chat's local
+     * row ([sendTargetFor]). A chat that row cannot address is refused with
+     * [ChatNotReadyException] before anything is written.
+     *
+     * @param recipientId Ignored, here and on every other send: no caller's idea
+     *   of the recipient is an addressing input. The parameter is still on the
+     *   signatures only until it is removed from `MessageRepository`.
      */
     override suspend fun sendMessage(
         chatId: String,
@@ -520,9 +551,7 @@ class MessageRepositoryImpl @Inject constructor(
             mentions = mentions,
             emojiSizes = emojiSizes
         )
-        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
-        messageDao.insertOutbox(row)
-        enqueueSend(row)
+        queueSend(optimisticMessage)
     }
 
     /**
@@ -564,9 +593,7 @@ class MessageRepositoryImpl @Inject constructor(
     /**
      * Send a media (image / video / document) message to a chat.
      *
-     * @param recipientId See [sendMessage] — must be an empty string for GROUP
-     *   and BROADCAST chats so the plaintext branch is used; Signal sessions
-     *   are 1:1 and cannot address a group.
+     * @param recipientId Ignored — see [sendMessage].
      * @param isHd per-image override from the send preview; `null` falls back to
      *   the global preference, so a caller that never offers the choice — the
      *   share sheet, a retry — behaves exactly as it did before per-image HD.
@@ -611,9 +638,7 @@ class MessageRepositoryImpl @Inject constructor(
             mediaHeight = null,
             isHd = sendAsHd
         )
-        val row = MessageEntity.outbox(placeholder, SendTarget.of(recipientId))
-        messageDao.insertOutbox(row)
-        enqueueSend(row, mimeType)
+        queueSend(placeholder, mimeType)
     }
 
     override suspend fun retryFailedMessage(messageId: String, recipientId: String): Result<Message> = resultOf {
@@ -622,15 +647,19 @@ class MessageRepositoryImpl @Inject constructor(
         if (entity.status != MessageStatus.FAILED.name) {
             throw IllegalStateException("Cannot retry message in state ${entity.status}")
         }
+        // A retry reads no chat: the target is the one the row recorded at insert —
+        // who enqueueSend's block check asks about and who OutboxSender encrypts
+        // for. A row that recorded none is refused before the flip, so it stays
+        // FAILED and nothing is requeued; the worker would refuse it too rather
+        // than guess.
+        checkNotNull(entity.sendTarget) { "Cannot retry message $messageId: no recorded target" }
         // Flip the row back to SENDING so the bubble updates immediately, and give
         // it a fresh budget of automatic attempts; failSendOnError reverts it to
         // FAILED if the enqueue itself fails. OutboxSender resumes past whatever the
-        // earlier attempts persisted and encrypts for the target recorded on the row
-        // at insert; the screen's recipient only stands in for the block check of a
-        // row that recorded none, which the worker refuses rather than guess.
+        // earlier attempts persisted.
         messageDao.requeueForRetry(messageId)
         val queued = entity.copy(record = entity.record.copy(status = MessageStatus.SENDING.name))
-        enqueueSend(queued, blockTarget = queued.sendTarget ?: SendTarget.of(recipientId), retry = true)
+        enqueueSend(queued, retry = true)
     }
 
     override suspend fun addReaction(chatId: String, messageId: String, userId: String, emoji: String): Result<Unit> = resultOf {
@@ -658,11 +687,12 @@ class MessageRepositoryImpl @Inject constructor(
     /**
      * A forward is a queued send like any other: the source message's row, re-stamped
      * for the target chat, goes through the outbox. Its media is already uploaded
-     * (`mediaUrl` set), so the worker skips straight to the write.
+     * (`mediaUrl` set), so the worker skips straight to the write. It is addressed
+     * from the target chat's row, like every send; [recipientId] is ignored.
      */
     override suspend fun forwardMessage(message: Message, targetChatId: String, recipientId: String): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
-        val target = SendTarget.of(recipientId)
+        val target = sendTargetFor(targetChatId, senderId)
         // Before the insert: the source message stays in its chat, so a refusal
         // loses nothing and leaves no FAILED bubble in the target chat.
         refuseIfBlocked(senderId, target)
@@ -702,9 +732,7 @@ class MessageRepositoryImpl @Inject constructor(
             localUri = uri,
             duration = durationSeconds
         )
-        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
-        messageDao.insertOutbox(row)
-        enqueueSend(row)
+        queueSend(optimisticMessage)
     }
 
     override suspend fun starMessage(messageId: String, starred: Boolean): Result<Unit> = resultOf {
@@ -1020,9 +1048,7 @@ class MessageRepositoryImpl @Inject constructor(
             latitude = latitude,
             longitude = longitude
         )
-        val row = MessageEntity.outbox(optimisticMessage, SendTarget.of(recipientId))
-        messageDao.insertOutbox(row)
-        enqueueSend(row)
+        queueSend(optimisticMessage)
     }
 
     override suspend fun sendTimerMessage(
@@ -1035,6 +1061,10 @@ class MessageRepositoryImpl @Inject constructor(
     ): Result<Message> = resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         require(durationMs > 0L) { "Timer duration must be positive" }
+        // Before the optimistic row: a timer into a chat that cannot be addressed
+        // leaves no bubble. A timer is never encrypted, so its target only says
+        // whose block list to ask.
+        val target = sendTargetFor(chatId, senderId)
 
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()
@@ -1057,7 +1087,7 @@ class MessageRepositoryImpl @Inject constructor(
         messageDao.upsertRecord(MessageRecord.fromDomain(optimistic))
 
         failSendOnError(tempId) {
-            ensureNotBlocked(senderId, recipientId)
+            ensureNotBlocked(senderId, target)
             val result = messageSource.sendTimerMessage(
                 chatId = chatId,
                 senderId = senderId,

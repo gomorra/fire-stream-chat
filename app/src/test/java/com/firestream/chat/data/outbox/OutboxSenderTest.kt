@@ -221,8 +221,8 @@ class OutboxSenderTest {
     )
 
     /** Inserts [message] as the repository does, recording its target — and, for a re-attempt, earlier runs. */
-    private fun store(message: Message, recipientId: String = "", attempts: Int = 0) {
-        rows[message.id] = MessageEntity.outbox(message, SendTarget.of(recipientId)).copy(outboxAttempts = attempts)
+    private fun store(message: Message, target: SendTarget = SendTarget.NoPeer, attempts: Int = 0) {
+        rows[message.id] = MessageEntity.outbox(message, target).copy(outboxAttempts = attempts)
     }
 
     private fun sending(id: String, type: MessageType, localUri: String? = null) = Message(
@@ -368,7 +368,7 @@ class OutboxSenderTest {
     @Test
     fun `an encrypted first attempt keeps the ciphertext on the row before writing it`() = runTest {
         coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
-        store(sending("msg1", MessageType.TEXT).copy(content = "hello"), recipientId = "peer1")
+        store(sending("msg1", MessageType.TEXT).copy(content = "hello"), target = SendTarget.Peer("peer1"))
 
         newSender(buildEncrypts = true).send("msg1")
 
@@ -387,7 +387,7 @@ class OutboxSenderTest {
     fun `a second attempt reuses the stored ciphertext and never encrypts again`() = runTest {
         coEvery { signalManager.encrypt("peer1", "hello") } returns EncryptedMessage("cipher-1", signalType = 3, peerIdentity = "id-1")
         coEvery { anyEncryptedWrite() } throws IOException("ack timed out")
-        store(sending("msg1", MessageType.TEXT).copy(content = "hello"), recipientId = "peer1")
+        store(sending("msg1", MessageType.TEXT).copy(content = "hello"), target = SendTarget.Peer("peer1"))
         val encrypting = newSender(buildEncrypts = true)
 
         assertTrue(runCatching { encrypting.send("msg1") }.exceptionOrNull() is IOException)
@@ -441,7 +441,7 @@ class OutboxSenderTest {
     fun `media is encrypted after its upload, so a failed upload leaves nothing to reuse`() = runTest {
         coEvery { signalManager.encrypt(any(), any()) } returns EncryptedMessage("cipher-voice", signalType = 3)
         coEvery { storageSource.uploadMedia(any(), any(), any(), any(), any()) } throws IOException("network down")
-        store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac"), recipientId = "peer1")
+        store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac"), target = SendTarget.Peer("peer1"))
 
         assertTrue(runCatching { newSender(buildEncrypts = true).send("voice1") }.exceptionOrNull() is IOException)
 

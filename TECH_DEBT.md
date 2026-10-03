@@ -405,6 +405,36 @@ The `pocketbase` flavor that landed 2026-04-28 is intentionally a thin slice. Th
 
 ---
 
+### An unsent message keeps the target it recorded, even a wrong one
+
+**The smell.** A send records who it is for on its row (`outboxRecipientId`). A retry and the outbox worker use that recorded target and do not read the chat again. A row written by a build in which a screen could still name the recipient may hold a wrong one: a group message that recorded one member, sent from a group opened through its notification. Such a row stays addressed to that member. With encryption off it is refused when that member is blocked, and otherwise reaches the whole group in plaintext. With encryption on it is encrypted for that member only.
+
+**Why we're not fixing it.** `docs/plans/send-addressing.md` decision 4 keeps a retry on the row's recorded target, so that a retry never changes who a stored ciphertext is for. Only rows that were still `SENDING` or `FAILED` when the fixed build was installed are affected. Deleting the bubble and sending the message again addresses it correctly.
+
+**When to revisit.** Before end-to-end encryption is switched on by default, or on the first report of a group message that stays failed after an update. The repair is a one-off pass over unsent rows that re-derives each target with `SendTarget.forChat` and clears the stored ciphertext where it changed.
+
+---
+
+### An unknown chat type from the backend is stored as a 1:1 chat
+
+**The smell.** `SendTarget.forChat` refuses a chat row whose `type` it does not know. No such row is written today. `FirestoreChatSource.mapChat` and `PocketBaseChatSource` map an unknown or missing type to `ChatType.INDIVIDUAL` before the chat reaches Room, and `ChatEntity.toDomain()` does the same on the way out. A chat of a type a newer client introduces is therefore stored as a 1:1 chat. A send into it is refused when it has more than one other participant, and is addressed to that participant when it has exactly one. It is never sent in plaintext.
+
+**Why we're not fixing it.** The outcome fails closed. Letting the mapper keep a type it does not know means a new value on the domain `Chat` model and a decision at every `when (chat.type)`.
+
+**When to revisit.** When a fourth `ChatType` is added, or with the plan that puts the chat partner on the domain `Chat` (candidate 2 of the 2026-09-20 review).
+
+---
+
+### A failed timer shows a retry button that cannot retry it
+
+**The smell.** `ChatScreen` offers retry on every own `FAILED` message. A timer is written directly, not through the outbox, so its row records no send target and `MessageRepositoryImpl.retryFailedMessage` refuses it. The tap shows the banner *"Cannot retry message … : no recorded target"* and the bubble stays failed. The retry supports TEXT, IMAGE, DOCUMENT, VOICE and LOCATION only (KDoc on `MessageRepository.retryFailedMessage`).
+
+**Why we're not fixing it.** Hiding the button for a timer, or sending a failed timer again, changes the timer send path and `MessageBubble`. Neither is part of send addressing.
+
+**When to revisit.** The next change to `sendTimerMessage` or to the retry affordance in `MessageBubble`.
+
+---
+
 ### Link previews cache in RAM only, while their screenshots cache on disk
 
 **The smell.** `LinkPreviewSource` holds resolved previews and negative results in two `ConcurrentHashMap`s on a `@Singleton`, but `WebPagePreviewCapture` writes its rendered JPEGs into `cacheDir`. So the two halves of one result have different lifetimes: after every cold start the title/description and — more expensively — the *negative* result are gone, so a dead link's 10-minute `FAILURE_COOLDOWN_MS` resets and the ~20 s offscreen WebView capture runs again. Raised by the altitude reviewer during the 2026-09-08 preview work.
