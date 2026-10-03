@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, no step started. The prototype below runs first, and step 5 waits for its verdict.
+Status: approved, no step started. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
 
 ## Context
 
@@ -78,10 +78,13 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
 **Pre-flight (owner, 30 seconds):** in the phone's Files app open
 `Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers` and confirm it lists sticker files.
 
-## Prototype first (interactive, throwaway branch, not a runner step)
+## Prototype (done, throwaway branch, not a runner step)
 
-**Question:** how are stickers and GIFs reached from the composer? Built per the `prototype` skill's
-UI branch, before step 1, in this session. Work stops afterwards until the owner picks.
+**Question:** how are stickers and GIFs reached from the composer?
+
+**Verdict:** variant A, the island panel. The owner tried all three in the chat screen and chose it.
+Step 5 carries the decision. The rest of this section describes what was built, so the branch can be
+read later.
 
 - **Where:** branch `prototype/sticker-gif-picker` in its own worktree (copy `local.properties` and
   `google-services.json` in; never `./gradlew --stop` from it). It is never merged into main.
@@ -105,8 +108,7 @@ UI branch, before step 1, in this session. Work stops afterwards until the owner
   of each variant goes to the owner; the same build runs on the phone.
 - **Not owed:** tests, CHANGELOG, docs. It must only compile (`assembleFirebaseDebug`). Load the
   `app-ui-design` skill so the variants look like this app.
-- **Capture:** commit on the throwaway branch. The verdict (which variant, which parts of the others)
-  is written into step 5 below in a `docs(plan):` commit on main.
+- **Capture:** one commit on the throwaway branch (`e1338e0f`). The verdict is in step 5 below.
 
 ## Steps
 
@@ -199,8 +201,12 @@ The outbox, the sync path and a new storage model change here.
 
 ### 5. Stickers tab in the composer (UI + state)
 
-The bullets below describe variant A. Rewrite them to the prototype's verdict before this step runs.
+Stickers and GIFs are reached through the island panel. The emoji panel gains tabs and takes the
+keyboard's place, as it does today. This is variant A of the prototype on branch
+`prototype/sticker-gif-picker`; `ui/chat/prototype/VariantAIsland.kt` there is the reference for layout.
 
+- The picker row keeps `PickerPanel`'s left-aligned order: search button, island, backspace key.
+  A centred island with the two buttons pinned to the edges was tried and rejected by the owner.
 - `PickerTab.STICKER_LIBRARY` and `PickerSelection.Sticker`. Refresh the `PickerTab` KDoc.
 - `ui/chat/picker/StickerLibraryTab.kt`: a row of pack icons (Recents, Favourites, then packs), the
   active pack's grid with static thumbnails, long-press to favourite. An empty library shows an
@@ -328,7 +334,7 @@ two functions. The `wizard` skill can script this.
 
 ## Run
 
-Build the prototype and stop for the owner's pick. Only then:
+Run one checkpoint at a time:
 
 ```bash
 scripts/run-plan.sh docs/plans/stickers-and-gifs.md --dry-run
