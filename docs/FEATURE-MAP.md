@@ -621,6 +621,8 @@ A `STICKER` message points at a sticker by that hash and carries no bytes of its
 one shared Storage object, `stickers/<id>.<ext>`, uploaded the first time anyone sends the sticker.
 A receiver hashes what it downloads before storing it. A `GIF` message is plain media sent as it
 is: one upload per message, and the file is kept in `filesDir/documents/`, not in the gallery.
+A sticker bubble has no fill and no tail, and a GIF bubble is the photo layout with a badge.
+Both animate through a decoder attached per request. Previews show the first frame.
 No screen sends either type yet. Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
 
 The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
@@ -642,6 +644,8 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `withStickerUrl` (library url, else look up, else upload, one sticker at a time) and the GIF's document route |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles` |
 | `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
+| `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` for the reply, forward and starred previews |
 | `app/src/main/java/com/firestream/chat/data/sticker/WaStickerMetadata.kt` | Pack id, name, publisher and emojis out of a WhatsApp WebP's EXIF chunk |
 | `app/src/main/java/com/firestream/chat/data/sticker/StickerPackArchive.kt` | `.wastickers` / zip reader under caps on entry count, bytes per entry and total bytes |
 | `app/src/main/java/com/firestream/chat/data/sticker/WhatsAppStickerFolder.kt` | One child-documents query over the granted folder, newest first |

@@ -63,11 +63,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
+import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 
@@ -503,12 +502,7 @@ internal fun StickerCell(
 /** A sticker's first frame. [model] is the path of the library's file or a folder entry's uri. */
 @Composable
 internal fun StickerThumbnail(model: String, modifier: Modifier = Modifier) {
-    AsyncImage(
-        model = model,
-        contentDescription = "Sticker",
-        contentScale = ContentScale.Fit,
-        modifier = modifier,
-    )
+    StickerImage(model = model, modifier = modifier, animated = false)
 }
 
 /** The top bar of both sticker screens, with the import's progress line under it. */

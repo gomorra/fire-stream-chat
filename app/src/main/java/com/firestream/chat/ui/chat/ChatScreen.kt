@@ -153,6 +153,8 @@ import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import com.firestream.chat.ui.components.FileIntents
 import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
+import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.stickerLabel
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -1651,7 +1653,7 @@ fun ChatScreen(
             // Reply-to banner
             if (uiState.composer.replyToMessage != null) {
                 val replyTo = uiState.composer.replyToMessage!!
-                val isImageReply = replyTo.type == MessageType.IMAGE
+                val hasThumbnail = replyTo.type.hasStillPreview
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1666,7 +1668,7 @@ fun ChatScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    if (isImageReply) {
+                    if (hasThumbnail) {
                         ReplyImageThumbnail(
                             message = replyTo,
                             modifier = Modifier.size(36.dp)
@@ -1679,11 +1681,13 @@ fun ChatScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        val snippet = if (isImageReply) {
-                            replyTo.content.take(60)
+                        val snippet = when (replyTo.type) {
+                            MessageType.IMAGE -> replyTo.content.take(60)
                                 .ifBlank { stringResource(R.string.reply_preview_photo) }
-                        } else {
-                            replyTo.content.take(60)
+                            MessageType.STICKER -> stickerLabel(replyTo.content.take(60))
+                            MessageType.GIF -> replyTo.content.take(60)
+                                .ifBlank { MessageType.GIF.placeholderLabel }
+                            else -> replyTo.content.take(60)
                         }
                         Text(
                             text = snippet,

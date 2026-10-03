@@ -85,7 +85,7 @@ internal fun ForwardMessagePanel(
 
 /**
  * What is about to be forwarded, filling the space above the chat list: the
- * picture itself for a photo or a video, otherwise the text, otherwise an icon
+ * picture itself for a photo, a video, a sticker or a GIF, otherwise the text, otherwise an icon
  * naming the kind of message.
  */
 @Composable
@@ -110,9 +110,19 @@ private fun BoxScope.ForwardMessagePreview(message: Message) {
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
         )
-        MessageType.STICKER -> LabelledPreview(
-            icon = message.type.previewIcon,
-            label = stickerLabel(message.content),
+        // A sticker and a GIF show their first frame: a plain request carries no
+        // animated decoder. Without a file or a url they fall back to the label.
+        MessageType.STICKER -> MediaPreview(
+            model = rememberMessageImageModel(message),
+            caption = stickerLabel(message.content),
+            overlayIcon = null,
+            fallbackIcon = message.type.previewIcon,
+        )
+        MessageType.GIF -> MediaPreview(
+            model = rememberMessageImageModel(message),
+            caption = message.content.ifBlank { message.type.placeholderLabel },
+            overlayIcon = null,
+            fallbackIcon = message.type.previewIcon,
         )
         else -> LabelledPreview(
             icon = message.type.previewIcon,
@@ -122,9 +132,14 @@ private fun BoxScope.ForwardMessagePreview(message: Message) {
 }
 
 @Composable
-private fun MediaPreview(model: Any?, caption: String, overlayIcon: ImageVector?) {
+private fun MediaPreview(
+    model: Any?,
+    caption: String,
+    overlayIcon: ImageVector?,
+    fallbackIcon: ImageVector = Icons.Default.Description,
+) {
     if (model == null) {
-        LabelledPreview(icon = Icons.Default.Description, label = caption.ifBlank { "Media" })
+        LabelledPreview(icon = fallbackIcon, label = caption.ifBlank { "Media" })
         return
     }
     Box(contentAlignment = Alignment.Center) {

@@ -40,6 +40,19 @@ and the screen's state. Nothing has run on a device:
 6. WhatsApp Business keeps its stickers under `com.whatsapp.w4b`. The picker does not open
    there by itself; navigate to it by hand and import.
 
+### Sticker and GIF bubbles (2026-10-03)
+
+`docs/plans/stickers-and-gifs.md` step 4. Robolectric covers which branch draws a message. No
+JVM test decodes a frame, and no screen sends either type before step 5, so check these with it:
+1. An animated sticker and a GIF play in the chat. A static sticker keeps its transparency on
+   both themes.
+2. A sticker has no bubble behind it. Time and ticks sit under it, and the jump highlight frames it.
+3. A reply to a sticker or a GIF, the forward preview and the starred list show a still first frame.
+4. Link previews and avatars do not animate.
+5. A chat with many animated bubbles scrolls smoothly.
+6. A debug build opens a chat. `MessageBubble` is close to the dex register ceiling
+   (`docs/GOTCHAS.md`), and only a device runs the verifier.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two
