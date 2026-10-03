@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–2 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, steps 1–3 shipped. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
 
 ## Context
 
@@ -240,6 +240,23 @@ Departures (for sign-off):
 
 The outbox, the sync path and a new storage model change here.
 
+**Approach**
+- Order: the model and Room first (`MessageType`, `Message`, `MessageRecord`, `RawMessage`, `stickers.remoteUrl`, 30 → 31),
+  then `StickerObjectSource` and both message sources, then the receive side (`data/sticker/StickerDownloads.kt`,
+  `MediaFileManager.downloadFor`), then `OutboxSender`, then the two repository sends, then the labels.
+- The sticker fields cross the `MessageSource` boundary as one value, `StickerRef`, beside `FileMetadata`.
+- `MediaFileManager.downloadFor` stays the one router by type. It sends a `STICKER` to `StickerDownloads` and a `GIF`
+  to `DocumentFiles`, and returns `null` for a sticker that is refused. So both types join all three `MessageDao` lists
+  and `AUTO_DOWNLOAD_TYPES`, and the chat-open scan and the backfill worker retry a sticker like any other media.
+- A received sticker is hashed before it is stored, so a mismatch writes nothing. The file and its `stickers` row are
+  written under a lock in `StickerFiles`, which the refused-archive undo in `StickerRepositoryImpl` takes too.
+- A `stickers` row gets its `remoteUrl` from `ensureUploaded` only, never from a received message's `mediaUrl`.
+- `sendStickerMessage` shares a pack id only for a `USER` or `INSTALLED` pack. Favourites and loose stickers stay private.
+- `MessageBubble` is step 4's. This step adds only the labels the plan lists.
+- Tests: the plan's list, plus `StickerDownloadsTest` (mismatch, repeat receive, the interleaving with a refused
+  archive), `FirebaseStickerObjectSourceTest` and the `MediaFileManagerTest` routing cases.
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
+
 - `MessageType` gains `STICKER`, `GIF`. `Message`, `MessageRecord`, `RawMessage`, `MessageWriter` and
   both message sources gain `stickerId`, `stickerPackId`. `AppDatabase` 30 → 31.
 - `data/remote/source/StickerObjectSource.kt`: `ensureUploaded(id, ext, mimeType, file): url`.
@@ -272,7 +289,30 @@ The outbox, the sync path and a new storage model change here.
   sends and the guard, `MessageRepositoryForwardTest`, `FirestoreMessageSourceTest` (new fields),
   a hash-mismatch test.
 - **Owner, before the device pass:** add to the Storage rules in the console —
-  `match /stickers/{file} { allow read: if request.auth != null; allow create: if request.auth != null && resource == null && request.resource.size < 1024 * 1024; }`
+  `match /stickers/{file} { allow read: if request.auth != null; allow create: if request.auth != null && resource == null && request.resource.size <= 1024 * 1024; }`
+  **(step-3 /code-review)** The size check is `<=`, not `<`. `StickerFiles` accepts a file of exactly 1 MB, and
+  with `<` that sticker would import and then fail every send.
+
+**Shipped** `0f70776a` (2026-10-03) — tier: max, tagged max. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- A sticker ignores the auto-download preference. It is fetched on receive and on chat open, also under *Never* and under *Wi-Fi only* off Wi-Fi. `/code-review` found that with the preference applied, a sticker the device already held got no local file.
+- A forwarded sticker the library holds goes out with the library's url, or with none, so that `OutboxSender` looks the shared object up. The received `mediaUrl` is handed on only for a sticker the library does not hold (`/code-review`).
+- A `stickers` row gets its `remoteUrl` from `ensureUploaded` only. A received sticker's row has none, so the first send of a received sticker costs one lookup.
+- `sendStickerMessage` takes a nullable `packId` and shares it only for a `USER` or `INSTALLED` pack. For an `INSTALLED` pack it sends that pack's own id, not `originPackId`.
+- `sendGifMessage` refuses a mime type that is not an image type.
+- `MediaFileManager.downloadFor` takes a `stickerId` and returns `null` for a refused sticker. Both types joined all three `MessageDao` lists, so the chat-open scan and `MediaBackfillWorker` handle them.
+- A refused sticker is remembered for the process only. Each new process fetches it once more, at most 1 MB.
+- A received sticker is hashed before it is stored. A file left without its row, which a destructive Room bump leaves behind, is checked and taken back without a download.
+- `StickerFiles.rowLock` is a second, short lock beside the import lock, so a received sticker does not wait for a whole import. The refused-archive undo takes it too.
+- The two sticker fields cross `MessageSource` as one `StickerRef`. The PocketBase source accepts and ignores them, like every field its v0 schema lacks. `PocketBaseStickerObjectSource` uploads through `StorageSource`, which is still a stub there.
+- The Storage rule in this step's last bullet says `<=` now.
+- The UI got labels only. `MessageBubble` is untouched, so until step 4 a sticker shows as a text bubble with its emoji.
+- `/code-review` findings not taken: `stickers.remoteUrl` is never cleared (`TECH_DEBT.md`), and the label sites keep their own wording.
+- `/simplify` findings not taken: one owner for "the url of a library sticker" (noted in step 6), a value type in place of `downloadFor`'s seven parameters, one shared HTTP fetch and one shared image-bounds probe, concurrent sticker downloads on chat open, a cap on the refusal set.
+- The hash-mismatch test and the interleaving test are in `StickerDownloadsTest`. Further new tests: `FirebaseStickerObjectSourceTest`, `MessageRepositoryStickerGifSendTest`, routing cases in `MediaFileManagerTest`.
+- Not user-visible, so no CHANGELOG entry and no version bump. Nothing ran on a device.
+- The Gradle daemon crashed three times in its parallel GC (`SIGSEGV` in `libjvm.so`). The gate passed on a daemon started with `-XX:+UseSerialGC`.
+- This block is at the end of the section, not under the Approach block, for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
 
 ### Step 4 — Bubbles for stickers and GIFs (UI)
 
@@ -285,6 +325,15 @@ The outbox, the sync path and a new storage model change here.
 - Reply, forward and starred previews show the first frame.
 - **(step-2)** `ui/stickers/StickerLibraryScreen.kt` has a plain `StickerThumbnail(model: String)` over `AsyncImage`,
   used by `StickerCell` and the pack rows. Replace its body with `StickerImage`, so there is one sticker renderer.
+- **(step-3)** A `STICKER` or `GIF` row's `localUri` is null until its download lands. It stays null for a sticker that was
+  refused, whose bytes did not hash to `stickerId`. The bubble renders from `mediaUrl` then. A sticker's `localUri` is
+  the shared file in `filesDir/stickers/`, and a GIF's is its copy in `filesDir/documents/`.
+- **(step-3)** A GIF's `mediaWidth` and `mediaHeight` are null when its header could not be read at send. The layout
+  needs a fallback shape.
+- **(step-3)** `MessageBubble`'s `copyableText` falls through to `content` for a sticker, which is its emoji. Add
+  `STICKER` to the types with nothing to copy.
+- **(step-3)** `ui/components/MessageTypeLabel.kt` has `stickerLabel(emoji)`. `ForwardMessagePanel` shows a labelled
+  icon for both types until this step gives it the first frame.
 - Test: one Robolectric test for the type dispatch.
 
 ### Step 5 — Stickers tab in the composer (UI + state)
@@ -310,6 +359,12 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 - **(step-2)** `ui/stickers/StickerLabels.kt` has `StickerPack.label()`, which names the `FAVOURITES` and `SAVED`
   packs. `StickerCell` in `StickerLibraryScreen.kt` is the grid cell, with click callbacks that hand the id back.
   Use both in the tab. `Routes.STICKERS` exists.
+- **(step-3)** `sendStickerMessage(chatId, stickerId, packId)` decides itself whether the pack id is shared: only for a
+  `USER` or `INSTALLED` pack. Pass the pack the user picked from, and null from Recents. It fails with a message fit to
+  show when the library does not hold the sticker.
+- **(step-3)** A received sticker has a `stickers` row and no pack item once its file is downloaded and checked, so
+  `setFavourite` works for it. A message whose `localUri` is null has no row yet. Call
+  `MessageRepository.ensureLocalFile(message)` first; it fails for a sticker that was refused.
 - Tests: `StickerSearchTest`, `PickerPanelTest` (two tabs draw the island; one-tab hosts unchanged),
   `ChatInfoManager` and `ChatMessageSender` tests.
 - Docs: rewrite `docs/BACKLOG.md` §4.6, add *Pending on-device verification* items.
@@ -348,6 +403,17 @@ A sync engine and new security rules.
   it. If favourites sync differently from packs, refuse it in the repository.
 - **(step-2)** An import runs in `viewModelScope`. If the sync worker is to start after an import, enqueue it from
   the repository, not from the screen.
+- **(step-3)** `stickers.remoteUrl` exists. Only `OutboxSender.withStickerUrl` sets it, after
+  `StickerObjectSource.ensureUploaded`. The worker's `ensureUploaded` for every sticker must set it too.
+- **(step-3 /simplify)** `OutboxSender` owns the lock per sticker id and the `remoteUrl` write. Move both into one class
+  in `data/sticker` that the worker and `OutboxSender` call, so a send and the sync exclude each other. Do not add a
+  second lock.
+- **(step-3)** Anything that stores a sticker file and writes its row outside an import must hold `StickerFiles.rowLock`
+  for both. A restored sticker's file should come through `StickerDownloads.ensureLocal`, which does that and checks the hash.
+- **(step-3)** A sticker message from an `INSTALLED` pack carries that pack's own id, not its `originPackId`. Decide
+  which one **View pack** opens, and what "already installed" compares.
+- **(step-3 /code-review)** A sticker forwarded from a device that does not hold it keeps the first sender's `mediaUrl`
+  and `stickerPackId`.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
@@ -400,6 +466,8 @@ returns; a second account adds a pack from a received sticker.
   add PNG to `StickerFormat` with its own container check, or convert before the import.
 - **(step-1)** `importFrom(listOf(uri))` with no pack name is the import into `SAVED`. Its result's `packIds` is
   empty when the sticker was already there, so find the sticker by its hash, not by the result.
+- **(step-3)** `sendGifMessage` refuses a type that is not an image type and a file over 8 MB (`MAX_GIF_BYTES`).
+  `sendMediaMessage` still sends `image/gif` as an `IMAGE`; the branch this step adds goes there.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
