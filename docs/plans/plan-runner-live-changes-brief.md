@@ -86,13 +86,13 @@ Two things went wrong on 2026-10-03 and 2026-10-04.
   §0 decision 13 are from a cloud session's transcript (session `01HwmrT3…`, 23:02 UTC). They
   were `status: rejected`, `rateLimitType: five_hour`, `resetsAt: 1791071400`, `overageStatus:
   rejected`, `overageDisabledReason: org_level_disabled`. That session kept working.
-- **The stream shape of `claude -p`** is recorded under *Probe* below, from a live call made by
-  the planning session before the run.
+- **The stream shape of `claude -p`** is recorded under *Probe* below. The planning session made
+  that live call after the 23:50 UTC reset, before the run.
 - **Step sessions may run the self-check.** The planning session added `Bash(scripts/plan-runner/selfcheck.sh*)`
   and `Bash(scripts/plan-runner/e2e.sh*)` to `ALLOWED_TOOLS` before this run. Without them every step of
   this plan would have been denied its own gate.
 
-**Probe** (filled in by the planning session; see the `**Probe**` note at the end of this section).
+**Probe**: pending until the reset.
 
 ## 2. Design
 
@@ -219,8 +219,8 @@ What stays: a spent budget is blocked at once. The nudge and escalation ladder i
 - `docs/GOTCHAS.md`: any host-independent trap the two steps hit. Cloud sessions run past the
   limit on cloud credits, and background jobs ignore SIGINT in a script. Add an entry only if a step
   hit it.
-- Move this plan to `docs/plans/done/` in the step's `docs(plan):` commit, after its `**Shipped**`
-  block.
+- Do not move this plan to `docs/plans/done/`. The driver validates this step by reading the plan
+  at its path. The owner moves it after the run is merged.
 
 ## 4. Gates
 
