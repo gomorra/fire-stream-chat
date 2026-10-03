@@ -245,6 +245,30 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The voice-message player prepares on the main thread
+
+**The smell.** `VoiceMessagePlayer` (`ui/chat/VoiceMessagePlayer.kt`) builds its `MediaPlayer` inside the Play button's `onClick` and calls the blocking `prepare()` there, on the main thread. For a voice note that is a remote `mediaUrl`, so a slow network holds the UI thread until the first bytes arrive — short recordings keep that brief, but it is the shape of an ANR. The file-handling work (2026-09-27) reused the player for audio *files*, which can be large, and worked around it by showing the inline player only once the file is on the device; it also added the try/catch that turns an unplayable source into "Can't play this file" instead of a crash.
+
+**Why we haven't fixed it.** The right fix is `prepareAsync()` with an `OnPreparedListener`, a loading state on the button, and error handling through `OnErrorListener` — a small rewrite of a component every voice note renders through, which wants its own on-device pass (speed changes, pause/resume, two players at once) rather than riding inside a feature diff.
+
+**When to revisit.** Before streaming audio files that are not downloaded yet (BACKLOG "Document sharing enhancements"), or on the first ANR report pointing at `MediaPlayer.prepare`.
+
+---
+
+### File handling — small leftovers from the 2026-09-27 review
+
+**The smell.** Four small things the file-handling reviews raised and the branch consciously left:
+- `FileMessageBubble`'s preview is keyed on the local path. A file deleted and downloaded again *to the same path* keeps showing the old preview until the bubble leaves composition, although `FilePreviewLoader`'s own cache key includes `lastModified`.
+- `TextPreview.decode` gives up when more than a tenth of the characters are replacement marks, so a very short Latin-1 file (`Café`) still previews with one `�`, while a long one gets no preview. Latin-1 is never decoded as such.
+- `SendFileSheet`'s `PendingFile.describe` repeats the `OpenableColumns` query of `DocumentFiles.describe`. The UI cannot reach the data class (UI→data allowlist), and the repository reads the uri again at send, so the two cannot disagree about what is sent — but it is the same eight lines twice.
+- `OutboxFiles.extensionFor` still falls back to the raw mime subtype, which `DocumentFiles.extensionFor` (and the Storage object name since `d974555`) deliberately never does. It only names the staged copy of a document queued before `mimeType` was a column, so it no longer decides anything for new rows.
+
+**Why we haven't fixed it.** Each is either a rare path (a same-path re-download, a legacy queued row) or cosmetic, and none produces wrong data. Fixing the preview key means carrying `lastModified` through the bubble's state; the Latin-1 case means guessing an encoding, which is its own can of worms.
+
+**When to revisit.** The next change to `FileMessageBubble`, `TextPreview` or `OutboxFiles` — fold the matching item in then. The describe duplication goes away by itself if the UI→data allowlist ever gains a file-metadata adapter.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

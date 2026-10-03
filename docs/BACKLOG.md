@@ -719,10 +719,31 @@ data-model change, and the provider decision a GIF forces:
   `AppDatabase`, `MessageBubble.kt`
 
 ### Document sharing enhancements (4.7)
-- In-app document viewer (PDF, images)
-- Download progress as a percentage — the file card shows a spinner while it downloads
+The file card, *Open with*, text/PDF previews, the send sheet, Save/Share and inline audio shipped
+in 1.36.0 (`docs/plans/file-handling.md`). Ideas for the next round, none decided:
+- **In-app PDF viewer** — every page, swipe and pinch-zoom, without leaving the chat. `PdfRenderer`
+  already renders page 1 in `FilePreviewLoader`; a pager rendering pages on demand (bounded by
+  `MediaProcessingLimiter`) inside the existing `ZoomableBox` would do it. Tapping the PDF thumbnail
+  would open the viewer, with *Open with* kept in the viewer's bar and the long-press menu.
+- **Text snippets for Word, Excel and PowerPoint** — `.docx`/`.xlsx`/`.pptx` are ZIP files of XML, so
+  the first lines can be read with no library: the `w:t` runs of `word/document.xml`, the first rows
+  of `xl/worksheets/sheet1.xml` resolved through `xl/sharedStrings.xml`, the `a:t` runs of the first
+  slides. It slots into `FilePreviewLoader` as another `FilePreview.Text`; read the ZIP entry with a
+  byte cap, since an XML bomb is the one thing to guard against.
+- **Download progress as a percentage** — the file card shows a spinner while it downloads.
+  `MediaFileManager.fetch` can read `Content-Length` and publish progress per message id the way
+  `OutboxSender.uploadProgress` does for uploads; the badge already draws a determinate ring.
+- **Stream audio files that are not downloaded yet** — the inline player shows only for a local
+  file; needs the asynchronous prepare in TECH_DEBT "The voice-message player prepares on the main
+  thread" first.
+- **End-to-end encryption of files** — today a file's bytes go to Storage unencrypted, and its name,
+  size and type sit in plaintext beside the encrypted caption (privacy note in the plan). The usual
+  shape: encrypt the bytes with a fresh per-file key before upload, and send that key plus the file
+  metadata inside the Signal-encrypted message body. A message-format change for every media type,
+  not just documents — plan it with encryption switched on in release builds.
 - Cloud storage integration (Google Drive picker)
-- Files: `ui/chat/ChatScreen.kt`, `ui/chat/MessageBubble.kt`
+- Files: `data/util/FilePreviewLoader.kt`, `data/util/MediaFileManager.kt`, `ui/chat/FileMessageBubble.kt`,
+  `ui/chat/ChatScreen.kt` (see FEATURE-MAP "File Messages (documents)")
 
 ---
 
