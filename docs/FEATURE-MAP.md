@@ -275,7 +275,7 @@ A retryable send — text, photo, video, document, voice note, location, forward
 | `app/src/main/java/com/firestream/chat/data/local/dao/MessageDao.kt` | `insertOutbox`, `upsertRecord` / `updateRecord`, `markSent` / `acknowledge` around the one `clearOutbox`, the step column updates, `getQueuedMessages` (the SQL half of `OutboxJob`), `failQueuedOfOtherTypes`, `requeueForRetry` |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxJob.kt` | What a row is queued for — `SEND`, `TOMBSTONE` or nothing — and whether its next attempt uploads; the one Kotlin rule the worker, the scheduler and the repository share |
 | `app/src/main/java/com/firestream/chat/data/outbox/BlockCheck.kt` | The per-peer block-list read behind every send, cached 30 s and shared by the repository and the worker, so the worker's re-check is a cache hit when the repository just asked |
-| `app/src/main/java/com/firestream/chat/data/outbox/SendTarget.kt` | `Peer(id)` / `NoPeer` — who a send is for, mapped to and from `outboxRecipientId` in one place |
+| `app/src/main/java/com/firestream/chat/data/outbox/SendTarget.kt` | `Peer(id)` / `NoPeer` — who a send is for. `forChat` resolves it from the chat's Room row and refuses on doubt; `fromColumn` reads it back from `outboxRecipientId`. The only place a target is built ([PATTERNS.md#the-repository-decides-who-a-send-is-for](PATTERNS.md#the-repository-decides-who-a-send-is-for)) |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxFiles.kt` | Stages a send's input under `filesDir/outbox/<id>.<ext>` before the enqueue; the durable-or-not rule for a SENT row's `localUri`; a document's picked type as the copy's extension |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxScheduler.kt` | One unique work per message id (`outbox-<id>`): KEEP on compose, REPLACE on retry, CONNECTED, exponential backoff from 10 s, the expedited rule (API 31+, or an upload); `requeueAll` on app start |
 | `app/src/main/java/com/firestream/chat/data/worker/OutboxWorker.kt` | One attempt: the `OutboxJob` gate, the authoritative block check, the foreground for an upload, `OutboxSender.send`, the transient / permanent verdict, give-up after 8 executed attempts |
@@ -541,26 +541,27 @@ over their host (a message and a list are already in hand, so neither needs a
 route); the share intent keeps its own NavHost destination, which is where its
 content resolution lives. An overlay slides with `ScreenMotion`, the same curve and duration the NavHost
 pushes a screen with, so "the same panel" is also the same motion.
-`sendRecipientId` is the panel's load-bearing rule:
-only a 1:1 chat names a recipient, because Signal sessions are 1:1 and a group
-must go out through the plaintext branch.
+The panel hands over chats and each host sends by chat id. Who a send is for is
+not decided here: `data/outbox/SendTarget.kt` resolves it from the chat's Room row
+([PATTERNS.md#the-repository-decides-who-a-send-is-for](PATTERNS.md#the-repository-decides-who-a-send-is-for)).
+`Chat.partnerIdHint` is for the chat route a host navigates to afterwards.
 
 | File | Role |
 |---|---|
 | `app/src/main/java/com/firestream/chat/ui/components/ChatPickerPanel.kt` | The panel: bar, preview slot, search (it filters its own rows), chat rows, send button |
 | `app/src/main/java/com/firestream/chat/ui/components/ChatPickerOverlay.kt` | The panel mounted over an existing screen — slide in/out, back, the latched target, the search query, the ticked chats, one send per opening |
-| `app/src/main/java/com/firestream/chat/ui/components/ChatTargets.kt` | The pure rules, free of Compose so a ViewModel can call them: `pickerDisplayName`, `sendRecipientId`, `filterChatsByName`, `destinationLabel` |
+| `app/src/main/java/com/firestream/chat/ui/components/ChatTargets.kt` | The pure rules, free of Compose so a ViewModel can call them: `pickerDisplayName`, `partnerIdHint` (navigation only), `filterChatsByName`, `destinationLabel` |
 | `app/src/main/java/com/firestream/chat/ui/chat/ForwardMessagePanel.kt` | "Forward to…" over the conversation; supplies the preview of the message being forwarded |
-| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | The forward fan-out: one send per picked chat, addressed by `sendRecipientId`, then the confirmation label |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | The forward fan-out: one `forwardMessage(message, chat.id)` per picked chat, then the confirmation label |
 | `app/src/main/java/com/firestream/chat/ui/lists/ShareListPanel.kt` | "Share list to…" over the Lists tab; supplies the list preview |
 | `app/src/main/java/com/firestream/chat/ui/main/MainScreen.kt` | Locks its pager while a tab has a full-screen panel over it, so a sideways drag on the panel isn't a tab swipe |
 | `app/src/main/java/com/firestream/chat/ui/components/ScreenMotion.kt` | The slide a screen arrives with, shared with `navigation/NavGraph.kt` so the overlay moves exactly as the routed panel does |
 | `app/src/main/java/com/firestream/chat/ui/share/SharePickerScreen.kt` | "Share to…" — the panel plus the shared-content preview (text + link preview, one image, many) |
 | `app/src/main/java/com/firestream/chat/ui/share/SharePickerViewModel.kt` | Chats, participant profiles, search, selection and the send fan-out for the share intent |
-| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerTargetsTest.kt` | The pure rules — group sends address nobody, no row ever shows a raw uid |
+| `app/src/test/java/com/firestream/chat/ui/components/ChatPickerTargetsTest.kt` | The pure rules — `partnerIdHint` is empty for a group or broadcast, no row ever shows a raw uid |
 | `app/src/test/java/com/firestream/chat/ui/components/ChatPickerPanelUiTest.kt` | Selection-before-send, the two empty states |
 | `app/src/test/java/com/firestream/chat/ui/chat/ForwardMessagePanelUiTest.kt` | Multi-select forwarding, search keeping the ticks, one send per opening, selection reset between openings |
-| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageActionsForwardTest.kt` | The fan-out: a group forward addressed to nobody, the confirmation, a failure reported instead |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageActionsForwardTest.kt` | The fan-out: each picked chat forwarded by its id, the confirmation, a failure reported instead |
 
 **Entry points:** long-press a message → Forward; Lists tab → long-press a list → Share; another app's share sheet → FireStream → `Routes.SHARE_PICKER`.
 

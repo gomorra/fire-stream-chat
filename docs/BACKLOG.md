@@ -21,6 +21,27 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Send addressing — the repository decides who a send is for (2026-10-03)
+
+Shipped on `plan/send-addressing` (`d63ae9b1`, `7abdf337`, `f411a330`, `58de0f05`); nothing has
+been on hardware. The JVM tests prove which target each row records. Only a device proves that
+the people a message is for can read it. Encryption is off in debug builds, so every check needs
+a **release build of the firebase flavor with the E2E toggle on** (Settings), on at least two
+phones plus a third account for the group:
+
+- (a) Receive a message in a group, tap its notification, send a reply from the screen that
+  opens → a second member, not only the notification's sender, can read it.
+- (b) Forward a message into a group → every member can read it.
+- (c) Fresh install, sign in, open a chat from Contacts before the chat list has synced, send →
+  the message goes through, or the banner *"This chat isn't ready yet"* shows and no bubble
+  appears. It is never delivered as plaintext to a 1:1.
+- (d) Let a message fail in a 1:1 chat (flight mode until it gives up, or a blocked recipient),
+  then retry it → it reaches the same person. A failed **timer** is different: its retry shows a
+  banner and the bubble stays failed, which is the known gap in `TECH_DEBT.md` (*A failed timer
+  shows a retry button that cannot retry it*), not a bug to file.
+- (e) With one group member blocked, send into the group → the send is not refused. This one
+  holds in any build, debug included.
+
 ### Multi-character emoji render as one glyph (2026-09-20)
 
 `d175db8e` made `EMOJI_REGEX` match whole emoji sequences so `addEmojiSpans` stops splitting

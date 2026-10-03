@@ -406,7 +406,7 @@ com.firestream.chat/
 │   │   ├── OutboxFiles.kt       # Staged send inputs under filesDir/outbox/
 │   │   ├── BlockCheck.kt        # The cached per-peer block-list read in front of a send
 │   │   ├── MessageWriter.kt     # Encrypt-or-plaintext decision + the MessageSource write
-│   │   ├── SendTarget.kt        # Peer / NoPeer, the outboxRecipientId column in one place
+│   │   ├── SendTarget.kt        # Peer / NoPeer: resolved from the chat row (forChat), read back from outboxRecipientId
 │   │   └── SendClock.kt         # Strictly increasing send timestamps
 │   ├── util/
 │   │   ├── AndroidConnectivityObserver.kt # Default-network callback; validated-only, so a captive portal is offline
