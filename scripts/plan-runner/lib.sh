@@ -302,11 +302,14 @@ pr_variant_check() {
 #     "result":"<json text>", "structured_output":{…}, … }
 # Budget exhaustion: "subtype":"error_max_budget_usd", "is_error":true,
 #   "terminal_reason":"budget_exhausted", "structured_output":null.
+# API error: "subtype":"success", "is_error":true, "terminal_reason":"api_error",
+#   "api_error_status":<http>, "result":"<the CLI's message>". The subtype says success;
+#   is_error is what marks it (confirmed 2026-10-03).
 #   complete   — success, not an error, structured_output is an object
 #   incomplete — success but no structured object (the session ended without the
 #                result); worth exactly one fix-forward nudge
 #   budget     — budget or turn limit hit; blocked at once, never resumed
-#   failed     — anything else (no file, no JSON, API error, execution error)
+#   failed     — anything else (no file, no JSON, API error, execution error); say why with pr_result_error
 pr_result_kind() {
     local f=$1 subtype is_error so
     [ -s "$f" ] && jq -e . "$f" >/dev/null 2>&1 || { echo failed; return; }
@@ -319,6 +322,19 @@ pr_result_kind() {
     else
         echo failed
     fi
+}
+
+# pr_result_error <result-file>  → one line on why a `failed` result failed: the subtype
+# (left out when it is "success"), terminal_reason, HTTP status, then the CLI's own message
+# from `result`, cut to 300 characters. Never fails, never prints nothing.
+pr_result_error() {
+    local out
+    [ -s "$1" ] || { printf 'the CLI wrote no result'; return; }
+    out=$(jq -r '([(.subtype | select(. != "success")), .terminal_reason, (.api_error_status | select(. != null) | "HTTP \(.)")]
+            | map(select(. != null and . != "")) | join(", ")) as $why
+        | (.result // "" | tostring | gsub("\\s+"; " ") | if length > 300 then .[0:300] + "…" else . end) as $msg
+        | [$why, $msg] | map(select(. != "")) | join(": ")' "$1" 2>/dev/null || true)
+    printf '%s' "${out:-the CLI output is not a result object}"
 }
 
 # pr_result_field <file> <jq-path> [<default>]  → the field as text, or the default

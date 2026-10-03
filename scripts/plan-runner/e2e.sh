@@ -63,6 +63,7 @@ case "$beh" in
     claims-review)   result done null '["code-review"]' ;;
     needs-decision)  printf '\n**Decision needed** — left or right?\n' >> "$PLAN"; result needs_decision null '[]' ;;
     budget)          printf '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"session_id":"s-budget","total_cost_usd":25,"structured_output":null}\n' ;;
+    api-error)       printf '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":429,"session_id":"s-api-error","total_cost_usd":0.88,"result":"You'\''ve hit your limit","structured_output":null}\n' ;;
     judge-nofindings) printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-judge","total_cost_usd":0.5,"structured_output":{"verdict":"cannot_judge","testsAdequate":true,"summary":"x"}}\n' ;;
     done-gate-red)   code app/src/main/java/x/ui/Screen.kt; ship none; echo red > "$STUB/gate"; result done null '[]' ;;
     noop-done)       result done null '[]' ;;
@@ -213,6 +214,16 @@ scenario "A spent budget is blocked at once, never re-run" budget
 run
 check "exit 3 (blocked)"                         "3" "$rc"
 check "events"                                   "launched result blocked" "$(events mini)"
+
+scenario "An API error is blocked at once, and the stop names the error, not 'success' or 'null'" api-error
+run
+check "exit 3 (blocked)"                         "3" "$rc"
+check "events: no nudge, no escalation"          "launched result blocked" "$(events mini)"
+check "the blocked reason carries the CLI's message" "1" "$(jq -r 'select(.event=="blocked") | .why' "$RUNS/mini.log" | grep -c "api_error, HTTP 429: You've hit your limit" || true)"
+check "the launch line reads failed, not success" "1" "$(grep -c 'session s-api-error: failed, status null' "$TMP/err" || true)"
+check "the driver says why it does not retry"   "1" "$(grep -c 'ended on an API error' "$TMP/err" || true)"
+check "no bare 'null' summary line"             "0" "$(grep -cx '  null' "$TMP/out" || true)"
+check "the resume hint names the session"       "1" "$(grep -c 'claude --resume s-api-error' "$TMP/out" || true)"
 
 scenario "A step finished by hand is not validated on a discarded attempt's skill claim" done-no-shipped-di claims-review blocked-env
 run

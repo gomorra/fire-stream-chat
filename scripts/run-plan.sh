@@ -357,9 +357,15 @@ stop_needs_decision() {
 stop_blocked() { # stop_blocked <why>
     log blocked --arg step "$STEP" --arg session "${SESSION_ID:-unknown}" --arg why "$1"
     notify "step $STEP is blocked" "$1"
-    echo; echo "  $(result_get .structured_output.summary)"; echo
-    echo "  inspect the worktree, then either resume the session or fix by hand and run this again:"
-    echo "    $(resume_hint)"
+    local summary; summary=$(result_get .structured_output.summary)
+    echo; [ "$summary" = null ] || { echo "  $summary"; echo; }
+    if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = null ]; then
+        echo "  no session to resume — inspect the worktree, fix by hand if needed, and run this again:"
+        echo "    cd $(printf '%q' "$WT") && git status"
+    else
+        echo "  inspect the worktree, then either resume the session or fix by hand and run this again:"
+        echo "    $(resume_hint)"
+    fi
     exit 3
 }
 
@@ -483,7 +489,7 @@ judge_step() {
     git -C "$ROOT" worktree remove --force "$jwt" || true
     if [ -n "$dirty" ] || [ "$(pr_result_kind "$out")" != complete ]; then
         log judge_failed --arg step "$STEP" --arg file "$(rel "$out")" --argjson cost "$(pr_result_json "$out" .total_cost_usd 0)" \
-            --arg why "$([ -n "$dirty" ] && echo "the judge wrote to its worktree — grade dropped" || echo "no usable result ($(pr_result_field "$out" .subtype))")"
+            --arg why "$([ -n "$dirty" ] && echo "the judge wrote to its worktree — grade dropped" || echo "no usable result ($(pr_result_error "$out"))")"
         say "warning: step $STEP has no grade — $([ -n "$dirty" ] && echo "the judge wrote to its (throwaway) worktree" || echo "the judge ended without a usable result"); the plan goes on"
         return 0
     fi
@@ -502,7 +508,11 @@ handle_result() {
     while :; do
         case "$(pr_result_kind "$RESULT_FILE")" in
             budget) stop_blocked "budget or turn limit exhausted ($(result_get .subtype)) — not resumed" ;;
-            failed) stop_blocked "session ended without a usable result ($(result_get .subtype); stderr in $(rel "$RESULT_FILE").stderr)" ;;
+            failed)
+                if [ "$(result_get .terminal_reason)" = api_error ]; then
+                    say "the session ended on an API error. The CLI retries transient errors before it gives up, so the runner does not retry. Once the cause is gone (a usage limit, a login, an outage), run this again: a fresh session restarts the step and sees what this one left uncommitted"
+                fi
+                stop_blocked "session ended without a usable result ($(pr_result_error "$RESULT_FILE"); stderr in $(rel "$RESULT_FILE").stderr)" ;;
             incomplete)
                 if [ "$NUDGED" = 1 ]; then
                     escalate "the session ended without the JSON result object, and its one nudge was already spent"
@@ -550,7 +560,7 @@ launch() {
     run_claude "$RESULT_FILE" "$PROMPT"
     SESSION_ID=$(result_get .session_id)
     log_result
-    say "step $STEP session $SESSION_ID: $(result_get .subtype), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
+    say "step $STEP session $SESSION_ID: $(pr_result_kind "$RESULT_FILE"), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
 }
 
 run_step() {
