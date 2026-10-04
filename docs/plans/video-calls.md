@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, steps 1 to 3 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
+Status: approved, steps 1 to 4 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
 ## Context
 
@@ -506,6 +506,55 @@ Departures (for sign-off):
 The layout is the prototype's A · Stage: `VariantAStage.kt` on `prototype/video-call`. The answer
 buttons are B's: `SplitAnswerRow` in `VariantBSplit.kt`. Rewrite them properly; do not copy them in.
 
+**Approach**
+
+1. `ui/call/CallScreen.kt` becomes a thin stateful wrapper around a stateless `CallStage`, which
+   takes a `CallStageState`, an `@Immutable CallScreenCallbacks` and the `videoTile` slot. The
+   pieces sit beside it: `CallStageTiles.kt` (tile, avatar, the floating self view and its corner
+   arithmetic) and `CallStageControls.kt` (dock, top bar, answer row).
+2. `CallControlButton` gains `enabled`. `CallAudioRouteButton` takes its colours, so it can sit
+   in the dark dock.
+3. A new `ui/call/OutgoingCallPlacer.kt`, a singleton on the application scope. It holds the wait
+   for `createCall`, so a recreated activity finds the call still being placed, and the stage
+   shows *Calling…* from the first frame. A hang-up during the wait ends the call it created.
+4. `CallActivity`: always the dark theme, `outgoingIntent`, the `CAMERA` request (with the
+   microphone for a video call, and on the first camera tap), the lock state, visibility
+   reports, picture-in-picture and the *minimise* arrow. `CallViewModel` injects `CallVideoSinks`
+   for the tile views.
+5. `CallService`: the speaker default needs an agreed video line (the step-3 note), and the two
+   ongoing notifications name the call's kind.
+6. Entry and log: the camera icon in `ChatScreen`, the three intents through `outgoingIntent`,
+   `CallsScreen` rows and the `CALL` bubble.
+7. Tests: `CallStageUiTest` (Robolectric, every row of the step's list), `SelfTileCornersTest`,
+   `OutgoingCallPlacerTest`, and the notification titles in `CallNotificationManagerTest`.
+8. Nothing in the code contradicts a decision or the model. Two things the spec does not say:
+   the back button minimises a live call like the arrow does, and the dock of a call that is
+   still being placed has only the hang-up button, because no call exists to switch anything on.
+9. This session has no device, so the two emulator checks of risks 1 and 3 stay in
+   `docs/BACKLOG.md`.
+10. Skills: `app-ui-design` (tagged), `changelog-release` for the bump, and `simplify` because the
+    diff will pass 600 lines.
+
+**Shipped** `a8b69da8` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, simplify. Reviewer models: simplify: sonnet, opus, sonnet, opus. CHANGELOG entry: `a8b69da8`.
+Departures (for sign-off):
+- **Nothing ran on a device or an emulator.** No video view, no camera and no picture-in-picture window has been seen. The two emulator checks of risks 1 and 3 are still open. The Robolectric tests draw the stage with a box in place of a video tile. `docs/BACKLOG.md` § *The call screen with video* lists thirteen checks.
+- The register counts of the new composables were not read from the APK. The session's permissions allow no pipe, and the `dexdump` recipe needs one. It is check 13 in the backlog.
+- A new class, `ui/call/OutgoingCallPlacer`, places the call. It holds the wait for `createCall` on the application scope and publishes `placing`, which the stage draws as *Calling…* with only the hang-up button. A hang-up during the wait ends the call document that is created after it. A call that cannot be created shows *Call failed* and closes. Before, it closed nothing and showed nothing.
+- The back button minimises a live call, as the arrow does. Before, it closed the activity. An incoming ring keeps the old behaviour.
+- The *minimise* arrow sends a call without video to the background (`moveTaskToBack`). Step 4a replaces that with the dock.
+- `CallActivity` closes at once when it is opened without a call and without one being placed, for example from a notification that outlived its call.
+- The stage closes only after an end it watched. `CallStateHolder` keeps `Ended` until the next call starts, and the activity would otherwise close under the permission dialog of the next call.
+- A tile is asked for from the moment a camera is on, and the avatar covers it until the first frame has arrived. The spec named only the two end states.
+- The decision the step-3 note asked for: a call started as video to an app without video starts on the earpiece. `CallService.followVideoWithAudio` reads `videoAvailable` for it.
+- The two notifications of a running call are titled *Video Call* or *Voice Call*. A kind that the service learns late from the call document does not update a notification that is already posted.
+- The refusal of the camera is explained in a toast, once per activity. A second tap after a permanent refusal does nothing and says nothing.
+- New strings are literals, like the rest of the call screen. The route sheet's strings stay resources.
+- A video call's bubble shows the camera icon also when the call was missed or declined, in the error colour. A missed voice call keeps the missed-call icon.
+- `docs/BACKLOG.md`: the item *Video calls, 1-to-1 (4.2)* is deleted, and risk 7 is a new item, *Call signalling is not authenticated end to end*.
+- CHANGELOG: one `Added` entry in the existing `[UNRELEASED] [1.39.0]` section. `scripts/check-changelog-header.sh` was not run, as in step 3.
+- Not done, from /simplify: `CallControlColors.themed()` and the default size of `CallAudioRouteButton` have no production caller until the docked card of step 4a. The live states still name the other person in three ways, so `CallStageState.person` has four branches. A `CallState.Placing` on `CallStateHolder` in place of the placer's own flow is noted in step 9.
+- No test covers `CallActivity`: the permission paths, the preview, the visibility reports and picture-in-picture.
+
 - One `CallScreen` for every call. Video tiles come in through a slot,
   `videoTile: @Composable (participantId) -> Unit`, so a Robolectric test can pass a plain box.
   Callbacks collapse into an `@Immutable CallScreenCallbacks`.
@@ -618,6 +667,30 @@ strip are C's: `DockedCall`, `DockedStrip` and `DockedBody` in `VariantCDocked.k
   collects. That also removes the rule that a screen reports again once the call exists.
 - Leaving the chat for another screen, or the app, pauses the camera like any time the call is off
   screen. The call notification leads back to the stage.
+- **(step-4)** The stage is `CallStage(state: CallStageState, callbacks: CallScreenCallbacks,
+  videoTile)` in `ui/call/CallScreen.kt`. Its pieces are in `CallStageTiles.kt` and
+  `CallStageControls.kt`. `showsVideo(controls, participants)` is the rule for "any video shows",
+  and the card-or-strip choice reads it. `CallAudioRouteButton` takes `CallControlColors`;
+  `CallControlColors.themed()` is the app theme's set, for the card.
+- **(step-4)** `CallActivity.minimise()` enters picture-in-picture while video shows and calls
+  `moveTaskToBack` otherwise. The back button of a live call does the same through a
+  `BackHandler` in `CallScreen`. The dock replaces both branches here, and the auto-enter of
+  picture-in-picture stays for the home gesture.
+- **(step-4)** `ConnectedScene` has a tap detector on the whole stage, which toggles the dock, and
+  the self tile has its own tap and drag. The swipe up must not eat those taps.
+- **(step-4)** A call that is still being placed has no call id. `OutgoingCallPlacer.placing`
+  carries its `chatId`, and the stage draws it as *Calling…* without the *minimise* arrow. It
+  cannot be docked until the service has it.
+- **(step-4 /simplify)** `CallActivity.prepareCall` reports the call as visible and starts the
+  preview once per call, and keeps `preparedCallId` in the saved state to do it only once. The
+  screen tokens remove the report. Move the preview too: the service starts it when the first
+  screen shows a ring of a video call, and reads the camera permission and the keyguard itself.
+  `preparedCallId` and `reportVisible` then go.
+- **(step-4 /simplify)** `CallScreen` closes only after an end it watched (`sawCall`), because
+  `CallStateHolder` keeps `Ended` until the next call starts. The card's *Call ended* needs the
+  same rule, or a chat opened later shows a stale one. Let the holder own it: `Ended` goes back
+  to `Idle` after a moment, on the application scope, and a screen closes on `Idle`.
+  `CallStateHolder.reset()` has no caller today.
 - Tests (Robolectric): what the card and the strip show for voice and for video, which size a call
   rests in, and the card showing only in the call's chat. A unit test for the visibility rule:
   stage to card without a pause, and the pause after a second with neither.
@@ -765,6 +838,15 @@ Rewrite it properly; do not copy it in.
   name.
 - Docked: the card from step 4a shows the same grid, smaller. The strip shows everyone's avatars.
 - Call log: a group entry shows the group's name and calls the group back. `CallLogEntry.isGroup`.
+- **(step-4)** The stage draws one other person: `CallStageState.remote` is the first
+  participant, and the picture-in-picture scene, the top bar's name and the *muted* mark all read
+  it. `CallStageState.person` takes the name from the 1:1 call states.
+- **(step-4)** `CallActivity.outgoingIntent` and `OutgoingCallPlacer` place a call to one callee
+  through `CallRepository.createCall`. A group call needs its own way in.
+- **(step-4 /simplify)** "Is there a call" has two sources: `CallStateHolder.callState` and
+  `OutgoingCallPlacer.placing`. `CallStage`, `CallScreen`, `CallActivity.finishIfNoCall` and
+  `CallViewModel.hangup()` each check both. A second way to place a call is the moment to fold
+  them: a `CallState.Placing` on the holder, with a failure as `Ended(ERROR)`.
 - Tests (Robolectric): the layout for 2, 3 and 4, an enlarged tile, the docked grid, the banner's
   states, the picker's cap.
 - Docs: `SPEC.md`, `FEATURE-MAP.md`, `BACKLOG.md`, CHANGELOG `Added` — **Group calls**.
