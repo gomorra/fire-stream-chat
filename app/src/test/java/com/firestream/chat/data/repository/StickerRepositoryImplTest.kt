@@ -794,6 +794,72 @@ class StickerRepositoryImplTest {
         assertTrue(repository.prepareStickerDraft("content://gone").isFailure)
     }
 
+    // --- A picture from the keyboard ---
+
+    @Test
+    fun `a sticker file is saved as it is, into the SAVED pack, whatever pack it names`() = runTest {
+        val bytes = sticker(1, cats)
+        val uri = source("keyboard.webp", bytes)
+
+        val id = repository.saveSticker(uri).getOrThrow()
+
+        assertEquals(StickerFiles.sha256Hex(bytes), id)
+        val saved = packs().single()
+        assertEquals(StickerPackKind.SAVED, saved.kind)
+        assertEquals(listOf(id), saved.stickers.map { it.id })
+        assertEquals(listOf("😺"), saved.stickers.single().emojis)
+        coVerify(exactly = 0) { maker.convert(any()) }
+        coVerify { scheduler.syncIfPending() }
+    }
+
+    @Test
+    fun `saving the same picture again gives the same id and adds nothing`() = runTest {
+        val uri = source("keyboard.webp", sticker(1))
+
+        val first = repository.saveSticker(uri).getOrThrow()
+        val second = repository.saveSticker(uri).getOrThrow()
+
+        assertEquals(first, second)
+        assertEquals(1, packs().single().stickers.size)
+        assertEquals(1, storedFiles().size)
+    }
+
+    @Test
+    fun `a picture that is no sticker file is converted, and the converted bytes are what is stored`() = runTest {
+        val png = source("keyboard.png", byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()))
+        val converted = sticker(5)
+        coEvery { maker.convert(png) } returns converted
+
+        val id = repository.saveSticker(png).getOrThrow()
+
+        assertEquals(StickerFiles.sha256Hex(converted), id)
+        assertEquals(listOf(id), packs().single { it.kind == StickerPackKind.SAVED }.stickers.map { it.id })
+    }
+
+    @Test
+    fun `a picture that cannot be read or converted saves nothing and says why`() = runTest {
+        val notAPicture = source("keyboard.bin", byteArrayOf(1, 2, 3))
+        coEvery { maker.convert(any()) } throws IllegalStateException("That picture could not be read")
+
+        val unreadable = repository.saveSticker(notAPicture)
+        val missing = repository.saveSticker(File(context.cacheDir, "picked/gone.png").absolutePath)
+
+        assertEquals("That picture could not be read", unreadable.exceptionOrNull()?.message)
+        assertEquals("That picture could not be read", missing.exceptionOrNull()?.message)
+        assertEquals(emptyList<StickerPack>(), packs())
+        assertEquals(emptyList<String>(), storedFiles())
+    }
+
+    @Test
+    fun `a conversion that yields no sticker saves nothing`() = runTest {
+        coEvery { maker.convert(any()) } returns byteArrayOf(1, 2, 3)
+
+        val result = repository.saveSticker(source("keyboard.png", byteArrayOf(9, 9, 9)))
+
+        assertEquals("That picture could not be made into a sticker", result.exceptionOrNull()?.message)
+        assertEquals(emptyList<StickerPack>(), packs())
+    }
+
     // --- Recents and the folder ---
 
     @Test

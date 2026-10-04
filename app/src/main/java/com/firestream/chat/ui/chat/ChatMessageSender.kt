@@ -112,7 +112,7 @@ internal class ChatMessageSender(
                 messageRepository.sendMediaMessage(
                     chatId,
                     item.uri.toString(),
-                    item.mimeType,
+                    item.sendMimeType,
                     item.caption,
                     item.isHd,
                 ).onFailure { e -> if (firstError == null) firstError = AppError.from(e) }
@@ -137,16 +137,46 @@ internal class ChatMessageSender(
      */
     fun sendSticker(stickerId: String, packId: String?) {
         scope.launch {
-            _uiState.update {
-                it.copy(messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1))
-            }
-            messageRepository.sendStickerMessage(chatId, stickerId, packId)
-                .onSuccess { stickerRepository.markUsed(stickerId) }
-                .onFailure { e ->
-                    _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
-                }
+            scrollToBottom()
+            sendStickerNow(stickerId, packId).onFailure(::showError)
         }
     }
+
+    private suspend fun sendStickerNow(stickerId: String, packId: String?): Result<Message> =
+        messageRepository.sendStickerMessage(chatId, stickerId, packId)
+            .onSuccess { stickerRepository.markUsed(stickerId) }
+
+    /**
+     * Sends a picture the keyboard inserted. A GIF goes out as it is. Any other
+     * picture is put into the `SAVED` pack and sent as a sticker, so it is in
+     * the Stickers tab the next time.
+     *
+     * [onHandled] runs once the bytes are copied or the send is given up, also
+     * when the scope is cancelled. The keyboard's grant for [uri] is held until then.
+     */
+    fun sendKeyboardContent(uri: Uri, mimeType: String, onHandled: () -> Unit = {}) {
+        val route = keyboardContentRoute(mimeType) ?: return onHandled()
+        scope.launch {
+            try {
+                scrollToBottom()
+                when (route) {
+                    KeyboardContentRoute.GIF ->
+                        messageRepository.sendGifMessage(chatId, uri.toString(), mimeType).onFailure(::showError)
+                    KeyboardContentRoute.STICKER -> stickerRepository.saveSticker(uri.toString())
+                        .onSuccess { stickerId -> sendStickerNow(stickerId, packId = null).onFailure(::showError) }
+                        .onFailure(::showError)
+                }
+            } finally {
+                onHandled()
+            }
+        }
+    }
+
+    private fun scrollToBottom() = _uiState.update {
+        it.copy(messages = it.messages.copy(scrollToBottomTrigger = it.messages.scrollToBottomTrigger + 1))
+    }
+
+    private fun showError(e: Throwable) = _uiState.update { it.copy(session = it.session.copy(error = AppError.from(e))) }
 
     fun sendVoiceMessage(uri: Uri, durationSeconds: Int) {
         scope.launch {

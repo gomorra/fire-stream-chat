@@ -114,11 +114,32 @@ class StickerMaker @Inject constructor(
         }
     }
 
-    private fun decode(source: Uri): Bitmap =
+    /**
+     * The picture at [sourceUri] as a WebP sticker, with its shape kept and its
+     * long edge capped at [StickerGeometry.CANVAS]. It is for a picture that is
+     * no sticker file: a keyboard hands over a PNG as often as a WebP. Throws
+     * [IllegalStateException], with a message fit to show, when the picture
+     * cannot be read or cannot be encoded under the size limit.
+     */
+    suspend fun convert(sourceUri: String): ByteArray = processingLimiter.withPermit {
+        withContext(Dispatchers.IO) {
+            val picture = try {
+                decode(Uri.parse(sourceUri), StickerGeometry.CANVAS)
+            } catch (e: Exception) {
+                // An IOException from the decoder, or a SecurityException when the keyboard's grant for its uri is gone.
+                throw IllegalStateException(UNREADABLE_PICTURE, e)
+            }
+            val bytes = encoder.encode(picture)
+            picture.recycle()
+            checkNotNull(bytes) { "That picture has too much detail for a sticker" }
+        }
+    }
+
+    private fun decode(source: Uri, maxDimension: Int = SOURCE_MAX_DIMENSION): Bitmap =
         ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.contentResolver, source)) { decoder, info, _ ->
-            // Software, because the pixels are read back for the trim and the outline.
+            // Software, because the pixels are read back: for the trim and the outline, and by the encoder.
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height, SOURCE_MAX_DIMENSION)
+            val (width, height) = ImageEditGeometry.cappedSize(info.size.width, info.size.height, maxDimension)
             if (width > 0 && height > 0) decoder.setTargetSize(width, height)
         }
 
@@ -133,6 +154,8 @@ class StickerMaker @Inject constructor(
 
         /** Twice the sticker's side, so a zoom to half the photo still fills the sticker with real pixels. */
         const val SOURCE_MAX_DIMENSION = 1024
+
+        private const val UNREADABLE_PICTURE = "That picture could not be read"
 
         /** A pixel fainter than this is not part of the subject. It keeps the model's haze out of the bounds. */
         private const val SUBJECT_ALPHA = 24

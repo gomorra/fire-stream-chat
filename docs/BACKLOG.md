@@ -21,6 +21,25 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### GIFs and stickers from the keyboard (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 9. Checked on the emulator (API 36, Gboard with a
+hardware keyboard, so its floating toolbar): a GIF and a sticker from Gboard's palette were
+each sent and arrived. Nothing ran on a phone.
+1. Gboard as an on-screen keyboard on a phone: its GIF and sticker tabs are offered in the
+   composer, and a pick is sent at once. Text typed before the pick stays in the composer.
+2. Samsung's keyboard: it is reported to refuse content in Compose fields. Check whether its
+   GIF and sticker buttons are live in the composer, and what a pick does.
+3. A Gboard sticker keeps its transparency in the bubble and is in the Stickers tab
+   afterwards, under Recents and in the *Saved* pack. The same sticker sent twice is one
+   entry there.
+4. A Bitmoji or another large keyboard sticker: it is sent, scaled to 512 px on its long edge.
+5. While a message is being edited, a keyboard pick is refused and nothing is sent.
+6. A `.gif` picked from the gallery goes through the send preview and arrives animated, with
+   its caption. Cropped or drawn on in the preview, it arrives as a still photo.
+7. A `.gif` shared into the app from another app arrives animated. One over 8 MB is refused
+   with *GIFs over 8 MB can't be sent*.
+
 ### The sticker maker (2026-10-04)
 
 `docs/plans/stickers-and-gifs.md` step 8. JVM and Robolectric tests cover the geometry, the
@@ -848,8 +867,8 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 Stickers are imported or made from a photo, sent from the composer's Stickers tab and shown
 in a chat. Lottie stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved
-under the account, and a received sticker's pack can be viewed and added. A GIF can be
-received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
+under the account, and a received sticker's pack can be viewed and added. A GIF and a
+sticker can be inserted from the keyboard. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
 
 - **Drawing on a made sticker, and placing emoji, text and shapes on it.** The sticker maker
   has the cutout, the outline and the crop. The image editor's Draw and Overlay screens are
@@ -862,8 +881,12 @@ received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these par
   of constant width would be drawn after the crop.
 - **A Lottie sticker sent to an older build shows as a broken image.** That build stores
   WebP only, and its bubble hands the url to an image decoder.
-- **Sending a GIF.** Nothing in the app picks one yet. The keyboard route is step 9. The
-  in-app GIFs tab and the online sticker catalogue are steps 10–11.
+- **A GIFs tab and an online sticker catalogue.** A GIF is sent from the keyboard, the
+  gallery or the share sheet. The in-app GIFs tab and the online catalogue are steps 10–11.
+- **A picture pasted from the keyboard's clipboard becomes a sticker.** Every keyboard
+  picture that is not a GIF is sent as a sticker, at most 512 px on its long edge. A
+  screenshot pasted from Gboard's clipboard row is such a picture. A rule that tells a
+  photo from a sticker, by its size or its lack of transparency, would send it as a photo.
 - **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage
   only. Search and media go through a Cloud Function, so the provider never sees a user's
   IP. The pocketbase flavor gets no GIFs tab.

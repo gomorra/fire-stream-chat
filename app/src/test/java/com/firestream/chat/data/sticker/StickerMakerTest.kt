@@ -215,4 +215,37 @@ class StickerMakerTest {
         assertTrue(result.exceptionOrNull() is IllegalStateException)
         assertEquals("That photo could not be read", result.exceptionOrNull()?.message)
     }
+
+    // --- A picture from the keyboard ---
+
+    @Test
+    fun `a converted picture keeps its shape, with its long edge at the sticker's size`() = runTest {
+        val encoded = captureEncoded(byteArrayOf(1, 2, 3))
+
+        val bytes = maker.convert(photo(2000, 1000).toString())
+
+        assertEquals(listOf<Byte>(1, 2, 3), bytes.toList())
+        assertEquals(StickerGeometry.CANVAS to StickerGeometry.CANVAS / 2, encoded.single().let { it.width to it.height })
+    }
+
+    @Test
+    fun `a small picture is converted at its own size`() = runTest {
+        val encoded = captureEncoded(byteArrayOf(1))
+
+        maker.convert(photo(120, 90).toString())
+
+        assertEquals(120 to 90, encoded.single().let { it.width to it.height })
+    }
+
+    @Test
+    fun `a picture that cannot be read or encoded is not converted, and says why`() = runTest {
+        every { encoder.encode(any()) } returns null
+
+        val missing = runCatching { maker.convert(Uri.fromFile(File(context.cacheDir, "missing.png")).toString()) }
+        val detailed = runCatching { maker.convert(photo(100, 100).toString()) }
+
+        assertTrue(missing.exceptionOrNull() is IllegalStateException)
+        assertEquals("That picture could not be read", missing.exceptionOrNull()?.message)
+        assertEquals("That picture has too much detail for a sticker", detailed.exceptionOrNull()?.message)
+    }
 }

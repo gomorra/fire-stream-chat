@@ -222,6 +222,38 @@ class MessageRepositoryStickerGifSendTest {
         }
     }
 
+    // The gallery and the share sheet send through sendMediaMessage.
+    @Test
+    fun `a media send of an image-gif is queued as a GIF, not as a photo to re-encode`() = runTest {
+        val result = repository.sendMediaMessage("chat1", "content://pick/funny", "image/GIF", "look", isHd = true, fileName = null)
+
+        assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
+        val row = inserted.single().toDomain()
+        assertEquals(MessageType.GIF, row.type)
+        assertEquals("look", row.content)
+        assertEquals("image/gif", row.mimeType)
+        assertEquals(false, row.isHd)
+        coVerify(exactly = 1) { outboxFiles.stage(row.id, "content://pick/funny", "image/gif") }
+    }
+
+    @Test
+    fun `a media send of a GIF over the size limit is refused, like a GIF send`() = runTest {
+        coEvery { documentFiles.describe("content://pick/huge") } returns DocumentInfo("huge.gif", MAX_GIF_BYTES + 1)
+
+        val result = repository.sendMediaMessage("chat1", "content://pick/huge", "image/gif", "", isHd = null, fileName = null)
+
+        assertTrue(result.exceptionOrNull() is MediaLimitException)
+        assertTrue(inserted.isEmpty())
+    }
+
+    @Test
+    fun `a media send of a GIF the editor turned into a JPEG stays a photo`() = runTest {
+        val result = repository.sendMediaMessage("chat1", "file:///cache/edits/1.jpg", "image/jpeg", "", isHd = false, fileName = null)
+
+        assertTrue("queued: ${result.exceptionOrNull()}", result.isSuccess)
+        assertEquals(MessageType.IMAGE, inserted.single().toDomain().type)
+    }
+
     @Test
     fun `a GIF send of something that is not an image is refused`() = runTest {
         val result = repository.sendGifMessage("chat1", "content://pick/clip", "video/mp4")

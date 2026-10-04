@@ -133,6 +133,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   finger-to-grip gap, measured at touch-*down*: `detectDragGestures` calls back only after
   touch slop, so record the down position yourself (a non-consuming `Initial`-pass
   `awaitFirstDown`). Accumulating `dragAmount` instead loses the slop, and the grip lags.
+- **`Modifier.contentReceiver` hears nothing from the keyboard on a value-based `BasicTextField`.**
+  That field (`value` / `onValueChange`, not `TextFieldState`) talks to the keyboard through
+  `RecordingInputConnection`, whose `commitContent` returns false, and its `EditorInfo` names no
+  content types. So a keyboard greys out its GIF and sticker tabs, or says the app does not take
+  them. Wrap the field in `InterceptPlatformTextInput` instead. The interceptor wraps the
+  connection the field makes: `EditorInfoCompat.setContentMimeTypes` on its `EditorInfo`, and
+  `InputConnectionCompat.createWrapper` with an `OnCommitContentListener`
+  (`ui/chat/KeyboardContentReceiver.kt`). Text input passes through untouched. In a Robolectric
+  test the field starts its input session only after `dispatchWindowFocusChanged(true)` on the
+  `AndroidComposeView`, and `onCreateInputConnection` on that view then returns the wrapped
+  connection (`KeyboardContentReceiverTest`). `adb shell dumpsys input_method` shows the
+  focused field's `contentMimeTypes` on a device.
 - **Two overlays showing the same content must not cross-fade over a third.**
   Closing the fullscreen viewer in the same frame as opening the send preview over
   it — both black, both drawing the photo at `Fit` — looked like it should be

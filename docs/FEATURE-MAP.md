@@ -631,7 +631,14 @@ A sticker bubble has no fill and no tail, and a GIF bubble is the photo layout w
 Both animate through a decoder attached per request. Previews show the first frame.
 
 A sticker is sent from the composer's picker, whose second tab is the library, or from the
-suggestion strip that appears while the composer holds one emoji. Nothing sends a GIF yet.
+suggestion strip that appears while the composer holds one emoji.
+
+The keyboard can insert a picture into the composer. `KeyboardContentReceiver` wraps the composer's
+input connection, names the picture types to the keyboard and takes its `commitContent`. A GIF goes
+out as a `GIF` message. Any other picture is put into the `SAVED` pack by
+`StickerRepository.saveSticker`, converted to WebP by `StickerMaker.convert` when it is no sticker
+file, and sent as a sticker. A GIF picked from the gallery or shared into the app is a `GIF` message
+too: `MessageRepositoryImpl.sendMediaMessage` hands an `image/gif` to `sendGifMessage`.
 
 A sticker can be made from a photo. `StickerMaker` prepares a draft in `cacheDir/sticker-maker/`:
 the photo, its subject cut out by ML Kit, and the subject with a white outline. The maker's
@@ -685,6 +692,7 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/domain/util/StickerSearch.kt` | Pure: stickers by emoji tag across packs, and which composer text earns suggestions |
 | `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's picker (Emoji and Stickers tabs) and `StickerSuggestionStrip` |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row with the **+** that opens the maker, grid, search, the import button of an empty library |
+| `app/src/main/java/com/firestream/chat/ui/chat/KeyboardContentReceiver.kt` | Takes a GIF or a sticker the keyboard inserts into the composer, and the rule for what each type is sent as |
 | `app/src/main/java/com/firestream/chat/ui/chat/StickerActionsSheet.kt` | The sheet a tap on a sticker bubble opens: add to or remove from the favourites, and *View pack* for a sticker that names one |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackSheet.kt` | The pack preview: name, stickers, *Add pack*, or that the library holds it already |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackPreviewViewModel.kt` | Looks a pack up each time the sheet opens, and installs it |
@@ -746,10 +754,12 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/ui/stickers/create/StickerCreateScreenTest.kt` | What the maker offers with and without a cutout, the pack and emoji chips |
 | `app/src/test/java/com/firestream/chat/domain/util/StickerSearchTest.kt` | Tag matching, the variation selector, one result per sticker, what earns suggestions |
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatStickerManagersTest.kt` | The library mirror, `sendSticker` with `markUsed`, the favourite toggle and its fetch for a sticker the library lacks |
+| `app/src/test/java/com/firestream/chat/ui/chat/KeyboardContentReceiverTest.kt` | The composer field's `EditorInfo` names the picture types, and a `commitContent` on its connection reaches the callback |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageSenderKeyboardContentTest.kt` | A keyboard GIF is sent as a GIF, any other picture is saved and sent as a sticker, and the keyboard's grant is always released |
 | `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip |
 | `app/src/test/java/com/firestream/chat/test/fakes/StickerRepositoryMocks.kt` | `emptyStickerRepository`, `testSticker`, `testStickerPack` |
 
-**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`.
+**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`. **From the keyboard:** `KeyboardContentReceiver` → `ChatViewModel.sendKeyboardContent` → `ChatMessageSender.sendKeyboardContent` → `MessageRepository.sendGifMessage`, or `StickerRepository.saveSticker` and then `sendStickerMessage`.
 
 **Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
 

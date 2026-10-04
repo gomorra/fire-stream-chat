@@ -693,6 +693,24 @@ with a manifest of another owner under its id. Found by `/code-review` on step 6
 
 ---
 
+### `ListRepositoryImplRaceTest` can fail under load
+
+**The smell.** `toggleItemChecked waits for in-flight migration before hitting Firestore` failed
+once in a full `./gradlew test` run with `migration should have started`, and passed in the
+next run with no change to the code. The test asserts right after `advanceUntilIdle()` that
+the migration has begun. So the migration `observeList` starts is not on the test's dispatcher,
+and the assertion races a real thread.
+
+**Why we haven't fixed it.** It was seen once, during a step of the sticker plan that touches
+no list code, and the cause above is read from the test, not confirmed. The fix is in the list
+repository's test wiring: run the migration on the test dispatcher, or wait for
+`migrationStarted` in place of asserting it.
+
+**When to revisit.** The next time it fails, or when the list sync path is touched. A red gate
+that names this test is not the diff under test. Seen 2026-10-04.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

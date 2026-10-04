@@ -15,7 +15,8 @@
 //   (the backup run), StickerLibrarySync (the restore), StickerPackSource and
 //   StickerManifest (a viewed pack), StickerObjectSource and StickerDownloads
 //   (a missing file, found by its id and checked against it), StickerMaker
-//   (the draft and the bytes of a made sticker, which is stored like an import).
+//   (the draft and the bytes of a made sticker, which is stored like an import,
+//   and the WebP of a keyboard picture that is no sticker file).
 // Don't put here: parsing of a file or an archive (domain/util/WebpContainer,
 //   data/sticker/), sending a sticker (MessageRepositoryImpl — "The repository
 //   decides who a send is for", docs/PATTERNS.md), the upload of a pack
@@ -219,6 +220,30 @@ class StickerRepositoryImpl @Inject constructor(
             Target.whatsApp(metadata.packId, metadata.packName, metadata.publisher)
         loosePackName != null -> Target.loose(loosePackName)
         else -> Target.SAVED
+    }
+
+    override suspend fun saveSticker(uri: String): Result<String> = resultOf {
+        withContext(Dispatchers.IO) {
+            val asItIs = try {
+                saveLoose { stickerFiles.open(uri).buffered().use { stickerFiles.store(it) } }
+            } catch (e: Exception) {
+                e.rethrowIfCancellation()
+                // Unreadable. The conversion reads it again and says so in words fit to show.
+                null
+            }
+            // Converted outside the import lock, like a made sticker is rendered: it waits for a processing permit.
+            asItIs ?: saveLoose { stickerFiles.store(stickerMaker.convert(uri)) }
+                ?: throw IllegalStateException(NOT_A_STICKER)
+        }.also { syncScheduler.syncIfPending() }
+    }
+
+    /** Puts what [store] stored into the `SAVED` pack and returns its id, or `null` when it stored nothing. */
+    private suspend fun saveLoose(store: suspend () -> StoredSticker?): String? = importLock.withLock {
+        val stored = store() ?: return@withLock null
+        val now = System.currentTimeMillis()
+        val sticker = StickerEntity.of(stored, stored.metadata?.emojis.orEmpty(), now)
+        stickerDao.importInto(newPack(Target.SAVED, now), listOf(sticker), now)
+        stored.id
     }
 
     override suspend fun toggleFavourite(stickerId: String): Result<Boolean> = resultOf {

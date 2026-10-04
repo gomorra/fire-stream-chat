@@ -37,6 +37,14 @@ interface StickerRepository {
     suspend fun importFrom(uris: List<String>, loosePackName: String? = null): Result<StickerImportResult>
 
     /**
+     * Puts the one picture at [uri] into the `SAVED` pack and succeeds with its
+     * sticker id, also when the library held it already. A sticker file is kept
+     * as it is. Any other picture, such as a PNG a keyboard inserted, becomes a
+     * still WebP sticker. Fails for something that is no picture.
+     */
+    suspend fun saveSticker(uri: String): Result<String>
+
+    /**
      * Adds [stickerId] to the favourites, or takes it out when it is one.
      * Succeeds with whether it is a favourite now. Fails for a sticker the
      * library does not hold.

@@ -104,6 +104,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
+import com.firestream.chat.domain.util.GIF_MIME_TYPE
 import com.firestream.chat.domain.util.MAX_GIF_BYTES
 import com.firestream.chat.domain.util.formatFileSize
 import kotlinx.coroutines.CancellationException
@@ -647,6 +648,11 @@ class MessageRepositoryImpl @Inject constructor(
      * @param isHd per-image override from the send preview; `null` falls back to
      *   the global preference, so a caller that never offers the choice — the
      *   share sheet, a retry — behaves exactly as it did before per-image HD.
+     *
+     * An `image/gif` goes out as a `GIF` message, bytes untouched: the image
+     * route would re-encode it to one still JPEG. That covers the gallery and
+     * the share sheet. A caller whose GIF went through the editor passes the
+     * type of what the editor wrote.
      */
     override suspend fun sendMediaMessage(
         chatId: String,
@@ -655,7 +661,9 @@ class MessageRepositoryImpl @Inject constructor(
         caption: String,
         isHd: Boolean?,
         fileName: String?,
-    ): Result<Message> = resultOf {
+    ): Result<Message> = if (mimeType.equals(GIF_MIME_TYPE, ignoreCase = true)) {
+        sendGifMessage(chatId, uri, GIF_MIME_TYPE, caption)
+    } else resultOf {
         val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
         val tempId = UUID.randomUUID().toString()
         val timestamp = sendClock.next()

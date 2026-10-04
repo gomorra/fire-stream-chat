@@ -1951,7 +1951,12 @@ fun ChatScreen(
                         // No clip: large emoji must overflow the Row's cross-axis height constraint.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
-                    BasicTextField(
+                    // A GIF or a sticker from the keyboard is sent at once, like a pick
+                    // from the Stickers tab. Not while a message is being edited.
+                    KeyboardContentReceiver(
+                        enabled = uiState.composer.editingMessage == null,
+                        onContent = viewModel::sendKeyboardContent,
+                    ) { BasicTextField(
                         value = inputValue,
                         onValueChange = { newValue ->
                             // User interaction during dictation cancels the session
@@ -2012,7 +2017,7 @@ fun ChatScreen(
                                 innerTextField()
                             }
                         }
-                    )
+                    ) }
                     if (uiState.composer.editingMessage == null) {
                         IconButton(
                             onClick = { showAttachmentSheet = true },
