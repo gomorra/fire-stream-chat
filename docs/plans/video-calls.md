@@ -779,6 +779,26 @@ Optional, see the checkpoint above. A secret and an authenticated endpoint are a
    relay at all. It goes into the Shipped block and the backlog.
 9. Skills: `code-review` (tagged), and `changelog-release` for the entry and the bump.
 
+**Shipped** `cd6a382e` (2026-10-05) — tier: strong, tagged strong. skills: code-review, changelog-release, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus. CHANGELOG entry: `cd6a382e`.
+Departures (for sign-off):
+- **Until `getTurnCredentials` is deployed with its two secrets, this build has no relay at all.** The `openrelay` servers are gone, as the step says. A call then connects only where a direct path exists. Do not release this build before the checkpoint below is done.
+- **Nothing ran on a device, and the function was never deployed or called.** The shape of Cloudflare's answer is taken from its documentation. `node --check functions/index.js` was not run. `docs/BACKLOG.md` § *The Cloudflare relay for calls* lists eight checks.
+- The secrets are named `CLOUDFLARE_TURN_KEY_ID` and `CLOUDFLARE_TURN_API_TOKEN`. The function answers every failure on Cloudflare's side with `unavailable`, gives the request ten seconds, and logs only the HTTP status.
+- Where the wait sits. The caller waits inside `CallRepository.createCall`, beside the capability read, before the call document exists. `CallService` then takes the kept set with `IceServerProvider.current()` and waits for nothing. The side that answers starts the fetch when the ring starts. It opens its session at once when the fetch has settled, and otherwise waits up to three seconds first.
+- The first call after twelve hours rings up to three seconds later than before, while the servers are fetched.
+- The fetch runs on the application scope. A caller that stops waiting does not cancel it, and the late answer is kept for the next call.
+- A failed fetch is not repeated for one minute. The spec did not ask for it. Without it the side that answers would wait again for what just failed during the ring.
+- `CallActivity` warms through a new `CallRepository.prepareCall()`, so the UI gains no import from `data/`.
+- The log line names the relay only when this side's end of the path is the relay: `relayed (local relay, …) through turn:turn.cloudflare.com:…`. `IcePath` gained the server's URL for it. Whether WebRTC reports that URL on the selected pair is unchecked.
+- A fetched set replaces the server list, Google's STUN servers included. Cloudflare's answer carries its own STUN servers.
+- The app drops every URL that is not `stun:`, `turn:` or `turns:`, and every relay entry without a full login. /code-review found that WebRTC builds no connection on such an entry, and the set would have been kept for twelve hours.
+- /code-review also found that a request cancelled by the Firebase client reached the caller as its own cancellation and failed the call. It is a failed fetch now.
+- Not done, from /code-review: the side that answers in the last three seconds of the ring, before the servers arrived, can lose to the caller's ring timeout. It is check 8 in the backlog.
+- Not done, from /simplify: a fetch started when a chat opens, so the first call does not wait (`CallActivity` opens only after the tap), the set kept in the function between requests, and the validity rules of an entry moved from the Firebase parser to the model. The lifetime of the login is written in the function and in the app; `TECH_DEBT.md` has the entry. Notes for the mesh are in step 7.
+- Any signed-in user can ask for a relay login, without a limit. `docs/BACKLOG.md` § *The relay hands a login to every signed-in user* has the options.
+- `docs/ARCHITECTURE.md` no longer counts the domain models. The count was wrong.
+- `scripts/check-changelog-header.sh` was not run, as in steps 3 to 4a.
+
 - `functions/index.js`: `getTurnCredentials`, an `onCall` function that rejects a caller who is not
   signed in. It posts `{"ttl": 86400}` to
   `https://rtc.live.cloudflare.com/v1/turn/keys/<key id>/credentials/generate-ice-servers` with the
