@@ -1,0 +1,18 @@
+### Step 1 — a
+Body 1.
+
+<<<<<<<<<<<<< plan/p
+**Shipped** `abc1234` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+||||||||||||| base
+=============
+### Step 1a — new
+>>>>>>>>>>>>> main
+
+### Step 2 — b
+<<<<<<<<<<<<< plan/p
+Body 2. **(step-1)** a note for step 2.
+||||||||||||| base
+Body 2.
+=============
+Body 2, revised on main.
+>>>>>>>>>>>>> main

@@ -123,12 +123,14 @@ Do not reimplement either with a custom review prompt.
 Multi-step plans run unattended from a terminal, not from inside a Claude session:
 
 ```bash
-scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--budget <USD>] [--variant <name>] [--base <ref>]
+scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [--budget <USD>] [--variant <name>] [--base <ref>] [--sync-from <ref>|none]
 ```
 
 - **One session per step.** Each step gets a fresh headless session in a dedicated worktree on `plan/<name>`.
 - **The plan file is the state.** A step is done when a `**Shipped**` block sits under its heading. The step session writes it in a `docs(plan):` commit after its green code commit.
 - **Stops.** The driver stops on `needs_decision` (resume the printed session to answer), on `blocked`, and at every `‖` checkpoint. It never pushes.
+- **Plan edits during a run.** Commit them on main. For a cloud run, push them and pass `--sync-from origin/main`. Before each step the driver merges the plan file, and only that, into the branch as a `docs(plan): sync` commit. That is the one commit it makes. A conflict stops with exit 5 and prints the commit that records a hand merge.
+- **Pause.** Create `docs/plans/.runs/<run-id>.pause` to stop the run before its next step (exit 5). Run again to continue.
 - **Partly hand-finished plans** need `**Shipped**` lines for their done steps, or `--from N`. Always `--dry-run` first.
 - **Retries.** A step that is still invalid after its one nudge, or gives up on the gate, re-runs once at the next effort level. The failed attempt is kept on a `plan-attempts/` branch. A fresh review session repairs a missed skill.
 - **`--variant NAME`** runs under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log. Pass it on every re-run.

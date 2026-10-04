@@ -1,37 +1,50 @@
 # Plan runner — how it runs
 
 `scripts/run-plan.sh` is a bash loop with no model in it. It starts one fresh headless Claude
-session per step, checks the branch itself before it believes a result, and stops for the human in
-three situations. Contract and rationale: `docs/plans/done/plan-runner.md` (§5 for escalation,
-variants, the review session and the judge). Keep the two diagrams below in step with
-`handle_result` and the main loop when either changes. The same diagrams, with a who-writes-what
-figure and the exit-code table, are a standalone page: `flow.html` next to this file (open it in a
-browser; it loads mermaid and its fonts from a CDN).
+session per step, checks the branch itself before it believes a result, and stops for the human
+only at the exits listed in `flow.html`. Contract and rationale: `docs/plans/done/plan-runner.md`
+(§5 for escalation, variants, the review session and the judge; §6 for the pause file and the plan
+sync). Keep the two diagrams below in step with `handle_result` and the main loop when either
+changes. The same diagrams, with a who-writes-what figure and the exit-code table, are a standalone
+page: `flow.html` next to this file (open it in a browser; it loads mermaid and its fonts from a CDN).
 
 ## The loop over the plan
 
 The plan's `Order:` line is the program: a number is a step, `‖` is a checkpoint. A step is done
 only when a `**Shipped**` block sits under its heading in the branch's copy of the plan — that is
-the runner's whole state, which is why a run can stop anywhere and be started again.
+the runner's whole state, which is why a run can stop anywhere and be started again. The driver
+walks the Order line from the top again after every step and every plan sync, so a step the owner
+adds on main during a run is picked up at the next step boundary.
 
 ```mermaid
 flowchart TD
-  start(["run-plan.sh plan.md --variant b"]) --> setup["load the variant file, create or reuse the worktree"]
+  start(["run-plan.sh plan.md --variant b"]) --> setup["load the variant file, create or reuse the worktree, remove a stale pause file"]
   setup --> byhand{"last shipped step launched by the runner but never validated?"}
   byhand -- "yes: finished by hand" --> v0["validate it first"]
-  byhand -- "no" --> tok
-  v0 --> tok{"next token of the Order line"}
-  tok -- "checkpoint after a step this run shipped" --> e4(["exit 4: checkpoint"])
+  byhand -- "no" --> top
+  v0 --> top["read the Order line, walk it from the top"]
+  top --> tok{"next token"}
+  tok -- "‖ at the frontier, after a step this run shipped" --> e4(["exit 4: checkpoint"])
   tok -- "a step" --> shipped{"Shipped block under its heading?"}
   shipped -- "yes" --> tok
   shipped -- "no" --> pend{"unanswered Decision needed block?"}
   pend -- "yes" --> e2(["exit 2: needs a decision"])
-  pend -- "no" --> run[["run one step"]]
-  run -- "validated" --> tok
+  pend -- "no" --> pause{"pause file?"}
+  pause -- "yes: removed" --> e5(["exit 5: stopped for the owner"])
+  pause -- "no" --> sync{"plan changed on the sync ref?"}
+  sync -- "merged cleanly: sync commit" --> top
+  sync -- "conflict, or the merged plan does not check" --> e5
+  sync -- "no: or the plan is dirty, or --sync-from none" --> run[["run one step"]]
+  run -- "validated" --> top
   run -- "needs_decision" --> e2
   run -- "blocked" --> e3(["exit 3: blocked"])
   tok -- "none left" --> e0(["exit 0: plan complete"])
 ```
+
+The step boundary is the moment before a launch. A pause file `docs/plans/.runs/<run-id>.pause`
+stops the run there, and running again continues. The plan sync merges the plan file, and nothing
+else, from `--sync-from` (default `main`; pass `origin/main` in a cloud container) and commits it as
+`docs(plan): sync …` with a `Plan-Synced-From:` trailer. It is the only commit the runner makes.
 
 ## One step
 
@@ -74,8 +87,8 @@ the step met its spec — the judge grades that, nothing acts on the grade yet.
 
 | File | Role |
 |---|---|
-| `../run-plan.sh` | The driver: tunables, worktree, launch, validate, nudge, escalate, judge, the main loop. |
-| `lib.sh` | Pure functions (text in, text out): Order grammar, heading tags, Shipped/Decision blocks, tripwire, result classification, variant check. |
+| `../run-plan.sh` | The driver: tunables, worktree, launch, validate, nudge, escalate, judge, the walk over the Order line, the pause file and the plan sync. |
+| `lib.sh` | Pure functions (text in, text out): Order grammar, heading tags, Shipped/Decision blocks, tripwire, result classification, variant check, the `‖` frontier, placing same-spot merge insertions, the merged-plan check. |
 | `step-prompt.md` | What every step session is told. |
 | `skills-prompt.md` | The fresh review session that stands in for the nudge when only skills are missing. |
 | `judge-prompt.md`, `judge-result.schema.json` | The read-only grading pass and its result. |

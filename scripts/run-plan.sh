@@ -5,7 +5,7 @@
 # Claude session.
 #
 #   scripts/run-plan.sh <plan.md> [--from N] [--to N] [--dry-run] [--cap max|strong|mid] [--budget USD]
-#                                 [--variant NAME] [--base REF]
+#                                 [--variant NAME] [--base REF] [--sync-from REF|none]
 #
 #   --variant NAME  load scripts/plan-runner/variants/NAME.env over the tunables below and run
 #                   on plan/<name>-NAME (own worktree, own log) — two configurations of one
@@ -13,13 +13,23 @@
 #   --base REF      the commit a new plan branch starts from (default: main)
 #   --to N          stop after step N is validated (and judged); later steps stay untouched and a
 #                   run without --to continues from there. Exit 0.
+#   --sync-from REF where the owner edits the plan during a run (default: main). At every step
+#                   boundary the plan file, and nothing else, is merged from REF into the branch's
+#                   copy. A remote-tracking REF is fetched first: pass origin/main in a cloud
+#                   container, whose local main never moves. none = no sync.
+#
+# Step boundary: before each launch, a pause file docs/plans/.runs/<run-id>.pause stops the run
+# (exit 5; the file is removed, and running again continues), then the plan is synced from REF.
+# A sync that cannot merge cleanly writes docs/plans/.runs/<run-id>.plan-sync.conflict.md,
+# prints the one commit that records a hand merge, and stops with exit 5.
 #
 # Exit codes: 0 all steps shipped (or dry run) · 1 usage/config error ·
-#             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint
+#             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint ·
+#             5 stopped between steps for the owner: a pause file, or a plan sync that needs a hand merge
 #
-# The runner never commits and never pushes. Every commit on plan/<name> is a
-# step session's. The one thing it changes in the worktree: to escalate a failed
-# step it keeps the attempt (branch + patch + tarball), then resets and cleans. State lives in the plan file (**Shipped** blocks) and in the
+# The runner commits nothing but a plan sync, and never pushes. Every other commit on
+# plan/<name> is a step session's. The other thing it changes in the worktree: to escalate a
+# failed step it keeps the attempt (branch + patch + tarball), then resets and cleans. State lives in the plan file (**Shipped** blocks) and in the
 # gitignored run log docs/plans/.runs/<name>.log (one JSON object per line;
 # scripts/plan-runner/report.sh turns it into a per-step table).
 set -Eeuo pipefail
@@ -89,7 +99,7 @@ usage() { # usage [exit-code]  → the header comment, from its usage line to it
 }
 need_arg() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "$1 needs a value" >&2; usage 1; }; }
 
-PLAN_ARG=''; FROM=1; TO=''; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''
+PLAN_ARG=''; FROM=1; TO=''; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''; SYNC_FROM=main
 while [ $# -gt 0 ]; do
     case "$1" in
         --from)    need_arg "$@"; FROM=$2; shift 2 ;;
@@ -99,6 +109,7 @@ while [ $# -gt 0 ]; do
         --budget)  need_arg "$@"; BUDGET_OVERRIDE=$2; shift 2 ;;
         --variant) need_arg "$@"; VARIANT=$2; shift 2 ;;
         --base)    need_arg "$@"; BASE_REF=$2; shift 2 ;;
+        --sync-from) need_arg "$@"; SYNC_FROM=$2; shift 2 ;;
         -h|--help) usage 0 ;;
         -*)        echo "unknown flag $1" >&2; usage 1 ;;
         *)         [ -z "$PLAN_ARG" ] || usage 1; PLAN_ARG=$1; shift ;;
@@ -143,6 +154,8 @@ RUNS=${PLAN_RUNNER_RUNS_DIR:-$ROOT/docs/plans/.runs}   # override for the self-c
 mkdir -p "$RUNS"
 RUNS=$(cd "$RUNS" && pwd)              # absolute: escalate writes into it from inside the worktree
 LOG=$RUNS/$RUN_ID.log
+PAUSE=$RUNS/$RUN_ID.pause                        # the owner creates it; the next step boundary stops for it
+SYNC_CONFLICT=$RUNS/$RUN_ID.plan-sync.conflict.md
 if [ -n "$BASE_REF" ]; then
     git -C "$ROOT" rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null || { echo "--base: '$BASE_REF' is not a commit" >&2; exit 1; }
 fi
@@ -631,14 +644,200 @@ validate_pending_from_log() {
     judge_step
 }
 
+# ---- the walk over the Order line ----------------------------------------------
+SHIPPED_NOW=' '     # the steps this invocation shipped (a dry run: would ship), space-delimited
+NEXT=''; PENDING=0; STOPPED_TO=0; SYNCED=0; SYNC_NOTED=0; SYNC_FETCHED=0
+
+# load_tokens  → TOKENS from the Order line of the branch's plan; read again after every sync.
+load_tokens() {
+    local order
+    order=$(pr_order_tokens "$PLAN_WT" || exit 1) || exit 1
+    mapfile -t TOKENS <<< "$order"
+}
+
+# checkpoint_due <step left of the ‖> <index of the ‖>  → exit 0 when the ‖ stops the run. Only
+# at the frontier: no later step of the Order line is shipped. So a ‖ that a sync adds behind the
+# run's position never stops it. At the frontier it is due when its step shipped in this
+# invocation, or when the step is shipped and the log rule of pr_checkpoint_due holds.
+checkpoint_due() {
+    [ -n "$1" ] || return 1
+    ! pr_shipped_after "$PLAN_WT" "$2" "${TOKENS[@]}" || return 1
+    case "$SHIPPED_NOW" in *" $1 "*) return 0 ;; esac
+    pr_step_shipped "$PLAN_WT" "$1" && pr_checkpoint_due "$LOG" "$1"
+}
+
+stop_checkpoint() { # stop_checkpoint <step>
+    log checkpoint --arg step "$1"
+    notify "checkpoint after step $1" "sign off the departures in $PLAN_REL, then run again to continue"
+    echo "  $(wt_git log --oneline "$(wt_git merge-base main HEAD)..HEAD" | wc -l) commit(s) on $BRANCH — git -C $ROOT log main..$BRANCH"
+    echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
+    exit 4
+}
+
+# walk  → one pass over TOKENS from the top. A real run stops at the first step to launch and
+# leaves it in NEXT (empty: nothing left, or STOPPED_TO=1 past --to). A dry run lists every
+# step instead. Exits at a due ‖ (4) and at an unanswered **Decision needed** block (2).
+walk() {
+    local i tok prev='' last_session
+    NEXT=''
+    for i in "${!TOKENS[@]}"; do
+        tok=${TOKENS[$i]}
+        # --to: the first step past N ends the run. A ‖ between N and that step has had its turn by
+        # now (CP tokens carry no number), so a checkpoint due after step N still stops with exit 4.
+        if [ -n "$TO" ] && [ "$tok" != CP ] && [ "$(pr_step_num "$tok")" -gt "$TO" ]; then STOPPED_TO=1; return 0; fi
+        if [ "$tok" = CP ]; then
+            if checkpoint_due "$prev" "$i"; then
+                if [ "$DRY_RUN" = 1 ]; then echo; echo "‖ the run would stop here after step $prev (listing continues for review)"; continue; fi
+                stop_checkpoint "$prev"
+            fi
+            continue
+        fi
+        prev=$tok
+        if [ "$(pr_step_num "$tok")" -lt "$FROM" ]; then continue; fi
+        if pr_step_shipped "$PLAN_WT" "$tok"; then continue; fi
+        if pr_step_decision_pending "$PLAN_WT" "$tok"; then
+            STEP=$tok
+            if [ "$DRY_RUN" = 1 ]; then echo; echo "step $tok — has an unanswered **Decision needed** block; a real run stops here"; PENDING=1; continue; fi
+            say "step $tok has an unanswered **Decision needed** block — answer it (resume the last session, or edit the branch's plan and rename the block to **Decision taken**)"
+            last_session=$(jq -r --arg s "$tok" 'select(.event=="needs_decision" and .step==$s) | .session' "$LOG" 2>/dev/null | tail -1 || true)
+            [ -z "${last_session:-}" ] || { SESSION_ID=$last_session; echo "    $(resume_hint)"; }
+            exit 2
+        fi
+        if [ "$DRY_RUN" = 1 ]; then PENDING=1; run_step "$tok"; SHIPPED_NOW+="$tok "; continue; fi
+        NEXT=$tok; return 0
+    done
+}
+
+# ---- the step boundary: pause file and plan sync ---------------------------------
+stop_paused() {
+    log paused --arg next "$NEXT"
+    rm -f "$PAUSE"
+    notify "paused before step $NEXT" "the pause file is removed; run the same command again to continue"
+    exit 5
+}
+
+# sync_fetch  → a remote-tracking REF (origin/main) is fetched first: the owner's edits arrive
+# there by push, and a cloud container's local main never moves. A failed fetch is a warning.
+# Once per boundary: the main loop clears SYNC_FETCHED after each step, so the walk that follows a
+# sync commit, and the first boundary after the start-up check, do not fetch again.
+sync_fetch() {
+    local full remote branch err
+    [ "$SYNC_FETCHED" = 0 ] || return 0
+    SYNC_FETCHED=1
+    full=$(git -C "$ROOT" rev-parse --symbolic-full-name "$SYNC_FROM" 2>/dev/null || true)
+    case "$full" in refs/remotes/*/*) ;; *) return 0 ;; esac
+    full=${full#refs/remotes/}; remote=${full%%/*}; branch=${full#*/}
+    # `|| exit 1` inside: a failing command in $(…) fires the ERR trap there, `if !` outside or not.
+    if ! err=$(git -C "$ROOT" fetch -q "$remote" "$branch" 2>&1 || exit 1); then
+        say "warning: git fetch $remote $branch failed ($(tail -1 <<< "$err")) — syncing from $SYNC_FROM as it is"
+    fi
+}
+
+# last_sync <range>  → the REF sha named by the newest sync commit's trailer in <range>, or nothing.
+last_sync() { pr_synced_from "$(wt_git log -1 --format=%B --grep="^$PR_SYNC_TRAILER: " "$1")"; }
+
+# sync_message <ref-sha>  → the -m arguments of a sync commit, one per line: subject, then trailer.
+sync_message() {
+    printf 'docs(plan): sync %s from %s at %s\n%s: %s\n' "$PLAN_REL" "$SYNC_FROM" "$(git -C "$ROOT" rev-parse --short "$1")" "$PR_SYNC_TRAILER" "$1"
+}
+
+# sync_base <ref-sha>  → the merge base of the plan: the newer of the fork point and the REF commit
+# named by the trailer of the branch's newest sync commit. A trailer commit no longer on REF is
+# ignored. Prints nothing when the two share no history.
+sync_base() {
+    local mb t
+    mb=$(wt_git merge-base "$1" HEAD 2>/dev/null || true)
+    [ -n "$mb" ] || return 0
+    t=$(last_sync "$mb..HEAD")
+    if [ -n "$t" ] && wt_git merge-base --is-ancestor "$t" "$1" 2>/dev/null && ! wt_git merge-base --is-ancestor "$t" "$mb" 2>/dev/null; then
+        echo "$t"
+    else
+        echo "$mb"
+    fi
+}
+
+stop_sync() { # stop_sync <ref-sha> <why>  — nothing was written to the worktree
+    local msg
+    mapfile -t msg < <(sync_message "$1")
+    log plan_sync_failed --arg next "$NEXT" --arg ref "$SYNC_FROM" --arg sha "$1" --arg why "$2" --arg file "$(rel "$SYNC_CONFLICT")"
+    notify "the plan sync from $SYNC_FROM needs you" "$2"
+    echo; echo "  the merged plan is in $(rel "$SYNC_CONFLICT"); the worktree and $BRANCH are untouched."
+    echo "  merge it by hand into $(rel "$WT")/$PLAN_REL, record the merge with this one commit, and run this again:"
+    echo "    git -C $(printf '%q' "$WT") commit -m '${msg[0]}' -m '${msg[1]}' -- $PLAN_REL"
+    echo "  or run again with --sync-from none to go on without the change."
+    exit 5
+}
+
+# sync_plan  → merges the plan file, and only the plan file, from SYNC_FROM into the branch's copy
+# and commits it. Sets SYNCED=1 when it committed; exits 5 when the merge needs the owner.
+sync_plan() {
+    local sha base tmp rc=0 why='' placed=0 problems msg
+    SYNCED=0
+    [ "$SYNC_FROM" != none ] || return 0
+    if [ -n "$(wt_git status --porcelain -- "$PLAN_REL")" ]; then
+        say "note: $PLAN_REL has uncommitted changes in the worktree (an answer to a decision?) — plan sync skipped; a later step boundary syncs"
+        return 0
+    fi
+    sync_fetch
+    sha=$(git -C "$ROOT" rev-parse --verify --quiet "$SYNC_FROM^{commit}" || true)
+    if [ -z "$sha" ]; then say "warning: $SYNC_FROM no longer names a commit — plan sync skipped"; return 0; fi
+    if ! git -C "$ROOT" cat-file -e "$sha:$PLAN_REL" 2>/dev/null; then
+        [ "$SYNC_NOTED" = 1 ] || say "note: $SYNC_FROM has no $PLAN_REL — nothing to sync"
+        SYNC_NOTED=1; return 0
+    fi
+    base=$(sync_base "$sha")
+    if [ -z "$base" ]; then say "warning: $BRANCH and $SYNC_FROM share no history — plan sync skipped"; return 0; fi
+    # The plan changed on REF only when its blob differs from the base's.
+    [ "$(git -C "$ROOT" rev-parse "$sha:$PLAN_REL")" != "$(git -C "$ROOT" rev-parse --verify --quiet "$base:$PLAN_REL" || true)" ] || return 0
+    tmp=$(mktemp -d)
+    cp "$PLAN_WT" "$tmp/ours"
+    git -C "$ROOT" show "$sha:$PLAN_REL" > "$tmp/theirs"
+    git -C "$ROOT" show "$base:$PLAN_REL" > "$tmp/base" 2>/dev/null || : > "$tmp/base"
+    git merge-file -p --zdiff3 --marker-size=13 -L "$BRANCH" -L "base" -L "$SYNC_FROM" \
+        "$tmp/ours" "$tmp/base" "$tmp/theirs" > "$tmp/merged" || rc=$?
+    if [ "$rc" -ge 128 ]; then
+        why="git merge-file failed (exit $rc)"
+    elif [ "$rc" -gt 0 ]; then
+        # Same-spot insertions (a Shipped block here, a new step there) are placed, not stopped on.
+        if pr_merge_inserts "$tmp/merged" > "$tmp/placed"; then placed=$rc; else why="$PLAN_REL changed at the same place on $BRANCH and on $SYNC_FROM"; fi
+        mv "$tmp/placed" "$tmp/merged"
+    fi
+    if [ -z "$why" ]; then
+        problems=$(pr_plan_check "$tmp/merged" "$tmp/ours" || true)
+        [ -z "$problems" ] || why="the merged plan does not check: ${problems//$'\n'/; }"
+    fi
+    if [ -n "$why" ]; then cp "$tmp/merged" "$SYNC_CONFLICT"; rm -rf "$tmp"; stop_sync "$sha" "$why"; fi
+    if cmp -s "$tmp/merged" "$PLAN_WT"; then rm -rf "$tmp"; return 0; fi     # REF's change is already here
+    cp "$tmp/merged" "$PLAN_WT"; rm -rf "$tmp"
+    mapfile -t msg < <(sync_message "$sha")
+    if ! wt_git commit -q -m "${msg[0]}" -m "${msg[1]}" -- "$PLAN_REL"; then
+        cp "$PLAN_WT" "$SYNC_CONFLICT"
+        wt_git checkout -q -- "$PLAN_REL"
+        stop_sync "$sha" "git commit of the merged plan failed"
+    fi
+    log plan_synced --arg next "$NEXT" --arg ref "$SYNC_FROM" --arg sha "$sha" --arg base "$base" \
+        --arg commit "$(wt_git rev-parse HEAD)" --argjson placed "$placed"
+    say "${msg[0]#docs(plan): }$([ "$placed" = 0 ] || echo ", $placed same-spot insertion(s) placed with the branch's lines first") — reading the Order line again"
+    SYNCED=1
+}
+
 # ---- main --------------------------------------------------------------------
 if [ "$DRY_RUN" = 0 ]; then
+    if [ "$SYNC_FROM" != none ]; then
+        sync_fetch
+        git -C "$ROOT" rev-parse --verify --quiet "$SYNC_FROM^{commit}" >/dev/null \
+            || { echo "--sync-from: '$SYNC_FROM' is not a commit (none turns the plan sync off)" >&2; exit 1; }
+    fi
     ensure_worktree
     PLAN_WT=$WT/$PLAN_REL
     [ -f "$PLAN_WT" ] || { echo "plan-runner: $PLAN_REL is not on $BRANCH — commit the plan on main first, then merge main into $BRANCH or recreate the worktree" >&2; exit 1; }
-    # Not a cmp with the branch's copy: that differs from the first **Shipped** block on.
-    if ! git -C "$ROOT" diff --quiet "$(wt_git merge-base main HEAD)" -- "$PLAN_REL" 2>/dev/null; then
-        say "warning: $PLAN_REL changed in the main tree since $BRANCH forked from (or last merged) main — the runner reads the branch's copy ($(rel "$WT")/$PLAN_REL); merge main into $BRANCH to pick the change up"
+    # A committed edit reaches the run by the plan sync at the next step boundary; an uncommitted one never does.
+    if [ -n "$(git -C "$ROOT" status --porcelain -- "$PLAN_REL" 2>/dev/null || true)" ]; then
+        say "warning: $PLAN_REL has uncommitted changes in the main checkout — a run never sees them; $([ "$SYNC_FROM" = none ] && echo "commit them and merge them into $BRANCH" || echo "commit them on $SYNC_FROM, and the next step boundary syncs them")"
+    fi
+    if [ -f "$PAUSE" ]; then
+        rm -f "$PAUSE"
+        say "note: removed a stale pause file ($(rel "$PAUSE")) from before this start — to pause this run, create it again while it runs"
     fi
     behind=$(git -C "$ROOT" rev-list --count "$BRANCH..main" 2>/dev/null || echo 0)
     [ "$behind" = 0 ] || say "note: $BRANCH is $behind commit(s) behind main"
@@ -648,54 +847,35 @@ else
     say "dry run — reading $PLAN_REL from $([ -d "$WT" ] && echo "the worktree" || echo "the main tree"); nothing is launched, rendered prompts go to $(rel "$RUNS")"
 fi
 
-if ! ORDER=$(pr_order_tokens "$PLAN_WT"); then exit 1; fi
-mapfile -t TOKENS <<< "$ORDER"
+load_tokens
 [ "$DRY_RUN" = 1 ] || validate_pending_from_log
 
-ran_prev=0; prev=''; pending=0; stopped_to=0
-for tok in "${TOKENS[@]}"; do
-    # --to: the first step past N ends the run. A ‖ between N and that step has had its turn by
-    # now (CP tokens carry no number), so a checkpoint due after step N still stops with exit 4.
-    if [ -n "$TO" ] && [ "$tok" != CP ] && [ "$(pr_step_num "$tok")" -gt "$TO" ]; then stopped_to=1; break; fi
-    if [ "$tok" = CP ]; then
-        # Due after a step this run shipped (or, dry, would ship), or one the runner had a
-        # hand in earlier that never got its pause — see pr_checkpoint_due.
-        if [ -n "$prev" ] && { [ "$ran_prev" = 1 ] || pr_step_shipped "$PLAN_WT" "$prev"; } \
-           && pr_checkpoint_due "$LOG" "$prev" "$ran_prev"; then
-            if [ "$DRY_RUN" = 1 ]; then echo; echo "‖ the run would stop here after step $prev (listing continues for review)"; ran_prev=0; continue; fi
-            log checkpoint --arg step "$prev"
-            notify "checkpoint after step $prev" "sign off the departures in $PLAN_REL, then run again to continue"
-            echo "  $(wt_git log --oneline "$(wt_git merge-base main HEAD)..HEAD" | wc -l) commit(s) on $BRANCH — git -C $ROOT log main..$BRANCH"
-            echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
-            exit 4
-        fi
-        continue
-    fi
-    prev=$tok; ran_prev=0
-    if [ "$(pr_step_num "$tok")" -lt "$FROM" ]; then continue; fi
-    if pr_step_shipped "$PLAN_WT" "$tok"; then continue; fi
-    if pr_step_decision_pending "$PLAN_WT" "$tok"; then
-        STEP=$tok
-        if [ "$DRY_RUN" = 1 ]; then echo; echo "step $tok — has an unanswered **Decision needed** block; a real run stops here"; pending=1; continue; fi
-        say "step $tok has an unanswered **Decision needed** block — answer it (resume the last session, or edit the branch's plan and rename the block to **Decision taken**)"
-        last_session=$(jq -r --arg s "$tok" 'select(.event=="needs_decision" and .step==$s) | .session' "$LOG" 2>/dev/null | tail -1 || true)
-        [ -z "${last_session:-}" ] || { SESSION_ID=$last_session; echo "    $(resume_hint)"; }
-        exit 2
-    fi
-    pending=1
-    run_step "$tok"
-    ran_prev=1
-done
+if [ "$DRY_RUN" = 1 ]; then
+    walk        # one pass, no boundary: a dry run never pauses and never syncs
+else
+    # Walk from the top to the next step, stop at the boundary for a pause file, sync the plan;
+    # a sync commit means a new Order line, so walk again before launching anything.
+    while :; do
+        walk
+        [ -n "$NEXT" ] || break
+        [ ! -f "$PAUSE" ] || stop_paused
+        sync_plan
+        if [ "$SYNCED" = 1 ]; then load_tokens; continue; fi
+        PENDING=1
+        run_step "$NEXT"
+        SHIPPED_NOW+="$NEXT "; SYNC_FETCHED=0
+    done
+fi
 
-if [ "$pending" = 0 ]; then
+if [ "$PENDING" = 0 ]; then
     say "nothing to do — no unshipped step at or after step $FROM (a plan shipped by hand has no **Shipped** lines and would list every step; see --dry-run)"
     exit 0
 fi
 if [ "$DRY_RUN" = 1 ]; then
-    [ "$stopped_to" = 0 ] || { echo; echo "--to $TO: the run would stop here; later steps are not listed"; }
+    [ "$STOPPED_TO" = 0 ] || { echo; echo "--to $TO: the run would stop here; later steps are not listed"; }
     exit 0
 fi
-if [ "$stopped_to" = 1 ]; then
+if [ "$STOPPED_TO" = 1 ]; then
     say "stopped after step $TO as asked (--to) — later steps are untouched; run again without --to to continue"
     echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
     exit 0
@@ -711,5 +891,13 @@ if [ "$behind" = 0 ]; then
 else
     echo "  main moved on by $behind commit(s) while the plan ran — merge main into $BRANCH (or rebase), re-run the gate,"
     echo "  then: git -C $ROOT checkout main && git -C $ROOT merge --ff-only $BRANCH && git -C $ROOT push"
+fi
+last_sync=$(last_sync "$(wt_git merge-base main HEAD)..HEAD")
+if [ -n "$last_sync" ]; then
+    last_sync=$(git -C "$ROOT" rev-parse --short "$last_sync")
+    echo "  $BRANCH carries plan sync commits: its plan holds main's plan as of $last_sync. Merging main is clean where a"
+    echo "  sync merged cleanly. Git asks once more about the plan where a step was added right after one that shipped,"
+    echo "  or where a Shipped block sits next to a line main changed. Keep the branch's side there, then re-apply what"
+    echo "  main changed in the plan after the last sync: git -C $ROOT diff $last_sync main -- $PLAN_REL"
 fi
 exit 0

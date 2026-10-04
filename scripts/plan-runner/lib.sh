@@ -356,21 +356,114 @@ pr_result_json() {
 
 # ---- checkpoints (§2.4) -----------------------------------------------------
 
-# pr_checkpoint_due <log-file> <step-id> <ran-now 0|1>  → exit 0 when the ‖ after
-# <step> must stop this run. Due when the step shipped in this invocation, or
-# when the runner had a hand in it (any log event for the step — a launch, a
-# needs_decision the human then finished by resuming) and no `checkpoint`
-# event has been logged for it yet. A step the runner never touched (shipped
-# by hand, no log) passes: the human already had that pause.
+# pr_checkpoint_due <log-file> <step-id>  → exit 0 when the ‖ after a step shipped in
+# an earlier invocation must stop this run (the driver's checkpoint_due covers the
+# steps of this invocation and the frontier). Due when the runner had a hand in the
+# step (any log event for it — a launch, a needs_decision the human then finished by
+# resuming) and no `checkpoint` event has been logged for it yet. A step the runner
+# never touched (shipped by hand, no log) passes: the human already had that pause.
 pr_checkpoint_due() {
-    local log=$1 step=$2 ran_now=$3
-    [ "$ran_now" = 1 ] && return 0
+    local log=$1 step=$2
     [ -f "$log" ] || return 1
     jq -e --arg s "$step" 'select(.step == $s)' "$log" >/dev/null 2>&1 || return 1
     if jq -e --arg s "$step" 'select(.step == $s and .event == "checkpoint")' "$log" >/dev/null 2>&1; then
         return 1
     fi
     return 0
+}
+
+# pr_shipped_after <plan> <index> <tokens…>  → exit 0 when a step after position <index>
+# (0-based) of the Order tokens is shipped. A ‖ with a shipped step to its right is behind
+# the frontier: an earlier invocation went past it, so it never stops a run again.
+pr_shipped_after() {
+    local plan=$1 i=$2 tok; shift 2
+    [ $# -gt "$i" ] || return 1
+    shift "$((i + 1))"
+    for tok in "$@"; do
+        [ "$tok" = CP ] && continue
+        if pr_step_shipped "$plan" "$tok"; then return 0; fi
+    done
+    return 1
+}
+
+# ---- plan sync -----------------------------------------------------------------
+# The driver merges the plan file from the sync ref into the branch's copy at a step boundary.
+# Only the plan: main's code would change what the gate and the diff checks measure mid-run.
+
+# pr_merge_inserts <merge-file>  → <merge-file> is `git merge-file -p --zdiff3 --marker-size=13`
+# output. A conflict whose base part is empty is a same-spot insertion: a **Shipped** block on
+# the branch and a new step on the sync ref, both written right after the same line. It is
+# placed: the branch's lines, a blank line where neither side has one, then the ref's lines.
+# Any other conflict stays marked, and the exit code is 1. Literal markers, not `<{13}`:
+# mawk has no interval expressions.
+pr_merge_inserts() {
+    awk '
+        function marker(c) { return substr($0, 1, 13) == c && (length($0) == 13 || substr($0, 14, 1) == " ") }
+        BEGIN { L = "<<<<<<<<<<<<<"; B = "|||||||||||||"; S = "============="; R = ">>>>>>>>>>>>>" }
+        state == 0 && marker(L) { state = 1; head = $0; no = 0; nb = 0; nt = 0; hasbase = 0; next }
+        state == 1 && marker(B) { state = 2; bhead = $0; hasbase = 1; next }
+        (state == 1 || state == 2) && $0 == S { state = 3; next }
+        state == 3 && marker(R) {
+            state = 0
+            if (hasbase && nb == 0) {
+                for (i = 1; i <= no; i++) print ours[i]
+                if (no > 0 && nt > 0 && ours[no] != "" && theirs[1] != "") print ""
+                for (i = 1; i <= nt; i++) print theirs[i]
+            } else {
+                bad = 1; print head
+                for (i = 1; i <= no; i++) print ours[i]
+                if (hasbase) { print bhead; for (i = 1; i <= nb; i++) print base[i] }
+                print S
+                for (i = 1; i <= nt; i++) print theirs[i]
+                print
+            }
+            next
+        }
+        state == 1 { ours[++no] = $0; next }
+        state == 2 { base[++nb] = $0; next }
+        state == 3 { theirs[++nt] = $0; next }
+        { print }
+        END { exit bad }
+    ' "$1"
+}
+
+# pr_plan_check <plan> [<before>]  → prints what keeps <plan> from being run, one problem per
+# line; exit 1 when there is any. The Order line must parse, and every step it names must have
+# a heading whose tier and effort tags are valid. With <before> (the branch's copy before a
+# merge), every step shipped there must still be shipped here, naming the same commit.
+pr_plan_check() {
+    local plan=$1 before=${2:-} tokens tok h id out=''
+    if ! tokens=$(pr_order_tokens "$plan" 2>/dev/null); then
+        out+="no Order line that names a step"$'\n'
+    else
+        for tok in $tokens; do
+            [ "$tok" = CP ] && continue
+            if ! h=$(pr_step_heading "$plan" "$tok" 2>/dev/null); then
+                out+="the Order line names step $tok, which has no '### Step $tok' heading"$'\n'; continue
+            fi
+            pr_tag_tier "$h" >/dev/null 2>&1 || out+="step $tok: unknown tier '$(pr_tag "$h" model)'"$'\n'
+            pr_tag_effort "$h" medium >/dev/null 2>&1 || out+="step $tok: unknown effort '$(pr_tag "$h" effort)'"$'\n'
+        done
+    fi
+    if [ -n "$before" ]; then
+        for id in $(sed -nE 's/^### Step ([0-9]+[a-z]?)([^0-9a-z].*)?$/\1/p' "$before"); do
+            pr_step_shipped "$before" "$id" || continue
+            if ! pr_step_shipped "$plan" "$id"; then
+                out+="step $id lost its **Shipped** line"$'\n'
+            elif [ "$(pr_shipped_commit "$plan" "$id")" != "$(pr_shipped_commit "$before" "$id")" ]; then
+                out+="step $id's **Shipped** line names another commit"$'\n'
+            fi
+        done
+    fi
+    printf '%s' "$out"
+    [ -z "$out" ]
+}
+
+PR_SYNC_TRAILER=Plan-Synced-From     # names the REF commit a sync commit merged the plan from
+
+# pr_synced_from <commit-message>  → the sha of its last `Plan-Synced-From: <sha>` trailer, or nothing.
+pr_synced_from() {
+    { grep -E "^$PR_SYNC_TRAILER: [0-9a-f]{40,64}\$" <<< "$1" || true; } | tail -1 | sed "s/^$PR_SYNC_TRAILER: //"
 }
 
 # ---- prompt rendering -------------------------------------------------------

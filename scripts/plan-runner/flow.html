@@ -62,14 +62,14 @@
   <header>
     <span class="eyebrow">scripts/run-plan.sh</span>
     <h1>How the plan runner gets a plan from step 1 to merged</h1>
-    <p class="lede">The runner is a bash loop with no model in it. It starts one fresh headless Claude session per step, believes nothing that session says until it has checked the branch itself, and stops for you in exactly three situations. Everything it knows between runs is written in the plan file.</p>
+    <p class="lede">The runner is a bash loop with no model in it. It starts one fresh headless Claude session per step, believes nothing that session says until it has checked the branch itself, and stops for you only at the exits in the table below. Everything it knows between runs is written in the plan file, and you can edit that plan on main while a run goes on.</p>
   </header>
 
   <section>
     <h2>Who writes what</h2>
     <figure>
       <div class="canvas">
-        <svg viewBox="0 0 920 396" role="img" aria-label="Three actors and two stores. You start the driver in a terminal. The driver launches headless sessions and receives a result JSON. Sessions commit code and the Shipped block to the plan branch. The driver only reads the branch, re-runs the gate there, and writes its log to the runs directory, which report.sh reads back for you.">
+        <svg viewBox="0 0 920 396" role="img" aria-label="Three actors and two stores. You start the driver in a terminal. The driver launches headless sessions and receives a result JSON. Sessions commit code and the Shipped block to the plan branch. The driver reads the branch, re-runs the gate there, commits nothing to it but a plan sync, and writes its log to the runs directory, which report.sh reads back for you.">
           <defs>
             <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
@@ -89,7 +89,7 @@
           <line class="a" x1="220" y1="48" x2="358" y2="48" marker-end="url(#ah)"/>
           <text class="l" x="290" y="40" text-anchor="middle">run, re-run</text>
           <line class="a" x1="360" y1="80" x2="222" y2="80" marker-end="url(#ah)"/>
-          <text class="l" x="290" y="97" text-anchor="middle">notify, exit 0/2/3/4</text>
+          <text class="l" x="290" y="97" text-anchor="middle">notify, exit 0/2/3/4/5</text>
           <!-- driver <-> sessions -->
           <line class="a" x1="560" y1="48" x2="698" y2="48" marker-end="url(#ah)"/>
           <text class="l" x="630" y="40" text-anchor="middle">prompt, model, effort</text>
@@ -113,41 +113,48 @@
           <line class="a" x1="520" y1="104" x2="520" y2="278" marker-end="url(#ah)"/>
           <text class="l" x="530" y="146">reads the Shipped blocks,</text>
           <text class="l" x="530" y="163">re-runs the gate, checks the diff,</text>
-          <text class="l" x="530" y="180">resets it only to escalate</text>
+          <text class="l" x="530" y="180">resets it only to escalate,</text>
+          <text class="l" x="530" y="197">commits only a plan sync</text>
           <line class="a" x1="800" y1="104" x2="800" y2="278" marker-end="url(#ah)"/>
           <text class="l" x="790" y="228" text-anchor="end">commits code + tests,</text>
           <text class="l" x="790" y="245" text-anchor="end">then the Shipped block</text>
         </svg>
       </div>
-      <figcaption>Every commit on the plan branch is a session's; the driver never commits and never pushes. That split is why a run can stop anywhere and be started again: the next run reads the Shipped blocks and carries on from the first step that has none.</figcaption>
+      <figcaption>Every commit on the plan branch is a session's, except a plan sync: between two steps the driver merges the plan file, and nothing else, from main into the branch and commits that. It never pushes. That split is why a run can stop anywhere and be started again: the next run reads the Shipped blocks and carries on from the first step that has none.</figcaption>
     </figure>
   </section>
 
   <section>
     <h2>The loop over the plan</h2>
-    <p>The plan's <code>Order:</code> line is the program. The driver walks its tokens left to right; <code>‖</code> is a checkpoint, a number is a step.</p>
+    <p>The plan's <code>Order:</code> line is the program. The driver walks its tokens left to right; <code>‖</code> is a checkpoint, a number is a step. After every step and every plan sync it reads the Order line again and walks it from the top.</p>
     <figure>
       <div class="canvas">
 <pre class="mermaid">
 flowchart TD
-  start(["run-plan.sh plan.md --variant b"]) --> setup["load the variant file, create or reuse the worktree"]
+  start(["run-plan.sh plan.md --variant b"]) --> setup["load the variant file, create or reuse the worktree, remove a stale pause file"]
   setup --> byhand{"last shipped step launched by the runner but never validated?"}
   byhand -- "yes: you finished it by hand" --> v0["validate it first"]
-  byhand -- "no" --> tok
-  v0 --> tok{"next token of the Order line"}
-  tok -- "checkpoint after a step this run shipped" --> e4(["exit 4: checkpoint"])
+  byhand -- "no" --> top
+  v0 --> top["read the Order line, walk it from the top"]
+  top --> tok{"next token"}
+  tok -- "‖ at the frontier, after a step this run shipped" --> e4(["exit 4: checkpoint"])
   tok -- "a step" --> shipped{"Shipped block under its heading?"}
   shipped -- "yes" --> tok
   shipped -- "no" --> pend{"unanswered Decision needed block?"}
   pend -- "yes" --> e2(["exit 2: needs a decision"])
-  pend -- "no" --> run[["run one step (next figure)"]]
-  run -- "validated" --> tok
+  pend -- "no" --> pause{"pause file?"}
+  pause -- "yes: removed" --> e5(["exit 5: stopped for you"])
+  pause -- "no" --> sync{"plan changed on the sync ref?"}
+  sync -- "merged cleanly: sync commit" --> top
+  sync -- "conflict, or the merged plan does not check" --> e5
+  sync -- "no: or the plan is dirty, or --sync-from none" --> run[["run one step (next figure)"]]
+  run -- "validated" --> top
   run -- "needs_decision" --> e2
   run -- "blocked" --> e3(["exit 3: blocked"])
   tok -- "none left" --> e0(["exit 0: plan complete"])
 </pre>
       </div>
-      <figcaption>A step counts as done only when a Shipped block sits under its heading in the branch's copy of the plan. <code>--from N</code> skips steps below N; <code>--dry-run</code> walks the same loop, renders every prompt and launches nothing.</figcaption>
+      <figcaption>A step counts as done only when a Shipped block sits under its heading in the branch's copy of the plan. The step boundary is the moment before a launch: a pause file <code>docs/plans/.runs/&lt;run-id&gt;.pause</code> stops the run there, then the plan file is merged from <code>--sync-from</code> (default <code>main</code>). A new step right after the one that just shipped is placed below its Shipped block and runs next. A <code>‖</code> added behind the run's position does not stop it. <code>--from N</code> skips steps below N; <code>--dry-run</code> walks the Order line once, renders every prompt, and launches, pauses and syncs nothing.</figcaption>
     </figure>
   </section>
 
@@ -196,6 +203,7 @@ flowchart TD
           <tr><td class="code stop">2</td><td>A session hit something that would change a decision or the design of the plan. It wrote a Decision needed block and committed nothing.</td><td>Resume the printed session and answer, or rename the block to Decision taken in the branch's plan. Run again.</td></tr>
           <tr><td class="code stop">3</td><td>Blocked: budget spent, no usable result, an environment or spec problem, or still failing after the nudge and the escalated attempt.</td><td>Look at the worktree. Resume the session or fix by hand, then run again; a step you finished by hand is validated before anything else.</td></tr>
           <tr><td class="code go">4</td><td>A <code>‖</code> checkpoint after a step this run shipped.</td><td>Sign off the departures. Run again to continue.</td></tr>
+          <tr><td class="code go">5</td><td>Stopped between steps for you: your pause file, or a plan sync that did not merge cleanly. The pause file is removed; a failed sync wrote nothing to the worktree and left the merge in <code>&lt;run-id&gt;.plan-sync.conflict.md</code>.</td><td>After a pause, run again to continue. After a failed sync, merge the plan by hand and record it with the one commit the driver printed, or run again with <code>--sync-from none</code>.</td></tr>
           <tr><td class="code stop">1</td><td>Usage or configuration error, or a bug in the driver itself.</td><td>Read the message. Nothing was launched, or the trap names the line.</td></tr>
         </tbody>
       </table>
@@ -232,7 +240,7 @@ flowchart TD
     <p><code>--variant b</code> loads <code>scripts/plan-runner/variants/b.env</code> over the driver's tunables, which decide only three things per tier: model, effort, advisor. The same file can switch the judge on and escalation off. Everything the run produces is then named after <code>&lt;plan&gt;-b</code>: branch, worktree, log and result files, so two configurations of one plan sit side by side and <code>report.sh</code> can print them together. A step's own tags still win: <code>model: strong</code> keeps a step on the strong tier under every variant.</p>
   </section>
 
-  <footer>Drawn from <code>scripts/run-plan.sh</code> and <code>scripts/plan-runner/lib.sh</code> as of 2026-09-20. The contract is <code>docs/plans/done/plan-runner.md</code>; §5 covers escalation, variants, the review session and the judge.</footer>
+  <footer>Drawn from <code>scripts/run-plan.sh</code> and <code>scripts/plan-runner/lib.sh</code> as of 2026-10-04. The contract is <code>docs/plans/done/plan-runner.md</code>; §5 covers escalation, variants, the review session and the judge, §6 the pause file and the plan sync.</footer>
 </div>
 <!-- Standalone copy of the published page: opened from disk, the two flowcharts need mermaid loaded here. -->
 <script type="module">

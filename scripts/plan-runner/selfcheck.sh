@@ -199,11 +199,43 @@ check_rc "judge schema is JSON"                       0 jq -e . "$HERE/judge-res
 check "every required result field is described"      "" "$(jq -r '.required - (.properties | keys) | .[]' "$HERE/step-result.schema.json")"
 
 echo "Checkpoints"
-check_rc "due when shipped in this run"                 0 pr_checkpoint_due "$F/run.log" 9 1
-check_rc "not due: no log at all"                       1 pr_checkpoint_due "$TMP/nolog" 1 0
-check_rc "not due: step 1 already had its checkpoint"   1 pr_checkpoint_due "$F/run.log" 1 0
-check_rc "due: step 2 launched, finished by resume, no checkpoint yet" 0 pr_checkpoint_due "$F/run.log" 2 0
-check_rc "not due: step 3 never touched by the runner"  1 pr_checkpoint_due "$F/run.log" 3 0
+check_rc "not due: no log at all"                       1 pr_checkpoint_due "$TMP/nolog" 1
+check_rc "not due: step 1 already had its checkpoint"   1 pr_checkpoint_due "$F/run.log" 1
+check_rc "due: step 2 launched, finished by resume, no checkpoint yet" 0 pr_checkpoint_due "$F/run.log" 2
+check_rc "not due: step 3 never touched by the runner"  1 pr_checkpoint_due "$F/run.log" 3
+printf '**Order: 1 ‖ 2 → 3**\n\n### Step 1 — a\n\n**Shipped** `abc1234`\n\n### Step 2 — b\n\n**Shipped** `def5678`\n\n### Step 3 — c\n' > "$TMP/front.md"
+check_rc "frontier: a shipped step after the ‖ (index 1) puts it behind the run" 0 pr_shipped_after "$TMP/front.md" 1 1 CP 2 3
+check_rc "frontier: nothing shipped after step 2 (index 2)"  1 pr_shipped_after "$TMP/front.md" 2 1 CP 2 3
+check_rc "frontier: past the last token"                     1 pr_shipped_after "$TMP/front.md" 3 1 CP 2 3
+# shellcheck disable=SC2086
+check_rc "frontier: the fixture's ‖ after step 4 is at the frontier" 1 pr_shipped_after "$PLAN" 4 $tokens
+
+echo "Plan sync"
+merged=$(pr_merge_inserts "$F/merge-insert.txt") || true
+check_rc "same-spot insertions only → exit 0"          0 pr_merge_inserts "$F/merge-insert.txt"
+check "…and no marker is left"                         "0" "$(grep -c '^[<|=>]\{13\}' <<< "$merged" || true)"
+check "the branch's block, a blank line, then the ref's new step" "Departures (for sign-off): none||### Step 1a — new" \
+    "$(awk '/^Departures/ { n = 3 } n-- > 0 { printf "%s%s", (n < 2 ? "|" : ""), $0 }' <<< "$merged")"
+check "no extra blank line where the branch's side ends with one" "**Shipped** \`def5678\` (2026-10-03) — tier: mid. skills: none. Reviewer models: none." \
+    "$(awk '/^A note from main/ { print p2 } { p2 = p1; p1 = $0 }' <<< "$merged")"
+merged=$(pr_merge_inserts "$F/merge-edit.txt") || true
+check_rc "an edit conflict → exit 1"                   1 pr_merge_inserts "$F/merge-edit.txt"
+check "…which stays marked, with its base part"        "1 1 1 1" "$(for m in '<' '|' '=' '>'; do grep -c "^[$m]\{13\}" <<< "$merged" || true; done | paste -sd' ' -)"
+check "…while the insertion beside it is placed"       "1" "$(grep -c '^### Step 1a — new$' <<< "$merged")"
+check "the fixture plan passes the plan check"         "" "$(pr_plan_check "$PLAN")"
+printf '**Order: 1 → 2 → 9**\n\n### Step 1 — a\n\n### Step 2 — b — model: huge\n' > "$TMP/check.md"
+check "plan check: a bad tier, a step with no heading" "step 2: unknown tier 'huge'|the Order line names step 9, which has no '### Step 9' heading" \
+    "$(pr_plan_check "$TMP/check.md" | paste -sd'|' -)"
+check_rc "plan check: exit 1 on a problem"             1 pr_plan_check "$TMP/check.md"
+check "plan check: no Order line"                      "no Order line that names a step" "$(pr_plan_check "$TMP/o4.md")"
+printf '**Order: 1 ‖ 2 → 3**\n\n### Step 1 — a\n\n### Step 2 — b\n\n**Shipped** `0000000`\n\n### Step 3 — c\n' > "$TMP/front-lost.md"
+check "plan check: a lost and a changed Shipped line" "step 1 lost its **Shipped** line|step 2's **Shipped** line names another commit" \
+    "$(pr_plan_check "$TMP/front-lost.md" "$TMP/front.md" | paste -sd'|' -)"
+check "plan check: the branch's own copy passes against itself" "" "$(pr_plan_check "$TMP/front.md" "$TMP/front.md")"
+sha=0123456789abcdef0123456789abcdef01234567
+check "trailer: the last Plan-Synced-From line"        "$sha" "$(pr_synced_from "$(printf 'docs(plan): sync\n\nPlan-Synced-From: %040d\nPlan-Synced-From: %s\n' 0 "$sha")")"
+check "trailer: none → nothing"                        "" "$(pr_synced_from 'docs(plan): step 1 shipped')"
+check "trailer: a short sha is not one"                "" "$(pr_synced_from 'Plan-Synced-From: 0123abc')"
 
 echo "Prompt template"
 TPL=$HERE/step-prompt.md
@@ -258,7 +290,8 @@ check "malformed variant file exits 1"        "1" "$(PLAN_RUNNER_VARIANTS_DIR=$F
 check "fixture variant ok.env loads (ESCALATE=0 shows as blocked)" "1" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant ok 2>/dev/null | grep -c 'after a failed nudge: blocked | judge: opus/high' | sed 's/^[1-9][0-9]*$/1/')"
 check "bad --base exits 1"                    "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --base no-such-ref >/dev/null 2>&1; echo $?)"
 check "usage exits 1 without a plan"          "1" "$("$HERE/../run-plan.sh" >/dev/null 2>&1; echo $?)"
-check "--help prints the usage block with the new flags" "3" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to) ' || true)"
+check "--help prints the usage block with the new flags" "4" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to|sync-from) ' || true)"
+check "--help names exit 5"                   "1" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -c '5 stopped between steps for the owner' || true)"
 check "--help exits 0"                        "0" "$("$HERE/../run-plan.sh" --help >/dev/null 2>&1; echo $?)"
 check "--from without a value exits 1"        "1" "$("$HERE/../run-plan.sh" "$PLAN" --from >/dev/null 2>&1; echo $?)"
 check "bad --cap exits 1"                     "1" "$("$HERE/../run-plan.sh" "$PLAN" --cap huge --dry-run >/dev/null 2>&1; echo $?)"

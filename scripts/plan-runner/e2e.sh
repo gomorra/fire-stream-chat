@@ -25,9 +25,9 @@ cat > "$STUB/bin/claude" <<'STUB_CLAUDE'
 #!/usr/bin/env bash
 # Pops one behaviour off $STUB/queue and plays it in the cwd (the plan worktree).
 set -euo pipefail
-kind=step; effort='?'; advisor=none; prev=''
+kind=step; effort='?'; advisor=none; prev=''; step=1
 for a in "$@"; do
-    case "$prev" in --effort) effort=$a ;; --advisor) advisor=$a ;; -n) case "$a" in "plan review"*) kind=judge ;; esac ;; esac
+    case "$prev" in --effort) effort=$a ;; --advisor) advisor=$a ;; -n) step=${a##* }; case "$a" in "plan review"*) kind=judge ;; esac ;; esac
     [ "$a" = --resume ] && kind=nudge
     prev=$a
 done
@@ -36,32 +36,49 @@ case "$prompt" in *"requires skills the step session did not"*) kind=review ;; e
 beh=$(head -1 "$STUB/queue" || true); [ -n "$beh" ] || beh=unexpected
 tail -n +2 "$STUB/queue" > "$STUB/queue.next" || true; mv "$STUB/queue.next" "$STUB/queue"
 echo "$kind:$beh:$effort:$advisor" >> "$STUB/calls"
+echo "$kind:$step" >> "$STUB/steps"
 case "$prompt" in *"## Earlier attempt"*) echo "$kind:$beh" >> "$STUB/saw-attempt-block" ;; esac
 PLAN=docs/plans/mini.md
 echo "$kind:$beh:$(grep -c '^\*\*Decision taken\*\*' "$PLAN" || true)" >> "$STUB/saw-decision"
 [ "$kind" != judge ] || pwd > "$STUB/judge-cwd"
+# What happens elsewhere while this step's session runs: an edit committed on main, a pause file.
+# One-shot, run in the main checkout.
+if [ -f "$STUB/during.$step" ]; then
+    (cd "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" && bash "$STUB/during.$step")
+    rm -f "$STUB/during.$step"
+fi
 code() { # code <path>  → one production file and one test, committed
     mkdir -p "$(dirname "$1")" app/src/test/java/x
     echo "// $beh $RANDOM" >> "$1"; printf '    @Test fun t%s() {}\n' "$RANDOM" >> app/src/test/java/x/SeedTest.kt
     git add -A -- . ":(exclude)$PLAN"; git commit -qm "feat(x): $beh"     # -A: a blocked attempt's leftovers are this session's to settle
 }
-ship() { # ship <skills>  → Shipped line naming the last code commit, committed
-    local h; h=$(git log --format=%h -1 -- app)
-    printf '\n**Shipped** `%s` (2026-09-20) — tier: mid. skills: %s. Reviewer models: none.\nDepartures (for sign-off): none\n' "$h" "$1" >> "$PLAN"
-    git add "$PLAN"; git commit -qm "docs(plan): step 1 shipped"
+source scripts/plan-runner/lib.sh     # the worktree's copy: the stub finds sections the way the driver does
+section_add() { # section_add <block>  → the block at the end of this step's section, where a session writes it
+    awk -v re="$(pr_heading_re "$step")" -v block="$1" '
+        on && /^##/ { print ""; print block; if (!blank) print ""; on = 0; done = 1 }
+        !done && $0 ~ re { on = 1 }
+        on && /^$/ { blank++; next }
+        { while (blank > 0) { print ""; blank-- } print }
+        END { if (on) { print ""; print block } }' "$PLAN" > "$PLAN.new"
+    mv "$PLAN.new" "$PLAN"
+}
+ship() { # ship <skills>  → Shipped block naming the last code commit, committed
+    section_add "**Shipped** \`$(git log --format=%h -1 -- app)\` (2026-09-20) — tier: mid. skills: $1. Reviewer models: none.\nDepartures (for sign-off): none"
+    git add "$PLAN"; git commit -qm "docs(plan): step $step shipped"
 }
 result() { # result <status> <blockedKind|null> <run-json>
     local kindjson=null; [ "$2" = null ] || kindjson="\"$2\""
-    printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-%s-%s","num_turns":5,"total_cost_usd":1.5,"permission_denials":[],"modelUsage":{"stub-model":{"costUSD":1.5}},"structured_output":{"status":"%s","step":"1","commit":%s,"skills":{"intended":[],"run":%s,"skipped":[]},"reviewerModels":[],"question":null,"blockedKind":%s,"advisorConsults":null,"summary":"%s"}}\n' \
-        "$kind" "$beh" "$1" "$( [ "$1" = done ] && printf '"%s"' "$(git log --format=%h -1 -- app 2>/dev/null || echo 0000000)" || echo null)" "$3" "$kindjson" "$beh"
+    printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-%s-%s","num_turns":5,"total_cost_usd":1.5,"permission_denials":[],"modelUsage":{"stub-model":{"costUSD":1.5}},"structured_output":{"status":"%s","step":"%s","commit":%s,"skills":{"intended":[],"run":%s,"skipped":[]},"reviewerModels":[],"question":null,"blockedKind":%s,"advisorConsults":null,"summary":"%s"}}\n' \
+        "$kind" "$beh" "$1" "$step" "$( [ "$1" = done ] && printf '"%s"' "$(git log --format=%h -1 -- app 2>/dev/null || echo 0000000)" || echo null)" "$3" "$kindjson" "$beh"
 }
 case "$beh" in
     done-valid)      echo green > "$STUB/gate"; code app/src/main/java/x/ui/Screen.kt; ship none; result done null '[]' ;;
+    done-annotate)   code app/src/main/java/x/ui/Screen.kt; sed -i 's/^Body 2\.$/Body 2. **(step-1)** a note for step 2./' "$PLAN"; ship none; result done null '[]' ;;
     done-valid-di)   code app/src/main/java/x/di/Module.kt; ship none; result done null '[]' ;;
     done-no-shipped) code app/src/main/java/x/ui/Screen.kt; result done null '[]' ;;
     done-no-shipped-di) code app/src/main/java/x/di/Module.kt; result done null '[]' ;;
     claims-review)   result done null '["code-review"]' ;;
-    needs-decision)  printf '\n**Decision needed** — left or right?\n' >> "$PLAN"; result needs_decision null '[]' ;;
+    needs-decision)  section_add '**Decision needed** — left or right?'; result needs_decision null '[]' ;;
     budget)          printf '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"session_id":"s-budget","total_cost_usd":25,"structured_output":null}\n' ;;
     api-error)       printf '{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":429,"session_id":"s-api-error","total_cost_usd":0.88,"result":"You'\''ve hit your limit","structured_output":null}\n' ;;
     judge-nofindings) printf '{"type":"result","subtype":"success","is_error":false,"session_id":"s-judge","total_cost_usd":0.5,"structured_output":{"verdict":"cannot_judge","testsAdequate":true,"summary":"x"}}\n' ;;
@@ -99,9 +116,30 @@ new_repo() {
 scenario() {
     echo "$1"; shift
     R=$TMP/repo-$n-$RANDOM; RUNS=$R/runs; new_repo "$R"
-    : > "$STUB/calls"; : > "$STUB/saw-attempt-block"; : > "$STUB/saw-decision"; rm -f "$STUB/judge-cwd"; echo green > "$STUB/gate"
+    : > "$STUB/calls"; : > "$STUB/steps"; : > "$STUB/saw-attempt-block"; : > "$STUB/saw-decision"; rm -f "$STUB/judge-cwd" "$STUB"/during.*
+    echo green > "$STUB/gate"
     printf '%s\n' "$@" > "$STUB/queue"
 }
+# write_plan <order> <id>…  → the scratch plan, one section per id in that order (body "Body <id>."), committed on main
+write_plan() {
+    local order=$1 id; shift
+    { printf '# Mini plan\n\n**Order: %s**\n\n## 3. Steps\n' "$order"
+      for id in "$@"; do printf '\n### Step %s — Step %s (`feat(x):`)\nBody %s.\n' "$id" "$id" "$id"; done
+    } > "$R/docs/plans/mini.md"
+    git -C "$R" commit -qam "plan: $order"
+}
+# during <step> <script>  → bash <script> runs in the main checkout while step <step>'s session runs
+during() { printf '%s\n' "$2" > "$STUB/during.$1"; }
+# Edits of main's plan, each committed on main.
+REVISE_2='sed -i "s/^Body 2\.$/Body 2, revised on main./" docs/plans/mini.md && git commit -qam "plan: revise step 2"'
+REVISE_3='sed -i "s/^Body 3\.$/Body 3, revised on main./" docs/plans/mini.md && git commit -qam "plan: revise step 3"'
+INSERT_1A='sed -i -e "s/^\*\*Order: 1 → /**Order: 1 → 1a → /" -e "s/^### Step 2 —/### Step 1a — Step 1a (feat(x):)\nBody 1a.\n\n&/" docs/plans/mini.md && git commit -qam "plan: step 1a"'
+steps() { paste -sd' ' - < "$STUB/steps"; }
+count_event() { jq -c --arg e "$1" 'select(.event == $e)' "$RUNS/mini.log" | wc -l | tr -d ' '; }
+with_origin() { # → a bare scratch remote `origin` holding main, fetched; sets BARE
+    BARE=$TMP/remote-$n.git; git clone -q --bare "$R" "$BARE"; git -C "$R" remote add origin "$BARE"; git -C "$R" fetch -q origin
+}
+branch_plan() { git -C "$R" show plan/mini:docs/plans/mini.md; }
 run() { rc=0; PLAN_RUNNER_RUNS_DIR=$RUNS "$R/scripts/run-plan.sh" "$R/docs/plans/mini.md" "$@" > "$TMP/out" 2> "$TMP/err" || rc=$?; }
 requeue() { printf '%s\n' "$@" > "$STUB/queue"; }     # a second invocation on the same scratch repo
 events() { jq -r '.event' "$RUNS/$1.log" | paste -sd' ' -; }
@@ -117,10 +155,7 @@ check "validated event carries the @Test delta"  "1 2" "$(jq -r 'select(.event==
 check "the launch records the base it forked from" "$(git -C "$R" rev-parse main | cut -c1-8)" "$(jq -r 'select(.event=="launched") | .base' "$RUNS/mini.log")"
 
 scenario "--to stops cleanly before the next step" done-valid
-# Step 2's section sits above step 1's on purpose: the stub appends its Shipped line to the end
-# of the file, and it has to land under step 1.
-printf '# Mini plan\n\n**Order: 1 → 2**\n\n## 3. Steps\n\n### Step 2 — Never reached (`feat(x):`)\nBody.\n\n### Step 1 — First step (`feat(x):`)\nBody.\n' > "$R/docs/plans/mini.md"
-git -C "$R" commit -qam "two steps"
+write_plan "1 → 2" 1 2
 run --to 1
 check "exit 0"                                   "0" "$rc"
 check "events: step 1 only"                      "launched result validated" "$(events mini)"
@@ -279,12 +314,165 @@ sed -i 's/^### Step 1 — Only step.*/&  — effort: infinite/' "$R/docs/plans/m
 run
 check "bad effort tag in the plan: exit 1, plain message" "1 0" "$rc $(grep -c 'internal error' "$TMP/err" || true)"
 
-scenario "The plan-differs warning fires on an edit in the main tree, not on the branch's own Shipped block" done-valid
+scenario "The plan warning fires on an uncommitted edit in the main checkout only" done-valid
 run; requeue; run
 check "second run: nothing to do, exit 0"        "0" "$rc"
 check "…and no warning, though the branch's copy has a Shipped block main's lacks" "0" "$(grep -c 'warning:' "$TMP/err" || true)"
-echo "an afterthought" >> "$R/docs/plans/mini.md"; run
-check "an edit in the main tree is warned about" "1" "$(grep -c 'warning: docs/plans/mini.md changed in the main tree' "$TMP/err" || true)"
+echo "a committed afterthought" >> "$R/docs/plans/mini.md"; git -C "$R" commit -qam afterthought; run
+check "an edit committed on main is not warned about: a sync carries it" "0" "$(grep -c 'warning:' "$TMP/err" || true)"
+echo "an uncommitted afterthought" >> "$R/docs/plans/mini.md"; run
+check "an uncommitted edit in the main checkout is warned about" "1" "$(grep -c 'warning: docs/plans/mini.md has uncommitted changes in the main checkout' "$TMP/err" || true)"
+
+scenario "A pause file stops the run at the next step boundary, and the next run continues" done-valid
+write_plan "1 → 2" 1 2
+during 1 'touch "$PLAN_RUNNER_RUNS_DIR/mini.pause"'
+run
+check "exit 5 (stopped for the owner)"           "5" "$rc"
+check "events: step 1, then the pause"           "launched result validated paused" "$(events mini)"
+check "the pause file is gone"                   "no" "$([ -e "$RUNS/mini.pause" ] && echo yes || echo no)"
+check "step 2 was not launched"                  "step:1" "$(steps)"
+requeue done-valid; run
+check "the next run continues: exit 0"           "0" "$rc"
+check "…with step 2"                             "step:1 step:2" "$(steps)"
+
+scenario "A pause file found at start-up is stale: removed with a note, and the run goes on" done-valid
+mkdir -p "$RUNS"; touch "$RUNS/mini.pause"
+run
+check "exit 0"                                   "0" "$rc"
+check "the stale pause file is gone"             "no" "$([ -e "$RUNS/mini.pause" ] && echo yes || echo no)"
+check "the driver says so"                       "1" "$(grep -c 'stale pause file' "$TMP/err" || true)"
+
+scenario "A step added on main right after the running step runs next, without a stop" done-valid done-valid done-valid
+write_plan "1 → 2" 1 2
+during 1 "$INSERT_1A"
+run
+check "exit 0"                                   "0" "$rc"
+check "steps in the merged order"                "step:1 step:1a step:2" "$(steps)"
+check "events: one sync between step 1 and step 1a" "launched result validated plan_synced launched result validated launched result validated" "$(events mini)"
+check "the same-spot insertion was placed, not stopped on" "1" "$(jq -r 'select(.event=="plan_synced") | .placed' "$RUNS/mini.log")"
+check "step 1's Shipped block sits above step 1a's heading" "1" "$(branch_plan | awk '/^\*\*Shipped\*\*/ && !s { s = NR } /^### Step 1a / { h = NR } END { print (s && s < h) ? 1 : 0 }')"
+sync=$(jq -r 'select(.event=="launched" and .step=="1a") | .start' "$RUNS/mini.log")
+check "step 1a's launch starts at the sync commit" "docs(plan): sync docs/plans/mini.md from main at $(git -C "$R" rev-parse --short main)" "$(git -C "$R" log -1 --format=%s "$sync")"
+check "…which carries main's sha as its trailer" "Plan-Synced-From: $(git -C "$R" rev-parse main)" "$(git -C "$R" log -1 --format=%B "$sync" | grep '^Plan-Synced-From:')"
+check "…and changes the plan only"               "docs/plans/mini.md" "$(git -C "$R" show --name-only --format= "$sync")"
+
+scenario "Two syncs in one run; the second merges from the first sync's base, cleanly" done-valid done-valid done-valid done-valid
+write_plan "1 → 2 → 3" 1 2 3
+during 1 "$INSERT_1A"; during 2 "$REVISE_3"
+run
+check "exit 0"                                   "0" "$rc"
+check "steps"                                    "step:1 step:1a step:2 step:3" "$(steps)"
+check "two syncs, the second with nothing to place" "1 0" "$(jq -r 'select(.event=="plan_synced") | .placed' "$RUNS/mini.log" | paste -sd' ' -)"
+check "step 1a's heading is there once"          "1" "$(branch_plan | grep -c '^### Step 1a ')"
+check "main's second edit reached the branch"    "1" "$(branch_plan | grep -c '^Body 3, revised on main\.$')"
+check "no sync failed"                           "0" "$(count_event plan_sync_failed)"
+
+scenario "A clean sync reaches the branch, and a later merge of main is clean" done-valid done-valid
+write_plan "1 → 2" 1 2
+# Away from the end of a step section: a line main changes right where the branch later writes a
+# Shipped block makes `git merge main` ask about it, sync or no sync (the end-of-run hint says so).
+during 1 'sed -i "s/^# Mini plan$/# Mini plan, revised on main/" docs/plans/mini.md && git commit -qam "plan: retitle"'
+run
+check "exit 0"                                   "0" "$rc"
+check "events"                                   "launched result validated plan_synced launched result validated" "$(events mini)"
+check "main's edit is on the branch"             "1" "$(branch_plan | grep -c '^# Mini plan, revised on main$')"
+check "the end-of-run message names the sync"    "1" "$(grep -c 'plan sync commit' "$TMP/out" || true)"
+mrc=0; git -C "$(WT mini)" merge -q --no-edit main >/dev/null 2>&1 || mrc=$?
+check "git merge main afterwards is clean"       "0" "$mrc"
+
+scenario "--sync-from none never syncs" done-valid done-valid
+write_plan "1 → 2" 1 2
+during 1 "$REVISE_2"
+run --sync-from none
+check "exit 0"                                   "0" "$rc"
+check "no sync"                                  "launched result validated launched result validated" "$(events mini)"
+check "main's edit is not on the branch"         "0" "$(branch_plan | grep -c 'revised on main' || true)"
+
+scenario "--sync-from origin/main fetches the owner's push first" done-valid done-valid
+write_plan "1 → 2" 1 2
+with_origin
+during 1 "git clone -q '$BARE' '$TMP/clone-$n' && cd '$TMP/clone-$n' && $REVISE_2 && git push -q origin main"
+run --sync-from origin/main
+check "exit 0"                                   "0" "$rc"
+check "one sync, from origin/main"               "origin/main" "$(jq -r 'select(.event=="plan_synced") | .ref' "$RUNS/mini.log")"
+check "the pushed edit is on the branch"         "1" "$(branch_plan | grep -c '^Body 2, revised on main\.$')"
+check "local main did not move"                  "0" "$(git -C "$R" show main:docs/plans/mini.md | grep -c 'revised on main' || true)"
+
+scenario "A failed fetch is a warning, not a driver bug, and the run goes on" done-valid done-valid
+write_plan "1 → 2" 1 2
+with_origin
+during 1 "rm -rf '$BARE'"
+run --sync-from origin/main
+check "exit 0"                                   "0" "$rc"
+check "the fetch failure is a warning"           "1" "$(grep -c 'warning: git fetch origin main failed' "$TMP/err" || true)"
+check "…and no 'internal error'"                 "0" "$(grep -c 'internal error' "$TMP/err" || true)"
+
+scenario "A real edit conflict stops with exit 5 and leaves the branch and the worktree untouched" done-annotate
+write_plan "1 → 2" 1 2
+during 1 "$REVISE_2"
+run
+check "exit 5"                                   "5" "$rc"
+check "events"                                   "launched result validated plan_sync_failed" "$(events mini)"
+check "the conflict file holds the markers"      "1" "$(grep -c '^<<<<<<<<<<<<< ' "$RUNS/mini.plan-sync.conflict.md" 2>/dev/null || true)"
+check "the branch ends at step 1's plan commit"  "docs(plan): step 1 shipped" "$(git -C "$R" log -1 --format=%s plan/mini)"
+check "the worktree is clean"                    "" "$(git -C "$(WT mini)" status --porcelain)"
+check "the hand-merge command carries the trailer" "1" "$(grep -c "Plan-Synced-From: $(git -C "$R" rev-parse main)" "$TMP/out" || true)"
+check "step 2 was not launched"                  "step:1" "$(steps)"
+
+scenario "A merged plan whose Order names a step with no heading stops with exit 5, nothing committed" done-valid
+write_plan "1 → 2" 1 2
+during 1 'sed -i "s/^\*\*Order: 1 → 2\*\*$/**Order: 1 → 2 → 9**/" docs/plans/mini.md && git commit -qam "plan: step 9"'
+run
+check "exit 5"                                   "5" "$rc"
+check "events"                                   "launched result validated plan_sync_failed" "$(events mini)"
+check "the reason names the step"                "1" "$(jq -r 'select(.event=="plan_sync_failed") | .why' "$RUNS/mini.log" | grep -c 'step 9')"
+check "nothing committed"                        "docs(plan): step 1 shipped" "$(git -C "$R" log -1 --format=%s plan/mini)"
+check "the worktree is clean"                    "" "$(git -C "$(WT mini)" status --porcelain)"
+
+scenario "An uncommitted answer in the plan skips the sync; a later boundary syncs" needs-decision
+write_plan "1 → 2" 1 2
+run
+check "exit 2"                                   "2" "$rc"
+sed -i 's/^\*\*Decision needed\*\*/**Decision taken**/' "$(WT mini)/docs/plans/mini.md"
+( cd "$R" && bash -c "$REVISE_2" )
+requeue done-valid done-valid; run
+check "exit 0"                                   "0" "$rc"
+check "the driver says why it did not sync"      "1" "$(grep -c 'plan sync skipped' "$TMP/err" || true)"
+check "the sync came at the boundary after step 1" "launched result needs_decision launched result validated plan_synced launched result validated" "$(events mini)"
+
+scenario "A ‖ added on main at the frontier stops the run" done-valid
+write_plan "1 → 2" 1 2
+during 1 'sed -i "s/^\*\*Order: 1 → 2\*\*$/**Order: 1 ‖ 2**/" docs/plans/mini.md && git commit -qam "plan: checkpoint"'
+run
+check "exit 4"                                   "4" "$rc"
+check "events"                                   "launched result validated plan_synced checkpoint" "$(events mini)"
+
+scenario "A ‖ added on main behind the frontier does not stop the run" done-valid done-valid
+write_plan "1 → 2 → 3" 1 2 3
+run --to 2
+check "first run: exit 0"                        "0" "$rc"
+sed -i 's/^\*\*Order: 1 → 2 → 3\*\*$/**Order: 1 ‖ 2 → 3**/' "$R/docs/plans/mini.md"; git -C "$R" commit -qam "plan: checkpoint"
+requeue done-valid; run
+check "second run: exit 0"                       "0" "$rc"
+check "the ‖ reached the branch"                 "1" "$(branch_plan | grep -c '^\*\*Order: 1 ‖ 2 → 3\*\*$' || true)"
+check "step 3 ran"                               "step:1 step:2 step:3" "$(steps)"
+check "no checkpoint"                            "0" "$(count_event checkpoint)"
+
+scenario "…nor does one added behind it in the same run, after two steps it shipped" done-valid done-valid done-valid
+write_plan "1 → 2 → 3" 1 2 3
+during 2 'sed -i "s/^\*\*Order: 1 → 2 → 3\*\*$/**Order: 1 ‖ 2 → 3**/" docs/plans/mini.md && git commit -qam "plan: checkpoint"'
+run
+check "exit 0"                                   "0" "$rc"
+check "step 3 ran after the sync"                "step:1 step:2 step:3" "$(steps)"
+check "no checkpoint"                            "0" "$(count_event checkpoint)"
+
+scenario "A ‖ due at the same boundary as a pause file wins; the pause file is stale at the next start" done-valid done-valid
+write_plan "1 ‖ 2" 1 2
+during 1 'touch "$PLAN_RUNNER_RUNS_DIR/mini.pause"'
+run
+check "exit 4, not 5"                            "4" "$rc"
+requeue done-valid; run
+check "the next run removes the stale pause file and goes on" "0 1" "$rc $(grep -c 'stale pause file' "$TMP/err" || true)"
 
 scenario "A missing tool is an environment error (exit 1), not a driver bug or a blocked step" done-valid
 BARE=$TMP/bare-$n; mkdir -p "$BARE"
