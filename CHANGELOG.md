@@ -4,6 +4,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ## [UNRELEASED] [1.39.0] — 2026-10-04
 
+### Added
+
+- **Video calls.** A camera icon beside the phone icon in a 1:1 chat starts a call with the camera on, and any call can switch the camera on or off from its new call screen. The other person fills the screen, your own picture floats in a corner you can drag it to, and a tap on it swaps the two. An incoming video call can be answered with video or voice only. Leaving the screen while video shows keeps the call in a small picture-in-picture window. The call log and the call bubble say which calls were video calls and call back the same way. If the other person's app is older, the call runs as a voice call and says so.
+
 ### Fixed
 
 - **The mute button starts every call unmuted.** After a call that ended muted, the next call showed the microphone as muted while it was live. The call's controls now start fresh with every call. (`70b59566`)

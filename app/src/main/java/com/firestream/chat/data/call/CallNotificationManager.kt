@@ -49,7 +49,8 @@ class CallNotificationManager(private val context: Context) {
         )
     }
 
-    fun buildOngoingCallNotification(remoteName: String): Notification {
+    /** The call past its ring. [video] is how the call was started, and only picks the title. */
+    fun buildOngoingCallNotification(remoteName: String, video: Boolean): Notification {
         val hangupIntent = Intent(context, CallService::class.java).apply {
             action = CallService.ACTION_HANGUP
         }
@@ -66,7 +67,7 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Voice Call")
+            .setContentTitle(callTitle(video))
             .setContentText("In call with $remoteName")
             .setOngoing(true)
             .setContentIntent(launchPending)
@@ -75,7 +76,8 @@ class CallNotificationManager(private val context: Context) {
             .build()
     }
 
-    fun buildOutgoingCallNotification(remoteName: String): Notification {
+    /** The outgoing ring. [video] is how the call was started, and only picks the title. */
+    fun buildOutgoingCallNotification(remoteName: String, video: Boolean): Notification {
         val hangupIntent = Intent(context, CallService::class.java).apply {
             action = CallService.ACTION_HANGUP
         }
@@ -92,7 +94,7 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Voice Call")
+            .setContentTitle(callTitle(video))
             .setContentText("Calling $remoteName...")
             .setOngoing(true)
             .setContentIntent(launchPending)
@@ -128,7 +130,7 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle(if (video) "Incoming Video Call" else "Incoming Voice Call")
+            .setContentTitle("Incoming ${callTitle(video)}")
             .setContentText(callerName)
             // The service posts the ring a second time when it learns the kind late.
             .setOnlyAlertOnce(true)
@@ -149,6 +151,8 @@ class CallNotificationManager(private val context: Context) {
     fun cancelNotification(id: Int) {
         notifManager.cancel(id)
     }
+
+    private fun callTitle(video: Boolean) = if (video) "Video Call" else "Voice Call"
 
     private fun buildCallActivityIntent(): Intent {
         return Intent().apply {

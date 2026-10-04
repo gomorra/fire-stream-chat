@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -216,6 +217,21 @@ internal data class MessageBubbleCallbacks(
     // Cancel the pending reminder. Null when no reminder is pending.
     val onCancelReminder: (() -> Unit)? = null,
 )
+
+/**
+ * What a `CALL` bubble says. [endReason] is the message's content: how the call ended.
+ * A call that was started as video says so, whatever became of it.
+ */
+internal fun callBubbleLabel(endReason: String, isOwnMessage: Boolean, video: Boolean): String {
+    val call = if (video) "video call" else "call"
+    return when {
+        isOwnMessage && endReason == "timeout" -> if (video) "Video call · No answer" else "No answer"
+        endReason == "declined" -> if (video) "Video call · Declined" else "Declined"
+        isOwnMessage -> "Outgoing $call"
+        endReason == "timeout" -> "Missed $call"
+        else -> "Incoming $call"
+    }
+}
 
 /**
  * Animated border colour for the ~1.5s "jump target" frame — the pink flash shown
@@ -1123,17 +1139,11 @@ private fun MessageBubbleBody(
                 val isDeclined = !isOwnMessage && endReason == "declined"
                 val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
                 val callIcon = when {
+                    message.isVideoCall -> Icons.Default.Videocam
                     isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed
                     else -> Icons.Default.Call
                 }
-                val callLabel = when {
-                    isOwnMessage && endReason == "timeout" -> "No answer"
-                    isOwnMessage && endReason == "declined" -> "Declined"
-                    isOwnMessage -> "Outgoing call"
-                    isMissed -> "Missed call"
-                    isDeclined -> "Declined"
-                    else -> "Incoming call"
-                }
+                val callLabel = callBubbleLabel(endReason, isOwnMessage, message.isVideoCall)
                 val durationSeconds = message.duration ?: 0
                 val callDetail = when {
                     durationSeconds > 0 -> {

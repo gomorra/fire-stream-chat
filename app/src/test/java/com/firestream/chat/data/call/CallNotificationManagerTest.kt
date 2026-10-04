@@ -40,6 +40,14 @@ class CallNotificationManagerTest {
         assertEquals("Incoming Voice Call", ring.title())
     }
 
+    @Test
+    fun `the notifications of a running call name its kind`() {
+        assertEquals("Video Call", manager.buildOutgoingCallNotification("Alice", video = true).title())
+        assertEquals("Voice Call", manager.buildOutgoingCallNotification("Alice", video = false).title())
+        assertEquals("Video Call", manager.buildOngoingCallNotification("Alice", video = true).title())
+        assertEquals("Voice Call", manager.buildOngoingCallNotification("Alice", video = false).title())
+    }
+
     // The service posts the ring again when the call document names the kind after the push did
     // not. The second post must not alert a second time.
     @Test

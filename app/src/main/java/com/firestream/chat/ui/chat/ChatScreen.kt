@@ -1040,16 +1040,14 @@ fun ChatScreen(
                 },
                 actions = {
                     if (!uiState.session.isGroupChat && !uiState.session.isBroadcast) {
-                        IconButton(onClick = {
-                            val callIntent = Intent(context, CallActivity::class.java).apply {
-                                putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.partnerIdHint)
-                                putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
-                                putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
-                                putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
-                            }
-                            context.startActivity(callIntent)
-                        }) {
+                        IconButton(onClick = { startCall(context, viewModel, uiState, video = true) }) {
+                            Icon(
+                                imageVector = Icons.Default.Videocam,
+                                contentDescription = "Video call",
+                                tint = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+                        IconButton(onClick = { startCall(context, viewModel, uiState, video = false) }) {
                             Icon(
                                 imageVector = Icons.Default.Phone,
                                 contentDescription = "Voice call",
@@ -1456,16 +1454,8 @@ fun ChatScreen(
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
                                                 onCall = if (message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
-                                                    {
-                                                        val callIntent = Intent(context, CallActivity::class.java).apply {
-                                                            putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-                                                            putExtra(CallActivity.EXTRA_CALLEE_ID, viewModel.partnerIdHint)
-                                                            putExtra(CallActivity.EXTRA_CALLEE_NAME, uiState.session.chatName ?: "")
-                                                            putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, uiState.session.recipientAvatarUrl)
-                                                            putExtra(CallActivity.EXTRA_CHAT_ID, viewModel.chatId)
-                                                        }
-                                                        context.startActivity(callIntent)
-                                                    }
+                                                    // Calls back with the kind the call was.
+                                                    { startCall(context, viewModel, uiState, video = message.isVideoCall) }
                                                 } else null,
                                                 onCancelTimer = if (message.type == MessageType.TIMER && message.timerState == TimerState.RUNNING) {
                                                     { viewModel.cancelTimer(message.id) }
@@ -2588,6 +2578,20 @@ private fun adjustEmojiIndices(
             .filter { (idx, _) -> idx < editPos || idx >= deleteEnd }
             .associate { (idx, v) -> (if (idx >= deleteEnd) idx + delta else idx) to v }
     }
+}
+
+/** Call the other person of this 1:1 chat. [video] starts the call with the camera on. */
+private fun startCall(context: Context, viewModel: ChatViewModel, uiState: ChatUiState, video: Boolean) {
+    context.startActivity(
+        CallActivity.outgoingIntent(
+            context = context,
+            calleeId = viewModel.partnerIdHint,
+            calleeName = uiState.session.chatName ?: "",
+            calleeAvatarUrl = uiState.session.recipientAvatarUrl,
+            chatId = viewModel.chatId,
+            video = video
+        )
+    )
 }
 
 private fun createCameraUri(context: Context): Uri {

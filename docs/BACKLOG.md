@@ -85,6 +85,45 @@ not made.
 Known limit, not a check: a phone that goes back to a build from before video calls keeps
 `callVideoLine: true` on its user document. A call to it crashes it until it updates again.
 
+### The call screen with video (2026-10-04)
+
+`docs/plans/video-calls.md` step 4. The stage, the camera permission, picture-in-picture and the
+entry points are new. Robolectric tests draw the stage from plain state with a box in place of a
+video tile. No video view, no camera and no picture-in-picture window has run on a device or an
+emulator, and items 3 to 9 of the list above are checked through this screen.
+1. The camera icon in a 1:1 chat asks for the microphone and the camera, shows *Calling…* at
+   once, then the own preview behind the name. The other phone rings with *Incoming Video Call*
+   and offers *Decline*, *Voice only* and *With video*.
+2. *With video* connects with both pictures. *Voice only* connects with the caller's picture only,
+   and a preview that showed during the ring goes off.
+3. The self view drags, snaps to the nearest corner, and never rests under the dock. A tap on it
+   swaps the two pictures. Rounded corners clip the video.
+4. With video showing, the dock and the top bar hide after four seconds and a tap brings them
+   back. With both cameras off they stay.
+5. The first frame: the avatar stays until the other side's picture has arrived, with no black
+   flash in between.
+6. Start as voice, then switch the camera on: the permission is asked once. Refuse it: one toast,
+   and the call goes on.
+7. The *minimise* arrow, the back button and the home gesture go into picture-in-picture while
+   video shows, and the small window draws only the other person. Closing the window pauses the
+   camera. Without video the arrow sends the call to the background and the notification leads
+   back.
+8. A video call to a locked phone offers only *Answer* and connects with the camera off. *Answer*
+   in the notification does the same.
+9. A call to a phone with an older build: the camera button is disabled, the line under it names
+   the reason, and the call starts on the earpiece although it was started as video.
+10. Rotate the phone or switch the system theme while *Calling…* shows: the call is still placed.
+    Hang up during *Calling…*: the other phone does not ring, or stops at once.
+11. The notification of a running video call is titled *Video Call*.
+12. The call log row and the call bubble of a video call show the camera icon and say *video
+    call*. Tapping either calls back with video.
+13. A debug build opens the stage without a `VerifyError`. `ConnectedScene` and `CallStage` are
+    the largest composables there; check their register counts with the `dexdump` recipe in
+    `docs/GOTCHAS.md`.
+
+Owed on hardware, from the plan's verification list: two phones on mobile data, a Bluetooth
+headset connected during video, and a phone with an older app version as the partner.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two
@@ -755,11 +794,14 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
   needs the `BLUETOOTH_CONNECT` runtime permission on API 31+, which was not judged worth a
   permission prompt. Nice-to-have, and cheap if the app ever asks for that permission anyway.
 
-### Video calls, 1-to-1 (4.2)
-- Extend the existing voice-call infrastructure with a video track
-- Camera switch (front/back), video toggle
-- Picture-in-picture support
-- Files: `ui/call/` package extension
+### Call signalling is not authenticated end to end
+
+Call media is encrypted between the two phones, a relay included. The key fingerprints of that
+encryption travel in the offer and the answer, through `calls/{callId}` in Firestore. Whoever can
+rewrite a call document could therefore put themselves between the two phones. `firestore.rules`
+lets only the caller and the callee update a call, so today that is Firebase itself or a stolen
+account. Closing it means signing the offer and the answer with the Signal identity keys, or
+showing a short code both sides compare. Not planned (`docs/plans/video-calls.md`, risk 7).
 
 ### Group voice/video calls (4.3)
 - SFU (Selective Forwarding Unit) server for multi-party calls

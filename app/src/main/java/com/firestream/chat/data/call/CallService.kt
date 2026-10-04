@@ -342,7 +342,7 @@ class CallService : Service() {
             CallState.OutgoingRinging(callId, userId, name, avatar, localAvatar, video)
         )
 
-        val notification = notificationManager!!.buildOutgoingCallNotification(name)
+        val notification = notificationManager!!.buildOutgoingCallNotification(name, video)
         startForeground(
             CallNotificationManager.NOTIFICATION_ID_ONGOING,
             notification,
@@ -416,7 +416,7 @@ class CallService : Service() {
             )
         )
 
-        val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
+        val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown", callVideo)
         // Android 14+ prohibits changing from SHORT_SERVICE to another type directly;
         // exit foreground first, then re-enter as MICROPHONE now that RECORD_AUDIO is granted.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -547,7 +547,7 @@ class CallService : Service() {
         )
         if (!callStateHolder.compareAndSetState(ringing, connecting)) return
 
-        val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown")
+        val notification = notificationManager!!.buildOngoingCallNotification(remoteName ?: "Unknown", callVideo)
         notificationManager!!.updateNotification(notification, CallNotificationManager.NOTIFICATION_ID_ONGOING)
     }
 
@@ -659,6 +659,8 @@ class CallService : Service() {
         // Only a call with an agreed video line is ever written to, see CallMediaPublisher.
         mediaPublisher.onVideoLine(callId, available)
         if (available) return
+        // On screen this is a voice call now, so it leaves the speaker default of a video call.
+        serviceScope.launch { followVideoWithAudio() }
         // An app without video on the other side. A preview that already runs would look like a
         // camera that is being sent, so it goes off. On the main thread, where the camera is switched.
         mainHandler.post {
@@ -828,8 +830,8 @@ class CallService : Service() {
         val manager = notificationManager ?: return true
         val name = remoteName ?: "Unknown"
         val notification = when (callStateHolder.callState.value) {
-            is CallState.OutgoingRinging -> manager.buildOutgoingCallNotification(name)
-            is CallState.Connecting, is CallState.Connected -> manager.buildOngoingCallNotification(name)
+            is CallState.OutgoingRinging -> manager.buildOutgoingCallNotification(name, callVideo)
+            is CallState.Connecting, is CallState.Connected -> manager.buildOngoingCallNotification(name, callVideo)
             else -> return true
         }
         if (cameraWanted) return startForegroundWithCamera(notification)
@@ -932,14 +934,16 @@ class CallService : Service() {
     }
 
     /**
-     * Audio follows video. A call started as video, or one where video shows right now on either
-     * side, plays on the speaker unless a headset is connected or the user picked a route. While
-     * video shows the proximity lock is off. Does nothing before the audio session has started.
-     * Not for the main thread: it takes [audioSessionLock].
+     * Audio follows video. A call started as video that can carry video, or one where video shows
+     * right now on either side, plays on the speaker unless a headset is connected or the user
+     * picked a route. A call started as video to an app without video is a voice call on screen,
+     * and starts on the earpiece. While video shows the proximity lock is off. Does nothing before
+     * the audio session has started. Not for the main thread: it takes [audioSessionLock].
      */
     private fun followVideoWithAudio() = synchronized(audioSessionLock) {
         val showing = cameraTrack != null || callStateHolder.participants.value.any { it.cameraOn }
-        audioRouter?.setPreferSpeaker(callVideo || showing)
+        val startedAsVideo = callVideo && callStateHolder.uiControls.value.videoAvailable
+        audioRouter?.setPreferSpeaker(startedAsVideo || showing)
         proximityLock?.setVideoShowing(showing)
     }
 

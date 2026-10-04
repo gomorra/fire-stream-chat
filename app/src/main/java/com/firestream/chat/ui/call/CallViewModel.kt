@@ -1,10 +1,13 @@
 package com.firestream.chat.ui.call
 
 import android.content.Context
+import android.view.View
 import androidx.lifecycle.ViewModel
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
+import com.firestream.chat.data.call.CallVideoSinks
 import com.firestream.chat.domain.model.CallAudioRoute
+import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -14,18 +17,48 @@ import javax.inject.Inject
 
 @HiltViewModel
 class CallViewModel @Inject constructor(
-    private val callStateHolder: CallStateHolder,
+    callStateHolder: CallStateHolder,
+    private val callPlacer: OutgoingCallPlacer,
+    private val videoSinks: CallVideoSinks,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
     val callState: StateFlow<CallState> = callStateHolder.callState
     val uiControls: StateFlow<CallUiControls> = callStateHolder.uiControls
+    val participants: StateFlow<List<CallParticipant>> = callStateHolder.participants
 
-    fun answer() = CallService.sendAction(context, CallService.ACTION_ANSWER)
+    /** An outgoing call that has no call document yet, see [OutgoingCallPlacer]. */
+    val placing: StateFlow<PlacingCall?> = callPlacer.placing
+
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
-    fun hangup() = CallService.sendAction(context, CallService.ACTION_HANGUP)
+
+    /**
+     * Hang up. A call that is still being placed is dropped instead, because the service does not
+     * have it yet.
+     *
+     * @return true when nothing is left for the stage to show.
+     */
+    fun hangup(): Boolean {
+        if (callPlacer.placing.value != null) {
+            callPlacer.cancel()
+            return true
+        }
+        CallService.sendAction(context, CallService.ACTION_HANGUP)
+        return false
+    }
+
+    fun cancelPlacing() = callPlacer.cancel()
+
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
+
+    fun flipCamera() = CallService.sendAction(context, CallService.ACTION_FLIP_CAMERA)
 
     /** Move the call's audio to [route]. The OS decides when it actually lands; [uiControls] follows. */
     fun selectAudioRoute(route: CallAudioRoute) = CallService.sendSelectAudioRoute(context, route)
+
+    /** A view that draws [participantId]'s video. Single-use: hand it back with [releaseVideoView]. */
+    fun createVideoView(context: Context, participantId: String): View =
+        videoSinks.createView(context, participantId)
+
+    fun releaseVideoView(view: View) = videoSinks.releaseView(view)
 }

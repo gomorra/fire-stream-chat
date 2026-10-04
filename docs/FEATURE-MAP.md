@@ -10,9 +10,9 @@ Only features that span **4+ packages** are listed here. Single-screen features 
 
 ---
 
-## Voice Call (1-on-1, WebRTC)
+## Voice and Video Call (1-on-1, WebRTC)
 
-Real-time audio call via WebRTC, signalled through Firestore, woken by a high-priority FCM push. A call between two apps with video also sets up one video line. The service can put the camera on it, and no screen asks for that yet.
+Real-time call via WebRTC, signalled through Firestore, woken by a high-priority FCM push. A voice call is a call with both cameras off. A call between two apps with video sets up one video line, and each side switches its own camera onto it from the call screen.
 
 | File | Role |
 |---|---|
@@ -33,10 +33,13 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source. `createCall` reads the callee's `callVideoLine` before it rings |
 | `app/src/main/java/com/firestream/chat/data/repository/AuthRepositoryImpl.kt` | `announceCallVideoLine()` — writes `callVideoLine: true` to the own user document at app start (`FireStreamApp`) and when an existing user signs in |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseAuthSource.kt` | Writes and reads `users/{uid}.callVideoLine`; a new user document carries it from its creation |
-| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route |
-| `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
-| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents |
-| `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | Mute / hang up / route control |
+| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route. Owns the microphone and camera requests, the lock state, picture-in-picture, the visibility reports to the service, and `outgoingIntent` |
+| `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | The stateful `CallScreen`, and the stateless `CallStage` with its scenes: ring, connected, ended, picture-in-picture. Video tiles come in through the `videoTile` slot |
+| `app/src/main/java/com/firestream/chat/ui/call/CallStageTiles.kt` | The stage's colours, avatar, glow and name block, the floating self tile and its corner arithmetic (`SelfTileCorners`) |
+| `app/src/main/java/com/firestream/chat/ui/call/CallStageControls.kt` | The dock, the top bar and the answer row of an incoming ring |
+| `app/src/main/java/com/firestream/chat/ui/call/OutgoingCallPlacer.kt` | `@Singleton` — holds the wait for `createCall` on the application scope and hands the created call to `CallService` |
+| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` and `OutgoingCallPlacer`, control intents, video views from `CallVideoSinks` |
+| `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | The round control button and `CallControlColors` |
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
@@ -56,9 +59,12 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |
 | `app/src/test/java/com/firestream/chat/ui/call/CallAudioRouteUiTest.kt` | Route button branch (≤2 toggles, 3 opens the sheet) + sheet rows |
+| `app/src/test/java/com/firestream/chat/ui/call/CallStageUiTest.kt` | The stage from plain state: the camera button's states, avatar or tile, the voice call, the answer rows, the dock hiding only while video shows, a call being placed, the small window |
+| `app/src/test/java/com/firestream/chat/ui/call/OutgoingCallPlacerTest.kt` | Placing, a failed creation, a hang-up during the wait, a service that cannot start |
+| `app/src/test/java/com/firestream/chat/ui/call/CallKindLabelsTest.kt` | What the call log and the call bubble say for a video call, the self tile's corners, whether any video shows |
 | `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation |
 
-**Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallStateHolder.startCall()` → `CallService` foregrounds.
+**Entry point:** the phone or camera icon in `ChatScreen.kt`, a call-log row or a call bubble → `CallActivity.outgoingIntent` → `CallActivity` asks for the permissions → `OutgoingCallPlacer.place` → `CallService.startOutgoing`.
 
 ---
 
