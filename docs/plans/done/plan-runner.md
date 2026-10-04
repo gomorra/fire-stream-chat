@@ -461,7 +461,7 @@ Known limits, left as they are on purpose:
 A verdict committed on main eight minutes after a run forked never reached that run, and there was
 no moment to merge it in. A run that hit the usage limit at night stopped as blocked in the middle of
 a step, and a cloud session went on past the limit on cloud credits. The plan
-`docs/plans/plan-runner-live-changes-brief.md` holds the decisions (§0 1–28) and the evidence. Where
+`docs/plans/done/plan-runner-live-changes.md` holds the decisions (§0 1–28) and the evidence. Where
 the rows below contradict §2, §4 or §5, this section wins.
 
 | Change | Why | Where |
