@@ -284,6 +284,21 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Stickers — leftovers from the 1.39.0 pre-release review
+
+**The smell.** The `/code-review` pass over `v1.38.0..main` found no release blocker and left five things:
+- `StickerMaker.prepare` holds a `MediaProcessingLimiter` permit across `SubjectCutout.cutOut`, which waits up to 45 s for the segmentation model on first use. One of the two process-wide permits is gone for that time, so image and video sends run one at a time.
+- `StickerLibrarySync` catches a listener error and completes inside `shareIn(WhileSubscribed)`. The restore listener does not start again until every collector of `observePacks()` has left. A `PERMISSION_DENIED` while a chat is open stops the restore until that chat closes.
+- `StickerRepositoryImpl.saveSticker` converts a keyboard picture inside `importLock`, although its comment says outside. An import waits while a conversion waits for a permit.
+- `installPack` writes the `format` a shared pack's manifest names, and `mergeStickers` never corrects it. A manifest from a modified client can leave a row that says `LOTTIE` over a WebP file, and that sticker cannot be shown or sent from the library.
+- `LottieThumbnails` and the `Semaphore(4)` in `StickerRepositoryImpl` decode outside `MediaProcessingLimiter`. The Lottie gate draws frame 0 only, with no time bound, so a heavy animation from a contact passes it.
+
+**Why we haven't fixed it.** None loses data or reaches another user's library. The first two need a regression test each and a new gate run, and the release was cut at step 9 on the owner's request.
+
+**When to revisit.** The first two before the next release: wait for the model outside the permit, and retry the listener. Fold the others into the next change to `StickerRepositoryImpl` or `LottieThumbnails`.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
