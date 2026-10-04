@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Added
 
-- **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library.
+- **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library. (`33f54406`)
 
 ## [1.38.0] — 2026-10-04
 

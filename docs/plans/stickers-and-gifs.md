@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–5 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–6 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -446,6 +446,30 @@ Departures (for sign-off):
 
 A sync engine and new security rules.
 
+**Approach**
+- Order: Room first (`StickerSyncState.DELETED`, the DAO's tombstone, manifest read, compare-and-set mark and remote merge;
+  no column changes, so no version bump), then `StickerPackSource` with both implementations and `firestore.rules`, then `data/sticker/StickerUploads.kt`
+  (the per-sticker lock and the `remoteUrl` write, out of `OutboxSender`), then `StickerSyncScheduler` and `StickerSyncWorker`,
+  then `data/sticker/StickerLibrarySync.kt` (the restore), then `StickerRepositoryImpl` and `AuthRepositoryImpl`, then the UI.
+- A manifest holds sticker ids and their metadata, and no urls. A file is always fetched from the object its id names
+  (`stickers/<id>.<ext>`), looked up through a new `StickerObjectSource.urlIfPresent`, and hashed by `StickerDownloads`.
+  So a manifest someone else wrote can never point this device at another host.
+- The restore listener runs while something collects `observePacks()`: an open chat or the library screen. It applies
+  changes newer-only by `updatedAt`, and removes a pack only on a `REMOVED` change of a `SYNCED` row.
+- Two packs with one import key merge into the older one, on every device alike. The loser gets a tombstone.
+- Sign-out already clears every table (`AuthRepositoryImpl.signOut`). This step adds a lock that keeps a restore from
+  writing after it, cancels the sync work and clears the recents.
+- **View pack** opens the pack the message names. **Add pack** copies it as `INSTALLED` under the root id
+  (`originPackId` of the viewed pack, else its id) with the import key `installed:<root>`, which is also what
+  "already installed" compares. Install writes rows only. Files arrive when a cell is first shown, as after a restore.
+- Fetch on display: `StickerCell` takes a `Sticker`, checks its file and asks `LocalStickerFetcher`, which
+  `MainActivity` provides from `StickerRepository.ensureFile`. No ViewModel is threaded through.
+- The pack preview is its own sheet with its own `StickerPackPreviewViewModel`, so `ChatUiState` gains nothing.
+- Tests: `StickerSyncWorkerTest`, `StickerLibrarySyncTest`, `StickerUploadsTest`, `FirestoreStickerPackSourceTest`, new
+  cases in `StickerDaoTest` and `StickerRepositoryImplTest`, `StickerPackPreviewViewModelTest`, a Robolectric test for the
+  sheet rows and the fetch on display.
+- Further skills intended: `simplify` (the diff will pass 600 lines), `app-ui-design` (Compose), `changelog-release`.
+
 - `data/remote/source/StickerPackSource.kt`, `FirestoreStickerPackSource`, a pocketbase stub.
 - `firestore.rules`: `stickerPacks/{packId}` — get for any signed-in user, list and write for the owner.
 - `data/worker/StickerSyncWorker.kt` (unique work, connected): for each pending pack, `ensureUploaded`
@@ -495,6 +519,30 @@ A sync engine and new security rules.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
+**Review outcome** (`/code-review`, then `/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` fixes: a sign-out finishes inside the fence though its caller is cancelled; the listener maps snapshots in order; the worker skips a pack that changed while its files uploaded; a manifest keeps 8 emoji tags and stops at 900 000 bytes; `StickerSyncSchedulerTest`; one `awaitAck`.
+- `SingleFlight` no longer hands a cancelled first caller's cancellation to its waiters. `LinkPreviewSource` uses it too.
+- `/simplify` fixes: `StickerSyncScheduler.syncIfPending` does not throw; `ensureFile` is cancellable, writes no `remoteUrl` and remembers a missing object; `countItem` and the sheet's fallback text are gone.
+- Not taken: the two-device cases (`TECH_DEBT.md`), a sync trigger driven from a DAO flow, `ensureFile` inside `StickerDownloads`, batched `remoteUrl` writes during a backup, no mapping of unchanged manifests when the listener starts, one `StickerCell`, shared test builders.
+- `/code-review` ran before the `/simplify` fixes and the `SingleFlight` change. They were not reviewed again.
+  Each has a test: `SingleFlightTest`, `StickerLibrarySyncTest`, `StickerSyncWorkerTest`, `StickerSyncSchedulerTest`,
+  `StickerManifestTest` and the fetch cases in `StickerRepositoryImplTest`.
+
+**Shipped** `33f54406` (2026-10-04) — tier: max, tagged max. skills: code-review, simplify, app-ui-design, changelog-release. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- This session found the step written and uncommitted in the worktree, left by an earlier attempt. It read, reviewed, fixed and gated that work.
+- **For sign-off, not fixed (`/code-review`):** the rules let any signed-in user create a manifest under an id no document has yet. A recipient with a modified client can claim a pack id it was sent, before the owner's first upload or after a delete. `TECH_DEBT.md`, *A sticker pack's id can be claimed by whoever writes its manifest first*, has the fix. It changes the pack's document id, and its rule cannot be tested here.
+- A manifest holds no urls. A file is found by its id through the new `StickerObjectSource.urlIfPresent` and hashed.
+- The restore listens only while `observePacks()` is collected: an open chat or the library screen.
+- `StickerRepository.setFavourite` became `toggleFavourite`, decided in one DAO transaction.
+- *Add pack* installs under the root pack id with the import key `installed:<root>`. It writes rows only.
+- A sticker whose file has not arrived shows grey. A tap on it is refused with *That sticker is not in the library*.
+- `LocalStickerFetcher` is a CompositionLocal that `MainActivity` provides. It has no `docs/PATTERNS.md` entry.
+- On pocketbase `StickerPackSource.isSupported` is false, and a deleted pack's row goes at once.
+- `SingleFlight` (`data/util`, outside this step's files) changed. See *Review outcome* above.
+- CHANGELOG: `v1.38.0` is tagged on main. The `[1.38.0]` header lost its prefix here and a new `[UNRELEASED] [1.39.0]` section holds this entry. A merge with main meets the same header line.
+- Nothing ran against Firestore, on a device or an emulator. The rules are untested. The dex register check did not run. Checklist: `docs/BACKLOG.md`.
+
 **‖ Checkpoint.** The owner deploys `firestore.rules`. Device: reinstall and confirm the library
 returns; a second account adds a pack from a received sticker.
 
@@ -515,6 +563,12 @@ returns; a second account adds a pack from a received sticker.
   with a plain `AsyncImage`, which cannot read Lottie, so they need the PNG thumbnail.
 - **(step-5)** The composer's Stickers tab, its pack row and the suggestion strip draw `Sticker.localPath` through
   `StickerCell` and `StickerThumbnail`. For a Lottie sticker they need the PNG thumbnail.
+- **(step-6)** A restored or installed sticker is a row whose file arrives later, through
+  `StickerRepositoryImpl.ensureFile` → `StickerDownloads.ensureLocal` → `StickerFiles.store`, which accepts WebP only.
+  Extend that path for Lottie, and write the PNG thumbnail there too, not only at import. `StickerManifest.stickersOf`
+  drops an entry whose format the build does not know, so an older build restores a pack without its Lottie stickers.
+- **(step-6)** A library sticker is drawn by `LibraryStickerImage` in `ui/components/StickerImage.kt`, which checks
+  `Sticker.localPath` and asks `LocalStickerFetcher` for a missing file. The format switch goes there as well.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
 ### Step 8 — Make your own stickers
@@ -534,6 +588,9 @@ returns; a second account adds a pack from a received sticker.
 - **(step-5)** The picker's pack row is the `LazyRow` in `ui/chat/picker/StickerLibraryTab.kt`. The **+** is a last item
   there, and its callback is a new field of `ComposerPickerCallbacks`. `ChatScreen` hands it to `NavGraph` like
   `onImportStickersClick`.
+- **(step-6)** A new sticker joins a pack through a `StickerDao` transaction (`importInto`, `addToPack`), which marks
+  the pack `PENDING`. `StickerRepositoryImpl` then calls `StickerSyncScheduler.syncIfPending()`, as after every edit,
+  and `StickerSyncWorker` uploads the file. Nothing else is owed for the backup.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
@@ -556,6 +613,8 @@ returns; a second account adds a pack from a received sticker.
   `sendMediaMessage` still sends `image/gif` as an `IMAGE`; the branch this step adds goes there.
 - **(step-5)** A sticker from the keyboard is sent through `ChatViewModel.sendSticker(stickerId, packId = null)`, which
   also marks it used.
+- **(step-6)** `importFrom` already asks for the backup of the `SAVED` pack. `StickerRepository.setFavourite` is gone:
+  `toggleFavourite(stickerId)` decides the direction.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -597,6 +656,11 @@ two functions. The `wizard` skill can script this.
 - **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
   `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
   `ComposerPickerCallbacks`.
+- **(step-6)** The long press that adds an online sticker to the favourites is `StickerRepository.toggleFavourite`.
+  `installPack` takes a `StickerPackPreview` read from a Firestore manifest, so an online pack is imported as files,
+  not installed. On pocketbase `StickerPackSource.isSupported` is false, like the flag this step adds.
+- **(step-6 /code-review)** `SingleFlight` no longer passes a cancelled first caller's cancellation to its waiters.
+  A download that a picker cell starts and cancels is safe to share with other callers.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 
