@@ -621,6 +621,7 @@ Departures (for sign-off):
 - Lottie is 6.6.0. `LottieCompositionSpec.File` reads the `.tgs` itself, which `LottieStickerUiTest` proves by waiting for the composition.
 - `/code-review` and `/simplify` were added: the step parses untrusted files, and the diff passed 600 lines.
 - CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, which was a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit.
+- The driver's first gate run was red in `StickerSyncWorkerTest`, a step-6 test. The worker uploads files in parallel on `Dispatchers.IO` and the test recorded them in a plain list, which can lose an append. The test's lists are thread-safe now (the commit after `51f04ab4`). No production code changed for it.
 - Nothing ran on a device or an emulator beyond the adb read. The dex register check did not run; `MessageBubble` gained one parameter on an existing call. Checklist: `docs/BACKLOG.md`, *Lottie stickers*.
 
 ### Step 8 — Make your own stickers
