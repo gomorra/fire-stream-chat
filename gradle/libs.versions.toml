@@ -29,6 +29,7 @@ libsignal = "0.86.5"
 
 # Image Loading
 coil = "2.7.0"
+lottie = "6.6.0"
 pdfbox-android = "2.0.27.0"
 
 # Media3 (video transcoding/playback)
@@ -126,6 +127,7 @@ libsignal-client = { group = "org.signal", name = "libsignal-client", version.re
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 coil-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
 coil-gif = { group = "io.coil-kt", name = "coil-gif", version.ref = "coil" }
+lottie-compose = { group = "com.airbnb.android", name = "lottie-compose", version.ref = "lottie" }
 pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfbox-android" }
 
 # Media3 (video transcoding/playback)

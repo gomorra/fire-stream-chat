@@ -21,6 +21,10 @@ import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.WhatsAppStickerFile
+import com.firestream.chat.test.LottieFixtures.animation
+import com.firestream.chat.test.LottieFixtures.tgs
+import com.firestream.chat.test.LottieFixtures.waProps
+import com.firestream.chat.test.LottieFixtures.was
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.waJson
 import com.firestream.chat.test.WebpFixtures.zip
@@ -182,6 +186,51 @@ class StickerRepositoryImplTest {
 
         assertEquals(File(files.dir, "${imported.id}.webp").absolutePath, imported.localPath)
         assertTrue(File(imported.localPath).isFile)
+    }
+
+    // --- Import: Lottie ---
+
+    @Test
+    fun `a was file from the WhatsApp folder joins the pack its animation names, as a Lottie sticker`() = runTest {
+        val json = animation(1, customProps = waProps("SchoolDays", listOf("🚌", "👍")))
+
+        val result = repository.importFrom(listOf(source("STK-1.was", was(json))), loosePackName = "WhatsApp").getOrThrow()
+
+        assertEquals(1, result.imported)
+        assertEquals(0, result.rejected)
+        // WhatsApp's own Lottie packs have an id and no name.
+        val imported = pack("SchoolDays").stickers.single()
+        assertEquals(StickerFormat.LOTTIE, imported.format)
+        assertTrue(imported.isAnimated)
+        assertEquals(listOf("🚌", "👍"), imported.emojis)
+        assertEquals(File(files.dir, "${imported.id}.tgs").absolutePath, imported.localPath)
+        assertEquals(imported.localPath + ".png", imported.stillPath)
+        assertTrue(File(imported.localPath).isFile)
+    }
+
+    @Test
+    fun `a tgs file is told by its bytes, whatever it is named, and a second import adds nothing`() = runTest {
+        val uri = source("sticker.bin", tgs(animation(2)))
+
+        val first = repository.importFrom(listOf(uri)).getOrThrow()
+        val again = repository.importFrom(listOf(uri)).getOrThrow()
+
+        assertEquals(1, first.imported)
+        assertEquals(1, again.duplicates)
+        val saved = packs().single()
+        assertEquals(StickerPackKind.SAVED, saved.kind)
+        assertEquals(StickerFormat.LOTTIE, saved.stickers.single().format)
+    }
+
+    @Test
+    fun `a was file whose animation is refused counts as rejected and leaves no file`() = runTest {
+        val notAnAnimation = was("""{"some":"json"}""".toByteArray())
+
+        val result = repository.importFrom(listOf(source("bad.was", notAnAnimation), source("1.webp", sticker(1)))).getOrThrow()
+
+        assertEquals(1, result.imported)
+        assertEquals(1, result.rejected)
+        assertEquals(1, storedFiles().size)
     }
 
     @Test

@@ -21,6 +21,24 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Lottie stickers (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 7. JVM and Robolectric tests cover the container, the
+import, the receive path and which renderer draws a sticker. One real `.was` from the owner's
+phone was read and drawn in a scratch test. Nothing ran on a device.
+1. *From WhatsApp* lists the `.was` files among the `.webp` ones, each as a cell with an
+   animation mark. Importing one puts it into a pack named after its pack id (`SchoolDays`).
+2. The imported sticker shows its first frame in the library, the Stickers tab, the pack row
+   and the suggestion strip. Its emojis find it in the search.
+3. Sent to a second account, it plays in the bubble on both sides, on the chat background,
+   and loops. The reply, forward and starred previews show the first frame.
+4. *From files* with a Telegram `.tgs`: it imports, plays and sends the same way.
+5. Scroll a chat with a dozen Lottie stickers on a mid-range phone. Each bubble plays its own
+   animation, and nothing pauses the ones off screen but leaving the composition.
+6. After a reinstall, a restored Lottie sticker shows grey, then its first frame.
+7. A release build plays them too: R8 runs over Lottie there, and only its consumer rules
+   keep what it needs.
+
 ### Sticker library and import (2026-10-03)
 
 `docs/plans/stickers-and-gifs.md` steps 1–2. JVM/Robolectric tests cover the parsers, the import
@@ -800,12 +818,14 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 ### Stickers & GIFs (4.6)
 
-Stickers are imported, sent from the composer's Stickers tab and shown in a chat. Packs and
-favourites are saved under the account, and a received sticker's pack can be viewed and added.
-A GIF can be received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these
-parts of it are open:
+Stickers are imported, sent from the composer's Stickers tab and shown in a chat. Lottie
+stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved under the account,
+and a received sticker's pack can be viewed and added. A GIF can be received and shown. The
+plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
 
-- **Lottie stickers** (`.was`, `.tgs`) and **making a sticker from a photo** (steps 7–8).
+- **Making a sticker from a photo** (step 8).
+- **A Lottie sticker sent to an older build shows as a broken image.** That build stores
+  WebP only, and its bubble hands the url to an image decoder.
 - **Sending a GIF.** Nothing in the app picks one yet. The keyboard route is step 9. The
   in-app GIFs tab and the online sticker catalogue are steps 10–11.
 - **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage

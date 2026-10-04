@@ -46,7 +46,7 @@ internal fun StickerActionsSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             rememberMessageImageModel(message)?.let { model ->
-                StickerImage(model = model, modifier = Modifier.size(120.dp))
+                StickerImage(model = model, modifier = Modifier.size(120.dp), format = message.stickerFormat)
             }
             StickerActionRows(
                 isFavourite = isFavourite,

@@ -52,13 +52,25 @@ data class StickerPackPreview(
     val isInLibrary: Boolean,
 )
 
-/** One file in the WhatsApp sticker folder, before it is imported. */
+/**
+ * One file in the WhatsApp sticker folder, before it is imported. WhatsApp
+ * keeps a still or animated sticker as a `.webp` and a Lottie sticker as a `.was`.
+ */
 data class WhatsAppStickerFile(
     val uri: String,
     val name: String,
     val sizeBytes: Long,
     val lastModified: Long,
-)
+) {
+    /** Whether an image request can draw the file. A `.was` is a zip around an animation, which none can. */
+    val hasStill: Boolean
+        get() = !name.endsWith(LOTTIE_SUFFIX, ignoreCase = true)
+
+    companion object {
+        const val WEBP_SUFFIX = ".webp"
+        const val LOTTIE_SUFFIX = ".was"
+    }
+}
 
 /**
  * What an import did.

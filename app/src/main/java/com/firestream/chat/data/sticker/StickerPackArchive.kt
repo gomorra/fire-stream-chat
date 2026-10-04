@@ -11,7 +11,9 @@ class StickerArchiveException(message: String) : IOException(message)
 
 /**
  * Reads a `.wastickers` pack, which is a zip of WebP files beside a `title.txt`
- * and an `author.txt`.
+ * and an `author.txt`, and a WhatsApp `.was` file, which is a zip around one
+ * Lottie animation. The entries tell the two apart, and one loop reads both:
+ * a `.was` is a pack of one sticker without a title.
  *
  * The archive is untrusted. Three caps bound what it can cost: the number of
  * entries, the bytes of one sticker, and the bytes decompressed in total. The
@@ -27,6 +29,8 @@ object StickerPackArchive {
         val maxEntries: Int = 200,
         val maxEntryBytes: Int = StickerFiles.MAX_BYTES,
         val maxTotalBytes: Long = 32L * 1024 * 1024,
+        /** The cap on an `animation.json` entry, which is not compressed once it is read. */
+        val maxAnimationBytes: Int = LottieContainer.MAX_JSON_BYTES,
     )
 
     /** [skipped] counts sticker entries larger than [Limits.maxEntryBytes]. */
@@ -34,9 +38,13 @@ object StickerPackArchive {
 
     private const val MAX_TEXT_BYTES = 1024
 
+    /** The Lottie animation inside a WhatsApp `.was` file, which sits at `animation/animation.json`. */
+    private const val ANIMATION_ENTRY = "animation.json"
+
     /**
      * Hands each sticker entry's bytes to [onSticker], in archive order, and
-     * returns the pack's title and author. Blocking: call it off the main thread.
+     * returns the pack's title and author. A sticker entry is a `.webp`, a
+     * `.tgs`, or an `animation.json`. Blocking: call it off the main thread.
      *
      * Throws [StickerArchiveException] when [input] holds no sticker entry, has
      * more than [Limits.maxEntries] entries, inflates past [Limits.maxTotalBytes]
@@ -70,9 +78,10 @@ object StickerPackArchive {
             when {
                 name == "title.txt" -> title = zip.drain(MAX_TEXT_BYTES, budget)?.toText() ?: title
                 name == "author.txt" -> author = zip.drain(MAX_TEXT_BYTES, budget)?.toText() ?: author
-                name.endsWith(".webp") -> {
+                name.endsWith(".webp") || name.endsWith(".tgs") || name == ANIMATION_ENTRY -> {
                     stickerEntries++
-                    val bytes = zip.drain(limits.maxEntryBytes, budget)
+                    val cap = if (name == ANIMATION_ENTRY) limits.maxAnimationBytes else limits.maxEntryBytes
+                    val bytes = zip.drain(cap, budget)
                     if (bytes == null) skipped++ else onSticker(bytes)
                 }
                 else -> zip.drain(keep = 0, budget)

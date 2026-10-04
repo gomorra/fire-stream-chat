@@ -89,12 +89,12 @@ class StickerDownloads @Inject constructor(
             return@withContext null
         }
         stickerFiles.rowLock.withLock {
-            val stored = stickerFiles.store(bytes)
+            val stored = stickerFiles.storeReceived(bytes)
             if (stored == null) {
                 Log.w(TAG, "refused sticker $stickerId: not a sticker file")
                 return@withContext null
             }
-            val emojis = WaStickerMetadata.parse(stored.exif)?.emojis.orEmpty()
+            val emojis = stored.metadata?.emojis.orEmpty()
             stickerDao.mergeStickers(listOf(StickerEntity.of(stored, emojis, System.currentTimeMillis())))
             stickerFiles.fileFor(stored.id, stored.format)
         }

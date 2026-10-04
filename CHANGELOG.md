@@ -7,6 +7,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Added
 
 - **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library. (`33f54406`)
+- **Lottie stickers.** WhatsApp's newer animated stickers (`.was`) now show up in *From WhatsApp* and can be imported, and *From files* takes Telegram's `.tgs` stickers. They play in a chat like any animated sticker, show a still first frame in the library and the picker, and are backed up with their pack. Someone on an older version of the app sees a broken image in place of one.
 
 ## [1.38.0] — 2026-10-04
 

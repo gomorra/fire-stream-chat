@@ -18,10 +18,16 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.platform.testTag
 import coil.compose.AsyncImage
 import coil.decode.ImageDecoderDecoder
 import coil.request.ImageRequest
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerFormat
 import java.io.File
 
 /**
@@ -56,6 +62,11 @@ fun rememberAnimatedImageRequest(data: Any): ImageRequest {
  * With [animated] off the sticker shows its first frame. Grids and previews
  * pass that, so a screen of stickers does not run a decoder per cell.
  *
+ * [format] is what [model] holds. A [StickerFormat.LOTTIE] sticker is drawn by
+ * Lottie, and only from a file on this device: a library file has been hashed
+ * and checked, and what a url serves has not. Until its file arrives it shows
+ * a placeholder.
+ *
  * The caller fixes the size through [modifier]. A sticker is never cropped.
  */
 @Composable
@@ -64,7 +75,12 @@ fun StickerImage(
     modifier: Modifier = Modifier,
     animated: Boolean = true,
     contentDescription: String? = "Sticker",
+    format: StickerFormat = StickerFormat.WEBP,
 ) {
+    if (format == StickerFormat.LOTTIE) {
+        LottieSticker(model, modifier, animated, contentDescription)
+        return
+    }
     AsyncImage(
         model = if (animated) rememberAnimatedImageRequest(model) else model,
         contentDescription = contentDescription,
@@ -72,6 +88,41 @@ fun StickerImage(
         modifier = modifier,
         error = rememberVectorPainter(Icons.Default.BrokenImage),
     )
+}
+
+/** The test tag of a Lottie sticker that is drawn, as opposed to its placeholder. */
+internal const val LOTTIE_STICKER_TAG = "sticker:lottie"
+
+@Composable
+private fun LottieSticker(model: Any, modifier: Modifier, animated: Boolean, description: String?) {
+    val path = remember(model) { (model as? File)?.path ?: (model as? String)?.takeIf { it.startsWith("/") } }
+    val described = if (description == null) modifier else modifier.semantics { contentDescription = description }
+    if (path == null) {
+        StickerPlaceholder(described)
+        return
+    }
+    // Lottie reads and parses the file off the main thread, and keeps the parsed animation
+    // under the path. The path names the bytes, so a sticker shown again is neither read nor
+    // parsed. Until it is loaded nothing is drawn, which is never the url (docs/GOTCHAS.md,
+    // "Local-vs-remote image model").
+    val result = rememberLottieComposition(LottieCompositionSpec.File(path))
+    val composition = result.value
+    when {
+        result.isFailure -> StickerPlaceholder(described)
+        composition == null -> Box(described)
+        else -> LottieAnimation(
+            composition = composition,
+            iterations = if (animated) LottieConstants.IterateForever else 1,
+            isPlaying = animated,
+            modifier = described.testTag(LOTTIE_STICKER_TAG),
+        )
+    }
+}
+
+/** Where a sticker will be once its file is on this device. */
+@Composable
+private fun StickerPlaceholder(modifier: Modifier) {
+    Box(modifier.background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium))
 }
 
 /**
@@ -99,13 +150,12 @@ fun LibraryStickerImage(sticker: Sticker, modifier: Modifier = Modifier) {
     LaunchedEffect(sticker.id, hasFile) {
         if (!hasFile) fetched = fetch(sticker)
     }
-    if (hasFile) {
-        StickerImage(model = sticker.localPath, modifier = modifier, animated = false)
-    } else {
-        Box(
-            modifier = modifier
-                .background(MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.shapes.medium)
-                .semantics { contentDescription = "Sticker, not downloaded yet" },
-        )
+    // A Lottie sticker has its first frame beside it as a PNG. Should that be
+    // missing, the animation itself is drawn, stopped at its first frame.
+    val hasStill = remember(sticker.stillPath, hasFile) { hasFile && File(sticker.stillPath).isFile }
+    when {
+        hasStill -> StickerImage(model = sticker.stillPath, modifier = modifier, animated = false)
+        hasFile -> StickerImage(model = sticker.localPath, modifier = modifier, animated = false, format = sticker.format)
+        else -> StickerPlaceholder(modifier.semantics { contentDescription = "Sticker, not downloaded yet" })
     }
 }

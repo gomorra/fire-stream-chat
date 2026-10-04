@@ -6,6 +6,9 @@ import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.repository.newStickerRepository
 import com.firestream.chat.domain.model.StickerFormat
+import com.firestream.chat.test.LottieFixtures.animation
+import com.firestream.chat.test.LottieFixtures.tgs
+import com.firestream.chat.test.LottieFixtures.waProps
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.waJson
 import com.firestream.chat.test.WebpFixtures.zip
@@ -104,6 +107,37 @@ class StickerDownloadsTest {
         assertEquals(listOf("😺"), row.emojis)
         // The sender's url is not this device's to hand on. A send looks the object up itself.
         assertNull(row.remoteUrl)
+    }
+
+    @Test
+    fun `a received Lottie sticker is stored as a Lottie file with its row and its emojis`() = runTest {
+        // What a sender uploads: the library's own file, the compressed animation.
+        val lottie = tgs(animation(1, customProps = waProps("SchoolDays", listOf("🚌"))))
+        val lottieId = StickerFiles.sha256Hex(lottie)
+        serve(lottie)
+
+        val file = downloads.ensureLocal(lottieId, URL)
+
+        assertEquals(files.fileFor(lottieId, StickerFormat.LOTTIE), file)
+        assertTrue(file!!.readBytes().contentEquals(lottie))
+        val row = db.stickerDao().getSticker(lottieId)!!
+        assertEquals(StickerFormat.LOTTIE.name, row.format)
+        assertTrue(row.isAnimated)
+        assertEquals(listOf("🚌"), row.emojis)
+        // Held now: a second message with this sticker downloads nothing.
+        assertEquals(file, downloads.ensureLocal(lottieId, "https://storage.example/elsewhere.tgs"))
+        verify(exactly = 1) { httpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `an animation sent as bare JSON is refused, because the library would keep it under another id`() = runTest {
+        // The bytes hash to the id the message claims. Stored, they would be compressed, and no longer do.
+        val json = animation(2)
+        serve(json)
+
+        assertNull(downloads.ensureLocal(StickerFiles.sha256Hex(json), URL))
+
+        assertEquals(emptyList<String>(), storedFiles())
     }
 
     @Test

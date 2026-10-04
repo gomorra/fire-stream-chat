@@ -312,6 +312,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `AnimatedVisibility` must be composed hidden and *then* shown — one composed visible
   from the start skips its enter animation. See `ui/components/OnEnterSettledTest.kt`.
 
+- **A test tag inside a clickable parent is not in the merged semantics tree.**
+  `clickable` and `combinedClickable` merge their children's semantics into one node. A child's
+  content description is carried up, and its test tag is not. So `onNodeWithTag(tag)` on a child
+  of a bubble's click target finds nothing, and `assertDoesNotExist()` on it passes for the wrong
+  reason. Pass `useUnmergedTree = true` for a tag below a click target
+  (`ui/chat/LottieStickerUiTest.kt`).
+
 - **Robolectric records a network callback but never dispatches to it.**
   `ShadowConnectivityManager` keeps every callback passed to
   `registerDefaultNetworkCallback` in `shadowOf(cm).networkCallbacks`, and changing the

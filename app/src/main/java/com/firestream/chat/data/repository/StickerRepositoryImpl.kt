@@ -201,13 +201,9 @@ class StickerRepositoryImpl @Inject constructor(
         return refused + summary.skipped
     }
 
-    /**
-     * The row [stored] becomes and the pack its own metadata sends it to. The
-     * EXIF bytes are read here and not kept: an import of a whole folder would
-     * otherwise hold every file's chunk until its last file is stored.
-     */
+    /** The row [stored] becomes and the pack its own metadata sends it to. */
     private fun found(stored: StoredSticker, loosePackName: String?, now: Long): Found {
-        val metadata = WaStickerMetadata.parse(stored.exif)
+        val metadata = stored.metadata
         val entity = StickerEntity.of(stored, metadata?.emojis.orEmpty(), now)
         return Found(entity, stored.format, targetFor(metadata, loosePackName), stored.isNew)
     }
@@ -215,7 +211,7 @@ class StickerRepositoryImpl @Inject constructor(
     /** The pack a sticker outside a titled archive joins: the one its own metadata names, else the loose pack. */
     private fun targetFor(metadata: WaStickerMetadata?, loosePackName: String?): Target = when {
         metadata != null && (metadata.packId != null || metadata.packName != null) ->
-            Target.whatsApp(metadata.packId, metadata.packName, metadata.publisher, loosePackName ?: DEFAULT_PACK_NAME)
+            Target.whatsApp(metadata.packId, metadata.packName, metadata.publisher)
         loosePackName != null -> Target.loose(loosePackName)
         else -> Target.SAVED
     }
@@ -381,11 +377,14 @@ class StickerRepositoryImpl @Inject constructor(
             val SAVED = Target("kind:SAVED", StickerPackKind.SAVED, "", null)
             val FAVOURITES = Target("kind:FAVOURITES", StickerPackKind.FAVOURITES, "", null)
 
-            /** The pack a WhatsApp sticker names. Two apps may reuse a pack id, so the name and publisher are part of the key. */
-            fun whatsApp(packId: String?, packName: String?, publisher: String?, fallbackName: String) = Target(
+            /**
+             * The pack a WhatsApp sticker names. Two apps may reuse a pack id, so the name and publisher are part of the key.
+             * WhatsApp's own Lottie stickers name a pack by a readable id alone (`SchoolDays`), which then serves as the name.
+             */
+            fun whatsApp(packId: String?, packName: String?, publisher: String?) = Target(
                 importKey = "wa:" + listOf(packId, packName, publisher).joinToString(SEPARATOR) { it.orEmpty() },
                 kind = StickerPackKind.USER,
-                name = packName ?: fallbackName,
+                name = packName ?: packId.orEmpty(),
                 publisher = publisher,
             )
 

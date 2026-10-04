@@ -616,8 +616,12 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 A sticker is an immutable file named by the SHA-256 of its bytes, kept in `filesDir/stickers/`.
 A pack is an ordered list of sticker ids. Room holds the library, and `StickerRepository` is the
 only way into it. Stickers arrive by import: from WhatsApp's sticker folder through a folder grant,
-or from picked `.webp` files and `.wastickers` archives. Every imported byte is untrusted, so the
-parsers check sizes against the buffer and the archive reader works under caps.
+or from picked `.webp`, `.was` and `.tgs` files and `.wastickers` archives. Every imported byte is
+untrusted, so the parsers check sizes against the buffer and the archive reader works under caps.
+
+A sticker file is a WebP or a Lottie animation. A Lottie sticker is stored as gzip-compressed JSON
+(`<id>.tgs`), whichever container it came in, with its first frame beside it as `<id>.tgs.png`.
+Lottie plays it in the bubble, and grids and previews draw the PNG.
 
 A `STICKER` message points at a sticker by that hash and carries no bytes of its own. The file is
 one shared Storage object, `stickers/<id>.<ext>`, uploaded the first time anyone sends the sticker.
@@ -642,11 +646,13 @@ under *Image / Media Pipeline*.
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/domain/model/Sticker.kt` | `Sticker` and `StickerFormat` (extension and mime type) |
+| `app/src/main/java/com/firestream/chat/domain/model/Sticker.kt` | `Sticker` and `StickerFormat` (extension, mime type, and where a format's first frame is: `stillPathOf`) |
 | `app/src/main/java/com/firestream/chat/domain/model/StickerPack.kt` | `StickerPack`, `StickerPackKind`, `StickerPackPreview`, `WhatsAppStickerFile`, `StickerImportResult` |
 | `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, `toggleFavourite`, pack and sticker edits, `markUsed`, `ensureFile`, `viewPack`, `installPack` |
 | `app/src/main/java/com/firestream/chat/domain/util/WebpContainer.kt` | Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk |
-| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `open` for a uri, and `rowLock`, which keeps a file and its `stickers` row together |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `stillFor`, `open` for a uri, and `rowLock`, which keeps a file and its `stickers` row together. `store` tells a WebP, a `.tgs` and bare Lottie JSON apart by their first bytes. `storeReceived` keeps a downloaded file unchanged or not at all |
+| `app/src/main/java/com/firestream/chat/data/sticker/LottieContainer.kt` | A Lottie sticker out of its container: a `.tgs` (gzip) or the JSON a `.was` holds. The inflate cap, the nesting cap, no key twice in one object, what makes JSON an animation, no image assets, the layer count with precompositions laid out |
+| `app/src/main/java/com/firestream/chat/data/sticker/LottieThumbnails.kt` | The first frame of a Lottie sticker as a PNG, which `StickerFiles` writes beside the file for grids and previews. Also the last gate: an animation Lottie cannot parse, build and draw is not stored |
 | `app/src/main/java/com/firestream/chat/data/sticker/StickerDownloads.kt` | A received sticker's local copy: fetched once, hashed against the id the message claims, stored with its row. A mismatch stores nothing |
 | `app/src/main/java/com/firestream/chat/data/remote/source/StickerObjectSource.kt` | `ensureUploaded`: the url of a sticker's shared object, uploading only when the backend does not hold it. `urlIfPresent`: the url of a sticker known only by its id |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSource.kt` | `stickers/<id>.<ext>` in Firebase Storage: look up, then upload when missing |
@@ -668,8 +674,8 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `withStickerUrl` (the url from `StickerUploads`, persisted on the message) and the GIF's document route |
 | `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles` |
 | `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
-| `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request. `LibraryStickerImage` draws a library sticker and asks `LocalStickerFetcher` for a file that is not there yet |
-| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` for the reply, forward and starred previews |
+| `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request. `LibraryStickerImage` draws a library sticker and asks `LocalStickerFetcher` for a file that is not there yet. The `format` switch: a Lottie sticker is drawn by Lottie, from a local file only |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` and `rememberMessageStillModel` for the reply, forward and starred previews |
 | `app/src/main/java/com/firestream/chat/domain/util/StickerSearch.kt` | Pure: stickers by emoji tag across packs, and which composer text earns suggestions |
 | `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's picker (Emoji and Stickers tabs) and `StickerSuggestionStrip` |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row, grid, search, the import button of an empty library |
@@ -696,7 +702,11 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/domain/util/WebpContainerTest.kt` | Byte fixtures, truncated and oversize chunks |
 | `app/src/test/java/com/firestream/chat/data/sticker/WaStickerMetadataTest.kt` | Metadata present, absent and malformed |
 | `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesTest.kt` | Hash naming, the limits, the `cacheDir` fence of `open` |
-| `app/src/test/java/com/firestream/chat/data/sticker/StickerPackArchiveTest.kt` | Each cap, entry names, title and author |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerPackArchiveTest.kt` | Each cap, entry names, title and author, a `.was` file's animation |
+| `app/src/test/java/com/firestream/chat/data/sticker/LottieContainerTest.kt` | Both containers, the inflate and nesting caps, JSON that is no animation, image assets, a repeated key, precompositions that loop or multiply |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesLottieTest.kt` | One stored shape for both containers, the first frame really drawn, a missing one drawn again, an animation Lottie refuses, bare JSON refused on receive |
+| `app/src/test/java/com/firestream/chat/ui/chat/LottieStickerUiTest.kt` | Which renderer draws a Lottie sticker in the bubble, a grid and a preview, and the placeholder for a file not here yet |
+| `app/src/test/java/com/firestream/chat/test/LottieFixtures.kt` | `animation`, `tgs`, `was`: hand-built Lottie stickers that Lottie parses and draws |
 | `app/src/test/java/com/firestream/chat/data/sticker/StickerDownloadsTest.kt` | The hash mismatch, the refusals, a repeat receive, and a receive during a refused archive's undo |
 | `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryStickerGifSendTest.kt` | What is queued for a sticker and a GIF, the shared pack kinds, the GIF size guard |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSourceTest.kt` | Look up first, upload when missing, an upload refused because the object exists by now |

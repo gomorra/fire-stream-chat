@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.aspectRatio
@@ -28,6 +29,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -268,7 +270,7 @@ private fun PackList(
             ListItem(
                 headlineContent = { Text("From files") },
                 supportingContent = {
-                    Text("WebP stickers and .wastickers packs", style = MaterialTheme.typography.bodySmall)
+                    Text("WebP, .was and .tgs stickers, and .wastickers packs", style = MaterialTheme.typography.bodySmall)
                 },
                 leadingContent = { Icon(Icons.Default.UploadFile, contentDescription = null) },
                 modifier = Modifier.clickable(enabled = !uiState.isImporting, onClick = actions.onImportFromFiles),
@@ -470,6 +472,9 @@ internal fun stickerCellTag(stickerId: String): String = "sticker:$stickerId"
  * toggle recomposes only the cell it changed.
  *
  * [model] is anything that is not a library sticker: a folder entry's uri.
+ * [hasStill] is false for an entry no image request can draw
+ * (`WhatsAppStickerFile.hasStill`). Its cell shows a mark, and the sticker is
+ * seen once it is imported.
  */
 @Composable
 internal fun StickerCell(
@@ -480,9 +485,19 @@ internal fun StickerCell(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onLongClick: ((String) -> Unit)? = null,
+    hasStill: Boolean = true,
 ) {
     StickerCellFrame(id, isSelected, onClick, modifier, enabled, onLongClick) {
-        StickerThumbnail(model = model, modifier = Modifier.fillMaxSize().padding(6.dp))
+        if (hasStill) {
+            StickerThumbnail(model = model, modifier = Modifier.fillMaxSize().padding(6.dp))
+        } else {
+            Icon(
+                Icons.Default.Animation,
+                contentDescription = "Animated sticker",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.Center).size(32.dp),
+            )
+        }
     }
 }
 
@@ -510,7 +525,7 @@ private fun StickerCellFrame(
     modifier: Modifier,
     enabled: Boolean,
     onLongClick: ((String) -> Unit)?,
-    image: @Composable () -> Unit,
+    image: @Composable BoxScope.() -> Unit,
 ) {
     Box(
         modifier = modifier

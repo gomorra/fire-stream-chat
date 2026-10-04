@@ -113,7 +113,7 @@ private fun BoxScope.ForwardMessagePreview(message: Message) {
         // A sticker and a GIF show their first frame: a plain request carries no
         // animated decoder. Without a file or a url they fall back to the label.
         MessageType.STICKER -> MediaPreview(
-            model = rememberMessageImageModel(message),
+            model = rememberMessageStillModel(message),
             caption = stickerLabel(message.content),
             overlayIcon = null,
             fallbackIcon = message.type.previewIcon,

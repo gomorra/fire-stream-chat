@@ -4,11 +4,13 @@
 //   there: checked for size and format, hashed, written to a temp file and renamed.
 // Owns: the stickers directory; the 1 MB and 2048 px caps; the id rule (64
 //   lowercase hex digits), which is what keeps an id from steering a path; the
-//   lock that keeps a file and its row together (rowLock).
+//   lock that keeps a file and its row together (rowLock); the first-frame PNG
+//   beside a Lottie sticker.
 // Collaborators: StickerRepositoryImpl (store() per imported file or archive
 //   entry, discard() to undo a refused archive), StickerDownloads (store() for a
 //   sticker a message points at), OutboxSender and MessageRepositoryImpl
-//   (fileFor() of a sticker being sent), WebpContainer (the format check).
+//   (fileFor() of a sticker being sent), WebpContainer and LottieContainer (the
+//   format checks), LottieThumbnails (the first frame).
 // Don't put here: pack membership or any Room access (StickerRepositoryImpl),
 //   archive reading (StickerPackArchive), message media (MediaFileManager,
 //   DocumentFiles).
@@ -36,7 +38,8 @@ import javax.inject.Singleton
 
 /**
  * A sticker file in the directory. [isNew] is false when the same bytes were
- * already there. [exif] is the file's raw EXIF chunk, for [WaStickerMetadata].
+ * already there. [metadata] is the pack and the emojis the file names, when it
+ * names any.
  */
 class StoredSticker(
     val id: String,
@@ -44,7 +47,7 @@ class StoredSticker(
     val width: Int,
     val height: Int,
     val isAnimated: Boolean,
-    val exif: ByteArray?,
+    val metadata: WaStickerMetadata?,
     val isNew: Boolean,
 )
 
@@ -55,6 +58,7 @@ class StoredSticker(
 @Singleton
 class StickerFiles @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val thumbnails: LottieThumbnails = LottieThumbnails(),
 ) {
 
     val dir: File
@@ -97,25 +101,79 @@ class StickerFiles @Inject constructor(
     }
 
     /**
-     * Puts [bytes] into the directory under their hash and says what they are.
-     * Returns `null` for bytes that are not a sticker: larger than [MAX_BYTES],
-     * not a whole WebP file, or wider or taller than [MAX_DIMENSION]. Throws
-     * [IOException] when the file cannot be written.
+     * Puts [bytes] into the directory under the hash of the stored file and says
+     * what they are. The first bytes decide the format, never a name. Returns
+     * `null` for bytes that are not a sticker: a file larger than [MAX_BYTES],
+     * neither a whole WebP file nor a Lottie animation that [LottieContainer]
+     * accepts and Lottie can draw, or wider or taller than [MAX_DIMENSION].
+     * Throws [IOException] when the file cannot be written.
+     *
+     * Bare animation JSON, which a `.was` holds, is stored compressed. Its id
+     * is then not the hash of [bytes].
      */
     suspend fun store(bytes: ByteArray): StoredSticker? = withContext(Dispatchers.IO) {
-        if (bytes.size > MAX_BYTES) return@withContext null
-        val info = WebpContainer.parse(bytes) ?: return@withContext null
-        if (info.width > MAX_DIMENSION || info.height > MAX_DIMENSION) return@withContext null
-        val id = sha256Hex(bytes)
-        val format = StickerFormat.WEBP
-        val target = fileFor(id, format)
-        val isNew = !(target.isFile && target.length() == bytes.size.toLong())
-        if (isNew) write(bytes, target)
-        StoredSticker(id, format, info.width, info.height, info.isAnimated, info.exif, isNew)
+        if (LottieContainer.isJsonObject(bytes)) storeLottie(bytes, file = null) else storeFile(bytes)
     }
 
-    /** Deletes the file of the sticker [id], if there is one. */
+    /**
+     * [store] for a sticker a message or a manifest names by its id. The bytes
+     * are stored unchanged or not at all, so the id of what is stored is the
+     * hash of exactly what was downloaded.
+     */
+    suspend fun storeReceived(bytes: ByteArray): StoredSticker? = withContext(Dispatchers.IO) { storeFile(bytes) }
+
+    /** Stores [bytes] as the sticker file they are: a `.tgs` or a WebP. */
+    private fun storeFile(bytes: ByteArray): StoredSticker? {
+        if (LottieContainer.isGzip(bytes)) return storeLottie(bytes, file = bytes)
+        if (bytes.size > MAX_BYTES) return null
+        val info = WebpContainer.parse(bytes) ?: return null
+        if (info.width > MAX_DIMENSION || info.height > MAX_DIMENSION) return null
+        val id = sha256Hex(bytes)
+        val isNew = put(id, bytes, StickerFormat.WEBP)
+        return StoredSticker(id, StickerFormat.WEBP, info.width, info.height, info.isAnimated, WaStickerMetadata.parse(info.exif), isNew)
+    }
+
+    /**
+     * [file] is what is stored: a `.tgs` as it came, or `null` for bare
+     * animation JSON, which is compressed first.
+     *
+     * The first frame is drawn before anything is written, and an animation
+     * Lottie cannot draw is not a sticker. So a file in the directory is one a
+     * screen can play. The first frame is written beside the file whenever it
+     * is missing, so a sticker that was received or restored has it as well.
+     */
+    private fun storeLottie(bytes: ByteArray, file: ByteArray?): StoredSticker? {
+        val animation = LottieContainer.read(bytes) ?: return null
+        val stored = file ?: LottieContainer.compress(animation.json)
+        if (stored.size > MAX_BYTES) return null
+        val format = StickerFormat.LOTTIE
+        val id = sha256Hex(stored)
+        val still = stillFor(id, format)
+        if (!(still.isFile && holds(id, stored, format))) {
+            val firstFrame = thumbnails.firstFrame(animation.json) ?: return null
+            write(firstFrame, still)
+        }
+        val isNew = put(id, stored, format)
+        return StoredSticker(id, format, animation.width, animation.height, isAnimated = true, animation.metadata, isNew)
+    }
+
+    /** Whether the file of the sticker [id] is there, whole. */
+    private fun holds(id: String, bytes: ByteArray, format: StickerFormat): Boolean =
+        fileFor(id, format).let { it.isFile && it.length() == bytes.size.toLong() }
+
+    /** Writes [bytes], which hash to [id], unless that file is there already. Returns whether it wrote. */
+    private fun put(id: String, bytes: ByteArray, format: StickerFormat): Boolean {
+        val isNew = !holds(id, bytes, format)
+        if (isNew) write(bytes, fileFor(id, format))
+        return isNew
+    }
+
+    /** The first frame of the sticker [id]. For a WebP that is the sticker's own file. */
+    fun stillFor(id: String, format: StickerFormat): File = File(format.stillPathOf(fileFor(id, format).path))
+
+    /** Deletes the file of the sticker [id], and its first frame, if there are any. */
     suspend fun discard(id: String, format: StickerFormat) = withContext(Dispatchers.IO) {
+        stillFor(id, format).delete()
         fileFor(id, format).delete()
         Unit
     }
