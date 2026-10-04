@@ -42,6 +42,7 @@ class ChatMessageActionsEditTest {
         partnerIdHint = "recipient1",
         messageRepository = repository,
         reminderRepository = reminderRepository,
+        stickerRepository = com.firestream.chat.test.fakes.emptyStickerRepository(),
         dateTimeDetector = dateTimeDetector,
         _uiState = uiState,
         scope = TestScope(mainDispatcherRule.testDispatcher),

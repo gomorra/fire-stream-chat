@@ -398,6 +398,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   looks across files (`scripts/plan-runner/step-prompt.md`). Interactive sessions never see this —
   they get a permission prompt instead.
 
+- **`producer | grep -q` under `set -o pipefail` can fail on a match.** `grep -q` exits at the
+  first match. A producer that is still writing then dies of `SIGPIPE`, and `pipefail` turns
+  that into a failed pipeline. `pr_step_shipped` in `scripts/plan-runner/lib.sh` is this
+  shape (`awk … | grep -qE '^\*\*Shipped\*\*'`), and `scripts/run-plan.sh` runs under
+  `pipefail`. awk writes to a pipe in 4096-byte blocks, so a step section over 4 KB with its
+  `**Shipped**` line in an early block is a race. On 2026-10-03 the driver reported "no
+  **Shipped** line under step 3" for `docs/plans/stickers-and-gifs.md` while the line was
+  committed under the heading, in an 8 KB section. The cause was inferred from the code, not
+  reproduced. Until the check is `grep … >/dev/null`, which reads its whole input, put a long
+  step's `**Shipped**` block at the end of the step's section: the match is then in awk's last
+  write.
+
 - **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
   Several test names in this repo contain an em dash (e.g.
   `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),

@@ -1,7 +1,8 @@
 // region: AGENT-NOTE
 // Responsibility: Message CRUD across all message types — text / image / voice /
-//   document / poll / location / list / call. A queued send (text, media, voice,
-//   location, forward) is validate → resolve who it is for from the chat's local
+//   document / poll / location / list / call / sticker / GIF. A queued send (text,
+//   media, voice, location, sticker, GIF, forward) is validate → resolve who it is
+//   for from the chat's local
 //   row (sendTargetFor) → optimistic insert → block check → stage the input →
 //   OutboxScheduler.enqueue; the row returns SENDING at once and OutboxWorker
 //   delivers it (docs/PATTERNS.md "Sends are idempotent by client id and drained
@@ -26,7 +27,9 @@
 //   VideoTranscoder (pre-insert limit guard), PreferencesDataStore (HD default,
 //   AutoDownloadOption), MediaFileManager, ConnectivityManager (WiFi-only download check),
 //   ActiveChatTracker (a push reconcile yields to the open chat's listener),
-//   MediaBackfillScheduler (the failed-download retry).
+//   MediaBackfillScheduler (the failed-download retry), StickerDao and
+//   StickerFiles (the library row and file a sticker send points at; a received
+//   sticker's download goes through MediaFileManager like any other media).
 // Don't put here: a send target built from a caller's recipient id. A send is
 //   addressed from the chat's row (sendTargetFor). The broadcast fan-out, which
 //   addresses each list member, is the one exception. Nor poll vote/close
@@ -50,8 +53,10 @@ import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
+import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.outbox.BlockCheck
 import com.firestream.chat.data.outbox.MessageWriter
 import com.firestream.chat.data.outbox.OutboxFiles
@@ -66,11 +71,13 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
 import com.firestream.chat.data.util.parseMessageStatus
 import com.firestream.chat.data.util.parseMessageType
+import com.firestream.chat.data.util.parseStickerFormat
 import com.firestream.chat.data.util.resolveTimerAlarmSound
 import com.firestream.chat.data.util.resolveTimerAlarmStyle
 import com.firestream.chat.data.util.parseTimerState
@@ -89,6 +96,7 @@ import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.RecipientBlockedException
+import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.TimerAlarmSound
 import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
@@ -96,6 +104,7 @@ import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
+import com.firestream.chat.domain.util.MAX_GIF_BYTES
 import com.firestream.chat.domain.util.formatFileSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -126,7 +135,27 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val AUTO_DOWNLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT)
+/** Keep in step with `LOCAL_MEDIA_TYPES` in `MessageDao`, which the chat-open scan and the backfill select by. */
+private val AUTO_DOWNLOAD_TYPES = setOf(
+    MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT, MessageType.STICKER, MessageType.GIF,
+)
+
+/**
+ * The types the auto-download preference holds back. A sticker is not one: it
+ * is at most 1 MB, its bubble would fetch it from the url anyway, and only the
+ * local copy is checked against the id the message claims. A sticker this
+ * device already holds costs no download at all.
+ */
+private val PREFERENCE_GATED_TYPES = AUTO_DOWNLOAD_TYPES - MessageType.STICKER
+
+/** The largest file each type sends as it is, and what the refusal calls it. Nothing shrinks a document or a GIF. */
+private val SIZE_LIMITS = mapOf(
+    MessageType.DOCUMENT to (MAX_DOCUMENT_BYTES to "Files"),
+    MessageType.GIF to (MAX_GIF_BYTES to "GIFs"),
+)
+
+/** Pack kinds whose id a sticker message may carry. The favourites and the loose stickers stay the user's own. */
+private val SHAREABLE_PACK_KINDS = setOf(StickerPackKind.USER.name, StickerPackKind.INSTALLED.name)
 private const val ERR_NOT_AUTHENTICATED = "Not authenticated"
 private const val VOICE_MESSAGE_CONTENT = "Voice message"
 private const val LOCATION_DEFAULT_CONTENT = "Shared location"
@@ -184,6 +213,8 @@ class MessageRepositoryImpl @Inject constructor(
     private val activeChatTracker: ActiveChatTracker,
     private val mediaBackfillScheduler: MediaBackfillScheduler,
     private val documentFiles: DocumentFiles,
+    private val stickerDao: StickerDao,
+    private val stickerFiles: StickerFiles,
 ) : MessageRepository {
 
     private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -290,7 +321,7 @@ class MessageRepositoryImpl @Inject constructor(
             throw e
         }
 
-    /** Text, media, voice and location: resolve the target, record it on the row, queue. */
+    /** Text, media, voice, location, sticker and GIF: resolve the target, record it on the row, queue. */
     private suspend fun queueSend(message: Message, mimeType: String? = null): Message {
         val row = MessageEntity.outbox(message, sendTargetFor(message.chatId, message.senderId))
         messageDao.insertOutbox(row)
@@ -309,13 +340,23 @@ class MessageRepositoryImpl @Inject constructor(
         val staged = outboxFiles.stage(row.id, localUri, mimeType)?.also { messageDao.updateLocalUri(row.id, it) }
         // A provider that reports no size got past the check before the insert; the
         // copy's real length is the last word. The row goes FAILED (failSendOnError).
-        if (row.type == MessageType.DOCUMENT.name) {
+        val type = parseMessageType(row.type)
+        if (type in SIZE_LIMITS) {
             val copy = (staged ?: localUri).takeIf { it.startsWith("/") }?.let(::File)
-            if (copy != null && copy.length() > MAX_DOCUMENT_BYTES) {
+            try {
+                ensureWithinSizeLimit(type, copy?.length())
+            } catch (e: MediaLimitException) {
                 outboxFiles.delete(row.id)
-                throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
+                throw e
             }
         }
+    }
+
+    /** Refuses a file larger than its [type] accepts. An unknown [size] passes: the staged copy is measured later. */
+    private fun ensureWithinSizeLimit(type: MessageType, size: Long?) {
+        val (limit, what) = SIZE_LIMITS[type] ?: return
+        if ((size ?: 0L) <= limit) return
+        throw MediaLimitException("$what over ${formatFileSize(limit)} can't be sent")
     }
 
     /**
@@ -647,9 +688,7 @@ class MessageRepositoryImpl @Inject constructor(
             null
         }
         // The send sheet refuses these already; this holds the share sheet to it too.
-        if ((document?.size ?: 0L) > MAX_DOCUMENT_BYTES) {
-            throw MediaLimitException("Files over ${formatFileSize(MAX_DOCUMENT_BYTES)} can't be sent")
-        }
+        ensureWithinSizeLimit(messageType, document?.size)
 
         // Insert the optimistic row BEFORE any IO so the bubble appears immediately
         // and survives a downstream failure (e.g. concurrent-compression OOM when
@@ -670,6 +709,62 @@ class MessageRepositoryImpl @Inject constructor(
             fileName = document?.name,
             fileSize = document?.size,
             mimeType = mimeType.takeIf { document != null },
+        )
+        queueSend(placeholder, mimeType)
+    }
+
+    /**
+     * A sticker message points at a library sticker and carries no bytes. The row
+     * takes everything from the library: the file as `localUri`, the size, and the
+     * url when the sticker was uploaded before. A row without a url gets one from
+     * `OutboxSender`, which uploads the file only if the backend does not hold it.
+     */
+    override suspend fun sendStickerMessage(chatId: String, stickerId: String, packId: String?): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        // Before the insert: a sticker that cannot be sent leaves no bubble. Not an
+        // IOException: AppError.from would report a missing file as a network error.
+        val (sticker, file) = sendableSticker(stickerId)
+            ?: throw NoSuchElementException("That sticker is not in the library")
+        val sharedPackId = packId?.let { stickerDao.getPack(it) }?.takeIf { it.kind in SHAREABLE_PACK_KINDS }?.id
+
+        queueSend(
+            Message(
+                id = UUID.randomUUID().toString(),
+                chatId = chatId,
+                senderId = senderId,
+                // The first emoji stands for the sticker in a preview, and is what an older build shows.
+                content = sticker.emojis.firstOrNull().orEmpty(),
+                type = MessageType.STICKER,
+                status = MessageStatus.SENDING,
+                timestamp = sendClock.next(),
+                localUri = file.absolutePath,
+                mediaUrl = sticker.remoteUrl,
+                mediaWidth = sticker.width,
+                mediaHeight = sticker.height,
+                mimeType = parseStickerFormat(sticker.format).mimeType,
+                stickerId = stickerId,
+                stickerPackId = sharedPackId,
+            )
+        )
+    }
+
+    override suspend fun sendGifMessage(chatId: String, uri: String, mimeType: String, caption: String): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        require(mimeType.startsWith("image/")) { "A GIF message needs an image type, not $mimeType" }
+        // Before the insert, like the video guard: an over-limit GIF leaves no dead row.
+        ensureWithinSizeLimit(MessageType.GIF, documentFiles.describe(uri).size)
+
+        val placeholder = Message(
+            id = UUID.randomUUID().toString(),
+            chatId = chatId,
+            senderId = senderId,
+            content = caption,
+            type = MessageType.GIF,
+            status = MessageStatus.SENDING,
+            timestamp = sendClock.next(),
+            localUri = uri,
+            // What the upload goes out under, and what names the receiver's file.
+            mimeType = mimeType,
         )
         queueSend(placeholder, mimeType)
     }
@@ -743,10 +838,35 @@ class MessageRepositoryImpl @Inject constructor(
             reactions = emptyMap(),
             // Mentions name members of the source chat, not of this one.
             mentions = emptyList(),
-        )
+        ).withLibrarySticker()
         val row = MessageEntity.outbox(optimisticMessage, target)
         messageDao.insertOutbox(row)
         enqueueSend(row, blockTarget = null)
+    }
+
+    /**
+     * A forwarded sticker this device holds goes out as the library's sticker: its
+     * file, and the url the library row has or `OutboxSender` will ask for. The
+     * url it was received with is the first sender's choice. The sticker on screen
+     * here is the checked local file, so handing that url on could show the next
+     * chat a different picture. A sticker the library does not hold, and any other
+     * message, is forwarded as it is.
+     */
+    private suspend fun Message.withLibrarySticker(): Message {
+        if (type != MessageType.STICKER) return this
+        val (sticker, file) = sendableSticker(stickerId) ?: return this
+        return copy(mediaUrl = sticker.remoteUrl, localUri = file.absolutePath)
+    }
+
+    /**
+     * The library sticker [stickerId] with its file, when it can be sent: the
+     * backend already holds its file, or this device does. `null` otherwise, and
+     * for an id that is not a hash, which never reaches the database or a path.
+     */
+    private suspend fun sendableSticker(stickerId: String?): Pair<StickerEntity, File>? {
+        val sticker = stickerId?.takeIf(StickerFiles::isValidId)?.let { stickerDao.getSticker(it) } ?: return null
+        val file = stickerFiles.fileFor(sticker.id, parseStickerFormat(sticker.format))
+        return (sticker to file).takeIf { sticker.remoteUrl != null || file.isFile }
     }
 
     override suspend fun sendVoiceMessage(chatId: String, uri: String, durationSeconds: Int): Result<Message> = resultOf {
@@ -1432,20 +1552,14 @@ class MessageRepositoryImpl @Inject constructor(
         fileName = fileName,
         fileSize = fileSize,
         mimeType = mimeType,
+        stickerId = stickerId,
+        stickerPackId = stickerPackId,
     )
 
     private fun downloadPendingMediaForChat(chatId: String) {
         downloadScope.launch {
             try {
-                val option = preferencesDataStore.autoDownloadFlow.first()
-                if (option == AutoDownloadOption.NEVER) return@launch
-                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) {
-                    // Nothing downloads now; whatever this chat is missing
-                    // waits for Wi-Fi in the queued run (its UNMETERED constraint).
-                    if (messageDao.getMessagesWithoutLocalMediaForChat(chatId).isNotEmpty()) retryDownloadsLater()
-                    return@launch
-                }
-                savePendingMediaForChat(chatId)
+                savePendingMediaForChat(chatId, heldBackBy = downloadsHeldBackBy())
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
                 Log.w(TAG, "downloadPendingMediaForChat: scan failed for chat=$chatId", e)
@@ -1463,8 +1577,8 @@ class MessageRepositoryImpl @Inject constructor(
             ?.let { return@resultOf it.absolutePath }
         val url = message.mediaUrl ?: throw IllegalStateException("Document ${message.id} is not uploaded yet")
         val file = mediaFileManager.downloadFor(
-            message.chatId, message.id, message.type, url, message.fileName, message.mimeType,
-        )
+            message.chatId, message.id, message.type, url, message.fileName, message.mimeType, message.stickerId,
+        ) ?: throw IllegalStateException("Message ${message.id} has no file this device can keep")
         messageDao.updateLocalUri(message.id, file.absolutePath)
         file.absolutePath
     }
@@ -1484,20 +1598,34 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     /**
-     * Download and persist a local copy for every pending media row in [chatId].
-     * Preference gating is the caller's responsibility; this helper always
-     * downloads. The per-row try/catch keeps one failed download from aborting
-     * the rest.
+     * The preference when it holds downloads back right now: `NEVER`, or
+     * `WIFI_ONLY` off Wi-Fi. `null` when media may download. It applies to
+     * [PREFERENCE_GATED_TYPES] only.
      */
-    private suspend fun savePendingMediaForChat(chatId: String) {
-        val pending = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
+    private suspend fun downloadsHeldBackBy(): AutoDownloadOption? {
+        val option = preferencesDataStore.autoDownloadFlow.first()
+        return option.takeIf { it == AutoDownloadOption.NEVER || (it == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) }
+    }
+
+    /**
+     * Download and persist a local copy for every pending media row in [chatId].
+     * [heldBackBy] is the preference when it holds downloads back right now
+     * ([downloadsHeldBackBy]). Rows of a gated type then stay pending, and `null`
+     * downloads everything. What "Wi-Fi only" left behind waits for Wi-Fi in the
+     * queued run (its UNMETERED constraint), and so does whatever failed. The
+     * per-row try/catch keeps one failed download from aborting the rest.
+     */
+    private suspend fun savePendingMediaForChat(chatId: String, heldBackBy: AutoDownloadOption? = null) {
+        val (pending, left) = messageDao.getMessagesWithoutLocalMediaForChat(chatId)
+            .partition { heldBackBy == null || parseMessageType(it.type) !in PREFERENCE_GATED_TYPES }
         var failed = false
         for (entity in pending) {
             try {
                 val url = entity.mediaUrl ?: continue
+                // null: a sticker that was refused. It keeps rendering from its url.
                 val file = mediaFileManager.downloadFor(
-                    chatId, entity.id, parseMessageType(entity.type), url, entity.fileName, entity.mimeType,
-                )
+                    chatId, entity.id, parseMessageType(entity.type), url, entity.fileName, entity.mimeType, entity.stickerId,
+                ) ?: continue
                 messageDao.updateLocalUri(entity.id, file.absolutePath)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -1505,24 +1633,24 @@ class MessageRepositoryImpl @Inject constructor(
                 failed = true
             }
         }
-        if (failed) retryDownloadsLater()
+        if (failed || (heldBackBy == AutoDownloadOption.WIFI_ONLY && left.isNotEmpty())) retryDownloadsLater()
     }
 
     private fun tryAutoDownload(message: Message) {
         downloadScope.launch {
             try {
-                val option = preferencesDataStore.autoDownloadFlow.first()
-                if (option == AutoDownloadOption.NEVER) return@launch
-                if (option == AutoDownloadOption.WIFI_ONLY && !isOnWifi()) {
+                val heldBackBy = if (message.type in PREFERENCE_GATED_TYPES) downloadsHeldBackBy() else null
+                if (heldBackBy != null) {
                     // Not now: the queued run's UNMETERED constraint is what
                     // "Wi-Fi only" waits on, so this message lands once Wi-Fi is back.
-                    retryDownloadsLater()
+                    if (heldBackBy == AutoDownloadOption.WIFI_ONLY) retryDownloadsLater()
                     return@launch
                 }
 
                 val file = mediaFileManager.downloadFor(
                     message.chatId, message.id, message.type, message.mediaUrl!!, message.fileName, message.mimeType,
-                )
+                    message.stickerId,
+                ) ?: return@launch
                 messageDao.updateLocalUri(message.id, file.absolutePath)
             } catch (e: Exception) {
                 e.rethrowIfCancellation()

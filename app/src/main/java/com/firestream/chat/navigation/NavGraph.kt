@@ -60,6 +60,7 @@ import com.firestream.chat.ui.settings.SettingsScreen
 import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.reminders.ScheduledRemindersScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
+import com.firestream.chat.ui.stickers.StickerLibraryScreen
 import com.firestream.chat.ui.components.SCREEN_SLIDE_DURATION_MS
 import com.firestream.chat.ui.components.ScreenSlideEasing
 import kotlinx.coroutines.flow.first
@@ -133,6 +134,7 @@ object Routes {
     const val SEARCH = "search"
     const val SCHEDULED_REMINDERS = "scheduled_reminders"
     const val ARCHIVED_CHATS = "archived_chats"
+    const val STICKERS = "stickers"
     // Bottom nav tabs (no longer a separate nav route — handled by MainScreen tab state)
     // const val CALLS = "calls"
     // Phase 5 routes
@@ -506,6 +508,7 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
+                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
                 fromNotification = fromNotification
             )
         }
@@ -545,6 +548,7 @@ fun FireStreamNavGraph(
                 onStarredMessagesClick = { navController.navigate(Routes.STARRED_MESSAGES) },
                 onScheduledRemindersClick = { navController.navigate(Routes.SCHEDULED_REMINDERS) },
                 onArchivedChatsClick = { navController.navigate(Routes.ARCHIVED_CHATS) },
+                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
                 onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) },
                 onSignedOut = {
                     navController.navigate(Routes.LOGIN) {
@@ -566,6 +570,11 @@ fun FireStreamNavGraph(
         // Phase 2: Starred Messages
         composable(Routes.STARRED_MESSAGES) {
             StarredMessagesScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        // The sticker library and its two import routes
+        composable(Routes.STICKERS) {
+            StickerLibraryScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Global search across every chat. Its own destination rather than a

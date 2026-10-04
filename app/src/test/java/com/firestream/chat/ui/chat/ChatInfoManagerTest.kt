@@ -40,6 +40,7 @@ class ChatInfoManagerTest {
         chatRepository = chatRepository,
         listRepository = listRepository,
         userRepository = userRepository,
+        stickerRepository = com.firestream.chat.test.fakes.emptyStickerRepository(),
         preferencesDataStore = preferencesDataStore,
         checkGroupPermissionUseCase = checkGroupPermissionUseCase,
         connectivityObserver = connectivityObserver,

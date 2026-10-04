@@ -1,12 +1,14 @@
 // region: AGENT-NOTE
 // Responsibility: Where a DOCUMENT message's file lives on this device —
 //   filesDir/documents/<messageId>.<ext>, for sent and received documents alike —
-//   what extension it gets, and what a picked uri says about itself (name, size).
+//   what extension it gets, and what a picked uri says about itself (name, size,
+//   an image's pixel size). A GIF message's file lives here too: it is sent as it
+//   is, and this directory is not the gallery.
 // Owns: the documents directory; the extension rule (file name → mime type → URL
 //   → "bin"); the move of a sent document's staged copy into the directory.
-// Collaborators: MediaFileManager (downloads a received document to fileFor()),
-//   OutboxSender (adopt() once uploaded, discard() for a row deleted while
-//   queued), MessageRepositoryImpl (describe() and an audio file's duration at
+// Collaborators: MediaFileManager (downloads a received document or GIF to
+//   fileFor()), OutboxSender (adopt() once uploaded, discard() for a row deleted
+//   while queued, imageBounds() of a GIF), MessageRepositoryImpl (describe() and an audio file's duration at
 //   send, ensureLocalFile's owns()).
 // Don't put here: photo/video storage (MediaFileManager — MediaStore, Pictures/),
 //   the outbox staging copy (OutboxFiles) — "Sends are idempotent by client id
@@ -16,6 +18,7 @@
 package com.firestream.chat.data.util
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -132,6 +135,24 @@ class DocumentFiles @Inject constructor(
         } finally {
             retriever.release()
         }
+    }
+
+    /**
+     * The pixel size of the image at [localUri], read from its header. Nothing
+     * is decoded. `null` when the platform cannot read it as an image.
+     */
+    suspend fun imageBounds(localUri: String): Pair<Int, Int>? = withContext(Dispatchers.IO) {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        try {
+            if (localUri.startsWith("/")) {
+                BitmapFactory.decodeFile(localUri, options)
+            } else {
+                context.contentResolver.openInputStream(Uri.parse(localUri))?.use { BitmapFactory.decodeStream(it, null, options) }
+            }
+        } catch (e: Exception) {
+            return@withContext null
+        }
+        (options.outWidth to options.outHeight).takeIf { options.outWidth > 0 && options.outHeight > 0 }
     }
 
     companion object {

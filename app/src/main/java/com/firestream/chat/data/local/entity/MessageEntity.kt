@@ -118,6 +118,8 @@ interface MessageColumns {
     val fileName: String?
     val fileSize: Long?
     val mimeType: String?
+    val stickerId: String?
+    val stickerPackId: String?
 }
 
 /**
@@ -169,6 +171,8 @@ data class MessageRecord(
     override val fileName: String? = null,
     override val fileSize: Long? = null,
     override val mimeType: String? = null,
+    override val stickerId: String? = null,
+    override val stickerPackId: String? = null,
 ) : MessageColumns {
 
     /** The domain message, with the local columns the caller holds beside this record. */
@@ -212,6 +216,8 @@ data class MessageRecord(
         fileName = fileName,
         fileSize = fileSize,
         mimeType = mimeType,
+        stickerId = stickerId,
+        stickerPackId = stickerPackId,
     )
 
     companion object {
@@ -254,6 +260,8 @@ data class MessageRecord(
             fileName = message.fileName,
             fileSize = message.fileSize,
             mimeType = message.mimeType,
+            stickerId = message.stickerId,
+            stickerPackId = message.stickerPackId,
         )
 
         private fun pollToJson(poll: Poll): String {

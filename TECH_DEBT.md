@@ -581,6 +581,65 @@ twin together, never one alone.
 
 ---
 
+### Sticker files are never deleted
+
+**The smell.** `StickerRepositoryImpl.removeStickers` and `deletePack` delete rows of
+`sticker_pack_items` only. The `stickers` row and the file under `filesDir/stickers/` stay,
+even when no pack holds the sticker any more. A destructive `AppDatabase` bump drops the rows
+and leaves every file. `StickerFiles.store` writes through a `.part` temp file, and a process
+death between the write and the rename leaves that file too.
+
+A received sticker adds a `stickers` row and a file that no pack holds (`StickerDownloads`).
+
+**Why we haven't fixed it.** A file is at most 1 MB and is shared: the same sticker can sit
+in several packs, in the recents list and in any number of messages, whose `localUri` is the
+file's path. Step 6 of `docs/plans/stickers-and-gifs.md` restores rows whose files are fetched
+later. Which files are unreferenced can only be decided once that exists.
+
+**When to revisit.** After step 6 of the plan, or when the directory's size shows up in a
+storage report. The fix is a sweep that deletes files no pack item, recent or message names,
+and every `.part` file.
+
+---
+
+### Nothing on the backend checks that a sticker object matches its name
+
+**The smell.** A sticker's Storage object is `stickers/<sha256>.<ext>`, create-only. Storage
+rules cannot hash a file, so a signed-in user can create the object for a hash with other
+bytes. Everyone who sends that sticker afterwards gets that object's url from
+`StickerObjectSource.ensureUploaded`, which looks the object up and uploads nothing.
+
+**Why we haven't fixed it.** A receiver hashes what it downloads and stores only a match
+(`StickerDownloads`), so the library and every later send from it stay honest. What a wrong
+object costs is a sticker that renders from its url as the wrong picture, for everyone, until
+the object is deleted by hand. A device that stored that object's url in `stickers.remoteUrl`
+keeps sending it after the deletion, because nothing clears the column. The user base is
+closed, and the plan accepted this
+(`docs/plans/stickers-and-gifs.md`, open risk 2). The rules themselves are kept in the Firebase
+console and are not in this repo.
+
+**When to revisit.** Before the app is opened to users who are not trusted, or when step 10
+adds Cloud Functions that could own the upload. The fix is an upload through a function that
+hashes the bytes and writes the object itself, with client writes to `stickers/` closed.
+
+---
+
+### `StickerDao` exposes the writes its sync rule depends on
+
+**The smell.** Every change to a pack must set `syncState = PENDING`. `StickerDao`'s
+transaction methods (`addToPack`, `removeFromPack`, `moveBetweenPacks`, `reorderPacks`) do
+that through `touchPack`, but `insertItems`, `deleteItems` and `insertPack` are public on the
+same interface, so a caller can change a pack and leave it unmarked.
+
+**Why we haven't fixed it.** Nothing reads `syncState` yet, and the one caller,
+`StickerRepositoryImpl`, uses only the transaction methods. Hiding the single-statement
+writes needs an abstract-class DAO with protected members, which no DAO in this repo is.
+
+**When to revisit.** In step 6 of `docs/plans/stickers-and-gifs.md`, when `StickerSyncWorker`
+starts to read the column. A missed mark is then a pack change that never reaches the backup.
+
+---
+
 ## How to use this file
 
 - **Add entries** when you consciously decide not to fix something you noticed. Record the file paths, the reason, and the trigger condition.

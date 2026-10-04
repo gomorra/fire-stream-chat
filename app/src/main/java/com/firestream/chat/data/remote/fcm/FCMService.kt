@@ -227,6 +227,8 @@ class FCMService : FirebaseMessagingService() {
             MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"
             MessageType.DOCUMENT -> "\uD83D\uDCCE Document"
             MessageType.POLL -> "\uD83D\uDCCA Poll"
+            MessageType.STICKER -> "Sticker"
+            MessageType.GIF -> "\uD83C\uDF9E\uFE0F GIF"
             else -> "New message"
         }
         style.addMessage(notificationText, System.currentTimeMillis(), sender)

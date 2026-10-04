@@ -36,11 +36,30 @@ interface MessageRepository {
         fileName: String? = null,
     ): Result<Message>
     /**
+     * Sends the library sticker [stickerId]. The repository reads its file,
+     * size and url from the library, so a caller never passes a file. Fails for
+     * a sticker the library does not hold.
+     *
+     * [packId] is the pack the sticker was picked from. The recipient gets it
+     * only for a pack the user made, imported or installed. The favourites and
+     * the loose stickers are never named to anyone.
+     */
+    suspend fun sendStickerMessage(chatId: String, stickerId: String, packId: String? = null): Result<Message>
+
+    /**
+     * Sends the animated image at [uri] as it is. Nothing re-encodes it, so
+     * animation and transparency survive. [mimeType] must be an image type.
+     * Refused when the file is over `MAX_GIF_BYTES`.
+     */
+    suspend fun sendGifMessage(chatId: String, uri: String, mimeType: String, caption: String = ""): Result<Message>
+
+    /**
      * Re-drive the send pipeline for a previously-failed message, mutating the
      * existing Room row in place (no new optimistic placeholder, no duplicate
      * bubble). The [messageId] must reference a row whose status is
      * [com.firestream.chat.domain.model.MessageStatus.FAILED]; any other state
-     * fails fast. Supported types: TEXT, IMAGE, DOCUMENT, VOICE, LOCATION.
+     * fails fast. Supported types: TEXT, IMAGE, VIDEO, DOCUMENT, VOICE,
+     * LOCATION, STICKER, GIF.
      */
     suspend fun retryFailedMessage(messageId: String): Result<Message>
     // Phase 1: reactions

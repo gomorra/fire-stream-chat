@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Hd
 import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LightMode
@@ -115,6 +116,7 @@ fun SettingsScreen(
     onStarredMessagesClick: () -> Unit,
     onScheduledRemindersClick: () -> Unit = {},
     onArchivedChatsClick: () -> Unit = {},
+    onImportStickersClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
     onSignedOut: () -> Unit = {},
     focusUpdate: Boolean = false,
@@ -408,6 +410,13 @@ fun SettingsScreen(
                 title = "Auto-download Media",
                 subtitle = autoDownloadLabel,
                 onClick = { showAutoDownloadPicker = true }
+            )
+
+            SettingsItem(
+                icon = Icons.Default.EmojiEmotions,
+                title = "Import stickers",
+                subtitle = "Bring stickers over from WhatsApp or from files, and manage your packs",
+                onClick = onImportStickersClick
             )
 
             SettingsToggleItem(

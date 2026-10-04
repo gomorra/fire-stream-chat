@@ -63,6 +63,7 @@ interface MessageSource {
         longitude: Double? = null,
         isHd: Boolean = false,
         file: FileMetadata? = null,
+        sticker: StickerRef? = null,
         ifAbsent: Boolean = false,
     ): String
 
@@ -86,6 +87,7 @@ interface MessageSource {
         longitude: Double? = null,
         isHd: Boolean = false,
         file: FileMetadata? = null,
+        sticker: StickerRef? = null,
         ifAbsent: Boolean = false,
     ): String
 

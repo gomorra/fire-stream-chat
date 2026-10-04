@@ -122,7 +122,11 @@ import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.util.FilePreviewSource
+import com.firestream.chat.ui.components.StickerImage
+import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.rememberAnimatedImageRequest
 import com.firestream.chat.ui.components.rememberVideoFrameRequest
+import com.firestream.chat.ui.components.stickerLabel
 import androidx.compose.ui.graphics.Color
 import com.firestream.chat.ui.theme.LocalIsDarkTheme
 import com.firestream.chat.ui.theme.SentBubble
@@ -183,6 +187,8 @@ internal data class MessageBubbleCallbacks(
     // Tapping a VIDEO bubble's thumbnail — opens the fullscreen player. The
     // String is localUri ?: mediaUrl, same convention as onImageClick.
     val onVideoClick: (String) -> Unit = {},
+    // Tapping a STICKER. ChatScreen uses the captured `message`.
+    val onStickerClick: () -> Unit = {},
     // Tapping a DOCUMENT's file card — Open with another app (downloading first
     // when there is no local copy).
     val onOpenFile: () -> Unit = {},
@@ -259,15 +265,19 @@ internal fun MessageBubble(
     val showTail = remember(groupPosition) {
         groupPosition == GroupPosition.ALONE || groupPosition == GroupPosition.LAST
     }
-    val bubbleShape: Shape = remember(showTail, isOwnMessage) {
-        if (showTail) BubbleTailShape(isOwnMessage = isOwnMessage) else RoundedCornerShape(16.dp)
+    // A sticker stands on the chat background: no fill, no tail. A deleted one
+    // is the usual tombstone bubble.
+    val isBareSticker = message.type == MessageType.STICKER && message.deletedAt == null
+    val bubbleShape: Shape = remember(showTail, isOwnMessage, isBareSticker) {
+        if (showTail && !isBareSticker) BubbleTailShape(isOwnMessage = isOwnMessage) else RoundedCornerShape(16.dp)
     }
 
     var showMenu by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val copyableText: String? = remember(message.type, message.content) {
         when (message.type) {
-            MessageType.CALL, MessageType.VOICE -> null
+            // A sticker's content is its emoji, which is not text the user wrote.
+            MessageType.CALL, MessageType.VOICE, MessageType.STICKER -> null
             MessageType.LOCATION -> message.content
                 .takeIf { it.isNotBlank() && it != LOCATION_DEFAULT_CONTENT }
             else -> message.content.takeIf { it.isNotBlank() }
@@ -333,22 +343,13 @@ internal fun MessageBubble(
         Box {
             Box(
                 modifier = Modifier
-                    .widthIn(max = 280.dp)
-                    .background(
-                        color = bubbleColor,
-                        shape = bubbleShape
-                    )
+                    .bubbleFrame(isBareSticker, bubbleColor, bubbleShape)
                     .border(width = 2.dp, color = highlightColor, shape = bubbleShape)
                     .combinedClickable(
                         onClick = { if (message.type == MessageType.CALL) callbacks.onCall?.invoke() },
                         onLongClick = { showMenu = true }
                     )
-                    .padding(
-                        start = 12.dp,
-                        end = 12.dp,
-                        top = 8.dp,
-                        bottom = if (showTail) 16.dp else 8.dp
-                    )
+                    .bubblePadding(isBareSticker, showTail)
             ) {
                 Column {
                     if (message.deletedAt != null) {
@@ -388,45 +389,11 @@ internal fun MessageBubble(
                     }
 
                     if (replyToMessage != null) {
-                        val replySnippet = when (replyToMessage.type) {
-                            MessageType.IMAGE -> replyToMessage.content.take(80)
-                                .ifBlank { stringResource(R.string.reply_preview_photo) }
-                            MessageType.VIDEO -> replyToMessage.content.take(80)
-                                .ifBlank { stringResource(R.string.reply_preview_video) }
-                            else -> replyToMessage.content.take(80)
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(color = textColor.copy(alpha = 0.1f))
-                                .clickable { callbacks.onReplyPreviewClick() }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            if (replyToMessage.type == MessageType.IMAGE) {
-                                ReplyImageThumbnail(
-                                    message = replyToMessage,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            } else if (replyToMessage.type == MessageType.VIDEO) {
-                                ReplyVideoThumbnail(
-                                    message = replyToMessage,
-                                    modifier = Modifier.size(36.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                            }
-                            Text(
-                                text = replySnippet,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    lineHeightStyle = CenteredLineHeight
-                                ),
-                                color = textColor.copy(alpha = 0.8f),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        ReplyPreviewRow(
+                            replyToMessage = replyToMessage,
+                            textColor = textColor,
+                            onClick = callbacks.onReplyPreviewClick,
+                        )
                         Spacer(modifier = Modifier.height(4.dp))
                     }
 
@@ -580,6 +547,138 @@ internal fun MessageBubble(
     }
 }
 
+/**
+ * The quoted message at the top of a reply: a thumbnail for a photo, a video,
+ * a sticker or a GIF, then the first lines of its text or the name of its kind.
+ *
+ * Its own composable for the register-pressure reason spelled out on
+ * [MessageBubbleBody].
+ */
+@Composable
+private fun ReplyPreviewRow(
+    replyToMessage: Message,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    val replySnippet = when (replyToMessage.type) {
+        MessageType.IMAGE -> replyToMessage.content.take(80)
+            .ifBlank { stringResource(R.string.reply_preview_photo) }
+        MessageType.VIDEO -> replyToMessage.content.take(80)
+            .ifBlank { stringResource(R.string.reply_preview_video) }
+        MessageType.STICKER -> stickerLabel(replyToMessage.content.take(80))
+        MessageType.GIF -> replyToMessage.content.take(80)
+            .ifBlank { MessageType.GIF.placeholderLabel }
+        else -> replyToMessage.content.take(80)
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(color = textColor.copy(alpha = 0.1f))
+            .clickable { onClick() }
+            .padding(horizontal = 8.dp, vertical = 4.dp)
+    ) {
+        if (replyToMessage.type.hasStillPreview) {
+            ReplyImageThumbnail(
+                message = replyToMessage,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        } else if (replyToMessage.type == MessageType.VIDEO) {
+            ReplyVideoThumbnail(
+                message = replyToMessage,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        Text(
+            text = replySnippet,
+            style = MaterialTheme.typography.bodySmall.copy(
+                lineHeightStyle = CenteredLineHeight
+            ),
+            color = textColor.copy(alpha = 0.8f),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+// The side of a sticker in a bubble.
+private val STICKER_BUBBLE_SIZE = 160.dp
+
+// Width and fill of the bubble. A bare sticker is as wide as the sticker and has no fill.
+private fun Modifier.bubbleFrame(isBareSticker: Boolean, color: Color, shape: Shape): Modifier =
+    if (isBareSticker) widthIn(max = STICKER_BUBBLE_SIZE)
+    else widthIn(max = 280.dp).background(color = color, shape = shape)
+
+// The bottom padding makes room for the tail, which a bare sticker does not have.
+private fun Modifier.bubblePadding(isBareSticker: Boolean, showTail: Boolean): Modifier =
+    if (isBareSticker) padding(2.dp)
+    else padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = if (showTail) 16.dp else 8.dp)
+
+/**
+ * The types whose reply, forward and starred previews show a picture: a photo,
+ * or the first frame of a sticker or a GIF. All three resolve through
+ * [rememberMessageImageModel].
+ */
+internal val MessageType.hasStillPreview: Boolean
+    get() = this == MessageType.IMAGE || this == MessageType.STICKER || this == MessageType.GIF
+
+/**
+ * A sticker in the chat: the animated file on the chat background, 160 dp
+ * square. It renders from the library file once the download has landed and
+ * from `mediaUrl` until then, which is also where a refused sticker stays.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StickerBubbleContent(
+    message: Message,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit,
+) {
+    val model = rememberMessageImageModel(message)
+    Box(
+        modifier = Modifier
+            .size(STICKER_BUBBLE_SIZE)
+            .clip(RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (model != null) {
+            StickerImage(
+                model = model,
+                modifier = Modifier.fillMaxSize(),
+                contentDescription = stickerLabel(message.content),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.BrokenImage,
+                contentDescription = "Sticker unavailable",
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// Marks an animated picture, in the look of the video bubble's duration badge.
+@Composable
+private fun GifBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(Color.Black.copy(alpha = 0.55f))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = MessageType.GIF.placeholderLabel,
+            color = Color.White,
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
 @Composable
 private fun SwipeActionIcon(
     offset: Float,
@@ -689,7 +788,9 @@ internal fun ReplyImageThumbnail(
             AsyncImage(
                 model = imageModel,
                 contentDescription = null,
-                contentScale = ContentScale.Crop,
+                // A sticker is shown whole. A plain request shows the first frame
+                // of a sticker or a GIF, since only StickerImage attaches the decoder.
+                contentScale = if (message.type == MessageType.STICKER) ContentScale.Fit else ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
                 error = rememberVectorPainter(Icons.Default.BrokenImage),
             )
@@ -814,14 +915,23 @@ private fun MessageBubbleBody(
     onLongPress: () -> Unit,
 ) {
         when (message.type) {
-            MessageType.IMAGE -> {
+            MessageType.STICKER -> StickerBubbleContent(
+                message = message,
+                onClick = callbacks.onStickerClick,
+                onLongPress = onLongPress,
+            )
+            // A GIF is the photo layout with an animated request and a badge.
+            MessageType.IMAGE, MessageType.GIF -> {
+                val isGif = message.type == MessageType.GIF
                 val aspectRatio = if (message.mediaWidth != null && message.mediaHeight != null && message.mediaHeight > 0) {
                     message.mediaWidth.toFloat() / message.mediaHeight.toFloat()
                 } else {
-                    4f / 3f // fallback for old messages without dimensions
+                    // Old messages without dimensions, and a GIF whose header could not be read at send.
+                    4f / 3f
                 }
 
-                val imageModel = rememberMessageImageModel(message)
+                val stillModel = rememberMessageImageModel(message)
+                val imageModel = if (isGif && stillModel != null) rememberAnimatedImageRequest(stillModel) else stillModel
 
                 Box(
                     modifier = Modifier
@@ -834,7 +944,9 @@ private fun MessageBubbleBody(
                         .clip(RoundedCornerShape(8.dp))
                         .combinedClickable(
                             onClick = {
-                                val clickUrl = message.localUri ?: message.mediaUrl
+                                // A GIF already plays in place, and the fullscreen
+                                // viewer would show it as a still.
+                                val clickUrl = (message.localUri ?: message.mediaUrl).takeUnless { isGif }
                                 clickUrl?.let { callbacks.onImageClick(it) }
                             },
                             onLongClick = { onLongPress() }
@@ -843,11 +955,14 @@ private fun MessageBubbleBody(
                     if (imageModel != null) {
                         AsyncImage(
                             model = imageModel,
-                            contentDescription = "Image",
+                            contentDescription = if (isGif) "GIF" else "Image",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier.fillMaxSize(),
                             error = rememberVectorPainter(Icons.Default.BrokenImage)
                         )
+                        if (isGif) {
+                            GifBadge(modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
+                        }
 
                         // Upload progress overlay
                         val progress = state.uploadProgress

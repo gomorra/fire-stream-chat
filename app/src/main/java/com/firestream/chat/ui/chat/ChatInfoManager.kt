@@ -3,11 +3,12 @@
 //   recipient profile, group permissions, recent emojis, mention candidates.
 // Owns: ChatUiState.session.* (chat name/avatar, blocked state, isLoading)
 //   — and currently also writes ComposerState.canSendMessages / mentionCandidates
-//   and OverlaysState.recentEmojis (Phase 2 will move these out per the manager
+//   and OverlaysState.recentEmojis / stickerPacks / recentStickers /
+//   favouriteStickerIds (Phase 2 will move these out per the manager
 //   contract — see docs/PATTERNS.md#chat-manager-slice-ownership).
 // Collaborators: ChatViewModel (composition root), ChatRepository, UserRepository,
-//   ListRepository, CheckGroupPermissionUseCase, PreferencesDataStore,
-//   ConnectivityObserver (display-only offline hint).
+//   ListRepository, StickerRepository (read only), CheckGroupPermissionUseCase,
+//   PreferencesDataStore, ConnectivityObserver (display-only offline hint).
 // Don't put here: composer state writes, message send/edit, overlay state writes.
 //   New session fields are fine; cross-slice writes are not.
 // endregion
@@ -19,6 +20,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
@@ -27,9 +29,11 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.ListType
+import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ListRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.util.ConnectivityObserver
@@ -40,6 +44,7 @@ internal class ChatInfoManager(
     private val chatRepository: ChatRepository,
     private val listRepository: ListRepository,
     private val userRepository: UserRepository,
+    private val stickerRepository: StickerRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val checkGroupPermissionUseCase: CheckGroupPermissionUseCase,
     private val connectivityObserver: ConnectivityObserver,
@@ -57,6 +62,7 @@ internal class ChatInfoManager(
         observeReadReceiptsAllowed()
         loadChatInfo()
         observeRecentEmojis()
+        observeStickerLibrary()
         observeChatFontSize()
         if (partnerIdHint.isNotBlank()) {
             seedRecipientFromCache()
@@ -251,6 +257,33 @@ internal class ChatInfoManager(
                     // per open session (see EmojiHandlerPanel), so no debounce is needed
                     // here and reopening always reflects the latest taps immediately.
                     _uiState.update { it.copy(overlays = it.overlays.copy(recentEmojis = recents)) }
+                }
+        }
+    }
+
+    /**
+     * Mirrors the sticker library into the overlays slice for the composer's
+     * Stickers tab. Packs, recents and the favourite ids land in one update, so
+     * the tab never draws a pack list beside the recents of an older emission.
+     */
+    private fun observeStickerLibrary() {
+        scope.launch {
+            combine(stickerRepository.observePacks(), stickerRepository.observeRecents(), ::Pair)
+                .distinctUntilChanged()
+                .catch { /* non-fatal: the tab shows an empty library */ }
+                .collect { (packs, recents) ->
+                    val favourites = packs
+                        .filter { it.kind == StickerPackKind.FAVOURITES }
+                        .flatMapTo(HashSet()) { pack -> pack.stickers.map { it.id } }
+                    _uiState.update {
+                        it.copy(
+                            overlays = it.overlays.copy(
+                                stickerPacks = packs,
+                                recentStickers = recents,
+                                favouriteStickerIds = favourites,
+                            )
+                        )
+                    }
                 }
         }
     }

@@ -51,6 +51,8 @@ class OutboxJobTest {
     fun `only a media send that has not uploaded yet uploads`() {
         assertTrue(row(type = MessageType.IMAGE).needsUpload)
         assertTrue(row(type = MessageType.VOICE).needsUpload)
+        assertTrue(row(type = MessageType.GIF).needsUpload)
+        assertFalse("a sticker's file is small and shared, and is usually there already", row(type = MessageType.STICKER).needsUpload)
         assertFalse(row(type = MessageType.TEXT).needsUpload)
         assertFalse("a forward's media is the source's", row(type = MessageType.IMAGE, mediaUrl = "https://storage.example/src").needsUpload)
         assertFalse("a tombstone uploads nothing", row(type = MessageType.IMAGE, deletedAt = 5_000L).needsUpload)

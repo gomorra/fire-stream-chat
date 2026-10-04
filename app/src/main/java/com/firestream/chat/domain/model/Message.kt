@@ -64,4 +64,9 @@ data class Message(
     val fileName: String? = null,
     val fileSize: Long? = null,
     val mimeType: String? = null,
+    // A STICKER names its file by the SHA-256 of the bytes, which is also the
+    // file's name on every device. Both come from the sender and are untrusted
+    // on receive. The pack id is null when the sender did not share a pack.
+    val stickerId: String? = null,
+    val stickerPackId: String? = null,
 )

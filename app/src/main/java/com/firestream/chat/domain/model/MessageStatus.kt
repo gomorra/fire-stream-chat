@@ -18,7 +18,13 @@ enum class MessageType {
     CALL,
     LIST,
     LOCATION,
-    TIMER
+    TIMER,
+
+    /** One sticker from the library. The message names it by `stickerId` and carries no bytes of its own. */
+    STICKER,
+
+    /** An animated image sent as it is, never re-encoded. */
+    GIF
 }
 
 enum class ChatType {

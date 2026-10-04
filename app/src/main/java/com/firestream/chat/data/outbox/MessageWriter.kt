@@ -21,6 +21,7 @@ import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
 import kotlinx.coroutines.flow.first
@@ -114,6 +115,7 @@ class MessageWriter internal constructor(
                 longitude = message.longitude,
                 isHd = message.isHd,
                 file = FileMetadata.of(message),
+                sticker = StickerRef.of(message),
                 ifAbsent = ifAbsent,
             )
         } else {
@@ -137,6 +139,7 @@ class MessageWriter internal constructor(
                 longitude = message.longitude,
                 isHd = message.isHd,
                 file = FileMetadata.of(message),
+                sticker = StickerRef.of(message),
                 ifAbsent = ifAbsent,
             )
         }

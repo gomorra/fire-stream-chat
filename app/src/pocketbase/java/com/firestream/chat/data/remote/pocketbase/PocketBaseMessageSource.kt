@@ -27,6 +27,7 @@ package com.firestream.chat.data.remote.pocketbase
 import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
+import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
 import kotlinx.coroutines.flow.Flow
@@ -54,6 +55,8 @@ class PocketBaseMessageSource @Inject constructor(
         MessageType.LIST -> if (plain.isBlank()) "📋 List" else plain
         MessageType.LOCATION -> "📍 Location"
         MessageType.CALL -> "📞 Voice call"
+        MessageType.STICKER -> if (plain.isNotBlank()) "$plain Sticker" else "Sticker"
+        MessageType.GIF -> if (plain.isNotBlank()) "🎞️ $plain" else "🎞️ GIF"
         else -> plain.ifBlank { "Message" }
     }
 
@@ -121,6 +124,7 @@ class PocketBaseMessageSource @Inject constructor(
         longitude: Double?,
         isHd: Boolean,
         file: FileMetadata?,
+        sticker: StickerRef?,
         ifAbsent: Boolean,
     ): String {
         // v0 pb_schema.json has no media_thumbnail field; the param is accepted
@@ -181,6 +185,7 @@ class PocketBaseMessageSource @Inject constructor(
         longitude: Double?,
         isHd: Boolean,
         file: FileMetadata?,
+        sticker: StickerRef?,
         ifAbsent: Boolean,
     ): String = throw NotImplementedError(
         "encryption gated off in pocketbase flavor — MessageWriter should not reach here"
@@ -291,7 +296,8 @@ class PocketBaseMessageSource @Inject constructor(
      * v0 schema has no fields for: ciphertext, signalType, mediaThumbnailUrl,
      * editedAt, reactions, isForwarded, duration, readBy, deliveredTo,
      * pollData, mentions, deletedAt, emojiSizes, listId/listDiff, isPinned,
-     * mediaWidth/Height, latitude/longitude, fileName/fileSize/mimeType. They default to null/empty.
+     * mediaWidth/Height, latitude/longitude, fileName/fileSize/mimeType,
+     * stickerId/stickerPackId. They default to null/empty.
      */
     internal fun mapToRaw(record: JSONObject): RawMessage = RawMessage(
         id = record.optString("id"),

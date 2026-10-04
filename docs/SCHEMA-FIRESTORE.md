@@ -37,7 +37,11 @@ chats/{chatId}
     ├── senderId, content, type, status, timestamp
     ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
     ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight
-    ├── fileName, fileSize, mimeType            # DOCUMENT only — plaintext, like mediaUrl (docs/plans/file-handling.md)
+    ├── fileName, fileSize, mimeType            # DOCUMENT — plaintext, like mediaUrl (docs/plans/file-handling.md).
+    │                                           # A STICKER and a GIF carry mimeType alone
+    ├── stickerId, stickerPackId                # STICKER only — the SHA-256 of the sticker's bytes, and the pack it
+    │                                           # was sent from (absent for favourites and loose stickers). Plaintext.
+    │                                           # mediaUrl then points at the shared Storage object stickers/<id>.<ext>
     ├── localUri                                # NOT synced to Firestore — Room only
     ├── replyToId, isForwarded, isPinned, duration
     ├── editedAt, deletedAt

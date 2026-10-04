@@ -26,6 +26,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.stickerLabel
 import java.time.ZoneId
 
 /**
@@ -86,8 +88,9 @@ internal fun SnoozePickerSheet(
 @Composable
 private fun QuotedMessagePreview(message: Message) {
     val snippet = when (message.type) {
-        MessageType.IMAGE -> message.content.take(80).ifBlank { "Photo" }
-        MessageType.VIDEO -> message.content.take(80).ifBlank { "Video" }
+        MessageType.IMAGE, MessageType.VIDEO, MessageType.GIF ->
+            message.content.take(80).ifBlank { message.type.placeholderLabel }
+        MessageType.STICKER -> stickerLabel(message.content.take(80))
         else -> message.content.take(80)
     }
     if (snippet.isBlank()) return

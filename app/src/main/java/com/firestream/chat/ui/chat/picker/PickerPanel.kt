@@ -371,7 +371,7 @@ private fun TabIsland(
 /** The glyph a segment shows. Resolved here rather than stored on the enum, which keeps [PickerTab] free of Compose. */
 private fun PickerTab.icon(): ImageVector = when (this) {
     PickerTab.EMOJI -> Icons.Outlined.EmojiEmotions
-    PickerTab.STICKER -> Icons.Outlined.StickyNote2
+    PickerTab.STICKER, PickerTab.STICKER_LIBRARY -> Icons.Outlined.StickyNote2
     PickerTab.GIF -> Icons.Outlined.Gif
     PickerTab.TEXT -> Icons.Outlined.TextFields
     PickerTab.SHAPE -> Icons.Outlined.Category

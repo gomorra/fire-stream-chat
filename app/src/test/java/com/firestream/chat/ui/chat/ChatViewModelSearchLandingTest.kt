@@ -125,6 +125,7 @@ class ChatViewModelSearchLandingTest {
         dateTimeDetector = dateTimeDetector,
         pollRepository = pollRepository,
         userRepository = userRepository,
+        stickerRepository = com.firestream.chat.test.fakes.emptyStickerRepository(),
         preferencesDataStore = preferencesDataStore,
         mediaFileManager = mediaFileManager,
         imageEditRasterizer = mockk(relaxed = true),

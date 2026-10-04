@@ -40,7 +40,7 @@ data class Message(
     val chatId: String,
     val senderId: String,
     val content: String,
-    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION
+    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION | TIMER | STICKER | GIF
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
     val localUri: String?,                   // local file path for media (offline-first)
@@ -48,7 +48,9 @@ data class Message(
     val mediaHeight: Int?,                   // original image height for aspect ratio
     val fileName: String?,                   // DOCUMENT: display name as picked (null for other types)
     val fileSize: Long?,                     // DOCUMENT: size in bytes
-    val mimeType: String?,                   // DOCUMENT: type as picked
+    val mimeType: String?,                   // DOCUMENT: type as picked. STICKER, GIF: the file's type
+    val stickerId: String?,                  // STICKER: SHA-256 of the sticker's bytes; the sender's claim on receive
+    val stickerPackId: String?,              // STICKER: the pack it was sent from, when the sender shared one
     val status: MessageStatus,   // SENDING | SENT | DELIVERED | READ | FAILED
     val replyToId: String?,
     val timestamp: Long,
@@ -147,6 +149,43 @@ data class ListData(
     val sharedChatIds: List<String>,
     val genericStyle: GenericListStyle
 )
+```
+
+### Sticker / StickerPack
+
+```kotlin
+enum class StickerFormat(val extension: String, val mimeType: String) { WEBP("webp", "image/webp") }
+enum class StickerPackKind { USER, INSTALLED, FAVOURITES, SAVED }
+
+data class Sticker(
+    val id: String,                   // SHA-256 of the file's bytes, lowercase hex
+    val format: StickerFormat,
+    val width: Int,
+    val height: Int,
+    val isAnimated: Boolean,
+    val emojis: List<String>,
+    val localPath: String             // filesDir/stickers/<id>.<ext>
+)
+
+data class StickerPack(
+    val id: String,                   // random UUID
+    val name: String,                 // "" for FAVOURITES and SAVED; a screen labels those by kind
+    val publisher: String?,
+    val kind: StickerPackKind,
+    val originPackId: String?,        // the source pack of an INSTALLED one
+    val stickers: List<Sticker>,      // in pack order
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+data class StickerImportResult(
+    val imported: Int,                // stickers added to a pack
+    val duplicates: Int,              // stickers the target pack already held
+    val rejected: Int,                // unreadable, not a sticker, too large; a refused archive counts once
+    val packIds: List<String>         // packs that gained a sticker
+)
+
+data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes: Long, val lastModified: Long)
 ```
 
 ### CallLogEntry

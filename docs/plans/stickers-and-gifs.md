@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, no step started. The prototype's verdict is variant A, the island panel, and step 5 is written to it.
+Status: approved, steps 1–5 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -124,6 +124,40 @@ CHANGELOG entry and a bump through the `changelog-release` skill.
 
 Untrusted files and archives are parsed here.
 
+**Approach**
+- Order: pure parsers first (`WebpContainer`, `WaStickerMetadata`, `StickerPackArchive`), then
+  `StickerFiles`, the Room tables and `StickerDao`, then `StickerRepositoryImpl` and its DI bindings.
+- Pack ids are random UUIDs, because step 6 makes a pack id a Firestore document id that only its
+  owner may write. A re-import finds its pack through a new `importKey` column instead.
+- `importFrom` takes a second argument, `loosePackName`. Files without pack metadata go to a pack of
+  that name (the WhatsApp route passes *WhatsApp*), or to the `SAVED` pack when it is null.
+- An import sniffs the first bytes to tell an archive from a WebP. A file name or a mime type from
+  another app decides nothing.
+- `StickerFiles` reads at most 1 MB + 1 byte into memory, hashes and parses that, then writes a
+  temp file and renames it. One pass, and the cap bounds the buffer.
+- Recents are `PreferencesDataStore.recentStickerIdsFlow`, next to the emoji recents.
+- `domain/model/StickerPack` shares its simple name with the bundled editor pack,
+  `domain/util/StickerPack`. They live in different packages and no file in this step needs both.
+- Tests: the five the step lists, plus `StickerDaoTest` for the ordering queries and a small
+  `WhatsAppStickerFolderTest` for the filter and sort.
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
+
+**Shipped** `f7c6640c` (2026-10-03) — tier: strong, tagged strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- `importFrom(uris, loosePackName)` has a second argument. Stickers without pack metadata join a pack of that name, or the `SAVED` pack when it is null.
+- Pack ids are random UUIDs. A new `sticker_packs.importKey` column, unique, is what a re-import finds its pack by. `FAVOURITES` and `SAVED` have the fixed keys `kind:FAVOURITES` and `kind:SAVED`.
+- A WhatsApp pack is keyed by id, name and publisher together, because two sticker apps can reuse a pack id.
+- `StickerFiles` reads at most 1 MB + 1 byte into memory and writes through a temp file. It does not hash while streaming to disk.
+- `StickerFiles` also refuses a sticker wider or taller than 2048 px, and `WebpContainer` refuses a frame larger than its canvas. The plan named only the 1 MB cap.
+- `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. A uri can come from another app.
+- An archive is recognised by its first bytes. A zip with no `.webp` entry, an entry name that is not UTF-8, or a broken cap refuses the whole archive, counts as one rejected input and deletes the files it had stored.
+- `sticker_packs.syncState` exists and every `StickerDao` pack write sets it to `PENDING`. Nothing reads it. `stickers` has no remote-url column yet.
+- Removing a sticker or deleting a pack deletes item rows only. Files and `stickers` rows stay (`TECH_DEBT.md`, *Sticker files are never deleted*).
+- `listWhatsAppFolder` returns uri, name, size and date. It reads no pack metadata, which is read at import.
+- `domain/model/StickerPack` shares its simple name with the editor's `domain/util/StickerPack`. Neither was renamed.
+- `PreferencesDataStore` got one shared helper pair for the emoji and the sticker recents (`/simplify`).
+- Extra tests: `StickerDaoTest`, `WhatsAppStickerFolderTest`. Not user-visible, so no CHANGELOG entry and no version bump.
+
 - `domain/model/Sticker.kt`, `StickerPack.kt` (kinds above, `StickerFormat`), and
   `domain/repository/StickerRepository.kt`: observe packs and recents, `listWhatsAppFolder(treeUri)`,
   `importFrom(uris): ImportResult`, favourite, rename / reorder / delete pack, move and remove
@@ -146,6 +180,35 @@ Untrusted files and archives are parsed here.
 
 ### Step 2 — Settings → Import stickers, and the library screen (UI)
 
+**Approach**
+- Order: `StickerLibraryViewModel` and its test first, then `StickerLibraryScreen.kt`, `WhatsAppImportScreen.kt`,
+  the `Routes.STICKERS` destination and the Settings row, then the docs.
+- One ViewModel and one route. The pack grid and the WhatsApp grid are views of the library screen, chosen by
+  `openPackId` and `whatsApp` in its state, each closed by the system back.
+- The WhatsApp grid shows the folder ungrouped, newest first. The import does the grouping, so no per-file
+  `peek` is added to the repository.
+- Packs reorder with *Move up* and *Move down* in the pack's menu, which call `reorderPacks`. No drag handle.
+- Stickers are selected by a long press in the pack grid, then moved to another pack or removed from the top bar.
+- The folder grant is taken in the composable and not stored. Every import from WhatsApp opens the folder picker.
+- The file picker offers every type, because `.wastickers` has no mime type. The repository checks the bytes.
+- Tests: `StickerLibraryViewModelTest` (MockK repository), `StickerLibraryScreenTest` (Robolectric, empty state).
+- Further skills intended: none. One ViewModel, no concurrency, crypto or sync path.
+
+**Shipped** `4d0edd6d` (2026-10-03) — tier: mid, tagged mid. skills: simplify. Reviewer models: simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- The WhatsApp grid is not grouped by pack. It shows the folder newest first, and the import sorts the stickers into packs. No per-file `peek` was added to the repository.
+- The pack grid and the WhatsApp grid are views inside `Routes.STICKERS`, switched by the screen's state and closed by the system back. `WhatsAppImportScreen` has no route of its own.
+- Packs reorder through *Move up* and *Move down* in a pack's menu. There is no drag handle.
+- The folder grant is taken and not stored. Each import from WhatsApp opens the folder picker again, inside the WhatsApp sticker folder.
+- The picker opens in `com.whatsapp` only. A WhatsApp Business folder has to be navigated to by hand.
+- The file picker offers every file type, because a `.wastickers` archive has no mime type. The repository refuses what is not a sticker and the summary line counts it.
+- An import runs in `viewModelScope`, so leaving the screen cancels it. The pack rows are written at the end of an import, so a cancelled one adds no stickers, and running it again imports them.
+- The *Favourites* pack is not offered as a target when moving stickers. Only the screen enforces that.
+- `/simplify` was added at the re-decision, because the diff passed 600 lines. It gave both screens one `StickerTopBar`, `StickerCell` and `EmptyHint`, and moved the labels into `StickerLabels.kt`.
+- `/simplify` findings not taken: an import-source enum in place of `loosePackName` (the plan fixes that signature), and one shared rule for which pack kinds have a name (it needs a change in `StickerRepositoryImpl`).
+- CHANGELOG: a new `[UNRELEASED] [1.38.0]` section, entry hash `4d0edd6d`. `docs/BACKLOG.md` has the device checklist.
+- Nothing ran on a device or an emulator. The folder grant under `Android/media` is the first thing to check.
+
 - `Routes.STICKERS` and its `NavGraph.kt` destination. A `SettingsItem` titled **Import stickers**
   beside *Auto-download Media* in `ui/settings/SettingsScreen.kt`.
 - `ui/stickers/StickerLibraryScreen.kt` + ViewModel: packs with icon, name and count; a pack's grid;
@@ -156,14 +219,43 @@ Untrusted files and archives are parsed here.
 - **From files:** `OpenMultipleDocuments`, validated after the pick.
 - Launchers stay in the composable, as in `ChatScreen.kt`. The ViewModel sees `StickerRepository`
   only, so the UI→data allowlist in `ArchitectureTest` is untouched. Errors are `AppError`.
+- **(step-1)** The WhatsApp route calls `importFrom(uris, loosePackName = "WhatsApp")`. The files route passes no name.
+- **(step-1)** `listWhatsAppFolder` returns uri, name, size and date only. Pack metadata is read at import, so the
+  grid cannot group by pack without a new repository call that reads each file. Either add one (a bounded,
+  per-file `peek`), or show the folder ungrouped and let the import do the grouping.
+- **(step-1)** The `FAVOURITES` and `SAVED` packs have an empty `name`. Label them by `kind`. `renamePack` fails for both.
+- **(step-1)** `observePacks()` maps the whole library on every emission, once per collector. Collect it once in the
+  ViewModel with `stateIn`.
+- **(step-1)** A failed edit is a `Result.failure` whose message is fit to show (`That pack no longer exists`,
+  `A pack needs a name`). `AppError.from` turns it into `Unknown` with that message.
 - Tests: `StickerLibraryViewModelTest`, one Robolectric test for the empty state.
-- Docs: new *Stickers & GIFs* section in `docs/FEATURE-MAP.md`.
+- Docs: new *Stickers & GIFs* section in `docs/FEATURE-MAP.md`. **(step-1)** It also lists step 1's files:
+  `domain/model/Sticker.kt` and `StickerPack.kt`, `domain/repository/StickerRepository.kt`,
+  `domain/util/WebpContainer.kt`, the five files in `data/sticker/`, `StickerDao`, `StickerEntity.kt`,
+  `StickerRepositoryImpl` and their tests.
 
 **‖ Checkpoint.** The owner imports from the real folder and reports whether packs came out grouped.
 
 ### Step 3 — `STICKER` and `GIF` as messages — skills: code-review; model: max
 
 The outbox, the sync path and a new storage model change here.
+
+**Approach**
+- Order: the model and Room first (`MessageType`, `Message`, `MessageRecord`, `RawMessage`, `stickers.remoteUrl`, 30 → 31),
+  then `StickerObjectSource` and both message sources, then the receive side (`data/sticker/StickerDownloads.kt`,
+  `MediaFileManager.downloadFor`), then `OutboxSender`, then the two repository sends, then the labels.
+- The sticker fields cross the `MessageSource` boundary as one value, `StickerRef`, beside `FileMetadata`.
+- `MediaFileManager.downloadFor` stays the one router by type. It sends a `STICKER` to `StickerDownloads` and a `GIF`
+  to `DocumentFiles`, and returns `null` for a sticker that is refused. So both types join all three `MessageDao` lists
+  and `AUTO_DOWNLOAD_TYPES`, and the chat-open scan and the backfill worker retry a sticker like any other media.
+- A received sticker is hashed before it is stored, so a mismatch writes nothing. The file and its `stickers` row are
+  written under a lock in `StickerFiles`, which the refused-archive undo in `StickerRepositoryImpl` takes too.
+- A `stickers` row gets its `remoteUrl` from `ensureUploaded` only, never from a received message's `mediaUrl`.
+- `sendStickerMessage` shares a pack id only for a `USER` or `INSTALLED` pack. Favourites and loose stickers stay private.
+- `MessageBubble` is step 4's. This step adds only the labels the plan lists.
+- Tests: the plan's list, plus `StickerDownloadsTest` (mismatch, repeat receive, the interleaving with a refused
+  archive), `FirebaseStickerObjectSourceTest` and the `MediaFileManagerTest` routing cases.
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
 
 - `MessageType` gains `STICKER`, `GIF`. `Message`, `MessageRecord`, `RawMessage`, `MessageWriter` and
   both message sources gain `stickerId`, `stickerPackId`. `AppDatabase` 30 → 31.
@@ -179,6 +271,15 @@ The outbox, the sync path and a new storage model change here.
   step table in the KDoc.
 - Receiving: a sticker downloads into `StickerFiles`, verified against `stickerId`. A mismatch keeps
   the remote render and logs. `MediaFileManager.downloadFor` routes GIFs to `DocumentFiles`.
+- **(step-1)** `stickers` has no remote-url column. Add it with the 30 → 31 bump.
+- **(step-1)** A sticker id from a message is untrusted. Check it with `StickerFiles.isValidId` before
+  `fileFor`, which throws for anything that is not 64 lowercase hex digits. `StickerFiles.store` computes the
+  id from the bytes, so the receive path compares the returned id with `stickerId`. Its 1 MB, 2048 px and
+  WebP-only checks apply to a received sticker too.
+- **(step-1 /code-review)** The undo of a refused archive in `StickerRepositoryImpl.readArchive` deletes every
+  file that archive wrote and that has no `stickers` row. A received sticker stored during an import would be
+  such a file. The receive path must write the `stickers` row in the same step as the file, or store under
+  the repository's import lock. Add a test for the interleaving.
 - `OutboxJob.UPLOAD_TYPES` (GIF only), `AUTO_DOWNLOAD_TYPES`, and the three type lists in `MessageDao`.
 - Labels: `lastContentFor` in both flavors, `FCMService`, `MessageTypeLabel.placeholderLabel`, and
   the `when`s in `SnoozePickerSheet`, `ForwardMessagePanel`, `ChatMessageActions.snapshotContentFor`,
@@ -188,9 +289,49 @@ The outbox, the sync path and a new storage model change here.
   sends and the guard, `MessageRepositoryForwardTest`, `FirestoreMessageSourceTest` (new fields),
   a hash-mismatch test.
 - **Owner, before the device pass:** add to the Storage rules in the console —
-  `match /stickers/{file} { allow read: if request.auth != null; allow create: if request.auth != null && resource == null && request.resource.size < 1024 * 1024; }`
+  `match /stickers/{file} { allow read: if request.auth != null; allow create: if request.auth != null && resource == null && request.resource.size <= 1024 * 1024; }`
+  **(step-3 /code-review)** The size check is `<=`, not `<`. `StickerFiles` accepts a file of exactly 1 MB, and
+  with `<` that sticker would import and then fail every send.
+
+**Shipped** `0f70776a` (2026-10-03) — tier: max, tagged max. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- A sticker ignores the auto-download preference. It is fetched on receive and on chat open, also under *Never* and under *Wi-Fi only* off Wi-Fi. `/code-review` found that with the preference applied, a sticker the device already held got no local file.
+- A forwarded sticker the library holds goes out with the library's url, or with none, so that `OutboxSender` looks the shared object up. The received `mediaUrl` is handed on only for a sticker the library does not hold (`/code-review`).
+- A `stickers` row gets its `remoteUrl` from `ensureUploaded` only. A received sticker's row has none, so the first send of a received sticker costs one lookup.
+- `sendStickerMessage` takes a nullable `packId` and shares it only for a `USER` or `INSTALLED` pack. For an `INSTALLED` pack it sends that pack's own id, not `originPackId`.
+- `sendGifMessage` refuses a mime type that is not an image type.
+- `MediaFileManager.downloadFor` takes a `stickerId` and returns `null` for a refused sticker. Both types joined all three `MessageDao` lists, so the chat-open scan and `MediaBackfillWorker` handle them.
+- A refused sticker is remembered for the process only. Each new process fetches it once more, at most 1 MB.
+- A received sticker is hashed before it is stored. A file left without its row, which a destructive Room bump leaves behind, is checked and taken back without a download.
+- `StickerFiles.rowLock` is a second, short lock beside the import lock, so a received sticker does not wait for a whole import. The refused-archive undo takes it too.
+- The two sticker fields cross `MessageSource` as one `StickerRef`. The PocketBase source accepts and ignores them, like every field its v0 schema lacks. `PocketBaseStickerObjectSource` uploads through `StorageSource`, which is still a stub there.
+- The Storage rule in this step's last bullet says `<=` now.
+- The UI got labels only. `MessageBubble` is untouched, so until step 4 a sticker shows as a text bubble with its emoji.
+- `/code-review` findings not taken: `stickers.remoteUrl` is never cleared (`TECH_DEBT.md`), and the label sites keep their own wording.
+- `/simplify` findings not taken: one owner for "the url of a library sticker" (noted in step 6), a value type in place of `downloadFor`'s seven parameters, one shared HTTP fetch and one shared image-bounds probe, concurrent sticker downloads on chat open, a cap on the refusal set.
+- The hash-mismatch test and the interleaving test are in `StickerDownloadsTest`. Further new tests: `FirebaseStickerObjectSourceTest`, `MessageRepositoryStickerGifSendTest`, routing cases in `MediaFileManagerTest`.
+- Not user-visible, so no CHANGELOG entry and no version bump. Nothing ran on a device.
+- The Gradle daemon crashed three times in its parallel GC (`SIGSEGV` in `libjvm.so`). The gate passed on a daemon started with `-XX:+UseSerialGC`.
+- This block is at the end of the section, not under the Approach block, for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
 
 ### Step 4 — Bubbles for stickers and GIFs (UI)
+
+**Approach**
+- Order: `coil-gif` in the catalog and the build file, then `ui/components/StickerImage.kt` with the per-request
+  animated decoder, then `MessageBubble.kt`, then the reply, forward and starred previews, then `StickerThumbnail`.
+- `StickerImage` takes an `animated` flag. A request without the decoder shows the first frame, which is what the
+  previews and the library grids use.
+- The `STICKER` branch lives in its own composable, `StickerBubbleContent`, so `MessageBubble` and `MessageBubbleBody`
+  gain few registers. The dex register count is checked on the built APK (`docs/GOTCHAS.md`).
+- A sticker bubble drops the fill, the tail and the padding, and is 160 dp wide. Time and ticks stay in the shared
+  metadata row, which follows the grouping rule of every other bubble. A deleted sticker is the usual tombstone bubble.
+- The `GIF` branch is the `IMAGE` branch with the animated request and a badge. The 4:3 fallback shape for missing
+  dimensions is already there.
+- New callback: `MessageBubbleCallbacks.onStickerClick`, a no-op until step 5 wires the sheet. A tap on a GIF does
+  nothing, because the fullscreen viewer has no animated decoder and its gallery lists photos only.
+- Tests: `MessageBubbleStickerGifTest` (Robolectric) for the type dispatch, the tap, the badge, the tombstone and
+  the reply preview.
+- Further skills intended: none. UI only, one file per surface, no ViewModel, no concurrency.
 
 - `coil-gif` in `gradle/libs.versions.toml` and `app/build.gradle.kts`.
   `ui/components/StickerImage.kt`: the one composable every surface draws a sticker with, attaching
@@ -199,13 +340,54 @@ The outbox, the sync path and a new storage model change here.
   time and ticks beneath. A `GIF` branch that reuses the `IMAGE` layout and caption with the animated
   request and a small GIF badge. New callbacks go into `MessageBubbleCallbacks`.
 - Reply, forward and starred previews show the first frame.
+- **(step-2)** `ui/stickers/StickerLibraryScreen.kt` has a plain `StickerThumbnail(model: String)` over `AsyncImage`,
+  used by `StickerCell` and the pack rows. Replace its body with `StickerImage`, so there is one sticker renderer.
+- **(step-3)** A `STICKER` or `GIF` row's `localUri` is null until its download lands. It stays null for a sticker that was
+  refused, whose bytes did not hash to `stickerId`. The bubble renders from `mediaUrl` then. A sticker's `localUri` is
+  the shared file in `filesDir/stickers/`, and a GIF's is its copy in `filesDir/documents/`.
+- **(step-3)** A GIF's `mediaWidth` and `mediaHeight` are null when its header could not be read at send. The layout
+  needs a fallback shape.
+- **(step-3)** `MessageBubble`'s `copyableText` falls through to `content` for a sticker, which is its emoji. Add
+  `STICKER` to the types with nothing to copy.
+- **(step-3)** `ui/components/MessageTypeLabel.kt` has `stickerLabel(emoji)`. `ForwardMessagePanel` shows a labelled
+  icon for both types until this step gives it the first frame.
 - Test: one Robolectric test for the type dispatch.
+
+**Shipped** `da2eaf18` (2026-10-03) — tier: mid, tagged mid. skills: none. Reviewer models: none.
+Departures (for sign-off):
+- A tap on a GIF does nothing. The fullscreen viewer has no animated decoder and its gallery lists photos only, so it would show a still. A GIF has no *Save image* either.
+- `MessageBubbleCallbacks.onStickerClick` exists and `ChatScreen` does not set it. Step 5 wires the sheet.
+- Time and ticks under a sticker follow the grouping rule of every bubble: they show on the last message of a group.
+- A sticker's forwarded line and reply preview sit above it on the chat background, 160 dp wide. A deleted sticker is the usual tombstone bubble.
+- `StickerImage(model, animated)` shows the first frame with `animated = false`. The library grids, and every preview through `ReplyImageThumbnail`, are still. The starred list got a 40 dp thumbnail for both types.
+- The reply preview moved into `ReplyPreviewRow`, to take register pressure off `MessageBubble`.
+- The dex register check from `docs/GOTCHAS.md` did not run: the session's allowlist refused `unzip` and `dexdump`. `javap` shows `MessageBubble` at 216 locals and 32 stack slots, which is 4 locals fewer than before the move. A debug build on a device is the real check (`docs/BACKLOG.md`).
+- Not user-visible, because no screen sends either type yet. No CHANGELOG entry and no version bump; step 5 carries both. Nothing ran on a device.
 
 ### Step 5 — Stickers tab in the composer (UI + state)
 
 Stickers and GIFs are reached through the island panel. The emoji panel gains tabs and takes the
 keyboard's place, as it does today. This is variant A of the prototype on branch
 `prototype/sticker-gif-picker`; `ui/chat/prototype/VariantAIsland.kt` there is the reference for layout.
+
+**Approach**
+- Order: `domain/util/StickerSearch.kt` and its test, then `PickerTab` / `PickerSelection`, `OverlaysState`, `ChatInfoManager`,
+  `ChatMessageSender` and `ChatMessageActions`, then `picker/StickerLibraryTab.kt`, `ComposerPickerPanel.kt`,
+  `StickerActionsSheet.kt`, then the `ChatScreen` and `NavGraph` wiring, then the docs.
+- `StickerSearch` stays pure, so it takes emojis, not a query. The tab turns the query into emojis with `EmojiSearchData`,
+  which lives in `ui/chat/picker`.
+- The composer declares two tabs, Emoji and Stickers. The GIFs tab is step 11's, behind its flag.
+- `ChatInfoManager` combines `observePacks` and `observeRecents` and writes packs, recents and the favourite ids in one update.
+- The favourite toggle lives in `ChatMessageActions`, which has `MessageRepository` for `ensureLocalFile`. It serves the
+  bubble's sheet and the grid's long press.
+- A suggestion is a sticker tagged with exactly the composer's text, so no emoji detection is needed. Picking one sends
+  it and clears the composer.
+- The Recents shelf is frozen per open panel (`docs/GOTCHAS.md`, list order), because every send reorders it.
+- `ChatScreen` gains one parameter, `onImportStickersClick`, and the new UI sits in its own composables to keep the
+  register count of `ChatScreen` down.
+- Tests: `StickerSearchTest`, two new cases in `PickerPanelTest`, `ChatInfoManagerStickerTest`, `ChatMessageSenderStickerTest`,
+  `ChatMessageActionsStickerTest`, `StickerLibraryTabTest` (Robolectric).
+- Further skill intended: `simplify`, since the diff will pass 600 lines.
 
 - The picker row keeps `PickerPanel`'s left-aligned order: search button, island, backspace key.
   A centred island with the two buttons pinned to the edges was tried and rejected by the owner.
@@ -221,9 +403,42 @@ keyboard's place, as it does today. This is variant A of the prototype on branch
 - `ChatInfoManager` mirrors packs and recents into `OverlaysState` in one `.update {}`.
   `ChatMessageSender.sendSticker` sends and calls `markUsed`.
 - Tapping a sticker bubble opens a sheet: **Add to favourites**.
+- **(step-2)** `ui/stickers/StickerLabels.kt` has `StickerPack.label()`, which names the `FAVOURITES` and `SAVED`
+  packs. `StickerCell` in `StickerLibraryScreen.kt` is the grid cell, with click callbacks that hand the id back.
+  Use both in the tab. `Routes.STICKERS` exists.
+- **(step-3)** `sendStickerMessage(chatId, stickerId, packId)` decides itself whether the pack id is shared: only for a
+  `USER` or `INSTALLED` pack. Pass the pack the user picked from, and null from Recents. It fails with a message fit to
+  show when the library does not hold the sticker.
+- **(step-3)** A received sticker has a `stickers` row and no pack item once its file is downloaded and checked, so
+  `setFavourite` works for it. A message whose `localUri` is null has no row yet. Call
+  `MessageRepository.ensureLocalFile(message)` first; it fails for a sticker that was refused.
+- **(step-4)** The tap on a sticker bubble is `MessageBubbleCallbacks.onStickerClick`, which `ChatScreen` does not set
+  yet. Grid cells use `StickerImage(animated = false)` through `StickerThumbnail`. This step carries the CHANGELOG
+  entry for the bubbles too, and should run the dex register check on `MessageBubble` (`docs/GOTCHAS.md`).
 - Tests: `StickerSearchTest`, `PickerPanelTest` (two tabs draw the island; one-tab hosts unchanged),
   `ChatInfoManager` and `ChatMessageSender` tests.
 - Docs: rewrite `docs/BACKLOG.md` §4.6, add *Pending on-device verification* items.
+
+**Shipped** `daf5a088` (2026-10-04) — tier: mid, tagged mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The composer declares two tabs, Emoji and Stickers. The GIFs tab of the prototype is step 11's, behind its flag.
+- `StickerSearch` takes emojis, not a query. `EmojiSearchData` lives in `ui/chat/picker`, and `domain/util` may not import it. `StickerLibraryTab` turns the query into emojis.
+- A suggestion is a sticker tagged with exactly the composer's text. No emoji detection runs. A text with a letter, a digit or a space offers nothing, so a keycap emoji offers nothing either.
+- A pick from the suggestion strip sends the sticker and clears the composer. The strip shows at most 24 stickers.
+- The favourite toggle is `ChatMessageActions.setStickerFavourite`, not in `ChatInfoManager`. It needs `MessageRepository.ensureLocalFile`. `ChatViewModel.toggleStickerFavourite` decides the direction from `OverlaysState.favouriteStickerIds`.
+- `OverlaysState` has a third field, `favouriteStickerIds`, written in the same update as packs and recents.
+- The sheet reads *Remove from favourites* for a sticker that is one. A long press in the grid toggles the same way. Each shows a snackbar.
+- The Recents shelf holds its order while the panel is open. It follows when a sticker joins it.
+- A shelf with no stickers is left out of the pack row. A search result is sent with the id of the first pack that holds it.
+- `ChatScreen` has a new parameter, `onImportStickersClick`. `EmojiHandlerPanel` gave its backspace key to a shared `PickerBackspaceKey`.
+- `StickerCell` sets a test tag, `sticker:<id>`, for every host (`/simplify`).
+- Tests: `ChatStickerManagersTest` covers the three managers in one file. `ComposerPickerPanelTest` covers the tab and the strip. `PickerPanelTest` already had the island and the one-tab cases, and is unchanged.
+- `/simplify` was intended from the start, because the diff passes 600 lines. It took: shared test builders, the named `when` branches in `ComposerPickerPanel`, the suggestion search keyed on the emoji and not on the text, one remembered pick function for the grid.
+- `/simplify` findings not taken: a `toggleFavourite` in `StickerRepository` (noted in step 6), deriving the favourite ids at the read sites, remembering `ComposerPickerCallbacks` (the screen builds its callback bundles inline everywhere), a search debounce, an index of tags per library.
+- The dex register check did not run: the allowlist refused `unzip` again. `javap` shows `ChatScreen` at 112 locals and 54 stack slots. `MessageBubble` is untouched. A debug build on a device is the real check (`docs/BACKLOG.md`).
+- CHANGELOG: one entry in `[UNRELEASED] [1.38.0]` for this step and the bubbles of step 4. The section was a `feat` already, so no bump. The entry's own hash is added in the `docs(plan)` commit.
+- Nothing ran on a device or an emulator. The checklist is in `docs/BACKLOG.md`.
+- The driver's first gate run was red: the test worker's JVM died with `SIGSEGV` in `libjvm.so` before any test reported (`app/hs_err_pid951948.log`, ignored by git). No code changed for it. `./gradlew test assembleDebug` passed on the same commit before and after that run.
 
 **‖ Checkpoint.** Sending and receiving stickers is complete. Device pass between two accounts.
 
@@ -239,6 +454,44 @@ A sync engine and new security rules.
   fetched when first displayed. Sign-out clears the library rows.
 - The sticker sheet gains **View pack**: fetch the message's `stickerPackId`, preview it, **Add pack**
   copies it as `INSTALLED`. A pack already installed says so.
+- **(step-1)** `StickerDao.deletePack` deletes the row outright, so a delete leaves nothing to sync. Add a
+  tombstone state to `StickerSyncState` and filter it out of `observePacks`.
+- **(step-1 /code-review)** `sticker_packs.importKey` is unique. Back it up in the manifest and restore by it:
+  a restored pack whose key a local pack already has must merge into that row, not insert beside it. This
+  is also what keeps one `FAVOURITES` and one `SAVED` pack (keys `kind:FAVOURITES`, `kind:SAVED`) when a
+  favourite was made before the restore arrived. Without the key in the backup, a re-import after a restore
+  makes a second pack.
+- **(step-1)** A restored `stickers` row arrives before its file. `Sticker.localPath` names where the file will
+  be, so a renderer must handle a path with no file yet. Validate restored sticker ids with
+  `StickerFiles.isValidId`; `StickerRepositoryImpl` drops rows that fail it.
+- **(step-1 /simplify)** `StickerDao` leaves `insertItems`, `deleteItems` and `insertPack` public beside the
+  transaction methods that mark a pack `PENDING` (`TECH_DEBT.md`). The worker and the restore must not
+  change a pack through them without setting `syncState`.
+- **(step-2 /simplify)** `StickerLibraryViewModel.WHATSAPP_PACK_NAME` is the loose pack name the WhatsApp route
+  passes, and the repository stores it in the import key `loose:WhatsApp`. Once that key is backed up, the
+  constant must not change. Move it into the repository if the name is ever to be translated.
+- **(step-2)** Only the library screen keeps the `FAVOURITES` pack out of the move targets. `moveStickers` accepts
+  it. If favourites sync differently from packs, refuse it in the repository.
+- **(step-2)** An import runs in `viewModelScope`. If the sync worker is to start after an import, enqueue it from
+  the repository, not from the screen.
+- **(step-3)** `stickers.remoteUrl` exists. Only `OutboxSender.withStickerUrl` sets it, after
+  `StickerObjectSource.ensureUploaded`. The worker's `ensureUploaded` for every sticker must set it too.
+- **(step-3 /simplify)** `OutboxSender` owns the lock per sticker id and the `remoteUrl` write. Move both into one class
+  in `data/sticker` that the worker and `OutboxSender` call, so a send and the sync exclude each other. Do not add a
+  second lock.
+- **(step-3)** Anything that stores a sticker file and writes its row outside an import must hold `StickerFiles.rowLock`
+  for both. A restored sticker's file should come through `StickerDownloads.ensureLocal`, which does that and checks the hash.
+- **(step-3)** A sticker message from an `INSTALLED` pack carries that pack's own id, not its `originPackId`. Decide
+  which one **View pack** opens, and what "already installed" compares.
+- **(step-3 /code-review)** A sticker forwarded from a device that does not hold it keeps the first sender's `mediaUrl`
+  and `stickerPackId`.
+- **(step-5)** The sticker sheet is `ui/chat/StickerActionsSheet.kt`, opened from `stickerSheetMessage` in `ChatScreen`.
+  **View pack** is a second row there.
+- **(step-5)** The composer's Stickers tab draws `Sticker.localPath` through `StickerCell`. A restored row whose file
+  has not arrived shows the broken-image mark there, and a tap sends it. Fetch the file when the cell is first shown.
+- **(step-5 /simplify)** `ChatViewModel.toggleStickerFavourite` reads `OverlaysState.favouriteStickerIds` and then calls
+  `setFavourite`. Two quick taps both read the old state. If favourites sync, give `StickerRepository` a
+  `toggleFavourite` that decides inside its own transaction.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
@@ -252,7 +505,16 @@ returns; a second account adds a pack from a received sticker.
 - `lottie-compose` dependency. `StickerFormat.LOTTIE`. `data/sticker/LottieContainer.kt`: gzip or zip
   to the animation JSON, with a size cap and a parse guard.
 - Importers accept `.was` and `.tgs`. A first-frame PNG thumbnail is written at import for grids.
+- **(step-1)** The importer tells inputs apart by their first bytes, not by name: `StickerPackArchive.isArchive`
+  for a zip, else `StickerFiles.store`, which accepts WebP only. Add the gzip header there. A `.was` that is
+  a zip must be told from a `.wastickers` pack by its entries. `StickerPackArchive.read` hands over `.webp`
+  entries only, and `WhatsAppStickerFolder` lists `.webp` names only.
 - `StickerImage` switches on format, so the bubble, the picker and the library all render Lottie.
+- **(step-4)** `StickerImage` takes `model: Any` and no format. The bubble has `Message.mimeType` and the library has
+  `Sticker.format`; give it a format parameter. `ReplyImageThumbnail` and the forward preview draw the first frame
+  with a plain `AsyncImage`, which cannot read Lottie, so they need the PNG thumbnail.
+- **(step-5)** The composer's Stickers tab, its pack row and the suggestion strip draw `Sticker.localPath` through
+  `StickerCell` and `StickerThumbnail`. For a Lottie sticker they need the PNG thumbnail.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
 ### Step 8 — Make your own stickers
@@ -267,6 +529,11 @@ returns; a second account adds a pack from a received sticker.
   and file it in `docs/BACKLOG.md`.
 - Without Play services the flow skips the cutout and offers crop only.
 - Entry points: **Create** on the library screen and a **+** in the picker's pack row.
+- **(step-2)** The library screen's import rows are the first items of `PackList` in `StickerLibraryScreen.kt`, and
+  its callbacks are the `StickerLibraryActions` bundle. **Create** goes next to them.
+- **(step-5)** The picker's pack row is the `LazyRow` in `ui/chat/picker/StickerLibraryTab.kt`. The **+** is a last item
+  there, and its callback is a new field of `ComposerPickerCallbacks`. `ChatScreen` hands it to `NavGraph` like
+  `onImportStickersClick`.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
@@ -281,6 +548,14 @@ returns; a second account adds a pack from a received sticker.
   `SAVED` pack and sent with `sendStickerMessage`.
 - `sendMediaMessage` sends an unedited `image/gif` as a `GIF`, which covers the gallery and the share
   sheet. An edited one is a JPEG by then and stays an `IMAGE`.
+- **(step-1)** `StickerFiles.store` refuses anything that is not WebP, and Gboard stickers are often PNG. Either
+  add PNG to `StickerFormat` with its own container check, or convert before the import.
+- **(step-1)** `importFrom(listOf(uri))` with no pack name is the import into `SAVED`. Its result's `packIds` is
+  empty when the sticker was already there, so find the sticker by its hash, not by the result.
+- **(step-3)** `sendGifMessage` refuses a type that is not an image type and a file over 8 MB (`MAX_GIF_BYTES`).
+  `sendMediaMessage` still sends `image/gif` as an `IMAGE`; the branch this step adds goes there.
+- **(step-5)** A sticker from the keyboard is sent through `ChatViewModel.sendSticker(stickerId, packId = null)`, which
+  also marks it used.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -314,6 +589,14 @@ two functions. The `wizard` skill can script this.
 - Stickers tab: an **Online** entry in the pack row and a *More online* section under a local search.
   A pick is downloaded, imported into `SAVED` and sent; long-press adds it to favourites or a pack.
 - A GIF pick downloads the full rendition through the proxy, then calls `sendGifMessage`.
+- **(step-1)** `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. Keep the
+  download there, or the import refuses it.
+- **(step-5)** The composer's tabs are `COMPOSER_TABS` in `ui/chat/ComposerPickerPanel.kt`, and its `when` names
+  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the flag is on, and refresh the
+  `PickerTab` KDoc, which says nobody declares `GIF`.
+- **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
+  `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
+  `ComposerPickerCallbacks`.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 

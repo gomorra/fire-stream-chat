@@ -190,6 +190,27 @@ internal class FakeMessageRepository : MessageRepository {
         return Result.success(msg)
     }
 
+    override suspend fun sendStickerMessage(chatId: String, stickerId: String, packId: String?): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(), chatId = chatId, type = MessageType.STICKER,
+            stickerId = stickerId, stickerPackId = packId,
+        )
+        lastSentMessage = msg
+        return Result.success(msg)
+    }
+
+    override suspend fun sendGifMessage(chatId: String, uri: String, mimeType: String, caption: String): Result<Message> {
+        consumeFailure()?.let { return it }
+        val msg = Message(
+            id = UUID.randomUUID().toString(), chatId = chatId, content = caption, type = MessageType.GIF,
+            localUri = uri, mimeType = mimeType,
+        )
+        lastSentMessage = msg
+        lastSentMimeType = mimeType
+        return Result.success(msg)
+    }
+
     override suspend fun addReaction(
         chatId: String,
         messageId: String,
