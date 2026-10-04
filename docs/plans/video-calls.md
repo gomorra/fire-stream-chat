@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, steps 1 and 2 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
+Status: approved, steps 1 to 3 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
 ## Context
 
@@ -75,9 +75,10 @@ picture-in-picture from the docked card, a call card outside the call's chat.
 - **Live state is per person:** `media.<uid>.camera` and `media.<uid>.mic` on the call document,
   written by that person. The other side shows the avatar while `camera` is false, and shows video
   only after the first frame has arrived.
-- **Video is available when both sides agreed to send and receive on the video line.** An older app
-  answers without it, and an older caller offers none. `PeerSession` reads this from the negotiated
-  direction, so no version field is needed.
+- **Video is available when both sides agreed to send and receive on the video line.** `PeerSession`
+  reads this from the negotiated direction. The caller offers the line only to a callee whose user
+  document carries `callVideoLine`, because an older app crashes on an offer with a video line. An
+  older caller offers none.
 - **`PeerSession` owns one connection to one remote person.** `CallService` owns the call: the
   foreground state, the notification, the audio session, the local media, and a map of sessions.
   A 1:1 call has one session. A group call has up to three.
@@ -336,6 +337,119 @@ Departures (for sign-off):
 
 ### Step 3 — Camera and the video line — skills: code-review; model: max
 
+**Approach**
+
+1. Dependencies first: `webrtc` to the newest 1.3.x that Gradle resolves, plus
+   `stream-webrtc-android-ui`. Then `WebRtcPeerConnectionFactory` (`EglBase`, the video codec
+   factories, a video source and track, the dispose order) and the new `LocalCamera`.
+2. `PeerSession`: a video transceiver when offering, the offered one set to `SEND_RECV` when
+   answering, `setCamera`, `videoAvailable`, and an event when the video line is negotiated. The
+   camera track is attached only to a line both sides agreed on, under a lock the signalling
+   thread never takes.
+3. The new `CallVideoSinks`, then the state: `CallParticipant`, `CallStateHolder.participants`,
+   the four new fields of `CallUiControls`.
+4. Signalling: `CallSignalingData.media`, `setMedia` through `CallSignalingSource`,
+   `FirestoreCallSource`, the pocketbase stub and `CallRepository`.
+5. Audio: `CallAudioRoutePolicy.resolve(preferSpeaker)`, `CallAudioRouter`, `ProximityLock`.
+6. `CallService` last: the three actions, the foreground type, the camera following the screen,
+   the media writes through one collector, the remote media and first frames into `participants`,
+   and the status of the call document handled once per change. Then the manifest and the docs.
+7. Tests: `PeerSessionTest`, new `CallVideoSinksTest` and `LocalCameraTest`,
+   `CallAudioRoutePolicyTest`, `CallAudioRouterTest`, `ProximityLockTest`, `CallStateHolderTest`,
+   `FirestoreCallSourceTest`.
+8. The code contradicts the spec in three places. None of the three touches a decision or the
+   model. A fourth finding does, see **Decision taken** below.
+   - The camera track does not join `localTracks`. The video line is a transceiver without a
+     track, and `setCamera` attaches the track later, so the step-1 note about `addTrack` covers
+     the microphone only.
+   - `CallStateHolder.reset()` has no caller, so the controls of one call are still set when the
+     next one starts. The service has to reset them at the start of every call, or `cameraOn`
+     would carry over as mute does today.
+   - This session cannot make the two emulator checks. No device is attached, the runner's
+     allowlist has no `emulator` command, and no screen shows a video tile before step 4. The
+     checks (overlapping tiles, the emulator's camera) go to `docs/BACKLOG.md`. The renderer stays
+     behind `CallVideoSinks.createView`, which returns a plain `View`.
+9. Skills: `code-review` (tagged), and `simplify` because the diff is concurrency-heavy and will
+   pass 600 lines.
+10. The decision below, built last. `AuthSource` writes and reads `callVideoLine` on
+    `users/{uid}`. `AuthRepository.announceCallVideoLine()` runs when the app starts and after a
+    sign-in. `CallRepository.createCall` reads the callee's field before it creates the call
+    document and returns it with the call id, so nothing waits between the ring and the offer.
+    `CallService` passes it to `PeerSession(offerVideoLine)`. The `media` writes move into a new
+    `CallMediaPublisher`, a plain class, so the rule that an app without video never sees them has
+    a test. Tests: `CallRepositoryImplTest`, `CallMediaPublisherTest`, `FirebaseAuthSourceTest`,
+    `AuthRepositoryImplCallVideoLineTest`, and new rows in `PeerSessionTest`.
+
+**Decision taken** (2026-10-04)
+
+Answer: a capability on the user document. The caller offers the video line only to a callee that
+can take it.
+
+- A current app writes `callVideoLine: true` to `users/{uid}` when it starts.
+- The caller reads the callee's document before the offer. It adds the video line only when the
+  field is true.
+- A missing field offers no video line. So does a read that fails or takes too long.
+- `PeerSession` is told whether to offer the video line. Without it the offer is the one a
+  released app gets today.
+- A call started as video goes out without the line too when the callee lacks the field. It runs
+  as a voice call with the camera button disabled.
+- The side that answers needs no check. A released app that calls offers no video line.
+- The check sits in the 1:1 call path, where a released app can be the callee.
+- Known limit: a phone that goes back to an older build keeps the field, and a call to it crashes
+  it until it updates.
+- Tests: the offer without a video line, and the read's four outcomes (true, missing, failed, too
+  slow).
+- Docs: the field in `SCHEMA-FIRESTORE.md`, the crash below in `GOTCHAS.md`.
+
+Why: a released app that is called crashes on an offer with a video line.
+
+- Its factory has no video codecs (`WebRtcPeerConnectionFactory` at `v1.38.0`). WebRTC logs
+  *No video codecs in common* and accepts the line. It then builds a receive stream for the
+  caller's video stream from an empty codec list and aborts the process: `front() called on an
+  empty vector`, SIGABRT in `libjingle_peerconnection_so.so`, inside `setRemoteDescription`. No
+  error comes back, so the released `CallService` cannot end the call. The app dies when the
+  callee answers, voice calls included.
+- Checked on the emulator with a probe app: library 1.3.0, a factory without video codecs and the
+  released constraints, answering this step's offer. Offer and answer only, no media.
+
+  | Case | Result |
+  |---|---|
+  | This build calls a released app, offer with the video line | The released side aborts |
+  | This build calls a released app, offer without a video line | Negotiates as today |
+  | A released app calls this build | Negotiates, no video line |
+  | Both sides current | The video line is agreed as `SEND_RECV` on both sides |
+
+- Libraries 1.3.0 and 1.3.10 carry the same WebRTC source stamp, 2024-04-15.
+- A released app that places the call is safe. It applies the answer again on every snapshot of
+  an answered call document, and ends the call when that fails. The `media` writes of this step
+  change the document after the answer. The service therefore writes `media` only once the session
+  reports the video line as agreed, which never happens with an older app. `CallMediaPublisher`
+  holds that rule, and `CallMediaPublisherTest` is its regression test.
+
+Not chosen:
+
+- Both sides need the current app. An updated phone would crash every phone that has not updated.
+- The video line only on calls started as video. Such a call still carries the line.
+- A second offer after the call connects. `PeerSignaling` and `PeerSession` carry one offer and
+  one answer per call.
+
+**Shipped** `70b59566` (2026-10-04) — tier: max, tagged max. skills: code-review, simplify, changelog-release. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, sonnet, opus.
+Departures (for sign-off):
+- The decision as built: the caller's read sits in `CallRepository.createCall`, before the call document exists, and not in `CallService`. Creating the document rings the callee, who answers by fetching the offer once, so nothing may wait between the ring and the offer. `createCall` returns `OutgoingCall(callId, videoLine)` and waits at most three seconds. `CallActivity` passes `videoLine` to `CallService.startOutgoing`.
+- The app writes `callVideoLine` at every process start (`FireStreamApp`, a start by a push included) and when an existing user signs in. A new user document carries the field from its creation. The field is never written as false.
+- A new class, `CallMediaPublisher`, holds the `media` writes and the rule that a call without an agreed video line is never written to. `CallMediaPublisherTest` is the regression test the decision owed.
+- **The build gate ran under a private Gradle home.** `~/.gradle/caches/8.11.1/transforms` holds about 110 zero-byte `metadata.bin` files, all written at 12:52 on 2026-10-04. `./gradlew assembleDebug` fails on them at `checkFirebaseDebugDuplicateClasses`, and will for every step until those directories are deleted. This session did not touch the shared cache. It built both flavors with `./gradlew -g <worktree>/build/gradle-home-step3 --no-daemon assembleDebug` and deleted that directory afterwards. Both unit test suites ran on the shared Gradle home. `docs/GOTCHAS.md` § *Build tooling* has the entry.
+- CHANGELOG: one `Fixed` entry under a new `[UNRELEASED] [1.39.0]`, because the call's controls now start fresh with every call and a mute no longer shows on the next one. `main` has a `[1.38.0]` section this branch lacks, so the merge will conflict there. `scripts/check-changelog-header.sh` was refused by the session's permissions; `v1.39.0` is not a tag.
+- `stream-webrtc-android` went from 1.3.0 to 1.3.10, with `stream-webrtc-android-ui` at the same version.
+- The camera track does not join `localTracks`. The video line is a transceiver without a track, and `setCamera` attaches the track once both sides agreed.
+- `CallStateHolder.beginCall` gives every call fresh controls. `reset()` still has no caller.
+- The two emulator checks (overlapping tiles, the emulator's camera) were not made. No screen shows a tile before step 4. They are in `docs/BACKLOG.md`, and step 4 has a note.
+- /code-review fixes: the release of a call's media guards each step, silences the microphone first, and leaks the factory when a step failed. An action without a call stops the service by start id. A camera that fails to open sets the foreground type back. The sign-in no longer waits for the announcement.
+- Not done, from /code-review: tests for `CallService`'s camera switch, its status handling and `onRemoteMedia` (step 7 has a note), the speaker default of a video call that runs without a video line, and the rotation during the capability read (both noted in step 4).
+- Not done, from /simplify: screen visibility as tokens on `CallStateHolder` (noted in step 4a), `CallVideoSinks` as the owner of the EGL context (noted in step 4), skipping the first `media` write of the default state, and dropping `PeerSession.videoAvailable`, which only tests read and the plan names.
+- `TECH_DEBT.md` has two new entries: `mediaLock` is taken on the main thread, and the capability is written on every process start.
+- Nothing ran on a device. The checks are in `docs/BACKLOG.md` § *Pending on-device verification*.
+
 - `libs.versions.toml`: `stream-webrtc-android` to the current 1.3.x, and `stream-webrtc-android-ui`
   at the same version.
 - `WebRtcPeerConnectionFactory`: one `EglBase` per factory, `DefaultVideoEncoderFactory` and
@@ -430,6 +544,33 @@ buttons are B's: `SplitAnswerRow` in `VariantBSplit.kt`. Rewrite them properly; 
   `CallState.Live.video`. `CallActivity.EXTRA_VIDEO` starts a call as video, and nothing sets it
   yet. The ring's title is *Incoming Video Call* or *Incoming Voice Call*; the two ongoing-call
   notifications still say *Voice Call* for every call.
+- **(step-3)** `CallRepository.createCall` returns `OutgoingCall(callId, videoLine)`, and
+  `CallService.startOutgoing(…, video, videoLine)` takes both by name. `videoLine` comes from
+  `createCall` and never from a guess: an app without video crashes on an offer with a video
+  line. `CallActivity.outgoingIntent` carries only how the call was started.
+- **(step-3 /code-review)** `createCall` waits up to three seconds for the callee's capability
+  before the call document exists. Nothing is on screen during that wait. A rotation in it drops
+  the call without a word, because `onDestroy` cancels `activityScope` and the recreated activity
+  skips `handleIntent()`. Show that the call is being placed, and let the wait outlive a
+  configuration change.
+- **(step-3)** What the screen reads: `CallUiControls` (`cameraOn`, `cameraPaused`, `frontCamera`,
+  `videoAvailable`) and `CallStateHolder.participants`. A tile shows video while `cameraOn` and
+  `hasFrame` are both true. `videoAvailable` is false from the start of an outgoing call to an
+  app without video, and from the applied offer on the side that answers.
+- **(step-3)** `CallVideoSinks.createView(context, participantId)` makes a tile's view, and
+  `CallVideoSinks.LOCAL` is the self view. A view is single-use: a tile that comes back asks for
+  a new one.
+- **(step-3)** The service starts every call as not shown and never asks for a permission. A
+  screen calls `CallService.sendScreenVisible(true)` once the call exists and again on every
+  change, and `sendSetCamera(true)` only with `CAMERA` granted.
+- **(step-3 /code-review)** A call started as video to an app without video still plays on the
+  speaker by default, because `callVideo` alone sets `preferSpeaker`. On screen it is a voice
+  call. Decide here whether it starts on the earpiece.
+- **(step-3 /simplify)** `CallVideoSinks.open()` hands a view made before the call its EGL context
+  late and replays its surface by hand. If the first emulator run shows trouble there, let
+  `CallVideoSinks` own the one `EglBase` and pass its context into the factory.
+- **(step-3)** The two emulator checks of risks 1 and 3 are still open, in `docs/BACKLOG.md`. This
+  is the first step with a screen that can make them.
 - `ArchitectureTest`: add `CallVideoSinks` to `UI_ALLOWED_DATA_IMPORTS` and name it in the
   allowlist entry of `TECH_DEBT.md`.
 - Tests (Robolectric): the camera button's three states, avatar or tile per participant state, the
@@ -471,6 +612,10 @@ strip are C's: `DockedCall`, `DockedStrip` and `DockedBody` in `VariantCDocked.k
   finishes without coming to the front.
 - Visibility: both activities report to the service. The call counts as visible while either does.
   The camera pauses only after one second with neither, so the hand-over does not blink.
+- **(step-3 /simplify)** `CallService.ACTION_SET_SCREEN_VISIBLE` carries one boolean, which cannot
+  say "visible while either activity shows". Replace it with a set of screen tokens on
+  `CallStateHolder`, which both activities inject, and a `screenShowing` flow the service
+  collects. That also removes the rule that a screen reports again once the call exists.
 - Leaving the chat for another screen, or the app, pauses the camera like any time the call is off
   screen. The call notification leads back to the stage.
 - Tests (Robolectric): what the card and the strip show for voice and for video, which size a call
@@ -565,6 +710,20 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   again and cancels a ring that lost a race with `cleanup()`. `onSessionConnected` calls
   `markVideo` a second time. All of that exists only because the call's state has no single
   thread. Delete it when the serial dispatcher lands, and keep one store.
+- **(step-3)** `PeerSession` takes `offerVideoLine`. A mesh session passes true: only an app with
+  group calls joins one, and every such app takes a video line. `CallMediaPublisher` writes the
+  1:1 call document only. A group call's `camera` and `mic` go to the member row.
+- **(step-3)** `LocalCamera` captures at a constant 1280×720 and 30 fps. `CallQuality` needs it
+  to take the size and the rate.
+- **(step-3 /code-review)** "The camera switch goes back off" exists in five forms in
+  `CallService`: `answerIncomingCall`, `onVideoLine`, `setCamera`, `startCamera` and the
+  camera's `onFailure`. Two are posted to the main thread with an identity check. On the serial
+  dispatcher each of them is one call of `setCamera(false)`. `mediaLock` then never runs on the
+  main thread, which closes its entry in `TECH_DEBT.md`.
+- **(step-3 /code-review)** `CallService` has no test for the camera switch (wanted, screen
+  visible, permission, `videoAvailable`, a refused foreground type), for the status handled once
+  per change in `observeCallDocument`, or for `onRemoteMedia`. Move the camera switch into a
+  plain class beside `MeshCoordinator` and test it there.
 - Tests: `MeshCoordinatorTest` (join, leave, reopen, second failure, the cap), `CallQualityTest`.
 
 ### Step 8 — Ringing a group — skills: code-review; model: strong

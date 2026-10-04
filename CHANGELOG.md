@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **The mute button starts every call unmuted.** After a call that ended muted, the next call showed the microphone as muted while it was live. The call's controls now start fresh with every call.
+- **The mute button starts every call unmuted.** After a call that ended muted, the next call showed the microphone as muted while it was live. The call's controls now start fresh with every call. (`70b59566`)
 
 ## [1.37.0] — 2026-10-03
 
