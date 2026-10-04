@@ -306,6 +306,7 @@ Departures (for sign-off):
 - `StickerFiles.rowLock` is a second, short lock beside the import lock, so a received sticker does not wait for a whole import. The refused-archive undo takes it too.
 - The two sticker fields cross `MessageSource` as one `StickerRef`. The PocketBase source accepts and ignores them, like every field its v0 schema lacks. `PocketBaseStickerObjectSource` uploads through `StorageSource`, which is still a stub there.
 - The Storage rule in this step's last bullet says `<=` now.
+- The console rules are published (owner, 2026-10-04). The catch-all there allowed every signed-in write, which would have overridden the `stickers/` block. It now reads `match /{folder}/{rest=**} { allow read, write: if request.auth != null && folder != 'stickers'; }`, beside the `stickers/` block from the last bullet.
 - The UI got labels only. `MessageBubble` is untouched, so until step 4 a sticker shows as a text bubble with its emoji.
 - `/code-review` findings not taken: `stickers.remoteUrl` is never cleared (`TECH_DEBT.md`), and the label sites keep their own wording.
 - `/simplify` findings not taken: one owner for "the url of a library sticker" (noted in step 6), a value type in place of `downloadFor`'s seven parameters, one shared HTTP fetch and one shared image-bounds probe, concurrent sticker downloads on chat open, a cap on the refusal set.
