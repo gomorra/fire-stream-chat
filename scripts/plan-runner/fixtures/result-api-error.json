@@ -1,1 +1,1 @@
-{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":429,"session_id":"s-api-error","num_turns":4,"total_cost_usd":0.88,"permission_denials":[],"result":"You've hit your limit\n· resets 3am","structured_output":null}
+{"type":"result","subtype":"success","is_error":true,"terminal_reason":"api_error","api_error_status":500,"session_id":"s-api-error","num_turns":4,"total_cost_usd":0.88,"permission_denials":[],"result":"API Error: 500\n· Internal server error","structured_output":null}

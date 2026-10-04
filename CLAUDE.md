@@ -130,14 +130,16 @@ scripts/run-plan.sh <plan-path> [--from N] [--to N] [--dry-run] [--cap <tier>] [
 - **The plan file is the state.** A step is done when a `**Shipped**` block sits under its heading. The step session writes it in a `docs(plan):` commit after its green code commit.
 - **Stops.** The driver stops on `needs_decision` (resume the printed session to answer), on `blocked`, and at every `‖` checkpoint. It never pushes.
 - **Plan edits during a run.** Commit them on main. For a cloud run, push them and pass `--sync-from origin/main`. Before each step the driver merges the plan file, and only that, into the branch as a `docs(plan): sync` commit. That is the one commit it makes. A conflict stops with exit 5 and prints the commit that records a hand merge.
-- **Pause.** Create `docs/plans/.runs/<run-id>.pause` to stop the run before its next step (exit 5). Run again to continue.
+- **Pause.** Create `docs/plans/.runs/<run-id>.pause` to stop the run before its next step, or during a usage-limit wait (exit 5). Run again to continue.
+- **Usage limit.** The driver reads every session's stream while it runs. At the usage limit it stops the session, because a cloud session would go on on cloud credits. It waits for the reset and resumes the same session. A reset over six hours away, or a seventh wait in one step, blocks the step (exit 3). Run again after the reset to resume it.
+- **Ctrl-C** stops the running session and exits 130.
 - **Partly hand-finished plans** need `**Shipped**` lines for their done steps, or `--from N`. Always `--dry-run` first.
 - **Retries.** A step that is still invalid after its one nudge, or gives up on the gate, re-runs once at the next effort level. The failed attempt is kept on a `plan-attempts/` branch. A fresh review session repairs a missed skill.
 - **`--variant NAME`** runs under `scripts/plan-runner/variants/NAME.env` on its own branch, worktree and log. Pass it on every re-run.
 - **`--base REF`** sets where a new plan branch starts.
-- **`scripts/plan-runner/report.sh <run-id>…`** prints cost, turns, nudges and grades per step.
+- **`scripts/plan-runner/report.sh <run-id>…`** prints cost, turns, nudges, usage-limit waits and grades per step.
 
-Contract and design: `docs/plans/done/plan-runner.md` (§5 covers everything since the first real step). Result schemas, prompt templates, variants, self-check and the stubbed end-to-end check live in `scripts/plan-runner/`.
+Contract and design: `docs/plans/done/plan-runner.md` (§5 and §6 cover everything since the first real step). Result schemas, prompt templates, variants, self-check and the stubbed end-to-end check live in `scripts/plan-runner/`.
 
 ## Architecture
 

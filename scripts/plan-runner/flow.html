@@ -69,7 +69,7 @@
     <h2>Who writes what</h2>
     <figure>
       <div class="canvas">
-        <svg viewBox="0 0 920 396" role="img" aria-label="Three actors and two stores. You start the driver in a terminal. The driver launches headless sessions and receives a result JSON. Sessions commit code and the Shipped block to the plan branch. The driver reads the branch, re-runs the gate there, commits nothing to it but a plan sync, and writes its log to the runs directory, which report.sh reads back for you.">
+        <svg viewBox="0 0 920 396" role="img" aria-label="Three actors and two stores. You start the driver in a terminal. The driver launches headless sessions and reads each one's stream while it runs, its result JSON last. Sessions commit code and the Shipped block to the plan branch. The driver reads the branch, re-runs the gate there, commits nothing to it but a plan sync, and writes its log to the runs directory, which report.sh reads back for you.">
           <defs>
             <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
               <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
@@ -89,12 +89,12 @@
           <line class="a" x1="220" y1="48" x2="358" y2="48" marker-end="url(#ah)"/>
           <text class="l" x="290" y="40" text-anchor="middle">run, re-run</text>
           <line class="a" x1="360" y1="80" x2="222" y2="80" marker-end="url(#ah)"/>
-          <text class="l" x="290" y="97" text-anchor="middle">notify, exit 0/2/3/4/5</text>
+          <text class="l" x="290" y="97" text-anchor="middle">notify, exit 0/2/3/4/5/130</text>
           <!-- driver <-> sessions -->
           <line class="a" x1="560" y1="48" x2="698" y2="48" marker-end="url(#ah)"/>
           <text class="l" x="630" y="40" text-anchor="middle">prompt, model, effort</text>
           <line class="a" x1="700" y1="80" x2="562" y2="80" marker-end="url(#ah)"/>
-          <text class="l" x="630" y="97" text-anchor="middle">result JSON</text>
+          <text class="l" x="630" y="97" text-anchor="middle">stream, read as it runs</text>
           <!-- stores -->
           <rect class="box" x="20" y="280" width="420" height="96" rx="5"/>
           <text class="m" x="230" y="312" text-anchor="middle">docs/plans/.runs/</text>
@@ -144,10 +144,12 @@ flowchart TD
   pend -- "yes" --> e2(["exit 2: needs a decision"])
   pend -- "no" --> pause{"pause file?"}
   pause -- "yes: removed" --> e5(["exit 5: stopped for you"])
-  pause -- "no" --> sync{"plan changed on the sync ref?"}
+  pause -- "no" --> cut{"a session of this step cut off during a usage-limit wait?"}
+  cut -- "yes: no sync mid-step" --> run
+  cut -- "no" --> sync{"plan changed on the sync ref?"}
   sync -- "merged cleanly: sync commit" --> top
   sync -- "conflict, or the merged plan does not check" --> e5
-  sync -- "no: or the plan is dirty, or --sync-from none" --> run[["run one step (next figure)"]]
+  sync -- "no: or the plan is dirty, or --sync-from none" --> run[["run one step (next figure): resume the cut-off session, or launch (a used-up window waits first)"]]
   run -- "validated" --> top
   run -- "needs_decision" --> e2
   run -- "blocked" --> e3(["exit 3: blocked"])
@@ -166,6 +168,11 @@ flowchart TD
 <pre class="mermaid">
 flowchart TD
   L["launch a fresh session: tier's model, effort, advisor, budget"] --> K{"what came back?"}
+  K -- "a usage limit: the stream says the window is used up, a 429, or the transcript says so" --> W["stop the session if it still runs; wait for the reset"]
+  W -- "reset within six hours, at most six waits this step" --> Rs["resume the same session"]
+  Rs --> K
+  W -- "pause file during the wait" --> P5(["exit 5: the next run resumes the session"])
+  W -- "a weekly limit, or the seventh wait" --> B
   K -- "budget spent, or no JSON at all" --> B(["exit 3: blocked"])
   K -- "ended without the result object" --> U
   K -- "a complete result" --> S{"status"}
@@ -189,7 +196,7 @@ flowchart TD
   Z --> L
 </pre>
       </div>
-      <figcaption>Validate means six checks the driver runs itself: HEAD moved; the Shipped line names a commit that is on the branch; the plan file is committed; nothing else is left uncommitted or untracked; the Gradle gate, re-run by the driver, is green (skipped for a docs-only diff); and every required skill ran, where required is the step's <code>skills:</code> tag plus what the diff tripwire demands. The escalated attempt is told what failed and starts from exactly what the first attempt started from, so an uncommitted answer of yours to a decision survives the reset. A step that escalated and then blocked resumes, on your next run, at the rung it had reached. A session that ends without its result object is nudged like an invalid one, and escalated if it does so again.</figcaption>
+      <figcaption>Validate means six checks the driver runs itself: HEAD moved; the Shipped line names a commit that is on the branch; the plan file is committed; nothing else is left uncommitted or untracked; the Gradle gate, re-run by the driver, is green (skipped for a docs-only diff); and every required skill ran, where required is the step's <code>skills:</code> tag plus what the diff tripwire demands. The escalated attempt is told what failed and starts from exactly what the first attempt started from, so an uncommitted answer of yours to a decision survives the reset. A step that escalated and then blocked resumes, on your next run, at the rung it had reached. A session that ends without its result object is nudged like an invalid one, and escalated if it does so again. Every session, the nudge, the review and the judge included, runs in the background while the driver reads its stream. At a usage limit the driver stops the session, waits for the reset and resumes the same session. It stops it itself because a cloud session would otherwise go on on cloud credits. The resume does not spend the nudge. A session with no id to resume is replaced by a fresh one, which is told the worktree holds an interrupted attempt.</figcaption>
     </figure>
   </section>
 
@@ -201,9 +208,10 @@ flowchart TD
         <tbody>
           <tr><td class="code go">0</td><td>Every step is shipped on the plan branch.</td><td>Read <code>report.sh &lt;run-id&gt;</code> and the departures in the Shipped blocks, then <code>merge --ff-only</code> and push.</td></tr>
           <tr><td class="code stop">2</td><td>A session hit something that would change a decision or the design of the plan. It wrote a Decision needed block and committed nothing.</td><td>Resume the printed session and answer, or rename the block to Decision taken in the branch's plan. Run again.</td></tr>
-          <tr><td class="code stop">3</td><td>Blocked: budget spent, no usable result, an environment or spec problem, or still failing after the nudge and the escalated attempt.</td><td>Look at the worktree. Resume the session or fix by hand, then run again; a step you finished by hand is validated before anything else.</td></tr>
+          <tr><td class="code stop">3</td><td>Blocked: budget spent, no usable result, an environment or spec problem, still failing after the nudge and the escalated attempt, or a usage limit the runner does not wait for (a reset over six hours away, or a seventh wait in one step).</td><td>Look at the worktree. Resume the session or fix by hand, then run again; a step you finished by hand is validated before anything else. After a usage limit, run again once it has reset: the cut-off session is resumed.</td></tr>
           <tr><td class="code go">4</td><td>A <code>‖</code> checkpoint after a step this run shipped.</td><td>Sign off the departures. Run again to continue.</td></tr>
-          <tr><td class="code go">5</td><td>Stopped between steps for you: your pause file, or a plan sync that did not merge cleanly. The pause file is removed; a failed sync wrote nothing to the worktree and left the merge in <code>&lt;run-id&gt;.plan-sync.conflict.md</code>.</td><td>After a pause, run again to continue. After a failed sync, merge the plan by hand and record it with the one commit the driver printed, or run again with <code>--sync-from none</code>.</td></tr>
+          <tr><td class="code go">5</td><td>Stopped for you: your pause file, between steps or during a usage-limit wait, or a plan sync that did not merge cleanly. The pause file is removed; a failed sync wrote nothing to the worktree and left the merge in <code>&lt;run-id&gt;.plan-sync.conflict.md</code>.</td><td>After a pause, run again to continue; a session paused in a wait is resumed. After a failed sync, merge the plan by hand and record it with the one commit the driver printed, or run again with <code>--sync-from none</code>.</td></tr>
+          <tr><td class="code stop">130</td><td>Interrupted: Ctrl-C or SIGTERM. The driver stopped its running session and logged <code>interrupted</code>.</td><td>Run again: a step is launched afresh and sees what the stopped session left, and a session stopped in a usage-limit wait is resumed.</td></tr>
           <tr><td class="code stop">1</td><td>Usage or configuration error, or a bug in the driver itself.</td><td>Read the message. Nothing was launched, or the trap names the line.</td></tr>
         </tbody>
       </table>
@@ -240,7 +248,7 @@ flowchart TD
     <p><code>--variant b</code> loads <code>scripts/plan-runner/variants/b.env</code> over the driver's tunables, which decide only three things per tier: model, effort, advisor. The same file can switch the judge on and escalation off. Everything the run produces is then named after <code>&lt;plan&gt;-b</code>: branch, worktree, log and result files, so two configurations of one plan sit side by side and <code>report.sh</code> can print them together. A step's own tags still win: <code>model: strong</code> keeps a step on the strong tier under every variant.</p>
   </section>
 
-  <footer>Drawn from <code>scripts/run-plan.sh</code> and <code>scripts/plan-runner/lib.sh</code> as of 2026-10-04. The contract is <code>docs/plans/done/plan-runner.md</code>; §5 covers escalation, variants, the review session and the judge, §6 the pause file and the plan sync.</footer>
+  <footer>Drawn from <code>scripts/run-plan.sh</code> and <code>scripts/plan-runner/lib.sh</code> as of 2026-10-04. The contract is <code>docs/plans/done/plan-runner.md</code>; §5 covers escalation, variants, the review session and the judge, §6 the pause file, the plan sync and the usage limit.</footer>
 </div>
 <!-- Standalone copy of the published page: opened from disk, the two flowcharts need mermaid loaded here. -->
 <script type="module">

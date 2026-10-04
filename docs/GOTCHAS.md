@@ -443,3 +443,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   stops matching at the first match there too, and only its own draining of the pipe keeps
   the writer alive. `scripts/plan-runner/lib.sh` read a shipped plan step as not shipped
   about one time in thirteen this way (2026-10-03, `efab2741`).
+
+- **A resumed `claude -p` session reports its cost cumulatively.**
+  `total_cost_usd` in the result of `claude -p --resume <id>` is the session's total so far, not
+  the invocation's. `--max-budget-usd` still caps each invocation. Summing every result therefore
+  counts a resumed session twice: video-calls step 2 read 15.05 USD instead of 7.82. Count each
+  result's increase over the same session's previous result, and give a resume what is left of its
+  budget. `scripts/plan-runner/report.sh` and `lib.sh` (`pr_cost_delta`, `pr_budget_left`) do.
+  A total below the previous one is a per-invocation figure from an older CLI. Seen on CLI 2.1.288:
+  0.0409 → 0.0478 over one resume (2026-10-03).
+
+- **A cloud session does not stop at the usage limit: it goes on on cloud credits.**
+  A headless driver that must stay on the subscription reads the session's stream
+  (`--output-format stream-json --verbose`) and stops the session itself. The signal is a
+  `rate_limit_info` with `status: "rejected"`, or a `unifiedWindows` entry at `utilization` ≥ 1.
+  Nothing in the CLI's output says that cloud credits are paying, and the stream's fields do not
+  show which pool pays. `scripts/run-plan.sh` stops the session on a desktop too, where it would
+  end at the limit by itself. Two cloud sessions, one of them a plan-runner step, were seen
+  working while `rejected`, with overage rejected too (2026-10-03).

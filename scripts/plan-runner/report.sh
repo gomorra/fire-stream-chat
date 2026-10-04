@@ -8,10 +8,13 @@
 # ndg = nudges (resume or fresh review) · esc = escalations · adv = advisor consults the
 # sessions reported · usd / turns / deny = summed over every session of the step, judge
 # excluded · min = first launch → validated, which includes any wait for the human ·
-# tests = @Test delta · judge = high/medium/low findings and the judge's own cost, or what a
-# failed judge cost. The header names the commit the run's branch forked from: two variants
-# are only comparable from the same base. Numbers only; reading the departures and the diffs
-# stays with the human.
+# wait = minutes spent waiting out usage limits · tests = @Test delta · judge = high/medium/low
+# findings and the judge's own cost, or what a failed judge cost. usd counts each result's
+# increase over its session's previous result, because a resumed session reports its cost so
+# far. A total below the previous one is a per-invocation figure from an older CLI and counts
+# whole. A result with no cost, from a session stopped before it wrote one, counts nothing.
+# The header names the commit the run's branch forked from: two variants are only comparable
+# from the same base. Numbers only; reading the departures and the diffs stays with the human.
 set -euo pipefail
 ROOT=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel)
 RUNS=${PLAN_RUNNER_RUNS_DIR:-$ROOT/docs/plans/.runs}
@@ -22,13 +25,20 @@ for id in "$@"; do
     [ -f "$log" ] || { echo "no log: $log" >&2; exit 1; }
     echo "== $id (base $(jq -rs 'map(select(.event == "launched" and .base != null) | .base) | unique | if length == 0 then "not recorded" else join(", ") end' "$log"))"
     {
-        printf 'step\tconfig\tatt\tndg\tesc\tadv\tusd\tturns\tdeny\tmin\toutcome\ttests\tjudge\n'
+        printf 'step\tconfig\tatt\tndg\tesc\tadv\tusd\tturns\tdeny\tmin\twait\toutcome\ttests\tjudge\n'
         jq -rs '
             def ts: sub("Z$"; "") | strptime("%Y-%m-%dT%H:%M:%S") | mktime;
+            def usd: reduce .[] as $x ({sum: 0, last: {}};
+                ($x.cost // 0) as $c | ($x.session // "null") as $s
+                | if $c <= 0 then .
+                  elif $s == "null" or $s == "" then .sum += $c
+                  else (.last[$s] // 0) as $p | .sum += (if $c >= $p then $c - $p else $c end) | .last[$s] = $c end)
+                | .sum;
             map(select(.step != null)) | group_by(.step) | map(
                 . as $e
                 | ($e | map(select(.event == "launched"))) as $l
-                | ($e | map(select(.event == "result"))) as $r
+                | ($e | map(select(.event == "result" and .kind != "judge"))) as $r
+                | ($e | map(select(.event == "resumed") | .waited_s // 0)) as $w
                 | ($e | map(select(.event == "validated")) | last) as $v
                 | ($e | map(select(.event == "judged")) | last) as $j
                 | ($e | map(select(.event == "judge_failed")) | last) as $jf
@@ -39,10 +49,11 @@ for id in "$@"; do
                     ndg: ($e | map(select(.event == "nudged" or .event == "review")) | length),
                     esc: ($e | map(select(.event == "escalated")) | length),
                     adv: ($r | map(.consults | select(. != null)) | if length == 0 then "-" else add end),
-                    usd: ($r | map(.cost // 0) | add // 0),
+                    usd: ($r | usd),
                     turns: ($r | map(.turns // 0) | add // 0),
                     deny: ($r | map(.denials // [] | length) | add // 0),
                     min: (if $v != null and ($l | length) > 0 then ((($v.ts | ts) - ($l[0].ts | ts)) / 60 | floor) else null end),
+                    wait: (if ($w | length) == 0 then null else ($w | add / 60 | round) end),
                     outcome: (if $v != null then "validated"
                         elif ($e | any(.event == "blocked")) then "blocked"
                         elif ($e | any(.event == "needs_decision")) then "needs_decision" else "open" end),
@@ -51,9 +62,9 @@ for id in "$@"; do
                     judge: (if $j != null then "\($j.high)/\($j.medium)/\($j.low) $\($j.cost * 100 | round / 100)"
                         elif $jf != null then "failed $\(($jf.cost // 0) * 100 | round / 100)" else "-" end) })
             | sort_by(.step | tonumber? // 0)
-            | (.[] | [.step, .config, .att, .ndg, .esc, .adv, (.usd * 100 | round / 100), .turns, .deny, (.min // "-"), .outcome, .tests, .judge]),
+            | (.[] | [.step, .config, .att, .ndg, .esc, .adv, (.usd * 100 | round / 100), .turns, .deny, (.min // "-"), (.wait // "-"), .outcome, .tests, .judge]),
               ["total", "", (map(.att) | add), (map(.ndg) | add), (map(.esc) | add), (map(.adv | numbers) | add // "-"), (map(.usd) | add * 100 | round / 100),
-               (map(.turns) | add), (map(.deny) | add), (map(.min // 0) | add), "", "", ""]
+               (map(.turns) | add), (map(.deny) | add), (map(.min // 0) | add), (map(.wait // 0) | add), "", "", ""]
             | @tsv' "$log"
     } | if command -v column >/dev/null 2>&1; then column -t -s $'\t'; else cat; fi
     echo

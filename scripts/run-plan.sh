@@ -23,9 +23,16 @@
 # A sync that cannot merge cleanly writes docs/plans/.runs/<run-id>.plan-sync.conflict.md,
 # prints the one commit that records a hand merge, and stops with exit 5.
 #
+# Usage limit: the driver reads each session's stream while it runs. It stops a session whose usage
+# window is used up, because a cloud session would go on on cloud credits. Then it waits for the
+# reset and resumes the same session. It waits at most USAGE_WAIT_MAX_S for one reset and
+# USAGE_RESUME_MAX times per step; past either, the step is blocked (exit 3). A pause file also stops
+# a wait (exit 5), and the next run resumes the session. Ctrl-C stops the running session and exits 130.
+#
 # Exit codes: 0 all steps shipped (or dry run) · 1 usage/config error ·
 #             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint ·
-#             5 stopped between steps for the owner: a pause file, or a plan sync that needs a hand merge
+#             5 stopped for the owner: a pause file between steps or during a usage-limit wait, or a
+#               plan sync that needs a hand merge · 130 interrupted (Ctrl-C or SIGTERM)
 #
 # The runner commits nothing but a plan sync, and never pushes. Every other commit on
 # plan/<name> is a step session's. The other thing it changes in the worktree: to escalate a
@@ -51,6 +58,13 @@ DEFAULT_BUDGET_USD=30      # per step; a `budget:` heading tag overrides, --budg
 NUDGE_BUDGET_USD=5         # the single fix-forward resume a step may get
 REVIEW_BUDGET_USD=8        # the fresh review session that stands in for the nudge when only skills are missing
 JUDGE_BUDGET_USD=7
+# The usage limit. One per line: e2e.sh sets them small with sed.
+USAGE_POLL_S=10            # a running session's stream is read this often for its usage-window state
+USAGE_WAIT_SLACK_S=90      # added to the reset time; also the shortest wait after a limit stop
+USAGE_WAIT_FALLBACK_S=3600 # the wait when no reset time is known
+USAGE_WAIT_MAX_S=21600     # a reset further away is not waited for (a weekly limit): the step is blocked
+USAGE_RESUME_MAX=6         # limit stops waited out per step, over its step, nudge, review and judge sessions
+USAGE_SLICE_S=60           # a wait sleeps in slices against the wall clock, and looks for the pause file in each
 GATE_TASKS=":app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug"
 NOTIFY_CMD=notify-send     # <cmd> "<title>" "<body>"; point at a phone bridge later
 PERMISSION_MODE=acceptEdits
@@ -156,6 +170,10 @@ RUNS=$(cd "$RUNS" && pwd)              # absolute: escalate writes into it from 
 LOG=$RUNS/$RUN_ID.log
 PAUSE=$RUNS/$RUN_ID.pause                        # the owner creates it; the next step boundary stops for it
 SYNC_CONFLICT=$RUNS/$RUN_ID.plan-sync.conflict.md
+# Session transcripts: <home>/projects/<cwd slug>/<session id>.jsonl. Override for the self-check.
+CLAUDE_HOME=${PLAN_RUNNER_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
+# The prompt that resumes a session after a usage-limit wait. e2e.sh's stub recognises it by its start.
+CONTINUE_PROMPT='This session was stopped at a usage limit, and the limit has reset. Carry on where you left off, and end with the JSON result object your instructions ask for.'
 if [ -n "$BASE_REF" ]; then
     git -C "$ROOT" rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null || { echo "--base: '$BASE_REF' is not a commit" >&2; exit 1; }
 fi
@@ -236,7 +254,7 @@ prepare_step() {
     # model only — a cheaper model thinking longer is the better trade.
     EFFORT=$(pr_tag_effort "$HEADING" "$(effort_for "$TAGGED_TIER")" || exit 1) || exit 1
     BUDGET=${BUDGET_OVERRIDE:-$(pr_tag_budget "$HEADING" "$DEFAULT_BUDGET_USD")}
-    NUDGED=0; SESSION_ID=''; RESULT_FILE=''; ATTEMPT=1; ATTEMPT_BLOCK=''; RUN_SKILLS=''; PRESTATE=''
+    NUDGED=0; SESSION_ID=''; RESULT_FILE=''; ATTEMPT=1; ATTEMPT_BLOCK=''; RUN_SKILLS=''; PRESTATE=''; WAITS=0
 }
 
 # The "## Advisor" section of the step prompt; empty when the step's tier has no advisor.
@@ -274,32 +292,270 @@ write_prompt() {
     printf '%s' "$PROMPT" > "$PROMPT_FILE"
 }
 
-claude_args() { # claude_args <budget> [--resume <id>]  → fills CLAUDE_ARGS
-    CLAUDE_ARGS=(-p --output-format json --json-schema "$(cat "$SCHEMA")"
+claude_args() { # claude_args <budget>  → fills CLAUDE_ARGS; run_session appends --resume
+    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$SCHEMA")"
         --model "$MODEL" --effort "$EFFORT" --max-budget-usd "$1"
         --permission-mode "$PERMISSION_MODE"
         --allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DISALLOWED_TOOLS[@]}"
         -n "plan $RUN_ID step $STEP")
     if [ -n "$ADVISOR" ]; then CLAUDE_ARGS+=(--advisor "$ADVISOR"); fi
-    if [ $# -ge 3 ] && [ "$2" = --resume ]; then CLAUDE_ARGS+=(--resume "$3"); fi
 }
 
-run_claude() { # run_claude <out-file> <prompt>  (cwd = worktree; a non-zero exit is a result, not an error)
-    (cd "$WT" && claude "${CLAUDE_ARGS[@]}" "$2" > "$1" 2> "$1.stderr") || true
+judge_args() { # judge_args <budget>  → fills CLAUDE_ARGS for the read-only judge (no acceptEdits)
+    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$JUDGE_SCHEMA")"
+        --model "$JUDGE_MODEL" --effort "$JUDGE_EFFORT" --max-budget-usd "$1"
+        --permission-mode default --allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}"
+        -n "plan review step $STEP")
 }
 
 # result_get <jq-path>  → the field from RESULT_FILE as text, or "null". Shape: lib.sh pr_result_kind.
 result_get() { pr_result_field "$RESULT_FILE" "$1"; }
 
-log_result() { # never fails: every value has a fallback (the file may be empty or not JSON)
-    log result --arg step "$STEP" --arg session "$(result_get .session_id)" --arg subtype "$(result_get .subtype)" \
-        --arg status "$(result_get .structured_output.status)" --arg commit "$(result_get .structured_output.commit)" \
-        --argjson cost "$(pr_result_json "$RESULT_FILE" .total_cost_usd 0)" \
-        --argjson turns "$(pr_result_json "$RESULT_FILE" .num_turns 0)" \
-        --argjson denials "$(pr_result_json "$RESULT_FILE" .permission_denials '[]')" \
-        --argjson models "$(pr_result_json "$RESULT_FILE" '.modelUsage | map_values(.costUSD)' '{}')" \
-        --argjson consults "$(pr_result_json "$RESULT_FILE" .structured_output.advisorConsults null)" \
-        --arg file "$(rel "$RESULT_FILE")"
+# log_result <file> <kind> <session>  → the `result` event of one invocation. <kind> is step, nudge,
+# review or judge; report.sh leaves the judge's out of the step's cost. <session> comes from the
+# stream, which names it even when the invocation was stopped before its result. Never fails: every
+# value has a fallback (the file may be missing, empty or not JSON).
+log_result() {
+    local f=$1
+    log result --arg step "$STEP" --arg kind "$2" --arg session "$3" \
+        --arg subtype "$(pr_result_field "$f" .subtype)" \
+        --arg status "$(pr_result_field "$f" .structured_output.status)" --arg commit "$(pr_result_field "$f" .structured_output.commit)" \
+        --argjson cost "$(pr_result_json "$f" .total_cost_usd 0)" \
+        --argjson turns "$(pr_result_json "$f" .num_turns 0)" \
+        --argjson denials "$(pr_result_json "$f" .permission_denials '[]')" \
+        --argjson models "$(pr_result_json "$f" '.modelUsage | map_values(.costUSD)' '{}')" \
+        --argjson consults "$(pr_result_json "$f" .structured_output.advisorConsults null)" \
+        --arg file "$(rel "$f")"
+}
+
+# ---- sessions and the usage limit ------------------------------------------------
+# Every session runs through run_session: step, nudge, review and judge. claude runs in the background
+# so the driver can read its stream and stop it at a usage limit. Contract: §6 of
+# docs/plans/done/plan-runner.md.
+SESSION_PID=''; SESSION_KIND=''; SESSION_STREAM=''; NAP_PID=''   # the running invocation, for the INT/TERM trap
+RUN_SID=''; RUN_SPENT=0; SESSION_STOP=''; WAITS=0
+# The reset time (epoch) of the newest used-up window a stream showed, and that stream's session;
+# empty once a stream shows an open window or a wait has passed the reset. The next launch waits for it.
+WINDOW_RESET=''; WINDOW_SID=''
+LIMIT_SOURCE=''; LIMIT_RESET=''; LIMIT_TRANSCRIPT=''      # set by limit_hit
+
+# nap <seconds>  → sleeps in the background and waits for it, so INT/TERM run their trap at once.
+nap() { sleep "$1" & NAP_PID=$!; wait "$NAP_PID" 2>/dev/null || true; NAP_PID=''; }
+
+# local_time <epoch>  → the owner's wall-clock time of it (GNU date, then BSD date).
+local_time() { date -d "@$1" '+%a %H:%M %Z' 2>/dev/null || date -r "$1" '+%a %H:%M %Z' 2>/dev/null || echo "epoch $1"; }
+
+# stop_session  → SIGTERM to the running claude, SIGKILL ten seconds later if it is still alive.
+stop_session() {
+    local i=0
+    kill -TERM "$SESSION_PID" 2>/dev/null || true
+    while kill -0 "$SESSION_PID" 2>/dev/null && [ "$i" -lt 50 ]; do nap 0.2; i=$((i + 1)); done
+    kill -KILL "$SESSION_PID" 2>/dev/null || true
+    wait "$SESSION_PID" 2>/dev/null || true
+}
+
+# invoke <cwd> <out> <prompt>  → one claude invocation with CLAUDE_ARGS. The stream goes to
+# <out>.stream.jsonl, stderr to <out>.stderr, and the stream's last result line to <out> (empty when
+# there is none). Returns 1 when the driver stopped it because its stream said the window is used up.
+invoke() {
+    local cwd=$1 out=$2 stream=$2.stream.jsonl ms=50 next=$((SECONDS + USAGE_POLL_S)) stopped=0 frac
+    SESSION_STREAM=$stream
+    : > "$stream"; : > "$out.stderr"     # there even when the cd fails: set_aside moves both
+    (cd "$cwd" && exec claude "${CLAUDE_ARGS[@]}" "$3" > "$stream" 2> "$out.stderr") &
+    SESSION_PID=$!
+    while kill -0 "$SESSION_PID" 2>/dev/null; do
+        printf -v frac '%03d' $((ms % 1000)); nap "$((ms / 1000)).$frac"
+        ms=$((ms < 500 ? ms * 2 : 1000))     # a stub ends in milliseconds, a real session in minutes
+        [ "$SECONDS" -ge "$next" ] || continue
+        next=$((SECONDS + USAGE_POLL_S))
+        case "$(pr_stream_limit "$stream")" in limited*) stop_session; stopped=1; break ;; esac
+    done
+    wait "$SESSION_PID" 2>/dev/null || true
+    SESSION_PID=''
+    pr_stream_result "$stream" > "$out"
+    [ "$stopped" = 0 ]
+}
+
+# transcript_of <session-id>  → the session's transcript file, or nothing.
+transcript_of() {
+    local f
+    [ -n "$1" ] && [ "$1" != null ] || return 0
+    for f in "$CLAUDE_HOME"/projects/*/"$1".jsonl; do
+        if [ -f "$f" ]; then printf '%s' "$f"; return 0; fi
+    done
+}
+
+# limit_hit <out> <stopped> <session>  → sets LIMIT_SOURCE to stream, result or transcript when the
+# invocation ended at a usage limit, else to nothing; LIMIT_RESET to the reset time (the stream's, else
+# the transcript's; empty when unknown). Notes the stream's newest window state in WINDOW_RESET either
+# way. A complete result or a spent budget is never a limit stop: that session finished, whatever its
+# stream says, and only the next launch waits (await_window). <session> is the one the invocation's
+# own stream names, or empty: a resume that died before its init line must not find, in the
+# transcript, the stop that preceded it.
+limit_hit() {
+    local out=$1 state reset='' kind tr_reset='' tr_hit=0
+    LIMIT_SOURCE=''; LIMIT_RESET=''; LIMIT_TRANSCRIPT=''
+    state=$(pr_stream_limit "$out.stream.jsonl")
+    case "$state" in
+        "limited "*) reset=${state#limited }; reset=${reset%.*}; WINDOW_RESET=$reset; WINDOW_SID=$3 ;;
+        limited|open) WINDOW_RESET='' ;;
+    esac
+    kind=$(pr_result_kind "$out")
+    case "$kind" in complete|budget) return 0 ;; esac
+    LIMIT_TRANSCRIPT=$(transcript_of "$3")
+    if [ -n "$LIMIT_TRANSCRIPT" ] && tr_reset=$(pr_transcript_usage_limit "$LIMIT_TRANSCRIPT" || exit 1); then tr_hit=1; fi
+    if [ "$2" = 1 ] || [ "${state%% *}" = limited ]; then LIMIT_SOURCE=stream
+    elif [ "$kind" = usage_limit ]; then LIMIT_SOURCE=result
+    elif [ "$tr_hit" = 1 ]; then LIMIT_SOURCE=transcript
+    else return 0; fi
+    LIMIT_RESET=${reset:-${tr_reset%.*}}
+}
+
+# past_ceiling <resetsAt|''> <target>  → exit 0, with SESSION_STOP set, when <target> lies further ahead
+# than USAGE_WAIT_MAX_S: a weekly limit, not waited for.
+past_ceiling() {
+    local wait_s=$(($2 - $(date +%s)))
+    [ "$wait_s" -gt "$USAGE_WAIT_MAX_S" ] || return 1
+    SESSION_STOP="the usage limit resets $(local_time "${1:-$2}") ($(pr_fmt_duration "$wait_s") away), past the $(pr_fmt_duration "$USAGE_WAIT_MAX_S") the runner waits — a weekly limit? Run this again after the reset"
+}
+
+# wait_out <kind> <session> <resetsAt|''> <target>  → notifies once with the local reset time, waits
+# until <target> and logs resumed. Kind `launch` is the wait before a launch. The wait sleeps in slices
+# of at most USAGE_SLICE_S against the wall clock, so a host that was suspended does not oversleep, and
+# a pause file stops the run in any slice (exit 5).
+wait_out() {
+    local start left
+    start=$(date +%s); left=$(($4 - start))
+    if [ "$left" -gt 0 ]; then
+        notify "usage limit in step $STEP" "$([ -n "$3" ] && echo "the limit resets $(local_time "$3")" || echo "no reset time known"); waiting $(pr_fmt_duration "$left"), until $(local_time "$4"), then the $([ "$1" = launch ] && echo "next session starts" || echo "$1 session resumes")"
+    fi
+    while [ "$left" -gt 0 ]; do
+        [ ! -f "$PAUSE" ] || stop_paused "during the usage-limit wait of step $STEP"
+        nap "$((left < USAGE_SLICE_S ? left : USAGE_SLICE_S))"
+        left=$(($4 - $(date +%s)))
+    done
+    log resumed --arg step "$STEP" --arg session "$2" --arg kind "$1" --argjson waited_s "$(($(date +%s) - start))"
+    WINDOW_RESET=''
+}
+
+# limit_wait <kind> <session> <source> <resetsAt|''> <file> <transcript>  → logs usage_limit and waits
+# out the reset plus slack: the fallback when no reset is known, and at least the slack after a stop.
+# Returns 1 with SESSION_STOP set, without waiting, past the ceiling or (any kind but launch) the cap.
+limit_wait() {
+    local kind=$1 reset=$4 now target
+    now=$(date +%s)
+    if [ -n "$reset" ]; then target=$((reset + USAGE_WAIT_SLACK_S)); else target=$((now + USAGE_WAIT_FALLBACK_S)); fi
+    # A reset already past would resume into the same stop at once; the slack is the least a stop waits.
+    if [ "$kind" != launch ] && [ "$target" -lt $((now + USAGE_WAIT_SLACK_S)) ]; then target=$((now + USAGE_WAIT_SLACK_S)); fi
+    log usage_limit --arg step "$STEP" --arg session "$2" --arg kind "$kind" --argjson resets_at "${reset:-null}" \
+        --arg source "$3" --argjson wait_s "$((target - now))" --arg file "$5" --arg transcript "$6"
+    if past_ceiling "$reset" "$target"; then return 1; fi
+    if [ "$kind" != launch ]; then
+        WAITS=$((WAITS + 1))
+        if [ "$WAITS" -gt "$USAGE_RESUME_MAX" ]; then
+            SESSION_STOP="usage limit hit $WAITS times in step $STEP — the runner waits out at most $USAGE_RESUME_MAX per step"
+            return 1
+        fi
+    fi
+    wait_out "$kind" "$2" "$reset" "$target"
+}
+
+# await_window  → before a launch: while the newest used-up window a stream showed has its reset ahead,
+# wait for it. Returns 1 with SESSION_STOP set when that reset is past the ceiling.
+await_window() {
+    [ -n "$WINDOW_RESET" ] && [ "$WINDOW_RESET" -gt "$(date +%s)" ] 2>/dev/null || return 0
+    limit_wait launch "$WINDOW_SID" stream "$WINDOW_RESET" '' ''
+}
+
+# The "## Interrupted attempt" section for a fresh step session that replaces one cut off at a usage
+# limit with no session left to resume.
+interrupted_block() {
+    printf '\n## Interrupted attempt\n\n%s\n' "An earlier session at this step was cut off at a usage limit and could not be resumed. The worktree holds its work: the commits since the step's start commit \`$START_SHA\`, and whatever is uncommitted. Read \`git log --oneline $START_SHA..HEAD\` and \`git status\` first, keep what is sound, and finish the step from there."
+}
+
+# session_total <session-id>  → the last total cost logged for that session (0 for none): a resumed
+# session reports its cost cumulatively, so its next total counts from there.
+session_total() {
+    local c=''
+    if [ -n "$1" ] && [ -f "$LOG" ]; then
+        c=$(jq -r --arg s "$1" 'select(.event == "result" and .session == $s and (.cost // 0) > 0) | .cost' "$LOG" 2>/dev/null | tail -1 || true)
+    fi
+    printf '%s' "${c:-0}"
+}
+
+# on_signal  → the INT/TERM trap of a real run. claude runs as a background job, which ignores SIGINT in
+# a non-interactive shell, so Ctrl-C reaches only the driver: it stops the running session itself.
+on_signal() {
+    local sid=''
+    trap - INT TERM
+    if [ -n "$SESSION_PID" ]; then sid=$(pr_session_id "$SESSION_STREAM"); stop_session; SESSION_PID=''; fi
+    [ -z "$NAP_PID" ] || kill "$NAP_PID" 2>/dev/null || true
+    log interrupted --arg step "$STEP" --arg session "$sid" --arg kind "$SESSION_KIND" || true
+    [ -z "$sid" ] || SESSION_ID=$sid
+    say "interrupted$([ -z "$sid" ] || echo " — session $sid stopped; resume it by hand with: $(resume_hint)")"
+    exit 130
+}
+
+# set_aside <out> <to>  → moves an invocation's result, stream and stderr out of the way of the next one.
+set_aside() { mv "$1" "$2"; mv "$1.stream.jsonl" "$2.stream.jsonl"; mv "$1.stderr" "$2.stderr"; }
+
+# run_session <kind> <cwd> <out> <budget> <prompt> [<resume-id> [after-limit]]  → runs one session of
+# <kind> (step, nudge, review, judge) until it ends by itself. A limit stop is logged, waited
+# out and the same session resumed with CONTINUE_PROMPT on what is left of <budget>; the interrupted
+# invocation's files move to <out minus .json>.limit<N>.json*. A session with no id to resume, or a
+# resume after a wait that ends without a result (its files: .noresume<N>.json*), is replaced by a
+# fresh session of its kind (a nudge's by a step session, with the Interrupted attempt block). Every
+# invocation's result is logged; <out> ends up holding the last one. Sets RUN_SID, and RUN_SPENT to
+# what the session's invocations reported spending. Sets SESSION_STOP, and returns, at the ceiling or
+# the cap. <after-limit> 1: the first invocation already resumes after a wait (resume_cut_off).
+run_session() {
+    local kind=$1 cwd=$2 out=$3 budget=$4 prompt=$5 sid=${6:-} after_limit=${7:-0}
+    local total prev n=0 tag stopped left=$4 text
+    SESSION_STOP=''; RUN_SID=$sid; RUN_SPENT=0
+    await_window || return 0
+    prev=$(session_total "$sid")
+    while :; do
+        if [ "$kind" = judge ]; then judge_args "$left"; else claude_args "$left"; fi
+        [ -z "$sid" ] || CLAUDE_ARGS+=(--resume "$sid")
+        if [ "$after_limit" = 1 ]; then text=$CONTINUE_PROMPT; else text=$prompt; fi
+        SESSION_KIND=$kind; stopped=0
+        invoke "$cwd" "$out" "$text" || stopped=1
+        SESSION_KIND=''
+        RUN_SID=$(pr_session_id "$out.stream.jsonl")
+        total=$(pr_result_field "$out" .total_cost_usd 0)
+        if awk -v t="$total" 'BEGIN { exit !(t > 0) }'; then
+            RUN_SPENT=$(awk -v a="$RUN_SPENT" -v d="$(pr_cost_delta "$total" "$prev")" 'BEGIN { print a + d }'); prev=$total
+        fi
+        limit_hit "$out" "$stopped" "$RUN_SID"
+        RUN_SID=${RUN_SID:-$sid}
+        # A resume after a wait that ends without a result had no session left to resume.
+        if [ -n "$LIMIT_SOURCE" ]; then tag=limit
+        elif [ "$after_limit" = 1 ] && [ ! -s "$out" ]; then tag=noresume
+        else log_result "$out" "$kind" "$RUN_SID"; return 0; fi
+        n=$((n + 1)); set_aside "$out" "${out%.json}.$tag$n.json"
+        log_result "${out%.json}.$tag$n.json" "$kind" "$RUN_SID"
+        if [ "$tag" = limit ]; then
+            say "step $STEP: the $kind session ${RUN_SID:-(no id)} stopped at a usage limit ($LIMIT_SOURCE)"
+            limit_wait "$kind" "$RUN_SID" "$LIMIT_SOURCE" "$LIMIT_RESET" "$(rel "${out%.json}.$tag$n.json")" "$LIMIT_TRANSCRIPT" || return 0
+        else
+            say "step $STEP: the resumed $kind session ${RUN_SID:-(no id)} ended without a result — starting a fresh one"
+            RUN_SID=''
+        fi
+        left=$(pr_budget_left "$budget" "$RUN_SPENT")    # the flag counts per invocation
+        if [ -n "$RUN_SID" ]; then sid=$RUN_SID; after_limit=1; continue; fi
+        # No session to resume: a fresh one of the same kind, which resumes nothing. A step's gets the
+        # Interrupted attempt block and keeps the step's START_SHA; a review or a judge its own prompt.
+        # A nudge has no fresh form: a step session replaces it, on what is left of the step's budget.
+        sid=''; prev=0; after_limit=0
+        if [ "$kind" = nudge ]; then
+            budget=$(pr_budget_left "$BUDGET" "$(kind_spent "$SESSION_ID" launched)"); RUN_SPENT=0; left=$budget
+        fi
+        if [ "$kind" = step ] || [ "$kind" = nudge ]; then
+            kind=step
+            case "$ATTEMPT_BLOCK" in *"## Interrupted attempt"*) ;; *) ATTEMPT_BLOCK+=$(interrupted_block)$NL ;; esac
+            write_prompt; prompt=$PROMPT
+        fi
+    done
 }
 
 resume_hint() { printf 'cd %q && claude --resume %s\n' "$WT" "$SESSION_ID"; }
@@ -389,10 +645,9 @@ nudge() {
     NUDGED=1
     log nudged --arg step "$STEP" --arg session "$SESSION_ID" --arg reasons "$1"
     say "nudging the session once (budget \$$NUDGE_BUDGET_USD)"
-    claude_args "$NUDGE_BUDGET_USD" --resume "$SESSION_ID"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).nudge.result.json
-    run_claude "$RESULT_FILE" "$1"$'\n\n'"Then end again with the JSON result object."
-    log_result
+    run_session nudge "$WT" "$RESULT_FILE" "$NUDGE_BUDGET_USD" "$1"$'\n\n'"Then end again with the JSON result object." "$SESSION_ID"
+    SESSION_ID=${RUN_SID:-$SESSION_ID}      # a fresh session replaces one it could not resume
 }
 
 # review_nudge <reasons>  — what the nudge becomes when the only thing wrong is a missed
@@ -407,10 +662,8 @@ review_nudge() {
     say "the diff requires skills the session did not run ($missing) — running them in a fresh session (budget \$$REVIEW_BUDGET_USD)"
     prompt=$(pr_render "$SKILLS_TEMPLATE" "PLAN_PATH=$PLAN_REL" "STEP=$STEP" "STEP_HEADING=$HEADING" \
         "BRANCH=$BRANCH" "START_SHA=$START_SHA" "TIER=$TIER" "MISSING=$missing" "SCHEMA_PATH=$SCHEMA_REL")
-    claude_args "$REVIEW_BUDGET_USD"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).review.result.json
-    run_claude "$RESULT_FILE" "$prompt"
-    log_result
+    run_session review "$WT" "$RESULT_FILE" "$REVIEW_BUDGET_USD" "$prompt"
 }
 
 # escalate <why>  — the one fresh re-run a step may get once its nudge is spent: the failed
@@ -479,7 +732,7 @@ judge_count() { pr_result_json "$1" "[.structured_output.findings[]? | select(.s
 # judge that writes despite its tool list damages nothing — its grade is dropped instead.
 judge_step() {
     [ -n "$JUDGE_MODEL" ] || return 0
-    local names head out prompt jwt dirty
+    local names head out prompt jwt dirty why
     names=$(mktemp); wt_git diff --name-only "$START_SHA..HEAD" > "$names"
     if ! pr_has_code "$names"; then rm -f "$names"; say "nothing but docs in the diff — judge skipped"; return 0; fi
     rm -f "$names"
@@ -494,20 +747,20 @@ judge_step() {
     prompt=$(pr_render "$JUDGE_TEMPLATE" "PLAN_PATH=$PLAN_REL" "STEP=$STEP" "STEP_HEADING=$HEADING" \
         "START_SHA=$START_SHA" "HEAD_SHA=$head")
     say "judging step $STEP on $JUDGE_MODEL/$JUDGE_EFFORT (read-only, budget \$$JUDGE_BUDGET_USD)"
-    (cd "$jwt" && claude -p --output-format json --json-schema "$(cat "$JUDGE_SCHEMA")" \
-        --model "$JUDGE_MODEL" --effort "$JUDGE_EFFORT" --max-budget-usd "$JUDGE_BUDGET_USD" \
-        --permission-mode default --allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}" \
-        -n "plan review step $STEP" "$prompt" > "$out" 2> "$out.stderr") || true
+    run_session judge "$jwt" "$out" "$JUDGE_BUDGET_USD" "$prompt"
     dirty=''
     if [ "$(git -C "$jwt" rev-parse HEAD)" != "$head" ] || [ -n "$(git -C "$jwt" status --porcelain)" ]; then dirty=1; fi
     git -C "$ROOT" worktree remove --force "$jwt" || true
-    if [ -n "$dirty" ] || [ "$(pr_result_kind "$out")" != complete ]; then
-        log judge_failed --arg step "$STEP" --arg file "$(rel "$out")" --argjson cost "$(pr_result_json "$out" .total_cost_usd 0)" \
-            --arg why "$([ -n "$dirty" ] && echo "the judge wrote to its worktree — grade dropped" || echo "no usable result ($(pr_result_error "$out"))")"
-        say "warning: step $STEP has no grade — $([ -n "$dirty" ] && echo "the judge wrote to its (throwaway) worktree" || echo "the judge ended without a usable result"); the plan goes on"
+    # A judge that still fails after a usage-limit wait, or stops at the ceiling or the cap, gets no grade either.
+    if [ -n "$dirty" ] || [ -n "$SESSION_STOP" ] || [ "$(pr_result_kind "$out")" != complete ]; then
+        if [ -n "$dirty" ]; then why="the judge wrote to its worktree — grade dropped"
+        elif [ -n "$SESSION_STOP" ]; then why=$SESSION_STOP
+        else why="no usable result ($(pr_result_error "$out"))"; fi
+        log judge_failed --arg step "$STEP" --arg file "$(rel "$out")" --argjson cost "$RUN_SPENT" --arg why "$why"
+        say "warning: step $STEP has no grade — $why; the plan goes on"
         return 0
     fi
-    log judged --arg step "$STEP" --arg session "$(pr_result_field "$out" .session_id)" \
+    log judged --arg step "$STEP" --arg session "$RUN_SID" \
         --arg model "$JUDGE_MODEL" --arg effort "$JUDGE_EFFORT" --arg verdict "$(pr_result_field "$out" .structured_output.verdict)" \
         --argjson high "$(judge_count "$out" high)" --argjson medium "$(judge_count "$out" medium)" --argjson low "$(judge_count "$out" low)" \
         --arg tests_adequate "$(pr_result_field "$out" .structured_output.testsAdequate)" \
@@ -520,11 +773,13 @@ judge_step() {
 handle_result() {
     local reasons
     while :; do
+        [ -z "$SESSION_STOP" ] || stop_blocked "$SESSION_STOP"      # a usage-limit wait past the ceiling or the cap
         case "$(pr_result_kind "$RESULT_FILE")" in
             budget) stop_blocked "budget or turn limit exhausted ($(result_get .subtype)) — not resumed" ;;
-            failed)
+            failed|usage_limit)
+                # A usage limit (HTTP 429) is waited out in run_session and never ends up here.
                 if [ "$(result_get .terminal_reason)" = api_error ]; then
-                    say "the session ended on an API error. The CLI retries transient errors before it gives up, so the runner does not retry. Once the cause is gone (a usage limit, a login, an outage), run this again: a fresh session restarts the step and sees what this one left uncommitted"
+                    say "the session ended on an API error. The CLI retries transient errors before it gives up, so the runner does not retry. Once the cause is gone (a login, an outage), run this again: a fresh session restarts the step and sees what this one left uncommitted"
                 fi
                 stop_blocked "session ended without a usable result ($(pr_result_error "$RESULT_FILE"); stderr in $(rel "$RESULT_FILE").stderr)" ;;
             incomplete)
@@ -561,20 +816,74 @@ handle_result() {
     done
 }
 
-# launch — one fresh session for the current attempt; sets RESULT_FILE and SESSION_ID.
+# launch — one fresh session for the current attempt; sets RESULT_FILE and SESSION_ID. A used-up
+# usage window that a stream reported waits first, before the launch is logged.
 launch() {
+    await_window || stop_blocked "$SESSION_STOP"
     write_prompt
-    claude_args "$BUDGET"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$STAMP.result.json
     log launched --arg step "$STEP" --arg start "$START_SHA" --arg tier "$TIER" --arg tagged "$TAGGED_TIER" \
         --arg model "$MODEL" --arg effort "$EFFORT" --arg advisor "${ADVISOR:-none}" --argjson attempt "$ATTEMPT" \
         --arg base "$(wt_git merge-base main HEAD | cut -c1-8)" \
         --arg budget "$BUDGET" --arg prompt "$(rel "$PROMPT_FILE")"
     say "step $STEP → $MODEL/$EFFORT${ADVISOR:+ + advisor $ADVISOR}, attempt $ATTEMPT, budget \$$BUDGET, floor $(pr_join "$FLOOR" none)"
-    run_claude "$RESULT_FILE" "$PROMPT"
-    SESSION_ID=$(result_get .session_id)
-    log_result
-    say "step $STEP session $SESSION_ID: $(pr_result_kind "$RESULT_FILE"), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
+    run_session step "$WT" "$RESULT_FILE" "$BUDGET" "$PROMPT"
+    SESSION_ID=$RUN_SID
+    say "step $STEP session ${SESSION_ID:-(no id)}: $(pr_result_kind "$RESULT_FILE"), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
+}
+
+# cut_off <step>  → exit 0 when a stop during a usage-limit wait (a pause, a crash, Ctrl-C) left a step
+# or nudge session of <step> to resume: the step's last limit event is a usage_limit with no resumed
+# after it. Sets CUT_KIND, CUT_SID, CUT_RESET (epoch or empty) and CUT_TARGET, the epoch the
+# interrupted wait was to end at. A review, a judge or a pre-launch wait is redone the way a re-run
+# always treats a step: a fresh launch.
+CUT_KIND=''; CUT_SID=''; CUT_RESET=''; CUT_TARGET=''
+cut_off() {
+    local last
+    CUT_KIND=''; CUT_SID=''; CUT_RESET=''; CUT_TARGET=''
+    [ -f "$LOG" ] || return 1
+    # One line, fields split by the unit separator: IFS whitespace would merge an empty field away.
+    last=$(jq -rs --arg s "$1" 'map(select(.step == $s and (.event == "usage_limit" or .event == "resumed"))) | last
+        | select(.event? == "usage_limit")
+        | [.kind, (.session // "" | if . == "null" then "" else . end), (.resets_at // ""), ((.ts | fromdateiso8601) + (.wait_s // 0))]
+        | map(tostring) | join("\u001f")' "$LOG" 2>/dev/null || true)
+    [ -n "$last" ] || return 1
+    IFS=$'\x1f' read -r CUT_KIND CUT_SID CUT_RESET CUT_TARGET <<< "$last" || true
+    case "$CUT_KIND" in step|nudge) [ -n "$CUT_SID" ] ;; *) return 1 ;; esac
+}
+
+# kind_spent <session> <event>  → what <session> spent since the step's last <event> (launched for a step
+# session, nudged for a nudge), from the logged results: each result's increase over the session's
+# previous one, the rule of lib.sh pr_cost_delta and report.sh. A result with no cost counts nothing.
+kind_spent() {
+    local out
+    out=$(jq -rs --arg s "$STEP" --arg sid "$1" --arg ev "$2" '
+        map(select(.step == $s)) | ((map(.event == $ev) | rindex(true)) // 0) as $i
+        | def costs: map(select(.event == "result" and .session == $sid and (.cost // 0) > 0) | .cost);
+          reduce (.[$i:] | costs)[] as $c ({p: (.[:$i] | costs | last // 0), s: 0};
+              .s += (if $c >= .p then $c - .p else $c end) | .p = $c) | .s' "$LOG" 2>/dev/null || true)
+    printf '%s' "${out:-0}"
+}
+
+# resume_cut_off  → the re-run side of a stop during a usage-limit wait (cut_off): waits out the rest of
+# that wait if it still lies ahead, logs resumed and resumes the step or nudge session where it was cut
+# off, on what is left of its kind's budget. The step keeps the START_SHA of its last launch. Sets
+# RESULT_FILE and SESSION_ID.
+resume_cut_off() {
+    local kind=$CUT_KIND sid=$CUT_SID target=${CUT_TARGET%.*} budget=$BUDGET from=launched now
+    START_SHA=$(jq -r --arg s "$STEP" 'select(.event == "launched" and .step == $s) | .start' "$LOG" 2>/dev/null | tail -1 || true)
+    START_SHA=${START_SHA:-$(wt_git rev-parse HEAD)}
+    SESSION_ID=$sid
+    if [ "$kind" = nudge ]; then NUDGED=1; budget=$NUDGE_BUDGET_USD; from=nudged; fi
+    budget=$(pr_budget_left "$budget" "$(kind_spent "$sid" "$from")")
+    say "step $STEP: resuming its $kind session $sid, which a usage limit stopped in an earlier run (budget \$$budget left)"
+    now=$(date +%s)
+    [ -n "$target" ] && [ "$target" -gt "$now" ] 2>/dev/null || target=$now
+    if past_ceiling "$CUT_RESET" "$target"; then stop_blocked "$SESSION_STOP"; fi
+    wait_out "$kind" "$sid" "$CUT_RESET" "$target"
+    RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).resume.result.json
+    run_session "$kind" "$WT" "$RESULT_FILE" "$budget" "$CONTINUE_PROMPT" "$sid" 1
+    SESSION_ID=${RUN_SID:-$sid}
 }
 
 run_step() {
@@ -609,7 +918,7 @@ run_step() {
             (cd "$WT" && git ls-files -o --exclude-standard -z | tar --null -czf "$PRESTATE.untracked.tgz" -T -)
         fi
     fi
-    launch
+    if cut_off "$STEP"; then resume_cut_off; else launch; fi
     handle_result
 }
 
@@ -709,10 +1018,10 @@ walk() {
 }
 
 # ---- the step boundary: pause file and plan sync ---------------------------------
-stop_paused() {
+stop_paused() { # stop_paused [<where>]  — default: before step NEXT. A run paused during a wait resumes its session.
     log paused --arg next "$NEXT"
     rm -f "$PAUSE"
-    notify "paused before step $NEXT" "the pause file is removed; run the same command again to continue"
+    notify "paused ${1:-before step $NEXT}" "the pause file is removed; run the same command again to continue"
     exit 5
 }
 
@@ -778,6 +1087,8 @@ sync_plan() {
         say "note: $PLAN_REL has uncommitted changes in the worktree (an answer to a decision?) — plan sync skipped; a later step boundary syncs"
         return 0
     fi
+    # A step whose session a usage limit cut off resumes mid-step: a sync commit here would land inside its range.
+    if cut_off "$NEXT"; then say "note: step $NEXT resumes a session cut off at a usage limit — plan sync deferred to the next step boundary"; return 0; fi
     sync_fetch
     sha=$(git -C "$ROOT" rev-parse --verify --quiet "$SYNC_FROM^{commit}" || true)
     if [ -z "$sha" ]; then say "warning: $SYNC_FROM no longer names a commit — plan sync skipped"; return 0; fi
@@ -848,7 +1159,16 @@ else
 fi
 
 load_tokens
-[ "$DRY_RUN" = 1 ] || validate_pending_from_log
+if [ "$DRY_RUN" = 0 ]; then
+    trap on_signal INT TERM
+    # A driver that dies on its ERR trap must not leave a session running in the worktree.
+    trap '[ -z "$SESSION_PID" ] || stop_session' EXIT
+    # The newest known window state at start-up is the log's last usage_limit: a run stopped during a
+    # wait, or blocked past the ceiling, waits out a reset that still lies ahead before its first launch.
+    last_limit=$(jq -r 'select(.event == "usage_limit") | "\(.resets_at // "") \(.session)"' "$LOG" 2>/dev/null | tail -1 || true)
+    WINDOW_RESET=${last_limit%% *}; WINDOW_RESET=${WINDOW_RESET%.*}; WINDOW_SID=${last_limit#* }
+    validate_pending_from_log
+fi
 
 if [ "$DRY_RUN" = 1 ]; then
     walk        # one pass, no boundary: a dry run never pauses and never syncs

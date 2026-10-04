@@ -294,22 +294,30 @@ pr_variant_check() {
 
 # ---- result classification (§2.5) -----------------------------------------
 
-# pr_result_kind <result-file>  → complete | incomplete | budget | failed
+# pr_result_kind <result-file>  → complete | incomplete | budget | usage_limit | failed
 # The result object `claude -p --output-format json --json-schema …` writes,
 # confirmed live on 2026-09-13 (this build):
 #   { "type":"result", "subtype":"success", "is_error":false, "terminal_reason":"completed",
 #     "session_id":"…", "num_turns":2, "total_cost_usd":0.059, "permission_denials":[],
 #     "result":"<json text>", "structured_output":{…}, … }
+# Sessions run with --output-format stream-json --verbose, and the result file is the stream's last
+# `result` line (pr_stream_result). That line has the same fields, structured_output included, and
+# its total_cost_usd counts the whole session across --resume. Confirmed by a probe on CLI 2.1.288
+# (2026-10-03 23:51 UTC, fixtures/stream-probe.jsonl).
 # Budget exhaustion: "subtype":"error_max_budget_usd", "is_error":true,
 #   "terminal_reason":"budget_exhausted", "structured_output":null.
 # API error: "subtype":"success", "is_error":true, "terminal_reason":"api_error",
 #   "api_error_status":<http>, "result":"<the CLI's message>". The subtype says success;
 #   is_error is what marks it (confirmed 2026-10-03).
-#   complete   — success, not an error, structured_output is an object
-#   incomplete — success but no structured object (the session ended without the
-#                result); worth exactly one fix-forward nudge
-#   budget     — budget or turn limit hit; blocked at once, never resumed
-#   failed     — anything else (no file, no JSON, API error, execution error); say why with pr_result_error
+# Usage limit: the same with "api_error_status":429. Read from the CLI's code by a desktop session on
+#   2026-10-03 (CLI 2.1.263–2.1.278); no headless limit result has been seen live
+#   (fixtures/result-usage-limit.json). The driver also reads the stream and the transcript for it.
+#   complete    — success, not an error, structured_output is an object
+#   incomplete  — success but no structured object (the session ended without the
+#                 result); worth exactly one fix-forward nudge
+#   budget      — budget or turn limit hit; blocked at once, never resumed
+#   usage_limit — an API error with HTTP 429: the driver waits for the reset and resumes the session
+#   failed      — anything else (no file, no JSON, API error, execution error); say why with pr_result_error
 pr_result_kind() {
     local f=$1 subtype is_error so
     [ -s "$f" ] && jq -e . "$f" >/dev/null 2>&1 || { echo failed; return; }
@@ -317,6 +325,7 @@ pr_result_kind() {
     subtype=$(jq -r '.subtype // "null"' "$f"); is_error=$(jq -r '.is_error | tostring' "$f")
     so=$(jq -r '.structured_output | type' "$f")
     case "$subtype" in error_max_budget_usd|error_max_turns) echo budget; return ;; esac
+    if [ "$is_error" = true ] && [ "$(pr_result_field "$f" .api_error_status)" = 429 ]; then echo usage_limit; return; fi
     if [ "$subtype" = success ] && [ "$is_error" = false ]; then
         if [ "$so" = object ]; then echo complete; else echo incomplete; fi
     else
@@ -352,6 +361,95 @@ pr_result_json() {
     local out
     out=$(jq -c "$2 // empty" "$1" 2>/dev/null || true)
     printf '%s' "${out:-$3}"
+}
+
+# ---- streams, transcripts and the usage limit ------------------------------------
+# A session's stream (`--output-format stream-json --verbose`) is one JSON object per line and carries
+# every tool output, so it grows to megabytes. Each reader picks its candidate lines with grep -F and
+# parses only those. A tool output sits in the stream as an escaped string, so its quotes are `\"` and
+# a fixed-string match on `"key"` never hits it. Never fails, never stops a pipe early (GOTCHAS: pipefail).
+
+# pr_stream_result <stream>  → the stream's last line whose type is `result` (the object the json
+# output format prints), compact; nothing when the session ended without one.
+pr_stream_result() {
+    local cand
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"result"' "$1" || true)
+    [ -n "$cand" ] || return 0
+    jq -cnR 'last(inputs | fromjson? | objects | select(.type == "result")) // empty' <<< "$cand" 2>/dev/null || true
+}
+
+# pr_session_id <stream>  → the session id from the `system`/`init` line, else from the result line;
+# nothing when the session stopped before either.
+pr_session_id() {
+    local cand sid=''
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"init"' "$1" || true)
+    if [ -n "$cand" ]; then
+        sid=$(jq -rnR 'first(inputs | fromjson? | objects | select(.type == "system" and .subtype == "init") | .session_id | strings) // empty' <<< "$cand" 2>/dev/null || true)
+    fi
+    [ -n "$sid" ] || sid=$(jq -r '.session_id // empty' <<< "$(pr_stream_result "$1")" 2>/dev/null || true)
+    printf '%s' "$sid"
+}
+
+# pr_stream_limit <stream>  → the usage-window state of the newest `rate_limit_info`, at any depth:
+#   "limited <resetsAt>" when the window is used up — status "rejected", or a unified window at
+#   utilization ≥ 1. The reset is the latest resetsAt among the full windows, else the top-level one;
+#   plain "limited" when neither has one. "open" otherwise; nothing when the stream has no such object.
+# Its fields, as seen in real streams: status, rateLimitType, resetsAt (epoch s), isUsingOverage,
+# overageStatus, unifiedWindows.<name>.{utilization, resetsAt} (2026-10-03).
+pr_stream_limit() {
+    local cand
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"rate_limit_info"' "$1" || true)
+    [ -n "$cand" ] || return 0
+    jq -rnR '(last(inputs | fromjson? | [.. | objects | .rate_limit_info? | objects] | last // empty) // empty)
+        | ([.unifiedWindows // {} | .[]? | objects | select((.utilization // 0) >= 1)]) as $full
+        | if .status == "rejected" or ($full | length) > 0
+          then "limited" + (([$full[].resetsAt | numbers] | max) // (.resetsAt | numbers) // "" | tostring | if . == "" then "" else " " + . end)
+          else "open" end' <<< "$cand" 2>/dev/null || true
+}
+
+# pr_transcript_usage_limit <transcript.jsonl>  → exit 0 when the transcript's last main-chain message
+# is an assistant entry that is a usage-limit stop (`error: "rate_limit"`), and print its
+# quotaLimits.resetsAt (epoch s; nothing when absent). Exit 1 otherwise. A user entry after the stop is
+# a resume's prompt: that resume has not stopped there. A sidechain (sub-agent) entry is not the
+# session's own turn. Field names as recorded in 27 real entries (CLI 2.1.263–2.1.278): error,
+# apiErrorStatus, quotaLimits.resetsAt.
+pr_transcript_usage_limit() {
+    local out
+    [ -f "$1" ] || return 1
+    grep -qF '"rate_limit"' "$1" || return 1      # a file, not a pipe: grep -q stopping early is safe here
+    out=$(jq -nrR 'reduce (inputs | fromjson? | objects | select((.type == "assistant" or .type == "user") and .isSidechain != true)) as $e (null; $e)
+        | select(.type? == "assistant" and .error? == "rate_limit")
+        | "rate_limit " + ([.. | objects | .quotaLimits? | objects | .resetsAt? | numbers] | first // "" | tostring)' "$1" 2>/dev/null || true)
+    [ -n "$out" ] || return 1
+    out=${out#rate_limit}
+    printf '%s' "${out# }"
+}
+
+# pr_fmt_duration <seconds>  → "45s", "59m", "1h 05m", "3d 1h"; a negative duration is "0s".
+pr_fmt_duration() {
+    local s=${1%.*}
+    [ "$s" -ge 0 ] 2>/dev/null || s=0
+    if [ "$s" -lt 60 ]; then printf '%ss' "$s"
+    elif [ "$s" -lt 3600 ]; then printf '%sm' "$((s / 60))"
+    elif [ "$s" -lt 86400 ]; then printf '%sh %02dm' "$((s / 3600))" "$((s % 3600 / 60))"
+    else printf '%sd %sh' "$((s / 86400))" "$((s % 86400 / 3600))"; fi
+}
+
+# pr_cost_delta <total> <previous>  → what one invocation added to its session's cost, from the session's
+# total_cost_usd now and at its previous result. A resumed session reports its cost so far (CLI 2.1.288),
+# so the increase is the difference. A total below the previous one is a per-invocation figure from an
+# older CLI, and counts whole.
+pr_cost_delta() {
+    awk -v t="$1" -v p="$2" 'BEGIN { d = (t + 0 >= p + 0) ? t - p : t + 0; s = sprintf("%.6f", d); sub(/0+$/, "", s); sub(/\.$/, "", s); print s }'
+}
+
+# pr_budget_left <budget> <spent>  → the --max-budget-usd of a resumed session: what is left of its
+# budget, at least 1. The flag counts per invocation.
+pr_budget_left() {
+    awk -v b="$1" -v s="$2" 'BEGIN { l = b - s; if (l < 1) l = 1; o = sprintf("%.2f", l); sub(/0+$/, "", o); sub(/\.$/, "", o); print o }'
 }
 
 # ---- checkpoints (§2.4) -----------------------------------------------------
