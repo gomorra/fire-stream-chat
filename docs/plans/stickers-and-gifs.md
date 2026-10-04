@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–7 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–8 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -626,6 +626,24 @@ Departures (for sign-off):
 
 ### Step 8 — Make your own stickers
 
+**Approach**
+- Order: the ML Kit dependency, then `domain/model/StickerDraft.kt` and the pure `domain/util/StickerGeometry.kt`, then
+  `data/sticker/SubjectCutout.kt`, `StickerEncoder.kt` and `StickerMaker.kt`, then two new `StickerRepository` calls
+  (`prepareStickerDraft`, `createSticker`), then `ui/stickers/create/`, then the two entry points and `Routes.STICKER_CREATE`.
+- The maker's ViewModel sees `StickerRepository` only, like the library's. Decoding, the cutout and the encoder stay in
+  `data/sticker`, so the UI→data allowlist in `ArchitectureTest` is untouched.
+- A draft is up to three PNG files in `cacheDir/sticker-maker/`: the photo, the subject trimmed to its bounds, and the
+  subject with a white outline. The outline is drawn once, when the photo is prepared. The screen only picks a file.
+- The crop is a pinch and a drag inside a square preview. `StickerGeometry` places the picture in the square for the
+  preview and for the 512 px canvas alike, so what is saved is what was shown.
+- `SubjectCutout` and `StickerMaker` are classes with `@Inject` constructors. No `di/` file changes.
+- The Draw and Overlay screens are not mounted. They take their rasterizer through `ImageEditServices`, which only
+  `ChatViewModel` builds, and `rasterize` writes JPEG. That is filed in `docs/BACKLOG.md`, as the step allows.
+- Tests: `StickerGeometryTest` (outline ring, placement, clamp), `StickerEncoderTest` (the size loop), `StickerMakerTest`
+  (Robolectric, native graphics: trim, outline, the path fence), `StickerCreateViewModelTest`, new cases in
+  `StickerRepositoryImplTest` and `StickerDaoTest`, and Robolectric cases for the two entry points.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible), `simplify` (the diff will pass 600 lines).
+
 - `play-services-mlkit-subject-segmentation`. `ui/stickers/create/`: pick a photo, cut out the
   subject, toggle cutout / original, crop, outline on or off, choose emojis and a pack.
 - `data/sticker/StickerEncoder.kt`: 512 × 512 WebP, quality lowered until it is under 100 KB.
@@ -647,6 +665,32 @@ Departures (for sign-off):
 - **(step-7)** `StoredSticker` carries `metadata` (pack and emojis read from the file), not the raw EXIF chunk. A made
   sticker has none, so its emojis come from the maker's screen. `StickerImage` takes a `format`, which defaults to WebP.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
+
+**Review outcome** (`/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- Fixes: `StickerMaker` recycles each bitmap once its file is written; the emoji cap and the default pack name have one
+  owner, `StickerDraft`; the two states without an editor share one centred column; `StickerEncoder.firstUnder` is internal.
+- Not taken: `rememberImagePicker` for the photo picker (it brings a camera launcher the maker has no use for); a typed
+  exception in place of `IllegalStateException` with a message fit to show (the repository's convention since step 1);
+  the default pack found by its import key and not by its name; the crop read only inside `graphicsLayer`, so a pinch
+  does not recompose the chips; one segmenter kept between cutouts; a binary search over the encoder's qualities; an
+  outline from a blur in place of the stamped ring; the draft's three PNG files written in parallel.
+
+**Shipped** `8e9ddf5d` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The Draw and Overlay screens are not mounted, and `ImageEditRasterizer` is untouched. They take their rasterizer through `ImageEditServices`, which only `ChatViewModel` builds, and `rasterize` writes JPEG. `docs/BACKLOG.md` §4.6 has what mounting them needs.
+- The outline is drawn once, around the whole subject, when the photo is prepared. A zoom into the cutout thickens it (`docs/BACKLOG.md` §4.6).
+- The crop is a pinch and a drag in a square preview, not a crop frame. An untouched picture is fitted whole, with transparent bars beside it. `StickerGeometry` holds the placement, the crop's limits and the outline's ring.
+- A draft is up to three PNG files in `cacheDir/sticker-maker/`, with the photo's long edge capped at 1024 px. Preparing a photo deletes the draft before it. Nothing sweeps the last draft; the system's cache clearing does.
+- `StickerRepository` has two new calls, `prepareStickerDraft` and `createSticker`. The maker's ViewModel sees the repository only, so `ArchitectureTest` has no new allowlist entry. `StickerDao.addMadeSticker` is new, with no schema change.
+- A made sticker joins a `USER` pack only. A new pack is found by the import key `loose:<name>`, so a second sticker for *My stickers* joins the first one's pack. That name is `StickerDraft.DEFAULT_PACK_NAME` and must not change.
+- A made sticker keeps at most three emojis, and none is required. They are picked in a sheet with the emoji grid, which has no search there.
+- `SubjectCutout` waits at most 45 seconds for Play services to deliver the model, then answers without a cutout. The manifest asks for the model at install. Every ML Kit failure gives the crop-only flow, the same as no Play services.
+- The encoder tries the qualities 90 down to 10 and refuses a picture that is over 100 KB at 10.
+- `StickerMaker` reports its failures as `IllegalStateException` with a message fit to show. `AppError.from` reads an `IOException` as a lost connection.
+- An empty library in the Stickers tab also offers *Make a sticker*. The photo picker opens with the maker.
+- `SubjectCutout`, `StickerEncoder` and `StickerMaker` have `@Inject` constructors. No `di/` file changed. `/code-review` was not run: no rule asked for it, and the maker reads only a photo the user picked.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit. `scripts/check-changelog-header.sh` was refused by the allowlist; `git tag -l v1.39.0` is empty.
+- Nothing ran on a device or an emulator. ML Kit's cutout, the platform's WebP encoder and the pinch are untested. The dex register check did not run; `ChatScreen` gained one parameter. Checklist: `docs/BACKLOG.md`, *The sticker maker*.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
 
@@ -674,6 +718,9 @@ Departures (for sign-off):
   a Lottie animation. A PNG is still refused. A new format needs its mime type in `StickerFormat`, because
   `StickerFormat.ofMimeType` reads anything unknown as a WebP, and a first-frame rule in `stillPathOf` if no image
   decoder draws it. `Message.stickerFormat` reads the local file's extension before the mime type.
+- **(step-8)** `data/sticker/StickerEncoder.kt` turns a bitmap into a WebP of at most 100 KB. A PNG from the keyboard can
+  be decoded and encoded with it, which is the "convert before the import" option and needs no new `StickerFormat`.
+  `StickerMaker.render` draws onto a 512 px square first, which a keyboard sticker may not want.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -715,6 +762,8 @@ two functions. The `wizard` skill can script this.
 - **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
   `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
   `ComposerPickerCallbacks`.
+- **(step-8)** The pack row's `LazyRow` ends with the **+** that opens the sticker maker (`CREATE_KEY`). The **Online**
+  entry goes before it. `ComposerPickerCallbacks` has a seventh field, `onCreateSticker`, and no defaults.
 - **(step-6)** The long press that adds an online sticker to the favourites is `StickerRepository.toggleFavourite`.
   `installPack` takes a `StickerPackPreview` read from a Firestore manifest, so an online pack is imported as files,
   not installed. On pocketbase `StickerPackSource.isSupported` is false, like the flag this step adds.
