@@ -292,19 +292,24 @@ write_prompt() {
     printf '%s' "$PROMPT" > "$PROMPT_FILE"
 }
 
+# session_args <schema> <model> <effort> <budget> <permission-mode>  → starts CLAUDE_ARGS with the flags
+# every session shares. The caller appends the tool lists, then `-n`: the tool flags take a list, and
+# `-n` ends it before the prompt.
+session_args() {
+    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$1")"
+        --model "$2" --effort "$3" --max-budget-usd "$4" --permission-mode "$5")
+}
+
 claude_args() { # claude_args <budget>  → fills CLAUDE_ARGS; run_session appends --resume
-    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$SCHEMA")"
-        --model "$MODEL" --effort "$EFFORT" --max-budget-usd "$1"
-        --permission-mode "$PERMISSION_MODE"
-        --allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DISALLOWED_TOOLS[@]}"
+    session_args "$SCHEMA" "$MODEL" "$EFFORT" "$1" "$PERMISSION_MODE"
+    CLAUDE_ARGS+=(--allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DISALLOWED_TOOLS[@]}"
         -n "plan $RUN_ID step $STEP")
     if [ -n "$ADVISOR" ]; then CLAUDE_ARGS+=(--advisor "$ADVISOR"); fi
 }
 
 judge_args() { # judge_args <budget>  → fills CLAUDE_ARGS for the read-only judge (no acceptEdits)
-    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$JUDGE_SCHEMA")"
-        --model "$JUDGE_MODEL" --effort "$JUDGE_EFFORT" --max-budget-usd "$1"
-        --permission-mode default --allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}"
+    session_args "$JUDGE_SCHEMA" "$JUDGE_MODEL" "$JUDGE_EFFORT" "$1" default
+    CLAUDE_ARGS+=(--allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}"
         -n "plan review step $STEP")
 }
 
@@ -358,7 +363,7 @@ stop_session() {
 # <out>.stream.jsonl, stderr to <out>.stderr, and the stream's last result line to <out> (empty when
 # there is none). Returns 1 when the driver stopped it because its stream said the window is used up.
 invoke() {
-    local cwd=$1 out=$2 stream=$2.stream.jsonl ms=50 next=$((SECONDS + USAGE_POLL_S)) stopped=0 frac
+    local cwd=$1 out=$2 stream=$2.stream.jsonl ms=10 next=$((SECONDS + USAGE_POLL_S)) stopped=0 frac
     SESSION_STREAM=$stream
     : > "$stream"; : > "$out.stderr"     # there even when the cd fails: set_aside moves both
     (cd "$cwd" && exec claude "${CLAUDE_ARGS[@]}" "$3" > "$stream" 2> "$out.stderr") &
@@ -510,7 +515,7 @@ set_aside() { mv "$1" "$2"; mv "$1.stream.jsonl" "$2.stream.jsonl"; mv "$1.stder
 # the cap. <after-limit> 1: the first invocation already resumes after a wait (resume_cut_off).
 run_session() {
     local kind=$1 cwd=$2 out=$3 budget=$4 prompt=$5 sid=${6:-} after_limit=${7:-0}
-    local total prev n=0 tag stopped left=$4 text
+    local total prev n=0 tag stopped left=$4 text aside
     SESSION_STOP=''; RUN_SID=$sid; RUN_SPENT=0
     await_window || return 0
     prev=$(session_total "$sid")
@@ -532,11 +537,12 @@ run_session() {
         if [ -n "$LIMIT_SOURCE" ]; then tag=limit
         elif [ "$after_limit" = 1 ] && [ ! -s "$out" ]; then tag=noresume
         else log_result "$out" "$kind" "$RUN_SID"; return 0; fi
-        n=$((n + 1)); set_aside "$out" "${out%.json}.$tag$n.json"
-        log_result "${out%.json}.$tag$n.json" "$kind" "$RUN_SID"
+        n=$((n + 1)); aside=${out%.json}.$tag$n.json
+        set_aside "$out" "$aside"
+        log_result "$aside" "$kind" "$RUN_SID"
         if [ "$tag" = limit ]; then
             say "step $STEP: the $kind session ${RUN_SID:-(no id)} stopped at a usage limit ($LIMIT_SOURCE)"
-            limit_wait "$kind" "$RUN_SID" "$LIMIT_SOURCE" "$LIMIT_RESET" "$(rel "${out%.json}.$tag$n.json")" "$LIMIT_TRANSCRIPT" || return 0
+            limit_wait "$kind" "$RUN_SID" "$LIMIT_SOURCE" "$LIMIT_RESET" "$(rel "$aside")" "$LIMIT_TRANSCRIPT" || return 0
         else
             say "step $STEP: the resumed $kind session ${RUN_SID:-(no id)} ended without a result — starting a fresh one"
             RUN_SID=''
@@ -548,10 +554,9 @@ run_session() {
         # A nudge has no fresh form: a step session replaces it, on what is left of the step's budget.
         sid=''; prev=0; after_limit=0
         if [ "$kind" = nudge ]; then
-            budget=$(pr_budget_left "$BUDGET" "$(kind_spent "$SESSION_ID" launched)"); RUN_SPENT=0; left=$budget
+            kind=step; budget=$(pr_budget_left "$BUDGET" "$(kind_spent "$SESSION_ID" launched)"); RUN_SPENT=0; left=$budget
         fi
-        if [ "$kind" = step ] || [ "$kind" = nudge ]; then
-            kind=step
+        if [ "$kind" = step ]; then
             case "$ATTEMPT_BLOCK" in *"## Interrupted attempt"*) ;; *) ATTEMPT_BLOCK+=$(interrupted_block)$NL ;; esac
             write_prompt; prompt=$PROMPT
         fi

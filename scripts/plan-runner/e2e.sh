@@ -61,7 +61,7 @@ case "$beh" in
        printf '{"type":"user","isSidechain":false,"sessionId":"%s","message":{"role":"user","content":"a prompt"}}\n' "$sid" >> "$T"
        entry '' "working: $beh" ;;
 esac
-resets_at() { echo $(( $(date +%s) + $(cat "$STUB/reset-in" 2>/dev/null || echo 1) )); }   # $STUB/reset-in: seconds to the reset
+resets_at() { echo $(( $(date +%s) + $(cat "$STUB/reset-in" 2>/dev/null || echo 0) )); }   # $STUB/reset-in: seconds to the reset
 rate_event() { # rate_event <status>  → a rate_limit_event line in the probe's shape; rejected = the five-hour window is full
     local r u=0.5; r=$(resets_at); [ "$1" != rejected ] || u=1
     printf '{"type":"rate_limit_event","rate_limit_info":{"status":"%s","resetsAt":%s,"rateLimitType":"five_hour","isUsingOverage":false,"overageStatus":"rejected","unifiedWindows":{"five_hour":{"utilization":%s,"resetsAt":%s}}},"session_id":"%s"}\n' "$1" "$r" "$u" "$r" "$sid"
@@ -148,10 +148,11 @@ new_repo() {
     local r=$1
     mkdir -p "$r/scripts" "$r/docs/plans" "$r/app"
     cp "$HERE/../run-plan.sh" "$r/scripts/"; cp -r "$HERE" "$r/scripts/plan-runner"
-    # No desktop notifications from a test, and no long sleeps: 1 s polls, slices and fallback, no slack.
+    # No desktop notifications from a test, and no long sleeps: 1 s polls and slices, no slack, no
+    # fallback wait. A scenario that measures a wait sets its own.
     sed -i -e 's/^NOTIFY_CMD=.*/NOTIFY_CMD=true/' -e 's/^USAGE_POLL_S=.*/USAGE_POLL_S=1/' -e 's/^USAGE_SLICE_S=.*/USAGE_SLICE_S=1/' \
-        -e 's/^USAGE_WAIT_SLACK_S=.*/USAGE_WAIT_SLACK_S=0/' -e 's/^USAGE_WAIT_FALLBACK_S=.*/USAGE_WAIT_FALLBACK_S=1/' "$r/scripts/run-plan.sh"
-    [ "$(grep -cE '^USAGE_(POLL_S=1|SLICE_S=1|WAIT_SLACK_S=0|WAIT_FALLBACK_S=1)$' "$r/scripts/run-plan.sh")" = 4 ] \
+        -e 's/^USAGE_WAIT_SLACK_S=.*/USAGE_WAIT_SLACK_S=0/' -e 's/^USAGE_WAIT_FALLBACK_S=.*/USAGE_WAIT_FALLBACK_S=0/' "$r/scripts/run-plan.sh"
+    [ "$(grep -cE '^USAGE_(POLL_S=1|SLICE_S=1|WAIT_SLACK_S=0|WAIT_FALLBACK_S=0)$' "$r/scripts/run-plan.sh")" = 4 ] \
         || { echo "e2e: run-plan.sh has no USAGE_* tunable line for e2e.sh to shorten — a scenario would sleep for an hour" >&2; exit 1; }
     printf '#!/usr/bin/env bash\n[ "$(cat "$STUB/gate" 2>/dev/null)" != red ]\n' > "$r/gradlew"; chmod +x "$r/gradlew"
     printf 'readme\n' > "$r/README.md"; printf '// seed\n' > "$r/app/Seed.kt"
@@ -328,6 +329,7 @@ check "the interrupted invocation's result, stream and stderr are kept apart" "3
 check "one notification names the local reset time" "1" "$(grep -c 'usage limit in step 1 — the limit resets .*; waiting .*, until ' "$TMP/err" || true)"
 
 scenario "A 429 result alone leads to the same wait and resume; with no reset time anywhere, the fallback wait" limit-429 done-valid
+sed -i 's/^USAGE_WAIT_FALLBACK_S=.*/USAGE_WAIT_FALLBACK_S=1/' "$R/scripts/run-plan.sh"
 run
 check "exit 0"                                   "0" "$rc"
 check "events"                                   "launched result usage_limit resumed result validated" "$(events mini)"
