@@ -114,10 +114,11 @@ read later.
 
 ## Steps
 
-Order: 1 → 2 ‖ 3 → 4 → 5 ‖ 6 ‖ 7 → 8 → 9 → 10 ‖ 11
+Order: 1 → 2 ‖ 3 → 4 → 5 ‖ 6 ‖ 7 → 8 → 9 → 10 → 11
 
-The run does not stop after step 8. The device pass for Lottie and the maker, named under that step,
-is done at the stop after step 10.
+The run does not stop after step 8 or step 10. The owner's tasks named under those two steps are done
+after step 11: the deploy of the two functions, then one device pass for Lottie, the maker and the
+online paths.
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -577,9 +578,11 @@ Authentication and an outbound fetch on user-supplied input.
 - Tests: `node --test` over the pure parts; `functions/package.json` gets a real `test` script.
 - Docs: `docs/CLOUD-FUNCTIONS.md`, and the function count in CLAUDE.md.
 
-**‖ Checkpoint (owner).** Get a Klipy key, `firebase functions:secrets:set KLIPY_API_KEY`, deploy the
-two functions. The `wizard` skill can script this. The key goes into the Firebase secret only, never
-into this file or any other tracked file: the repository is public.
+**Owner, after step 11.** Deploy the two functions from the plan worktree. The secret `KLIPY_API_KEY`
+is set in the Firebase project `fire-stream-chat` (version 1), so step 10 only declares it with
+`defineSecret`. The key itself goes into no tracked file: the repository is public. Step 11 is built
+and gated against functions that are not deployed yet, so its online paths are checked on a device
+only after the deploy.
 
 ### Step 11 — GIFs tab and the online sticker catalogue
 
