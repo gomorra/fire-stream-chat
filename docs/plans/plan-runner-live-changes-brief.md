@@ -201,6 +201,39 @@ What stays: a spent budget is blocked at once. The nudge and escalation ladder i
 
 ### Step 1 — Pause file and plan sync at the step boundary (`feat(plan-runner):`) — skills: code-review; model: strong
 
+**Approach**
+- Order: `e2e.sh` first (the stub learns the step id from `-n`, inserts its Shipped block at the end
+  of its step's section, runs a per-step `during.<step>` script in the main checkout; the twelve cases
+  of the list below plus the uncommitted-edit warning), run it red. Then `lib.sh` (`pr_merge_inserts`,
+  `pr_plan_check`, `pr_shipped_after`, `pr_synced_from`) with `selfcheck.sh` cases. Then `run-plan.sh`:
+  `--sync-from`, the pause file, `walk` / `checkpoint_due` / `sync_plan` / `stop_paused` / `stop_sync`,
+  the main loop as a restartable walk, the §0 14 warning, the §0 13 hint. Docs last.
+- The dry run keeps its single pass: `walk` lists every step when `DRY_RUN=1` and stops at the first
+  launch otherwise, so the rules (`--from`, `--to`, shipped, `‖`, Decision needed) live in one place.
+- `‖` reading of §0 11: due when the step to its left is in `SHIPPED_NOW`, or else when it is shipped,
+  no later Order step is shipped, and `pr_checkpoint_due` (log rule, unchanged) says so. The
+  "behind the frontier" case is therefore a step shipped in an earlier invocation.
+  **(step-1 /code-review)** Changed: the frontier condition now applies to both branches, so a
+  `‖` added behind two steps this invocation shipped does not stop the run either (§0 11's "So …"
+  sentence holds in every case).
+- `paused` and `plan_synced` log a `next` field, not `step`, so `report.sh` gets no row for them.
+- `--sync-from` is resolved at start-up of a real run only (CI's dry runs may lack a local `main`).
+- Nothing in the code contradicts §0 or §2. **(step-1)** Found later, in git rather than in the
+  code: §0 13's "clean where the sync merged cleanly" also fails where a `**Shipped**` block lands
+  next to a line main changed (a sync commit has one parent, so the later merge keeps the fork point
+  as its base). Recorded as a departure; the end-of-run hint covers it.
+
+**Shipped** `28a72cff` (2026-10-04) — tier: strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: opus, opus, opus, opus.
+Departures (for sign-off):
+- §0 11: the frontier condition applies to both branches. A `‖` is due only when no later Order step is shipped, and then when its step shipped in this invocation or by the old log rule. So a `‖` added behind two steps this run shipped does not stop it either (e2e case added). The literal reading stopped there, against §0 11's own "So …" sentence.
+- §0 13: a later `git merge main` also asks about the plan where a `**Shipped**` block lands next to a line main changed, sync or no sync. A sync commit has one parent, so the merge base stays the fork point. The end-of-run hint names the last synced main commit and the `git diff <it> main -- <plan>` to re-apply later edits. The e2e "merge is clean" case uses an edit away from step ends.
+- `--sync-from` is resolved at start-up of a real run (exit 1 if it names no commit, after a fetch for a remote ref). A boundary sync is skipped with a warning when REF stops resolving or shares no history with the branch. The fetch runs once per boundary.
+- `pr_plan_check` also rejects a `**Shipped**` line that names another commit after the merge, not only a lost one.
+- `pr_checkpoint_due` lost its `ran_now` argument: `SHIPPED_NOW` in the driver's `checkpoint_due` does that job.
+- `paused`, `plan_synced` and `plan_sync_failed` log a `next` field, not `step`, so `report.sh` gets no row for them. `plan_synced` logs `placed`, the number of same-spot insertions.
+- Extra e2e cases beyond the list: a failed fetch is a warning, not a "driver bug" (regression for a `/code-review` finding); a `‖` and a pause file at the same boundary (exit 4, the pause file stale at the next start).
+- `/simplify` skipped: deriving `PENDING`/`SYNCED` from other state, a token-list-only `pr_shipped_after` (the plan fixes its signature), caching shipped state per walk, and merging e2e scenarios to save CI time.
+
 - `run-plan.sh`: §2.1 and §0 1–14. `--sync-from REF|none` in the usage text and the flag parser.
   Exit 5 and "the runner commits nothing but a plan sync" in the header. `stop_paused` and
   `stop_sync`. The end-of-run hint of §0 13.
@@ -264,6 +297,16 @@ What stays: a spent budget is blocked at once. The nudge and escalation ladder i
   counted once.
 - Docs in the same commit, per the rules above. Also a `docs/GOTCHAS.md` entry on the cumulative cost
   of a resumed session, and one on cloud sessions that run past the usage limit on cloud credits.
+- **(step-1)** The step boundary is the `while :` loop at the end of `run-plan.sh`: `walk` →
+  pause check (`stop_paused`) → `sync_plan` → `run_step`. The pre-launch wait of §0 25 belongs
+  there, after `sync_plan` and before `run_step`. A pause during a wait (§0 21) reuses `$PAUSE` and
+  `stop_paused`; `stop_paused` logs `paused` with a `next` field (not `step`) from `NEXT`, so set
+  `NEXT` or pass the step. Exit 5 already exists in the header, `flow.html` and the contract's §6.
+- **(step-1)** The `e2e.sh` stub now reads the step id from `-n` (`$step`), records `kind:step` per
+  call in `$STUB/steps`, writes Shipped / Decision needed blocks at the end of its step's section
+  (`section_add`), and runs `$STUB/during.<step>` in the main checkout while that step's session
+  runs (`during <step> <script>`; a pause file there is `touch "$PLAN_RUNNER_RUNS_DIR/mini.pause"`).
+  `write_plan <order> <id>…` builds a multi-step plan. Stream lines and transcripts are still to add.
 
 ### Step 3 — Review the whole branch (`refactor(plan-runner):`) — skills: simplify
 
