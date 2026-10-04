@@ -342,6 +342,20 @@ Departures (for sign-off):
 
 ### Step 3 — Review the whole branch (`refactor(plan-runner):`) — skills: simplify
 
+**Approach**
+- Run `/simplify` over `git diff 8daebbbb..HEAD` (scripts, fixtures, docs), with its reviewers on the
+  mid tier and pointed at the step-2 list below. No skill beyond the floor: the diff touches no
+  crypto, worker, DI or ViewModel file, and step 1 and step 2 each ran `/code-review` already.
+- Apply only fixes that keep behaviour, mostly in `scripts/run-plan.sh`, `scripts/plan-runner/lib.sh`,
+  `report.sh` and `e2e.sh`. Then `scripts/plan-runner/selfcheck.sh` as the gate.
+- No new tests unless a fix adds a pure `lib.sh` function, which then gets `selfcheck.sh` cases.
+- Nothing in the code contradicts §0 or §2.
+
+**Shipped** `ae208f09` (2026-10-04) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- `/simplify` changed code, so this step has its own commit. `claude_args` and `judge_args` share `session_args`, and the tool lists and `-n` stay last. In `run_session`, the set-aside file is named once, and a nudge becomes a step session in one branch. `invoke`'s poll ladder starts at 10 ms. In `e2e.sh`, the fallback wait and the stub's default reset are 0 s, except in the fallback scenario. The self-check went from 1m49s to 1m36s.
+- Skipped and recorded in `TECH_DEBT.md` ("Plan runner — leftovers from the usage-limit review"): the cost-delta rule's three copies, the nudge-to-step branch in `run_session`, the kind `launch` in `limit_wait`, an event wait in place of the poll ladder (needs bash 5.1), and a helper for the six "last logged value" lookups. Also skipped: folding `pr_result_kind`'s jq calls into one, a template repo for `e2e.sh`, and reading the stream incrementally.
+
 - Run `/simplify` over the whole diff of this plan, from the branch's fork point (it is over 600
   lines). Re-run the self-check after its fixes.
 - Commit only if `/simplify` changed something. Otherwise the **Shipped** line names step 2's code

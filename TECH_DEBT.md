@@ -269,6 +269,21 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Plan runner — leftovers from the usage-limit review
+
+**The smell.** The whole-branch `/simplify` pass over the plan-runner live-changes work left five things in `scripts/run-plan.sh`:
+- The cost-delta rule is written three times. `lib.sh` `pr_cost_delta` uses awk, and `kind_spent` and `report.sh` each use jq. `report.sh` does not source `lib.sh`.
+- In `run_session`, a nudge that cannot be resumed is replaced by a step session. This is the loop's one step-specific branch.
+- `limit_wait` switches the slack floor and the `USAGE_RESUME_MAX` cap off for the kind `launch`.
+- `invoke` polls with sleeps that grow from 10 ms to 1 s. With `wait -n <pid>…` it could wait on events instead, but that needs bash 5.1.
+- Six call sites repeat the shape "the last logged value of an event for this step" (`jq … "$LOG" | tail -1`).
+
+**Why we haven't fixed it.** Each fix moves cost or wait accounting that `e2e.sh` pins only through its outcomes. A shared jq definition would have to reach `report.sh`. Moving the cap or the fallback out of the loop changes the shape of `run_session` and of its callers. None of the five produces a wrong result.
+
+**When to revisit.** When the cost rule or the limit handling changes next. Fold in the matching item then.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
