@@ -411,6 +411,10 @@ com.firestream.chat/
 │   │   └── SendClock.kt         # Strictly increasing send timestamps
 │   ├── sticker/
 │   │   ├── StickerFiles.kt      # filesDir/stickers/<sha256>.<ext>; size, format and dimension checks before a file lands
+│   │   ├── StickerDownloads.kt  # A sticker's local copy: fetched once, hashed against its id, stored with its row
+│   │   ├── StickerUploads.kt    # A sticker's shared object: one lock per sticker, uploaded once, remoteUrl kept on the row
+│   │   ├── StickerManifest.kt   # Library rows ⇄ pack manifest; what of a manifest is let into the library
+│   │   ├── StickerLibrarySync.kt # The restore: a listener on the user's own manifests, merged newer-only; the sign-out fence
 │   │   ├── StickerPackArchive.kt # .wastickers / zip reader under entry, per-entry and total-byte caps
 │   │   ├── StickerText.kt       # The one cleaning rule for pack names, publishers and pack ids
 │   │   ├── WaStickerMetadata.kt # Pack id, name, publisher and emojis out of a WebP's EXIF chunk
@@ -431,6 +435,8 @@ com.firestream.chat/
 │   │   ├── WorkerForeground.kt    # Shared foreground promotion + data-sync ForegroundInfo
 │   │   ├── MediaBackfillWorker.kt # WorkManager job to backfill local media
 │   │   ├── MediaBackfillScheduler.kt # The one-time backfill run a failed download queues
+│   │   ├── StickerSyncWorker.kt   # Backs up changed sticker packs and deletes the manifests of deleted ones
+│   │   ├── StickerSyncScheduler.kt # The one unique sync run, queued whenever a pack is unsynced
 │   │   └── UpdateCheckWorker.kt   # 24h periodic check; notifies on new release
 │   ├── remote/
 │   │   ├── fcm/                 # FCMService, ActiveChatTracker
@@ -439,7 +445,8 @@ com.firestream.chat/
 │   │   │                        # FirestoreListHistorySource, FirestoreMessageSource,
 │   │   │                        # FirestoreUserSource, FirebaseKeySource,
 │   │   │                        # FirebaseStorageSource, RealtimePresenceSource,
-│   │   │                        # LinkPreviewSource
+│   │   │                        # LinkPreviewSource, FirebaseStickerObjectSource,
+│   │   │                        # FirestoreStickerPackSource
 │   │   ├── update/              # UpdateManifestSource — fetches latest-{flavor}.json
 │   │   └── WebPagePreviewCapture.kt # Off-screen WebView screenshot fallback
 │   ├── repository/              # AuthRepositoryImpl, CallRepositoryImpl,
@@ -513,7 +520,8 @@ com.firestream.chat/
 │   ├── settings/                # SettingsScreen, SettingsViewModel
 │   ├── share/                   # SharePickerScreen, SharePickerViewModel
 │   ├── starred/                 # StarredMessagesScreen, StarredMessagesViewModel
-│   ├── stickers/                # StickerLibraryScreen, StickerLibraryViewModel, WhatsAppImportScreen, StickerLabels
+│   ├── stickers/                # StickerLibraryScreen, StickerLibraryViewModel, WhatsAppImportScreen, StickerLabels,
+│   │                            # StickerPackSheet, StickerPackPreviewViewModel
 │   └── theme/                   # Color, Shape, Theme, Type
 ├── AppLifecycleObserver.kt      # Process-level lifecycle — drives RTDB online/offline presence
 ├── FireStreamApp.kt

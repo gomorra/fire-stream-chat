@@ -38,6 +38,7 @@ internal data class ComposerPickerCallbacks(
     val onSticker: (PickerSelection.Sticker) -> Unit,
     val onToggleStickerFavourite: (stickerId: String) -> Unit,
     val onImportStickers: () -> Unit,
+    val onCreateSticker: () -> Unit,
 )
 
 /**
@@ -71,6 +72,7 @@ internal fun ComposerPickerPanel(
                 onSelection = callbacks.onSticker,
                 onToggleFavourite = callbacks.onToggleStickerFavourite,
                 onImport = callbacks.onImportStickers,
+                onCreate = callbacks.onCreateSticker,
             )
 
             PickerTab.EMOJI -> EmojiTab(
@@ -127,8 +129,7 @@ internal fun StickerSuggestionStrip(
         ) {
             items(matches, key = { it.sticker.id }) { match ->
                 StickerCell(
-                    id = match.sticker.id,
-                    model = match.sticker.localPath,
+                    sticker = match.sticker,
                     isSelected = false,
                     onClick = { onSelection(PickerSelection.Sticker(it, match.packId)) },
                     modifier = Modifier.size(72.dp),

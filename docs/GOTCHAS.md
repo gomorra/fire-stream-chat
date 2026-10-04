@@ -133,6 +133,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   finger-to-grip gap, measured at touch-*down*: `detectDragGestures` calls back only after
   touch slop, so record the down position yourself (a non-consuming `Initial`-pass
   `awaitFirstDown`). Accumulating `dragAmount` instead loses the slop, and the grip lags.
+- **`Modifier.contentReceiver` hears nothing from the keyboard on a value-based `BasicTextField`.**
+  That field (`value` / `onValueChange`, not `TextFieldState`) talks to the keyboard through
+  `RecordingInputConnection`, whose `commitContent` returns false, and its `EditorInfo` names no
+  content types. So a keyboard greys out its GIF and sticker tabs, or says the app does not take
+  them. Wrap the field in `InterceptPlatformTextInput` instead. The interceptor wraps the
+  connection the field makes: `EditorInfoCompat.setContentMimeTypes` on its `EditorInfo`, and
+  `InputConnectionCompat.createWrapper` with an `OnCommitContentListener`
+  (`ui/chat/KeyboardContentReceiver.kt`). Text input passes through untouched. In a Robolectric
+  test the field starts its input session only after `dispatchWindowFocusChanged(true)` on the
+  `AndroidComposeView`, and `onCreateInputConnection` on that view then returns the wrapped
+  connection (`KeyboardContentReceiverTest`). `adb shell dumpsys input_method` shows the
+  focused field's `contentMimeTypes` on a device.
 - **Two overlays showing the same content must not cross-fade over a third.**
   Closing the fullscreen viewer in the same frame as opening the send preview over
   it — both black, both drawing the photo at `Fit` — looked like it should be
@@ -186,6 +198,22 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (the re-entry force-write in `RealtimePresenceSource.startPresence`) are gated on the
   last `.info/connected` value; the listener itself writes online on reconnect. Regression:
   `RealtimePresenceSourceTest.startPresence re-entry after a disconnect writes nothing until the reconnect`.
+- **A waiter on shared in-flight work must not inherit the first caller's cancellation.**
+  `CompletableDeferred.completeExceptionally` with a `CancellationException` makes every
+  `await()` throw that cancellation, inside coroutines nobody cancelled. A `LaunchedEffect`
+  then ends without a word, and a loop over a chat's downloads stops at that message. It shows
+  as soon as a UI scope shares a flight with longer-lived callers: a sticker cell that scrolls
+  away, and the chat-open scan waiting for the same download. `SingleFlight.run` calls
+  `currentCoroutineContext().ensureActive()` when its `await()` is cancelled, and runs the
+  block itself when the cancellation was not its own. A hand-written copy of the idiom needs
+  the same check. Regression:
+  `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
+- **A Firestore listener on a parallel executor can deliver snapshots out of order.**
+  `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
+  `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
+  differences then sees a removal before the addition it follows. Map off the main thread on
+  `Dispatchers.Default.limitedParallelism(1).asExecutor()`, which keeps the order
+  (`FirestoreStickerPackSource`).
 - **A snapshot filter that depends on the clock needs its own timer.** Filtering
   `typingUsers` by age inside the Firestore listener only re-runs when the document
   changes, so an entry whose typing-off write never landed (writer offline or killed)
@@ -238,6 +266,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   indicator — fires it) and must not overwrite a newer local value with them. Hit when the chat
   preview became a newer-only transaction: `ChatDao.upsertRemote` keeps a strictly newer local
   preview. Regression: `ChatDaoUpsertRemoteTest.upsertRemote keeps a local preview newer than the snapshot's`.
+- **A document missing from a Firestore query snapshot was not necessarily deleted.** A
+  listener's first snapshot can come from the local cache, which holds whatever was read
+  before and nothing after a reinstall. A mirror that deletes every local row the snapshot
+  lacks wipes its table on such a snapshot. A snapshot that is from the server can still be
+  older than a write this device made a moment later, when the collector is slow. So a
+  mirror deletes only on a `DocumentChange.Type.REMOVED` change, which is sent for a document
+  that was in the result and left it, and only a row with no local changes
+  (`FirestoreStickerPackSource.observeOwnPacks`, `StickerDao.removeIfSynced`). Such a flow
+  emits differences, so it needs `buffer(Channel.UNLIMITED)`: a `trySend` into a full default
+  buffer drops a difference that never comes again.
 - **Room's `@Upsert` with a partial entity keeps the columns the object does not carry; a
   `REPLACE` insert does not.** `OnConflictStrategy.REPLACE` deletes the row and inserts the
   new one, so every column the new object lacks goes back to its default. `messages` is split
@@ -285,6 +323,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `waitForIdle()` → advance the clock (`runOnIdle { … }` alone is not enough), and an
   `AnimatedVisibility` must be composed hidden and *then* shown — one composed visible
   from the start skips its enter animation. See `ui/components/OnEnterSettledTest.kt`.
+
+- **A test tag inside a clickable parent is not in the merged semantics tree.**
+  `clickable` and `combinedClickable` merge their children's semantics into one node. A child's
+  content description is carried up, and its test tag is not. So `onNodeWithTag(tag)` on a child
+  of a bubble's click target finds nothing, and `assertDoesNotExist()` on it passes for the wrong
+  reason. Pass `useUnmergedTree = true` for a tag below a click target
+  (`ui/chat/LottieStickerUiTest.kt`).
 
 - **Robolectric records a network callback but never dispatches to it.**
   `ShadowConnectivityManager` keeps every callback passed to

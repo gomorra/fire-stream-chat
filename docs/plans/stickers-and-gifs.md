@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–5 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–9 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -21,8 +21,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
 | Import sources | WhatsApp's sticker folder (one folder grant, multi-select grid) and files (`.webp`, `.wastickers`, later `.was` / `.tgs`) |
 | Library backup | Packs and favourites are saved under the account and restored on login |
 | GIF sources | Keyboard insertion and an in-app GIFs tab backed by Klipy |
-| Provider privacy | Search and media go through a Cloud Function. The provider never sees a user's IP, and the key lives in Functions secrets. The pocketbase flavor gets no GIFs tab and no online catalogue |
-| Recipient privacy | Unchanged from `docs/BACKLOG.md` §4.6: the recipient fetches from Storage only |
+| Provider privacy | The app calls Klipy itself, because Klipy's integration requirements forbid a proxy. Klipy sees the IP and the searches of a user who uses the GIFs tab or the online stickers. The key ships in the app. A build without a key has no GIFs tab and no online catalogue |
+| Recipient privacy | A GIF or sticker picked from Klipy is loaded by the recipient's device from Klipy, which sees its IP. Everything else is fetched from Storage only (`docs/BACKLOG.md` §4.6) |
 
 ## The model
 
@@ -41,6 +41,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
   carry a `syncState`. Recents stay in DataStore, device-only.
 - **A GIF is a plain media message.** `type = GIF`, bytes untouched, one upload per message, stored
   in `DocumentFiles` so it never reaches the gallery.
+- **A pick from Klipy is a message that points at Klipy.** Its `mediaUrl` is the Klipy url. Nothing is
+  uploaded, and no device keeps a copy of the file.
 - **Animated decoders are attached per request**, mirroring `ui/components/VideoFrameRequest.kt`.
   A global registration would start animating link previews and avatars.
 
@@ -69,8 +71,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
    download on first use (step 8).
 6. **`Modifier.contentReceiver` on the value-based `BasicTextField`** (`ChatScreen.kt:1929`) is
    unverified. Samsung's stock keyboard is reported to refuse content in Compose fields (step 9).
-7. **Klipy's response shape, CDN hosts, `customer_id` rule and re-hosting terms** could not be read
-   from its docs in planning. Step 10 confirms them first; terms that forbid re-upload are a `needs_decision`.
+7. **A Klipy pick lives on Klipy's servers.** Klipy forbids a proxy and copies of its media (step 10). The
+   message breaks if Klipy removes the file, and the key in the app can be read out of the APK.
 8. **Old builds show the new types as an empty text bubble** (`parseMessageType` falls back to `TEXT`).
 9. **Bytes sit unencrypted in Storage**, like every file today, and a pack manifest is readable by
    any signed-in user who has its id.
@@ -116,9 +118,8 @@ read later.
 
 Order: 1 → 2 ‖ 3 → 4 → 5 ‖ 6 ‖ 7 → 8 → 9 → 10 → 11
 
-The run does not stop after step 8 or step 10. The owner's tasks named under those two steps are done
-after step 11: the deploy of the two functions, then one device pass for Lottie, the maker and the
-online paths.
+The run does not stop after step 8 or step 10. One device pass after step 11 covers Lottie, the maker
+and the online paths. The Klipy key is the owner's task, named under step 10.
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -451,6 +452,30 @@ Departures (for sign-off):
 
 A sync engine and new security rules.
 
+**Approach**
+- Order: Room first (`StickerSyncState.DELETED`, the DAO's tombstone, manifest read, compare-and-set mark and remote merge;
+  no column changes, so no version bump), then `StickerPackSource` with both implementations and `firestore.rules`, then `data/sticker/StickerUploads.kt`
+  (the per-sticker lock and the `remoteUrl` write, out of `OutboxSender`), then `StickerSyncScheduler` and `StickerSyncWorker`,
+  then `data/sticker/StickerLibrarySync.kt` (the restore), then `StickerRepositoryImpl` and `AuthRepositoryImpl`, then the UI.
+- A manifest holds sticker ids and their metadata, and no urls. A file is always fetched from the object its id names
+  (`stickers/<id>.<ext>`), looked up through a new `StickerObjectSource.urlIfPresent`, and hashed by `StickerDownloads`.
+  So a manifest someone else wrote can never point this device at another host.
+- The restore listener runs while something collects `observePacks()`: an open chat or the library screen. It applies
+  changes newer-only by `updatedAt`, and removes a pack only on a `REMOVED` change of a `SYNCED` row.
+- Two packs with one import key merge into the older one, on every device alike. The loser gets a tombstone.
+- Sign-out already clears every table (`AuthRepositoryImpl.signOut`). This step adds a lock that keeps a restore from
+  writing after it, cancels the sync work and clears the recents.
+- **View pack** opens the pack the message names. **Add pack** copies it as `INSTALLED` under the root id
+  (`originPackId` of the viewed pack, else its id) with the import key `installed:<root>`, which is also what
+  "already installed" compares. Install writes rows only. Files arrive when a cell is first shown, as after a restore.
+- Fetch on display: `StickerCell` takes a `Sticker`, checks its file and asks `LocalStickerFetcher`, which
+  `MainActivity` provides from `StickerRepository.ensureFile`. No ViewModel is threaded through.
+- The pack preview is its own sheet with its own `StickerPackPreviewViewModel`, so `ChatUiState` gains nothing.
+- Tests: `StickerSyncWorkerTest`, `StickerLibrarySyncTest`, `StickerUploadsTest`, `FirestoreStickerPackSourceTest`, new
+  cases in `StickerDaoTest` and `StickerRepositoryImplTest`, `StickerPackPreviewViewModelTest`, a Robolectric test for the
+  sheet rows and the fetch on display.
+- Further skills intended: `simplify` (the diff will pass 600 lines), `app-ui-design` (Compose), `changelog-release`.
+
 - `data/remote/source/StickerPackSource.kt`, `FirestoreStickerPackSource`, a pocketbase stub.
 - `firestore.rules`: `stickerPacks/{packId}` — get for any signed-in user, list and write for the owner.
 - `data/worker/StickerSyncWorker.kt` (unique work, connected): for each pending pack, `ensureUploaded`
@@ -500,10 +525,55 @@ A sync engine and new security rules.
 - Tests: the worker (pending → synced, each file uploaded once, delete), restore mapping and the
   newer-only rule, install and the already-installed case.
 
+**Review outcome** (`/code-review`, then `/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` fixes: a sign-out finishes inside the fence though its caller is cancelled; the listener maps snapshots in order; the worker skips a pack that changed while its files uploaded; a manifest keeps 8 emoji tags and stops at 900 000 bytes; `StickerSyncSchedulerTest`; one `awaitAck`.
+- `SingleFlight` no longer hands a cancelled first caller's cancellation to its waiters. `LinkPreviewSource` uses it too.
+- `/simplify` fixes: `StickerSyncScheduler.syncIfPending` does not throw; `ensureFile` is cancellable, writes no `remoteUrl` and remembers a missing object; `countItem` and the sheet's fallback text are gone.
+- Not taken: the two-device cases (`TECH_DEBT.md`), a sync trigger driven from a DAO flow, `ensureFile` inside `StickerDownloads`, batched `remoteUrl` writes during a backup, no mapping of unchanged manifests when the listener starts, one `StickerCell`, shared test builders.
+- `/code-review` ran before the `/simplify` fixes and the `SingleFlight` change. They were not reviewed again.
+  Each has a test: `SingleFlightTest`, `StickerLibrarySyncTest`, `StickerSyncWorkerTest`, `StickerSyncSchedulerTest`,
+  `StickerManifestTest` and the fetch cases in `StickerRepositoryImplTest`.
+
+**Shipped** `33f54406` (2026-10-04) — tier: max, tagged max. skills: code-review, simplify, app-ui-design, changelog-release. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- This session found the step written and uncommitted in the worktree, left by an earlier attempt. It read, reviewed, fixed and gated that work.
+- **For sign-off, not fixed (`/code-review`):** the rules let any signed-in user create a manifest under an id no document has yet. A recipient with a modified client can claim a pack id it was sent, before the owner's first upload or after a delete. `TECH_DEBT.md`, *A sticker pack's id can be claimed by whoever writes its manifest first*, has the fix. It changes the pack's document id, and its rule cannot be tested here.
+- A manifest holds no urls. A file is found by its id through the new `StickerObjectSource.urlIfPresent` and hashed.
+- The restore listens only while `observePacks()` is collected: an open chat or the library screen.
+- `StickerRepository.setFavourite` became `toggleFavourite`, decided in one DAO transaction.
+- *Add pack* installs under the root pack id with the import key `installed:<root>`. It writes rows only.
+- A sticker whose file has not arrived shows grey. A tap on it is refused with *That sticker is not in the library*.
+- `LocalStickerFetcher` is a CompositionLocal that `MainActivity` provides. It has no `docs/PATTERNS.md` entry.
+- On pocketbase `StickerPackSource.isSupported` is false, and a deleted pack's row goes at once.
+- `SingleFlight` (`data/util`, outside this step's files) changed. See *Review outcome* above.
+- CHANGELOG: `v1.38.0` is tagged on main. The `[1.38.0]` header lost its prefix here and a new `[UNRELEASED] [1.39.0]` section holds this entry. A merge with main meets the same header line.
+- Nothing ran against Firestore, on a device or an emulator. The rules are untested. The dex register check did not run. Checklist: `docs/BACKLOG.md`.
+
 **‖ Checkpoint.** The owner deploys `firestore.rules`. Device: reinstall and confirm the library
 returns; a second account adds a pack from a received sticker.
 
 ### Step 7 — Lottie stickers
+
+**Approach**
+- Spike, done on the owner's phone: the folder holds one `.was` beside 195 `.webp` files. It is a zip with
+  `animation/animation.json` (deflated) and `animation/animation.json.trust_token`. So `.was` is readable and both
+  containers ship.
+- One stored shape for both containers: the animation JSON, gzip-compressed, as `<id>.tgs`. A `.tgs` is stored as it
+  is. A `.was` has its JSON re-packed, so the id is the hash of the stored bytes and the receive check is unchanged.
+- Order: `lottie-compose` in the catalog, `StickerFormat.LOTTIE`, `data/sticker/LottieContainer.kt` and its test, then
+  `StickerPackArchive` (hands over `animation.json` and `.tgs` entries), `StickerFiles.store` (sniffs WebP, gzip, JSON;
+  writes the PNG first frame through `data/sticker/LottieThumbnails.kt`), `WhatsAppStickerFolder` (`.was` names),
+  the repository, then `StickerImage` and the preview sites.
+- `StoredSticker` carries the parsed `WaStickerMetadata` in place of the raw EXIF chunk, since a Lottie sticker has
+  its tags in the JSON.
+- The thumbnail is `<sticker file>.png`, a rule in `domain/model/Sticker.kt` that the UI can read (`Sticker.stillPath`).
+  `StickerFiles.store` writes it, so an import, a received sticker and a restored one all get it.
+- `StickerImage` gets a `format` parameter. A Lottie sticker plays only from a local file. Until the download
+  lands, and for a refused sticker, the bubble shows a placeholder: unhashed JSON from a url is not parsed.
+- Tests: `LottieContainerTest`, new cases in `StickerPackArchiveTest`, `StickerFilesTest`, `StickerRepositoryImplTest`,
+  `StickerDownloadsTest`, `WhatsAppStickerFolderTest`, and a Robolectric test for the format switch.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible), `simplify` if the diff
+  passes 600 lines.
 
 - **Spike first:** open real `.was` files from the owner's folder and confirm the container. If it
   cannot be read, ship `.tgs` only and report `needs_decision`.
@@ -520,9 +590,64 @@ returns; a second account adds a pack from a received sticker.
   with a plain `AsyncImage`, which cannot read Lottie, so they need the PNG thumbnail.
 - **(step-5)** The composer's Stickers tab, its pack row and the suggestion strip draw `Sticker.localPath` through
   `StickerCell` and `StickerThumbnail`. For a Lottie sticker they need the PNG thumbnail.
+- **(step-6)** A restored or installed sticker is a row whose file arrives later, through
+  `StickerRepositoryImpl.ensureFile` → `StickerDownloads.ensureLocal` → `StickerFiles.store`, which accepts WebP only.
+  Extend that path for Lottie, and write the PNG thumbnail there too, not only at import. `StickerManifest.stickersOf`
+  drops an entry whose format the build does not know, so an older build restores a pack without its Lottie stickers.
+- **(step-6)** A library sticker is drawn by `LibraryStickerImage` in `ui/components/StickerImage.kt`, which checks
+  `Sticker.localPath` and asks `LocalStickerFetcher` for a missing file. The format switch goes there as well.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
+**Review outcome** (`/code-review`, then `/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` fixes: layers are counted with precompositions laid out, so one that refers to itself is refused; an object
+  that names a key twice is refused, because Lottie's parser and `org.json` read it differently; Lottie parses, builds and
+  draws the animation before anything is stored, and catches `StackOverflowError` and `OutOfMemoryError` there; a received
+  sticker is stored unchanged or not at all (`StickerFiles.storeReceived`); `Message.stickerFormat` reads the local file's
+  extension before the sender's mime type; an unreadable file shows the placeholder.
+- `/simplify` fixes: `StickerImage` gives Lottie the file path (`LottieCompositionSpec.File`), so a sticker shown again is
+  not read again; `storeReceived` replaced a flag; one hash per stored file; the `.was` suffix lives in `WhatsAppStickerFile`.
+- Not taken: one shared capped read for `LottieContainer.inflate` and `StickerFiles.readCapped`; skipping the parse of a
+  `.tgs` the directory already holds; one model type that picks the still or the animation for every surface; a `canRead()`
+  check on the first-frame file, which is app-private.
+- `/code-review` ran before the `/simplify` fixes. They were not reviewed again. The gate ran after both.
+
+**Shipped** `51f04ab4` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The spike read one real `.was` from the owner's phone over adb (`STK-20260530-WA0012.was`, the only one beside 195 `.webp`). A copy is in `/tmp` on the host and in no commit. It is a zip with `animation/animation.json` and a `trust_token`. Its JSON has `metadata.customProps` with a pack id, emojis and no pack name.
+- A Lottie sticker is stored as gzip-compressed JSON, `<id>.tgs`, mime type `application/x-tgsticker`. A `.tgs` is stored as it is. The JSON of a `.was` is re-packed, so the stored file is not the `.was`, and its id is the hash of the re-packed file. The `trust_token` is dropped.
+- `StickerFiles.store` is the place that tells formats apart, by the first bytes: RIFF, gzip, or `{`. `StickerPackArchive` hands over an `animation.json` entry and `.tgs` entries, so a `.was` is read as a pack of one sticker. A bare `.json` file imports too.
+- A WhatsApp pack that has an id and no name is named by its id (`SchoolDays`). This also changes a WebP whose metadata has an id and no name: it used to join a pack named *WhatsApp* or *Stickers* under its own key.
+- An animation with an image asset is refused, in either container. So is one over 2 MB of JSON, 100 levels of nesting, 2000 laid-out layers, 120 frames per second, or with a key written twice or with an escape.
+- A sticker Lottie cannot draw is refused. The first frame is `<file>.png`, at most 256 px, and is written before the file.
+- A Lottie sticker plays only from the local file. Until its download lands, and for a refused one, the bubble shows a grey placeholder and the previews show the broken-image mark. A WebP still renders from its url.
+- The WhatsApp grid shows a `.was` as a cell with an animation mark. The picture is seen after the import.
+- An older build shows a received Lottie sticker as a broken image, and restores a pack without them (`docs/BACKLOG.md` §4.6).
+- `StoredSticker.exif` became `metadata`. `StickerFiles` has a default for its new `LottieThumbnails` parameter, for the tests. No `di/` file changed.
+- Lottie is 6.6.0. `LottieCompositionSpec.File` reads the `.tgs` itself, which `LottieStickerUiTest` proves by waiting for the composition.
+- `/code-review` and `/simplify` were added: the step parses untrusted files, and the diff passed 600 lines.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, which was a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit.
+- The driver's first gate run was red in `StickerSyncWorkerTest`, a step-6 test. The worker uploads files in parallel on `Dispatchers.IO` and the test recorded them in a plain list, which can lose an append. The test's lists are thread-safe now (the commit after `51f04ab4`). No production code changed for it.
+- Nothing ran on a device or an emulator beyond the adb read. The dex register check did not run; `MessageBubble` gained one parameter on an existing call. Checklist: `docs/BACKLOG.md`, *Lottie stickers*.
+
 ### Step 8 — Make your own stickers
+
+**Approach**
+- Order: the ML Kit dependency, then `domain/model/StickerDraft.kt` and the pure `domain/util/StickerGeometry.kt`, then
+  `data/sticker/SubjectCutout.kt`, `StickerEncoder.kt` and `StickerMaker.kt`, then two new `StickerRepository` calls
+  (`prepareStickerDraft`, `createSticker`), then `ui/stickers/create/`, then the two entry points and `Routes.STICKER_CREATE`.
+- The maker's ViewModel sees `StickerRepository` only, like the library's. Decoding, the cutout and the encoder stay in
+  `data/sticker`, so the UI→data allowlist in `ArchitectureTest` is untouched.
+- A draft is up to three PNG files in `cacheDir/sticker-maker/`: the photo, the subject trimmed to its bounds, and the
+  subject with a white outline. The outline is drawn once, when the photo is prepared. The screen only picks a file.
+- The crop is a pinch and a drag inside a square preview. `StickerGeometry` places the picture in the square for the
+  preview and for the 512 px canvas alike, so what is saved is what was shown.
+- `SubjectCutout` and `StickerMaker` are classes with `@Inject` constructors. No `di/` file changes.
+- The Draw and Overlay screens are not mounted. They take their rasterizer through `ImageEditServices`, which only
+  `ChatViewModel` builds, and `rasterize` writes JPEG. That is filed in `docs/BACKLOG.md`, as the step allows.
+- Tests: `StickerGeometryTest` (outline ring, placement, clamp), `StickerEncoderTest` (the size loop), `StickerMakerTest`
+  (Robolectric, native graphics: trim, outline, the path fence), `StickerCreateViewModelTest`, new cases in
+  `StickerRepositoryImplTest` and `StickerDaoTest`, and Robolectric cases for the two entry points.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible), `simplify` (the diff will pass 600 lines).
 
 - `play-services-mlkit-subject-segmentation`. `ui/stickers/create/`: pick a photo, cut out the
   subject, toggle cutout / original, crop, outline on or off, choose emojis and a pack.
@@ -539,11 +664,61 @@ returns; a second account adds a pack from a received sticker.
 - **(step-5)** The picker's pack row is the `LazyRow` in `ui/chat/picker/StickerLibraryTab.kt`. The **+** is a last item
   there, and its callback is a new field of `ComposerPickerCallbacks`. `ChatScreen` hands it to `NavGraph` like
   `onImportStickersClick`.
+- **(step-6)** A new sticker joins a pack through a `StickerDao` transaction (`importInto`, `addToPack`), which marks
+  the pack `PENDING`. `StickerRepositoryImpl` then calls `StickerSyncScheduler.syncIfPending()`, as after every edit,
+  and `StickerSyncWorker` uploads the file. Nothing else is owed for the backup.
+- **(step-7)** `StoredSticker` carries `metadata` (pack and emojis read from the file), not the raw EXIF chunk. A made
+  sticker has none, so its emojis come from the maker's screen. `StickerImage` takes a `format`, which defaults to WebP.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
+
+**Review outcome** (`/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- Fixes: `StickerMaker` recycles each bitmap once its file is written; the emoji cap and the default pack name have one
+  owner, `StickerDraft`; the two states without an editor share one centred column; `StickerEncoder.firstUnder` is internal.
+- Not taken: `rememberImagePicker` for the photo picker (it brings a camera launcher the maker has no use for); a typed
+  exception in place of `IllegalStateException` with a message fit to show (the repository's convention since step 1);
+  the default pack found by its import key and not by its name; the crop read only inside `graphicsLayer`, so a pinch
+  does not recompose the chips; one segmenter kept between cutouts; a binary search over the encoder's qualities; an
+  outline from a blur in place of the stamped ring; the draft's three PNG files written in parallel.
+
+**Shipped** `8e9ddf5d` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The Draw and Overlay screens are not mounted, and `ImageEditRasterizer` is untouched. They take their rasterizer through `ImageEditServices`, which only `ChatViewModel` builds, and `rasterize` writes JPEG. `docs/BACKLOG.md` §4.6 has what mounting them needs.
+- The outline is drawn once, around the whole subject, when the photo is prepared. A zoom into the cutout thickens it (`docs/BACKLOG.md` §4.6).
+- The crop is a pinch and a drag in a square preview, not a crop frame. An untouched picture is fitted whole, with transparent bars beside it. `StickerGeometry` holds the placement, the crop's limits and the outline's ring.
+- A draft is up to three PNG files in `cacheDir/sticker-maker/`, with the photo's long edge capped at 1024 px. Preparing a photo deletes the draft before it. Nothing sweeps the last draft; the system's cache clearing does.
+- `StickerRepository` has two new calls, `prepareStickerDraft` and `createSticker`. The maker's ViewModel sees the repository only, so `ArchitectureTest` has no new allowlist entry. `StickerDao.addMadeSticker` is new, with no schema change.
+- A made sticker joins a `USER` pack only. A new pack is found by the import key `loose:<name>`, so a second sticker for *My stickers* joins the first one's pack. That name is `StickerDraft.DEFAULT_PACK_NAME` and must not change.
+- A made sticker keeps at most three emojis, and none is required. They are picked in a sheet with the emoji grid, which has no search there.
+- `SubjectCutout` waits at most 45 seconds for Play services to deliver the model, then answers without a cutout. The manifest asks for the model at install. Every ML Kit failure gives the crop-only flow, the same as no Play services.
+- The encoder tries the qualities 90 down to 10 and refuses a picture that is over 100 KB at 10.
+- `StickerMaker` reports its failures as `IllegalStateException` with a message fit to show. `AppError.from` reads an `IOException` as a lost connection.
+- An empty library in the Stickers tab also offers *Make a sticker*. The photo picker opens with the maker.
+- `SubjectCutout`, `StickerEncoder` and `StickerMaker` have `@Inject` constructors. No `di/` file changed. `/code-review` was not run: no rule asked for it, and the maker reads only a photo the user picked.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit. `scripts/check-changelog-header.sh` was refused by the allowlist; `git tag -l v1.39.0` is empty.
+- Nothing ran on a device or an emulator. ML Kit's cutout, the platform's WebP encoder and the pinch are untested. The dex register check did not run; `ChatScreen` gained one parameter. Checklist: `docs/BACKLOG.md`, *The sticker maker*.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
 
 ### Step 9 — GIFs and stickers from the keyboard
+
+**Approach**
+- Spike, first half, read from the library: the value-based `BasicTextField` talks to the keyboard through
+  `RecordingInputConnection`, whose `commitContent` returns false in foundation 1.10.4. `Modifier.contentReceiver` cannot
+  reach it, so the fallback ships: `InterceptPlatformTextInput` around the composer's field only. The emulator half
+  follows the build.
+- Order: `MessageRepositoryImpl.sendMediaMessage` (the `image/gif` branch), then `StickerMaker.convert` and a new
+  `StickerRepository.saveSticker(uri)`, then `ChatMessageSender.sendKeyboardContent` and the routing rule, then
+  `ui/chat/KeyboardContentReceiver.kt` and its mount in `ChatScreen`.
+- `saveSticker` stores a sticker file as it is and converts anything else to a WebP with `StickerEncoder`, long edge
+  512 px, shape kept. It puts the sticker into `SAVED` and returns its id, so nothing is looked up from an import result.
+- An edited GIF keeps `image/gif` in `PendingMedia.mimeType` while its `uri` is the editor's JPEG. `ChatMessageSender`
+  sends an item whose `uri` is not its `originalUri` as `image/jpeg`.
+- The keyboard's uri grant is held until the send has staged or stored the bytes, then released.
+- Tests: `KeyboardContentRouteTest`, `KeyboardContentReceiverTest` (Robolectric: the field's `EditorInfo` names the
+  types and `commitContent` reaches the callback), `ChatMessageSenderKeyboardContentTest`, the `image/gif` cases in
+  `MessageRepositoryStickerGifSendTest`, `saveSticker` cases in `StickerRepositoryImplTest`.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible). `simplify` if the diff passes
+  600 lines.
 
 - **Spike first:** confirm on the emulator that `Modifier.contentReceiver` delivers Gboard content to
   the composer's `BasicTextField`. Fallback: `InterceptPlatformTextInput` wrapping the input connection
@@ -561,22 +736,51 @@ returns; a second account adds a pack from a received sticker.
   `sendMediaMessage` still sends `image/gif` as an `IMAGE`; the branch this step adds goes there.
 - **(step-5)** A sticker from the keyboard is sent through `ChatViewModel.sendSticker(stickerId, packId = null)`, which
   also marks it used.
+- **(step-6)** `importFrom` already asks for the backup of the `SAVED` pack. `StickerRepository.setFavourite` is gone:
+  `toggleFavourite(stickerId)` decides the direction.
+- **(step-7)** `StickerFiles.store` tells the formats apart by the first bytes: RIFF is a WebP, a gzip header or a `{` is
+  a Lottie animation. A PNG is still refused. A new format needs its mime type in `StickerFormat`, because
+  `StickerFormat.ofMimeType` reads anything unknown as a WebP, and a first-frame rule in `stillPathOf` if no image
+  decoder draws it. `Message.stickerFormat` reads the local file's extension before the mime type.
+- **(step-8)** `data/sticker/StickerEncoder.kt` turns a bitmap into a WebP of at most 100 KB. A PNG from the keyboard can
+  be decoded and encoded with it, which is the "convert before the import" option and needs no new `StickerFormat`.
+  `StickerMaker.render` draws onto a 512 px square first, which a keyboard sticker may not want.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
-### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
+**Review outcome** (`/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- Fixes: `KeyboardContentReceiver` has its commit handling in one named function; `ChatMessageSender` reports each
+  route's failure where it happens, without rebuilding a `Result`; `StickerMaker.convert` has one `catch`; the list of
+  keyboard types uses `GIF_MIME_TYPE`.
+- Not taken: one shared "store this sticker into a pack" for `saveSticker`, `createSticker` and the import (it changes
+  step 8's code); the editor's output type as a constant on `ImageEditRasterizer` (`PendingMedia` would import from
+  `data/`, which `ArchitectureTest` allowlists per class); the keyboard GIF sent through `sendMediaMessage`; no
+  `KeyboardContentRoute` enum; a block body with an early return in `sendMediaMessage`; a re-indent of the composer's
+  `BasicTextField` under its new wrapper; a type sniff that skips the first read of a PNG.
 
-Authentication and an outbound fetch on user-supplied input.
+**Shipped** `5a98ac49` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The spike settled open risk 6. `Modifier.contentReceiver` does not work on the composer: the value-based `BasicTextField` talks to the keyboard through `RecordingInputConnection`, whose `commitContent` returns false (read from the bytecode of foundation 1.10.4). The fallback shipped: `InterceptPlatformTextInput` around the composer's field, with `EditorInfoCompat.setContentMimeTypes` and `InputConnectionCompat.createWrapper`.
+- The spike ran on the emulator (API 36, Gboard with a hardware keyboard). `dumpsys input_method` showed the four picture types on the focused composer. **One GIF and one sticker from Gboard were sent** from the emulator's account into the chat that was open there, with *gomorra*, at 20:22 and 20:23. Both arrived as a GIF bubble and a transparent sticker. They are real messages in that chat.
+- This branch's debug build was installed over the emulator's (`adb install -r`), which already ran this branch at step 8. The installed build is the one before the `/simplify` fixes.
+- A keyboard picture that is no sticker file is converted before the import, with `StickerEncoder`: long edge 512 px, shape kept, at most 100 KB. No PNG format was added to `StickerFormat`. A WebP or a Lottie file from the keyboard is stored as it is.
+- `StickerRepository.saveSticker(uri)` is new. It puts one picture into `SAVED` and returns its id, also when the library held it. `importFrom` is not used for the keyboard, so nothing is looked up by hash afterwards. A sticker file that names a pack still goes to `SAVED`.
+- The composer names `image/gif`, `image/webp`, `image/png` and `image/jpeg` to the keyboard. A picture pasted from Gboard's clipboard is therefore sent as a sticker (`docs/BACKLOG.md` §4.6).
+- A keyboard pick is sent at once, without a preview, like a pick from the Stickers tab. It is refused while a message is being edited. Text in the composer stays.
+- "Unedited" is decided in the UI: `PendingMedia.sendMimeType` is `image/jpeg` once the item's `uri` is an edit step, and the pick's type when the edits are undone. `sendMediaMessage` routes by type alone.
+- A GIF over 8 MB from the gallery or the share sheet is now refused. It used to go out as one still JPEG.
+- The keyboard's uri grant is requested in the composable and released when the send has staged or stored the bytes, also when the chat is left meanwhile.
+- `/simplify` was added at the re-decision, because the diff passed 600 lines. `/code-review` was not run: no rule asked for it.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit. `git tag -l v1.39.0` is empty.
+- One full test run was red in `ListRepositoryImplRaceTest`, a list test this step does not touch. The two runs after it were green with no change for it (`TECH_DEBT.md`).
+- Not checked: a phone, an on-screen Gboard, Samsung's keyboard, the gallery and share-sheet GIF on a device. The dex register check did not run; `ChatScreen` gained one wrapper call. Checklist: `docs/BACKLOG.md`, *GIFs and stickers from the keyboard*.
 
-**Decision needed** Klipy's integration requirements forbid this step's design and part of step 11.
-Nothing of step 10 is built. The owner chooses one:
-- **A. Ask Klipy for written approval** (`developers@klipy.com`) of a server-side proxy and of copies kept
-  in Firebase Storage. Steps 10 and 11 wait for the answer.
-- **B. Standard integration.** The app calls `api.klipy.com` and loads media from `static.klipy.com` itself.
-  Step 10 is dropped. The key ships in the app. A picked GIF is sent as a message that carries the Klipy url,
-  and the recipient's device loads it from Klipy. An online sticker cannot be saved to the library. This
-  reverses the *Provider privacy* and *Recipient privacy* decisions.
-- **C. Drop the GIFs tab and the online catalogue.** The plan ends at step 9. GIFs still come from the keyboard,
-  the gallery and the share sheet.
+### Step 10 — Klipy in the app: source, send and receive — skills: code-review; model: strong
+
+A third-party key, a new outbound host, and a message whose file is not in Storage.
+
+**Decision taken** (owner, 2026-10-04): the standard integration. The app calls `api.klipy.com` and loads
+media from Klipy's hosts itself. There are no Cloud Functions in this plan, and `functions/` is not touched.
+Klipy's integration requirements forbid a server-side proxy and copies of its media without written approval.
 
 **Klipy facts** (read from `docs.klipy.com` on 2026-10-04; every page has a plain copy at `<page url>.md`)
 - Rules (`/integration-requirements`). Requests and media loads must come from the end-user client. Routing
@@ -601,46 +805,83 @@ Nothing of step 10 is built. The owner chooses one:
   `customer_id`.
 - A key in testing mode allows 100 requests an hour. Production access is requested in the Partner Panel.
 
-- Confirm against `docs.klipy.com` before coding: GIF and sticker search and trending endpoints,
-  rendition fields, CDN host names, whether `customer_id` is required, attribution, re-hosting terms.
-- `functions/mediaProxy.js`, exported from `index.js`:
-  - `mediaSearch` (v2 `onCall`, auth required): `kind` is `gifs` or `stickers`, query or trending,
-    key from `defineSecret("FIRE_STREAM_GIF")`, returns trimmed items. Any `customer_id` is an HMAC of
-    the uid, never the uid.
-  - `mediaFetch` (v2 `onRequest`): verifies the ID token, then streams one media URL. `https` only,
-    host on an allowlist of the provider's CDN, redirects re-validated, byte cap, `image/*` only, a timeout.
-- Tests: `node --test` over the pure parts; `functions/package.json` gets a real `test` script.
-- Docs: `docs/CLOUD-FUNCTIONS.md`, and the function count in CLAUDE.md.
+- **The key.** `BuildConfig.KLIPY_API_KEY` for both flavors, read like the release signing values in
+  `app/build.gradle.kts`: the environment variable `KLIPY_API_KEY`, else `klipyApiKey` in `local.properties`,
+  else empty. An empty key turns the feature off. The key goes into no tracked file.
+- **No url in an error.** The key is a path segment of every request. No log line, exception message or
+  `AppError` may carry a request url. A test asserts this on a failed request.
+- `domain/model/OnlineMedia.kt`: kind (`GIF` or `STICKER`), slug, title, a preview rendition and a send
+  rendition, each with url, width, height and mime type.
+- `domain/repository/OnlineMediaRepository.kt`: `isAvailable`, `search(kind, query, page)`,
+  `trending(kind, page)`, `reportShare(media)`.
+- `data/remote/source/KlipyMediaSource.kt` on the OkHttp client from `di/NetworkModule.kt`. It keeps the
+  order Klipy returns. The preview is the `sm` rendition and the send rendition is `md`, `webp` before `gif`.
+  An item with no rendition that passes `KlipyUrls.isMedia` is left out.
+- `customer_id` is a random UUID kept in `PreferencesDataStore`, made on first use. It is never the uid or
+  anything derived from it.
+- `domain/util/KlipyUrls.kt`, pure: `isMedia(url)` is true for an `https` url whose host is exactly one of
+  the three media hosts, with no user info and no other port.
+- **Send.** `MessageRepository.sendOnlineMedia(chatId, media)`. A GIF becomes `type = GIF`. A sticker becomes
+  `type = STICKER` with `stickerId` and `stickerPackId` null. `mediaUrl` is the Klipy url as returned, with its
+  mime type and dimensions. There is no `localUri` and no upload. A url that fails `KlipyUrls.isMedia` is
+  refused with `AppError.Validation`.
+- The send goes through `SendTarget.forChat` and the outbox like every other send. `OutboxJob.UPLOAD_TYPES`
+  holds `GIF`, and `OutboxSender` runs `prepareMedia` for a GIF and `withStickerUrl` for a sticker. A row whose
+  `mediaUrl` is a Klipy url and that has no local file skips both.
+- **No copy.** `MediaFileManager.downloadFor` returns no file for a Klipy url, for both types, and the media
+  backfill skips such a message. The bubble then plays from the url, as it does for any message without a
+  local file. `StickerDownloads.ensureLocal` is not called for it.
+- Check every place that stores or re-sends a message's file, and offer nothing that keeps a copy of a Klipy
+  pick: favourite, add to a pack, save to the device, share to another app. A forward keeps the url and
+  uploads nothing. The reply thumbnail, the starred list, the reminder widget and the notification read the url.
+- Coil's disk cache holds what it loads from Klipy. Record that under Departures for sign-off.
+- No code was found that checks the host of a received `mediaUrl`. This step adds no general check. If the
+  step confirms the gap, it records it in `TECH_DEBT.md`.
+- Find out what the released `v1.38.0` does with a `STICKER` that has no `stickerId`, and with a `GIF` whose
+  url is not in Storage. Record both in `docs/BACKLOG.md` §4.6.
+- **(step-3)** `sendGifMessage` takes a local uri and uploads it. It stays as it is for the keyboard, the
+  gallery and the share sheet.
+- **(step-7)** A sticker without a local file renders from its url as a WebP. Klipy's sticker renditions are
+  `webp`, `gif` and `png`, never Lottie.
+- Tests: `KlipyMediaSourceTest` on MockWebServer (the four endpoints, paging, the order kept, a foreign host
+  left out, an error without the key), `KlipyUrlsTest`, and in the repository and outbox tests: the row a
+  Klipy send writes, nothing uploaded, `downloadFor` without a file.
+- Docs: `docs/SCHEMA-FIRESTORE.md` (a `mediaUrl` may be a Klipy url), `docs/BACKLOG.md` §4.6, FEATURE-MAP.
 
-**Owner, after step 11.** Deploy the two functions from the plan worktree. The secret `FIRE_STREAM_GIF`
-holds the Klipy key in the Firebase project `fire-stream-chat` (version 1), so step 10 only declares it
-with `defineSecret`. The key itself goes into no tracked file: the repository is public. Step 11 is built
-and gated against functions that are not deployed yet, so its online paths are checked on a device
-only after the deploy.
+**Owner, any time before the device pass.** Put the Klipy key into `local.properties` as `klipyApiKey=<key>`,
+in the main checkout and in the plan worktree, and into the environment of whatever builds the release APK.
+The Firebase secrets `FIRE_STREAM_GIF` and `KLIPY_API_KEY` are not used and can be destroyed.
 
 ### Step 11 — GIFs tab and the online sticker catalogue
 
-- `BuildConfig.SUPPORTS_ONLINE_MEDIA` per flavor, like `SUPPORTS_SIGNAL`.
-  `data/remote/source/OnlineMediaSource.kt` with a Firebase implementation (the `firebase-functions`
-  SDK is already a dependency, unused so far) and a pocketbase stub.
-- `domain/model/OnlineMedia.kt`, `domain/repository/OnlineMediaRepository.kt`: `search`, `trending`,
-  `download` into `cacheDir`.
-- `ui/chat/gif/OnlineMediaViewModel.kt` (debounced query, paging, `AppError`).
-  `ui/chat/picker/GifTab.kt`: animated previews through the proxy, the provider's required search hint
-  and attribution. The composer declares `GIF` only when the flag is on.
-- Stickers tab: an **Online** entry in the pack row and a *More online* section under a local search.
-  A pick is downloaded, imported into `SAVED` and sent; long-press adds it to favourites or a pack.
-- A GIF pick downloads the full rendition through the proxy, then calls `sendGifMessage`.
-- **(step-1)** `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. Keep the
-  download there, or the import refuses it.
+- `ui/chat/gif/OnlineMediaViewModel.kt`: a debounced query, trending while the query is empty, paging by
+  `has_next`, `AppError`.
+- `ui/chat/picker/GifTab.kt`: the search field's placeholder is *Search KLIPY*, which Klipy requires. The
+  grid keeps the order returned. Previews load straight from Klipy with the per-request animated decoder.
+  A *Powered by KLIPY* mark sits in the tab.
+- The composer declares `GIF`, and the Stickers tab shows its online parts, only when
+  `OnlineMediaRepository.isAvailable`.
+- **First use.** Before the first request, the tab shows a one-time notice: searches go to KLIPY, and the
+  people you send a pick to load it from KLIPY. Nothing is requested until it is accepted. The answer is a
+  DataStore flag.
+- Stickers tab: an **Online** entry in the pack row, and a *More online* section under a local search. Klipy's
+  results stay in their own grid or section and are never mixed into the local ones.
+- A pick is sent with `sendOnlineMedia`, with the scroll and the error handling of
+  `ChatMessageSender.sendKeyboardContent`. Then `reportShare` runs on the application scope, and its failure
+  is ignored. A long press on an online sticker offers nothing, because it cannot be kept.
 - **(step-5)** The composer's tabs are `COMPOSER_TABS` in `ui/chat/ComposerPickerPanel.kt`, and its `when` names
-  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the flag is on, and refresh the
-  `PickerTab` KDoc, which says nobody declares `GIF`.
+  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the feature is available, and
+  refresh the `PickerTab` KDoc, which says nobody declares `GIF`.
 - **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
   `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
   `ComposerPickerCallbacks`.
-- Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
-- Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
+- **(step-8)** The pack row's `LazyRow` ends with the **+** that opens the sticker maker (`CREATE_KEY`). The **Online**
+  entry goes before it. `ComposerPickerCallbacks` has a seventh field, `onCreateSticker`, and no defaults.
+- **(step-9)** The composer's `BasicTextField` sits inside `KeyboardContentReceiver` in `ChatScreen.kt`. A search field
+  in the GIFs tab is outside it and must stay so: it would send a keyboard GIF picked while searching.
+- Tests: `OnlineMediaViewModelTest`, and a Robolectric test for the placeholder text, the notice, and the tab
+  hidden without a key.
+- Docs: FEATURE-MAP, BACKLOG (the device checklist), CHANGELOG.
 
 ## Verification
 
@@ -653,8 +894,9 @@ only after the deploy.
   confirm the outbox finishes it.
 - **After step 6:** clear app data, sign in, and confirm packs and favourites return.
 - **After step 9:** insert a GIF and a sticker from Gboard; pick a `.gif` from the gallery.
-- **After step 11:** search and send with OkHttp logging on. The app contacts only the Functions host
-  and Storage, never the provider.
+- **After step 11:** search and send with a key set. The app contacts `api.klipy.com` and Klipy's three
+  media hosts. Nothing of a Klipy pick lands in Storage or under `filesDir`. A build without a key shows
+  no GIFs tab.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): the real WhatsApp
   folder grant, WhatsApp Business, Samsung's keyboard, the cutout model download, scroll performance
   with many animated bubbles.

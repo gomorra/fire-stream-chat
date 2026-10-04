@@ -51,6 +51,7 @@ class ComposerPickerPanelTest {
     private val favourites = mutableListOf<String>()
     private var backspaces = 0
     private var imports = 0
+    private var creates = 0
 
     private fun setPanel(packs: List<StickerPack> = emptyList(), recents: List<Sticker> = emptyList()) {
         composeTestRule.setContent {
@@ -66,6 +67,7 @@ class ComposerPickerPanelTest {
                         onSticker = { picks += it },
                         onToggleStickerFavourite = { favourites += it },
                         onImportStickers = { imports++ },
+                        onCreateSticker = { creates++ },
                     ),
                     modifier = Modifier.height(360.dp),
                 )
@@ -100,6 +102,30 @@ class ComposerPickerPanelTest {
         composeTestRule.onNodeWithText("Import stickers").performClick()
 
         assertEquals(1, imports)
+    }
+
+    @Test
+    fun `the maker opens from an empty library and from the end of the pack row`() {
+        var packs by mutableStateOf(emptyList<StickerPack>())
+        composeTestRule.setContent {
+            MaterialTheme {
+                ComposerPickerPanel(
+                    recentEmojis = emptyList(),
+                    stickerPacks = packs,
+                    recentStickers = emptyList(),
+                    callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, {}, {}, {}, { creates++ }),
+                    modifier = Modifier.height(360.dp),
+                )
+            }
+        }
+        openStickers()
+        composeTestRule.onNodeWithText("Make a sticker").performClick()
+
+        packs = listOf(pack("animals", StickerPackKind.USER, cat))
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithContentDescription("Make a sticker").performClick()
+
+        assertEquals(2, creates)
     }
 
     @Test
@@ -154,7 +180,7 @@ class ComposerPickerPanelTest {
                     recentEmojis = emptyList(),
                     stickerPacks = listOf(pack("animals", StickerPackKind.USER, cat, dog)),
                     recentStickers = recents,
-                    callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, {}, {}, {}),
+                    callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, {}, {}, {}, {}),
                     modifier = Modifier.height(360.dp),
                 )
             }

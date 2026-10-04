@@ -111,29 +111,33 @@ internal class ChatMessageActions(
     }
 
     /**
-     * Adds a sticker to the favourites, or takes it out.
+     * Adds a sticker to the favourites, or takes it out when it is one. The
+     * repository decides which, in one transaction, so two quick taps flip twice.
      *
      * [message] is the bubble the sticker was tapped in, and null for a sticker
      * picked from the library. A received sticker has no library row until its
-     * file is downloaded and checked, so a bubble without a local file is
-     * fetched first. That fails for a sticker whose bytes were refused.
+     * file is downloaded and checked. So when the library refuses the sticker,
+     * the bubble's file is fetched and the toggle is tried once more. The fetch
+     * fails for a sticker whose bytes were refused.
      *
      * [onDone] gets the line to show, for either outcome.
      */
-    fun setStickerFavourite(
+    fun toggleStickerFavourite(
         stickerId: String,
-        favourite: Boolean,
         message: Message? = null,
         onDone: (String) -> Unit,
     ) {
         scope.launch {
-            val toFetch = message?.takeIf { favourite && it.localUri == null }
-            if (toFetch != null && messageRepository.ensureLocalFile(toFetch).isFailure) {
-                onDone("Couldn't save this sticker")
-                return@launch
+            var toggled = stickerRepository.toggleFavourite(stickerId)
+            if (toggled.isFailure && message != null) {
+                if (messageRepository.ensureLocalFile(message).isFailure) {
+                    onDone("Couldn't save this sticker")
+                    return@launch
+                }
+                toggled = stickerRepository.toggleFavourite(stickerId)
             }
-            stickerRepository.setFavourite(stickerId, favourite)
-                .onSuccess { onDone(if (favourite) "Added to favourites" else "Removed from favourites") }
+            toggled
+                .onSuccess { isFavourite -> onDone(if (isFavourite) "Added to favourites" else "Removed from favourites") }
                 .onFailure { onDone("Couldn't update favourites") }
         }
     }

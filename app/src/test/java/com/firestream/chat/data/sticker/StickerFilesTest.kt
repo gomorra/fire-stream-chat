@@ -7,7 +7,6 @@ import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.test.WebpFixtures.riff
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.vp8l
-import com.firestream.chat.test.WebpFixtures.waExif
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -55,7 +54,7 @@ class StickerFilesTest {
         assertEquals(512, stored.height)
         assertTrue(stored.isAnimated)
         assertTrue(stored.isNew)
-        assertArrayEquals(waExif("""{"emojis":["😀"]}"""), stored.exif)
+        assertEquals(listOf("😀"), stored.metadata!!.emojis)
         assertEquals(listOf("${stored.id}.webp"), stored())
         assertArrayEquals(bytes, files.fileFor(stored.id, stored.format).readBytes())
     }

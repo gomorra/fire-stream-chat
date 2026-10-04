@@ -32,13 +32,45 @@ data class StickerPack(
     val updatedAt: Long,
 )
 
-/** One file in the WhatsApp sticker folder, before it is imported. */
+/**
+ * A pack someone else may own, as it is offered for adding to the library.
+ *
+ * [packId] is the pack that was looked up. [rootPackId] is the pack it was
+ * first copied from, or [packId] itself when it is nobody's copy. A copy in the
+ * library remembers the root, so the same pack reached through two people is
+ * recognised as one. [isInLibrary] says the library already holds it, as the
+ * user's own pack or as a copy.
+ *
+ * The files of [stickers] may not be on this device yet.
+ */
+data class StickerPackPreview(
+    val packId: String,
+    val rootPackId: String,
+    val name: String,
+    val publisher: String?,
+    val stickers: List<Sticker>,
+    val isInLibrary: Boolean,
+)
+
+/**
+ * One file in the WhatsApp sticker folder, before it is imported. WhatsApp
+ * keeps a still or animated sticker as a `.webp` and a Lottie sticker as a `.was`.
+ */
 data class WhatsAppStickerFile(
     val uri: String,
     val name: String,
     val sizeBytes: Long,
     val lastModified: Long,
-)
+) {
+    /** Whether an image request can draw the file. A `.was` is a zip around an animation, which none can. */
+    val hasStill: Boolean
+        get() = !name.endsWith(LOTTIE_SUFFIX, ignoreCase = true)
+
+    companion object {
+        const val WEBP_SUFFIX = ".webp"
+        const val LOTTIE_SUFFIX = ".was"
+    }
+}
 
 /**
  * What an import did.

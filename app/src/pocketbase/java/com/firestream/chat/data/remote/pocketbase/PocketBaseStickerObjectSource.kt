@@ -20,6 +20,9 @@ class PocketBaseStickerObjectSource @Inject constructor(
     override suspend fun ensureUploaded(id: String, extension: String, mimeType: String, file: File): String =
         storageSource.uploadMedia(STICKERS, id, Uri.fromFile(file), mimeType)
 
+    /** No lookup in v0. Nothing is restored on this backend, so nothing asks. */
+    override suspend fun urlIfPresent(id: String, extension: String): String? = null
+
     private companion object {
         const val STICKERS = "stickers"
     }

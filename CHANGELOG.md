@@ -2,6 +2,15 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.39.0] — 2026-10-04
+
+### Added
+
+- **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library. (`33f54406`)
+- **Lottie stickers.** WhatsApp's newer animated stickers (`.was`) now show up in *From WhatsApp* and can be imported, and *From files* takes Telegram's `.tgs` stickers. They play in a chat like any animated sticker, show a still first frame in the library and the picker, and are backed up with their pack. Someone on an older version of the app sees a broken image in place of one. (`51f04ab4`)
+- **Make your own stickers.** *Create* in the sticker library, and the **+** at the end of the pack row in the Stickers tab, turn one of your photos into a sticker. The subject is cut out for you and gets a white outline, which you can switch off, or you keep the whole photo. Pinch and drag to crop, pick up to three emojis the sticker is found by, and choose the pack it joins. On a phone without Google Play services the cutout is left out and the crop remains. (`8e9ddf5d`)
+- **GIFs and stickers from the keyboard, and GIFs that stay GIFs.** The keyboard's GIF and sticker buttons now work in a chat: a pick is sent at once, a GIF as a GIF and a sticker as a sticker, which is also kept in your sticker library under *Saved*. A GIF picked from the gallery or shared into the app from elsewhere now arrives animated. It used to be flattened into a still photo. Crop it or draw on it before sending and it is still sent as a photo. (`5a98ac49`)
+
 ## [1.38.0] — 2026-10-04
 
 ### Added

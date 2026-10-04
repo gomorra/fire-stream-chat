@@ -155,6 +155,7 @@ import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
 import com.firestream.chat.ui.components.placeholderLabel
 import com.firestream.chat.ui.components.stickerLabel
+import com.firestream.chat.ui.stickers.StickerPackSheet
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -234,6 +235,8 @@ fun ChatScreen(
     onListClick: (listId: String) -> Unit = {},
     // Opens the sticker library screen, from the Stickers tab of an empty library.
     onImportStickersClick: () -> Unit = {},
+    // Opens the sticker maker, from the + that ends the Stickers tab's pack row.
+    onCreateStickerClick: () -> Unit = {},
     fromNotification: Boolean = false,
     // Invoked once when the message list (or the empty state of a fresh chat)
     // becomes visible. MainActivity uses it to release the splash screen.
@@ -345,6 +348,8 @@ fun ChatScreen(
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
     // The sticker bubble that was tapped, while its sheet is open.
     var stickerSheetMessage by remember { mutableStateOf<Message?>(null) }
+    // The pack that sheet's "View pack" asked for, while its preview is open.
+    var viewedStickerPackId by remember { mutableStateOf<String?>(null) }
     // Swipe-to-react panel state
     var swipeReactMessage by remember { mutableStateOf<Message?>(null) }
     // ID of the message whose reaction chips should be scrolled into view after reacting
@@ -1946,7 +1951,12 @@ fun ChatScreen(
                         // No clip: large emoji must overflow the Row's cross-axis height constraint.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
-                    BasicTextField(
+                    // A GIF or a sticker from the keyboard is sent at once, like a pick
+                    // from the Stickers tab. Not while a message is being edited.
+                    KeyboardContentReceiver(
+                        enabled = uiState.composer.editingMessage == null,
+                        onContent = viewModel::sendKeyboardContent,
+                    ) { BasicTextField(
                         value = inputValue,
                         onValueChange = { newValue ->
                             // User interaction during dictation cancels the session
@@ -2007,7 +2017,7 @@ fun ChatScreen(
                                 innerTextField()
                             }
                         }
-                    )
+                    ) }
                     if (uiState.composer.editingMessage == null) {
                         IconButton(
                             onClick = { showAttachmentSheet = true },
@@ -2118,6 +2128,7 @@ fun ChatScreen(
                             onSticker = { viewModel.sendSticker(it.stickerId, it.packId) },
                             onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
                             onImportStickers = onImportStickersClick,
+                            onCreateSticker = onCreateStickerClick,
                         ),
                         modifier = Modifier
                             .align(Alignment.TopCenter)
@@ -2303,8 +2314,14 @@ fun ChatScreen(
             message = target,
             isFavourite = stickerId != null && stickerId in uiState.overlays.favouriteStickerIds,
             onToggleFavourite = { if (stickerId != null) viewModel.toggleStickerFavourite(stickerId, target) },
+            onViewPack = target.stickerPackId?.let { packId -> { viewedStickerPackId = packId } },
             onDismiss = { stickerSheetMessage = null },
         )
+    }
+
+    // Pack preview — "View pack" in the sticker sheet.
+    viewedStickerPackId?.let { packId ->
+        StickerPackSheet(packId = packId, onDismiss = { viewedStickerPackId = null })
     }
 
     // Forward picker — the chat picker the share target uses, slid in over the

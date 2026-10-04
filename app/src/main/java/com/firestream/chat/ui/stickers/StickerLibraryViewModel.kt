@@ -181,7 +181,9 @@ class StickerLibraryViewModel @Inject constructor(
     companion object {
         /**
          * The pack that WhatsApp stickers without pack metadata join. The repository
-         * stores it in that pack's import key, so a changed name starts a second pack.
+         * stores it in that pack's import key, and the key is backed up with the
+         * pack. So this value must not change: a changed name starts a second pack
+         * beside the restored one. A translated name has to come from the repository.
          */
         const val WHATSAPP_PACK_NAME = "WhatsApp"
     }

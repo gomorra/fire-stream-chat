@@ -16,6 +16,7 @@ import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.sticker.StickerFiles
+import com.firestream.chat.data.sticker.StickerUploads
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.ImageResult
 import com.firestream.chat.data.util.DocumentFiles
@@ -205,7 +206,7 @@ class OutboxSenderTest {
         messageDao, chatDao, messageSource, storageSource,
         MessageWriter(messageSource, signalManager, preferencesDataStore, buildEncrypts),
         outboxFiles, imageCompressor, videoTranscoder, mediaFileManager, preferencesDataStore, documentFiles,
-        stickerDao, stickerFiles, stickerObjectSource,
+        StickerUploads(stickerDao, stickerFiles, stickerObjectSource),
     )
 
     private fun stickerUrl(stickerId: String) = "https://storage.example/stickers/$stickerId.webp"

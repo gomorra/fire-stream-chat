@@ -23,14 +23,16 @@ class StickerLibraryScreenTest {
     val composeTestRule = createComposeRule()
 
     @Test
-    fun `an empty library says so and offers both import routes`() {
+    fun `an empty library says so and offers the maker and both import routes`() {
         var whatsApp = 0
         var files = 0
+        var creates = 0
         composeTestRule.setContent {
             MaterialTheme {
                 StickerLibraryContent(
                     uiState = StickerLibraryUiState(isLoading = false),
                     actions = StickerLibraryActions(
+                        onCreate = { creates++ },
                         onImportFromWhatsApp = { whatsApp++ },
                         onImportFromFiles = { files++ },
                     ),
@@ -42,7 +44,9 @@ class StickerLibraryScreenTest {
         composeTestRule.onNodeWithText("Packs").assertDoesNotExist()
         composeTestRule.onNodeWithText("From WhatsApp").performClick()
         composeTestRule.onNodeWithText("From files").performClick()
+        composeTestRule.onNodeWithText("Create").performClick()
 
+        assertEquals(1, creates)
         assertEquals(1, whatsApp)
         assertEquals(1, files)
     }

@@ -121,6 +121,7 @@ import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.util.FilePreviewSource
 import com.firestream.chat.ui.components.StickerImage
 import com.firestream.chat.ui.components.placeholderLabel
@@ -626,9 +627,18 @@ internal val MessageType.hasStillPreview: Boolean
     get() = this == MessageType.IMAGE || this == MessageType.STICKER || this == MessageType.GIF
 
 /**
+ * The container a sticker message's file is in. The library file's extension
+ * says it once the sticker is on this device. Until then the mime type does,
+ * which the sender wrote.
+ */
+internal val Message.stickerFormat: StickerFormat
+    get() = localUri?.let(StickerFormat::ofPath) ?: StickerFormat.ofMimeType(mimeType)
+
+/**
  * A sticker in the chat: the animated file on the chat background, 160 dp
  * square. It renders from the library file once the download has landed and
  * from `mediaUrl` until then, which is also where a refused sticker stays.
+ * A Lottie sticker shows a placeholder in place of the url.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -650,6 +660,7 @@ private fun StickerBubbleContent(
                 model = model,
                 modifier = Modifier.fillMaxSize(),
                 contentDescription = stickerLabel(message.content),
+                format = message.stickerFormat,
             )
         } else {
             Icon(
@@ -779,7 +790,7 @@ internal fun ReplyImageThumbnail(
     message: Message,
     modifier: Modifier = Modifier,
 ) {
-    val imageModel = rememberMessageImageModel(message)
+    val imageModel = rememberMessageStillModel(message)
     Box(
         modifier = modifier.clip(RoundedCornerShape(6.dp)),
         contentAlignment = Alignment.Center,
@@ -818,6 +829,22 @@ internal fun rememberMessageImageModel(message: Message): Any? {
         localUri?.let { File(it) }?.takeIf { it.exists() && it.isFile && it.canRead() }
     }
     return localFile ?: message.mediaUrl
+}
+
+/**
+ * What a reply, forward or starred preview draws for [message] through a plain
+ * image request. For a Lottie sticker that is the first-frame PNG beside its
+ * library file, and null while the file is not on this device: no image
+ * decoder reads the animation, from a file or from a url.
+ */
+@Composable
+internal fun rememberMessageStillModel(message: Message): Any? {
+    val model = rememberMessageImageModel(message)
+    val format = if (message.type == MessageType.STICKER) message.stickerFormat else null
+    return remember(model, format) {
+        if (format != StickerFormat.LOTTIE) return@remember model
+        (model as? File)?.let { File(format.stillPathOf(it.path)) }?.takeIf { it.isFile }
+    }
 }
 
 @Composable

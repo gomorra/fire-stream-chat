@@ -10,19 +10,25 @@ import com.firestream.chat.data.local.entity.PackStickerRow
 import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerPackEntity
 import com.firestream.chat.data.local.entity.StickerPackItemEntity
+import com.firestream.chat.data.local.entity.StickerSyncState
 import kotlinx.coroutines.flow.Flow
 
 /**
  * The sticker library's three tables. Every write that changes a pack or its
  * items goes through a method here that also calls [touchPack], so a pack that
  * differs from the backend is always marked for sync.
+ *
+ * A deleted pack stays as a tombstone row ([StickerSyncState.DELETED]) until
+ * the backend's copy is deleted too. The reads the library is built from leave
+ * tombstones out. [getPackRow] and [getUnsyncedPacks] are the sync's reads and
+ * return them.
  */
 @Dao
 interface StickerDao {
 
     // --- Reads ---
 
-    @Query("SELECT * FROM sticker_packs ORDER BY sortOrder ASC, createdAt ASC")
+    @Query("SELECT * FROM sticker_packs WHERE syncState != 'DELETED' ORDER BY sortOrder ASC, createdAt ASC")
     fun observePacks(): Flow<List<StickerPackEntity>>
 
     /** Every pack's stickers, each pack's in its own order. */
@@ -41,17 +47,35 @@ interface StickerDao {
     @Query("SELECT * FROM stickers WHERE id = :id")
     suspend fun getSticker(id: String): StickerEntity?
 
-    @Query("SELECT * FROM sticker_packs WHERE id = :packId")
+    @Query("SELECT * FROM sticker_packs WHERE id = :packId AND syncState != 'DELETED'")
     suspend fun getPack(packId: String): StickerPackEntity?
 
+    /** The row of [packId] in whatever state, a tombstone included. */
+    @Query("SELECT * FROM sticker_packs WHERE id = :packId")
+    suspend fun getPackRow(packId: String): StickerPackEntity?
+
+    /** A tombstone has no import key, so this never returns one. */
     @Query("SELECT * FROM sticker_packs WHERE importKey = :importKey")
     suspend fun getPackByImportKey(importKey: String): StickerPackEntity?
 
-    @Query("SELECT id FROM sticker_packs ORDER BY sortOrder ASC, createdAt ASC")
+    @Query("SELECT id FROM sticker_packs WHERE syncState != 'DELETED' ORDER BY sortOrder ASC, createdAt ASC")
     suspend fun getPackIds(): List<String>
 
     @Query("SELECT stickerId FROM sticker_pack_items WHERE packId = :packId ORDER BY position ASC")
     suspend fun getStickerIds(packId: String): List<String>
+
+    @Query(
+        "SELECT s.* FROM sticker_pack_items i INNER JOIN stickers s ON s.id = i.stickerId " +
+            "WHERE i.packId = :packId ORDER BY i.position ASC"
+    )
+    suspend fun getPackStickers(packId: String): List<StickerEntity>
+
+    /** The packs whose state the backend does not have: changed packs and tombstones. */
+    @Query("SELECT * FROM sticker_packs WHERE syncState != 'SYNCED' ORDER BY sortOrder ASC, createdAt ASC")
+    suspend fun getUnsyncedPacks(): List<StickerPackEntity>
+
+    @Query("SELECT COUNT(*) FROM sticker_packs WHERE syncState != 'SYNCED'")
+    suspend fun countUnsyncedPacks(): Int
 
     @Query("SELECT MAX(sortOrder) FROM sticker_packs")
     suspend fun maxSortOrder(): Int?
@@ -77,6 +101,10 @@ interface StickerDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertPack(pack: StickerPackEntity)
 
+    /** Writes the whole row, its [StickerPackEntity.syncState] included. For the restore only. */
+    @Update
+    suspend fun updatePack(pack: StickerPackEntity)
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertItems(items: List<StickerPackItemEntity>)
 
@@ -89,17 +117,46 @@ interface StickerDao {
     @Query("DELETE FROM sticker_packs WHERE id = :packId")
     suspend fun deletePackRow(packId: String)
 
-    @Query("UPDATE sticker_packs SET updatedAt = :now, syncState = 'PENDING' WHERE id = :packId")
+    // The three writes below move `updatedAt` strictly forward, so two changes in
+    // one millisecond are still two values. None of them touches a tombstone,
+    // which would bring a deleted pack back as a pending one.
+
+    @Query(
+        "UPDATE sticker_packs SET updatedAt = MAX(:now, updatedAt + 1), syncState = 'PENDING' " +
+            "WHERE id = :packId AND syncState != 'DELETED'"
+    )
     suspend fun touchPack(packId: String, now: Long)
 
-    @Query("UPDATE sticker_packs SET name = :name, updatedAt = :now, syncState = 'PENDING' WHERE id = :packId")
+    @Query(
+        "UPDATE sticker_packs SET name = :name, updatedAt = MAX(:now, updatedAt + 1), syncState = 'PENDING' " +
+            "WHERE id = :packId AND syncState != 'DELETED'"
+    )
     suspend fun renamePack(packId: String, name: String, now: Long)
 
     @Query(
-        "UPDATE sticker_packs SET sortOrder = :sortOrder, updatedAt = :now, syncState = 'PENDING' " +
-            "WHERE id = :packId AND sortOrder != :sortOrder"
+        "UPDATE sticker_packs SET sortOrder = :sortOrder, updatedAt = MAX(:now, updatedAt + 1), syncState = 'PENDING' " +
+            "WHERE id = :packId AND sortOrder != :sortOrder AND syncState != 'DELETED'"
     )
     suspend fun setSortOrder(packId: String, sortOrder: Int, now: Long)
+
+    /** Turns the row into a tombstone. Its import key is given up, so a new pack can take it. */
+    @Query(
+        "UPDATE sticker_packs SET syncState = 'DELETED', importKey = NULL, updatedAt = MAX(:now, updatedAt + 1) " +
+            "WHERE id = :packId"
+    )
+    suspend fun markDeleted(packId: String, now: Long)
+
+    /**
+     * Marks the pack synced, but only while it is still the state that was
+     * uploaded: pending, and with the [updatedAt] the upload read. A pack that
+     * changed during its upload stays pending. Returns the rows changed.
+     */
+    @Query("UPDATE sticker_packs SET syncState = 'SYNCED' WHERE id = :packId AND updatedAt = :updatedAt AND syncState = 'PENDING'")
+    suspend fun markSynced(packId: String, updatedAt: Long): Int
+
+    /** Drops a tombstone once the backend's copy is deleted. A row in any other state stays. */
+    @Query("DELETE FROM sticker_packs WHERE id = :packId AND syncState = 'DELETED'")
+    suspend fun purgeTombstone(packId: String)
 
     // --- Transactions ---
 
@@ -158,6 +215,32 @@ interface StickerDao {
         return pack.id to addToPack(pack.id, stickers.map { it.id }, atFront = false, now = now)
     }
 
+    /**
+     * A made sticker in one transaction: its row and its place at the end of
+     * the pack [packId]. Returns false, and writes nothing, when that pack is gone.
+     */
+    @Transaction
+    suspend fun addMadeSticker(packId: String, sticker: StickerEntity, now: Long): Boolean {
+        getPack(packId) ?: return false
+        mergeStickers(listOf(sticker))
+        addToPack(packId, listOf(sticker.id), atFront = false, now = now)
+        return true
+    }
+
+    /**
+     * A new pack with [stickers] in the given order, after every other pack.
+     * Returns false, and writes nothing, when a pack with its import key is
+     * already there.
+     */
+    @Transaction
+    suspend fun installPack(pack: StickerPackEntity, stickers: List<StickerEntity>): Boolean {
+        if (pack.importKey?.let { getPackByImportKey(it) } != null) return false
+        mergeStickers(stickers)
+        insertPack(pack.copy(sortOrder = (maxSortOrder() ?: -1) + 1))
+        insertItems(stickers.toItems(pack.id))
+        return true
+    }
+
     @Transaction
     suspend fun removeFromPack(packId: String, stickerIds: List<String>, now: Long) {
         if (deleteItems(packId, stickerIds) > 0) touchPack(packId, now)
@@ -191,6 +274,24 @@ interface StickerDao {
         return true
     }
 
+    /**
+     * Takes [stickerId] out of the favourites when it is one, and puts it at
+     * their front when it is not. The pack is [candidate] when there is none yet.
+     * Read and write are one transaction, so two quick taps flip twice.
+     *
+     * Returns whether the sticker is a favourite now, or `null` when the library
+     * has no such sticker.
+     */
+    @Transaction
+    suspend fun toggleFavourite(candidate: StickerPackEntity, stickerId: String, now: Long): Boolean? {
+        val favourites = candidate.importKey?.let { getPackByImportKey(it) }
+        if (favourites != null && stickerId in getStickerIds(favourites.id)) {
+            removeFromPack(favourites.id, listOf(stickerId), now)
+            return false
+        }
+        return if (addFavourite(candidate, stickerId, now)) true else null
+    }
+
     /** Numbers the packs of [packIds] from zero in that order, and every other pack after them in its current order. */
     @Transaction
     suspend fun reorderPacks(packIds: List<String>, now: Long) {
@@ -199,9 +300,93 @@ interface StickerDao {
         (listed + currentOrder.filterNot { it in listed }).forEachIndexed { index, id -> setSortOrder(id, index, now) }
     }
 
+    /** Deletes the pack's items and leaves the row as a tombstone, for the sync to delete the backend's copy by. */
     @Transaction
-    suspend fun deletePack(packId: String) {
+    suspend fun deletePack(packId: String, now: Long) {
+        deleteItemsOf(packId)
+        markDeleted(packId, now)
+    }
+
+    /** Deletes the pack outright. For a backend that keeps no packs, where a tombstone would never be collected. */
+    @Transaction
+    suspend fun deletePackNow(packId: String) {
         deleteItemsOf(packId)
         deletePackRow(packId)
     }
+
+    // --- Sync ---
+
+    /** A pack and its stickers, in order, as one consistent read. `null` when there is no such row. */
+    @Transaction
+    suspend fun getPackWithStickers(packId: String): Pair<StickerPackEntity, List<StickerEntity>>? {
+        val pack = getPackRow(packId) ?: return null
+        return pack to getPackStickers(packId)
+    }
+
+    /**
+     * Brings the backend's copy of a pack into the library. Returns whether
+     * anything was written.
+     *
+     * - **Same id, newer-only.** A row with [remote]'s id takes its fields and its
+     *   stickers only when [remote] is later by `updatedAt`. A tombstone never
+     *   does: its delete is on the way.
+     * - **Same import key, other id.** Two packs were made from one source, or
+     *   two favourites packs on two devices. They become one. The older pack
+     *   survives, by `createdAt` and then by id, so every device picks the same
+     *   one. It gains the other's stickers and the other becomes a tombstone,
+     *   which deletes its backend copy.
+     * - **Neither.** [remote] is inserted as it is, already synced.
+     */
+    @Transaction
+    suspend fun applyRemotePack(remote: StickerPackEntity, stickers: List<StickerEntity>, now: Long): Boolean {
+        val synced = remote.copy(syncState = StickerSyncState.SYNCED.name)
+        val local = getPackRow(remote.id)
+        if (local != null) {
+            if (local.syncState == StickerSyncState.DELETED.name || remote.updatedAt <= local.updatedAt) return false
+            // The key is unique. A row cannot take one that another pack holds.
+            val keyHolder = remote.importKey?.let { getPackByImportKey(it) }
+            val importKey = if (keyHolder == null || keyHolder.id == remote.id) remote.importKey else local.importKey
+            mergeStickers(stickers)
+            updatePack(synced.copy(importKey = importKey))
+            deleteItemsOf(remote.id)
+            insertItems(stickers.toItems(remote.id))
+            return true
+        }
+
+        mergeStickers(stickers)
+        val twin = remote.importKey?.let { getPackByImportKey(it) }
+        if (twin == null) {
+            insertPack(synced)
+            insertItems(stickers.toItems(remote.id))
+            return true
+        }
+        if (compareValuesBy(remote, twin, { it.createdAt }, { it.id }) < 0) {
+            val twinStickerIds = getStickerIds(twin.id)
+            // The tombstone gives the key up before the survivor takes it.
+            deletePack(twin.id, now)
+            insertPack(synced)
+            insertItems(stickers.toItems(remote.id))
+            addToPack(remote.id, twinStickerIds, atFront = false, now = now)
+        } else {
+            addToPack(twin.id, stickers.map { it.id }, atFront = false, now = now)
+            insertPack(remote.copy(importKey = null, syncState = StickerSyncState.DELETED.name, updatedAt = now))
+        }
+        return true
+    }
+
+    /**
+     * Removes a pack the backend no longer has. Only a synced row goes: a pack
+     * with changes of its own stays and is uploaded again. Returns whether a row
+     * was removed.
+     */
+    @Transaction
+    suspend fun removeIfSynced(packId: String): Boolean {
+        if (getPackRow(packId)?.syncState != StickerSyncState.SYNCED.name) return false
+        deletePackNow(packId)
+        return true
+    }
 }
+
+/** These stickers as the items of [packId], in the order given. */
+private fun List<StickerEntity>.toItems(packId: String): List<StickerPackItemEntity> =
+    mapIndexed { index, sticker -> StickerPackItemEntity(packId, sticker.id, index) }

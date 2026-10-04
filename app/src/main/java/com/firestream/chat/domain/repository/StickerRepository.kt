@@ -1,14 +1,24 @@
 package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerCrop
+import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
+import com.firestream.chat.domain.model.StickerPackPreview
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import kotlinx.coroutines.flow.Flow
 
-/** The sticker library on this device. URIs cross this boundary as strings. */
+/**
+ * The sticker library on this device, and its backup under the account. Every
+ * change to a pack is saved there, and the packs come back after a sign-in.
+ * URIs cross this boundary as strings.
+ */
 interface StickerRepository {
-    /** Every pack with its stickers, in the user's order. */
+    /**
+     * Every pack with its stickers, in the user's order. While this is
+     * collected, the library is kept in step with the account's backup.
+     */
     fun observePacks(): Flow<List<StickerPack>>
 
     /** The stickers used most recently, newest first. Device-only. */
@@ -26,7 +36,20 @@ interface StickerRepository {
      */
     suspend fun importFrom(uris: List<String>, loosePackName: String? = null): Result<StickerImportResult>
 
-    suspend fun setFavourite(stickerId: String, favourite: Boolean): Result<Unit>
+    /**
+     * Puts the one picture at [uri] into the `SAVED` pack and succeeds with its
+     * sticker id, also when the library held it already. A sticker file is kept
+     * as it is. Any other picture, such as a PNG a keyboard inserted, becomes a
+     * still WebP sticker. Fails for something that is no picture.
+     */
+    suspend fun saveSticker(uri: String): Result<String>
+
+    /**
+     * Adds [stickerId] to the favourites, or takes it out when it is one.
+     * Succeeds with whether it is a favourite now. Fails for a sticker the
+     * library does not hold.
+     */
+    suspend fun toggleFavourite(stickerId: String): Result<Boolean>
 
     /** Renames a `USER` or `INSTALLED` pack. Fails for a blank name and for the two unnamed packs. */
     suspend fun renamePack(packId: String, name: String): Result<Unit>
@@ -43,4 +66,43 @@ interface StickerRepository {
 
     /** Records that [stickerId] was just sent, for [observeRecents]. */
     suspend fun markUsed(stickerId: String)
+
+    /**
+     * Fetches the file of [sticker] when this device does not hold it yet, and
+     * says whether it is there now. Called when a sticker is first shown. It
+     * does not throw: without a connection the answer is `false`.
+     */
+    suspend fun ensureFile(sticker: Sticker): Boolean
+
+    /**
+     * Looks up the pack [packId] that a received sticker names. Fails when the
+     * pack is gone or was never shared.
+     */
+    suspend fun viewPack(packId: String): Result<StickerPackPreview>
+
+    /** Adds a viewed pack to the library as an `INSTALLED` copy. Adding one that is already there changes nothing. */
+    suspend fun installPack(preview: StickerPackPreview): Result<Unit>
+
+    /**
+     * Prepares the photo at [sourceUri] for the sticker maker: the photo, and
+     * its subject cut out when this device can do that. Fails for a photo that
+     * cannot be read. The draft replaces the one prepared before it.
+     */
+    suspend fun prepareStickerDraft(sourceUri: String): Result<StickerDraft>
+
+    /**
+     * Makes a sticker of the draft picture at [imagePath], placed by [crop],
+     * and tags it with [emojis].
+     *
+     * It joins the pack [packId], which must be a `USER` pack. When [packId] is
+     * null it joins the pack named [packName], which is made when it is not
+     * there. Succeeds with the sticker's id.
+     */
+    suspend fun createSticker(
+        imagePath: String,
+        crop: StickerCrop,
+        emojis: List<String>,
+        packId: String?,
+        packName: String,
+    ): Result<String>
 }

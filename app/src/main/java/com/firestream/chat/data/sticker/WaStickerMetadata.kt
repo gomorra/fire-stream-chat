@@ -5,8 +5,9 @@ import org.json.JSONObject
 /**
  * The pack a WhatsApp sticker says it belongs to, and the emojis it is tagged with.
  *
- * WhatsApp writes these as a JSON object into the file's EXIF chunk, under the
- * private TIFF tag `0x5741`. Any field may be missing, and so may the whole chunk.
+ * WhatsApp writes these as a JSON object into a WebP's EXIF chunk, under the
+ * private TIFF tag `0x5741`, and into a Lottie animation under
+ * `metadata.customProps`. Any field may be missing, and so may the whole object.
  */
 data class WaStickerMetadata(
     val packId: String?,
@@ -31,6 +32,17 @@ data class WaStickerMetadata(
             if (exif == null) return null
             val tiff = if (exif.startsWith(EXIF_PREFIX)) exif.copyOfRange(EXIF_PREFIX.size, exif.size) else exif
             val root = taggedJson(tiff)?.let(::parseObject) ?: bracedJson(tiff)?.let(::parseObject) ?: return null
+            return from(root)
+        }
+
+        /**
+         * The metadata of a WhatsApp Lottie sticker, whose animation JSON carries
+         * the same fields under `metadata.customProps`. [animation] is that JSON's root.
+         */
+        fun ofLottie(animation: JSONObject): WaStickerMetadata? =
+            animation.optJSONObject("metadata")?.optJSONObject("customProps")?.let(::from)
+
+        private fun from(root: JSONObject): WaStickerMetadata? {
             val emojis = root.optJSONArray("emojis")?.let { array ->
                 (0 until array.length())
                     .mapNotNull { (array.opt(it) as? String)?.trim() }

@@ -4,9 +4,10 @@
 //   together with its `stickers` row.
 // Owns: the hash check of received bytes (a mismatch stores nothing); the
 //   refusals remembered for this process, so a bad sticker is fetched once.
-// Collaborators: MediaFileManager.downloadFor (the only caller — every download
-//   of a message's media is routed there), StickerFiles (the file, and the lock
-//   that keeps it with its row), StickerDao, OkHttpClient.
+// Collaborators: MediaFileManager.downloadFor (a message's sticker — every
+//   download of a message's media is routed there), StickerRepositoryImpl.ensureFile
+//   (a library row whose file is not here yet), StickerFiles (the file, and the
+//   lock that keeps it with its row), StickerDao, OkHttpClient.
 // Don't put here: uploads (StickerObjectSource), pack membership
 //   (StickerRepositoryImpl), the message row's localUri (the caller writes it),
 //   the auto-download preference (MessageRepositoryImpl, MediaBackfillWorker).
@@ -88,12 +89,12 @@ class StickerDownloads @Inject constructor(
             return@withContext null
         }
         stickerFiles.rowLock.withLock {
-            val stored = stickerFiles.store(bytes)
+            val stored = stickerFiles.storeReceived(bytes)
             if (stored == null) {
                 Log.w(TAG, "refused sticker $stickerId: not a sticker file")
                 return@withContext null
             }
-            val emojis = WaStickerMetadata.parse(stored.exif)?.emojis.orEmpty()
+            val emojis = stored.metadata?.emojis.orEmpty()
             stickerDao.mergeStickers(listOf(StickerEntity.of(stored, emojis, System.currentTimeMillis())))
             stickerFiles.fileFor(stored.id, stored.format)
         }

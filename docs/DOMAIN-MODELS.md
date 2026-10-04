@@ -164,7 +164,7 @@ data class Sticker(
     val height: Int,
     val isAnimated: Boolean,
     val emojis: List<String>,
-    val localPath: String             // filesDir/stickers/<id>.<ext>
+    val localPath: String             // filesDir/stickers/<id>.<ext>; the file may not be there yet
 )
 
 data class StickerPack(
@@ -176,6 +176,15 @@ data class StickerPack(
     val stickers: List<Sticker>,      // in pack order
     val createdAt: Long,
     val updatedAt: Long
+)
+
+data class StickerPackPreview(        // a pack someone shared, as it is offered for adding
+    val packId: String,               // the pack that was looked up
+    val rootPackId: String,           // the pack it was first copied from, else packId
+    val name: String,
+    val publisher: String?,
+    val stickers: List<Sticker>,
+    val isInLibrary: Boolean          // the user's own pack, or a copy is installed already
 )
 
 data class StickerImportResult(

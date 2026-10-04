@@ -14,16 +14,14 @@
 // Owns: uploadProgress (MessageRepository re-exposes it); the outbox columns on
 //   MessageEntity — the attempt count, the stored ciphertext — and the if-absent
 //   decision the count drives; one in-process lock per message id, so a REPLACE
-//   retry never overlaps the attempt it replaces, and the job is decided under it;
-//   one lock per sticker id inside that, and the write of `stickers.remoteUrl`
-//   once a sticker's shared object is known to be there.
+//   retry never overlaps the attempt it replaces, and the job is decided under it.
 //   Cites "Sends are idempotent by client id and drained by OutboxWorker"
 //   (docs/PATTERNS.md).
 // Collaborators: OutboxWorker (only caller — one run per attempt, online by
 //   constraint), MessageWriter, MessageDao, ChatDao, MessageSource, StorageSource,
 //   OutboxFiles, ImageCompressor, VideoTranscoder, MediaFileManager,
-//   PreferencesDataStore, DocumentFiles, StickerDao, StickerFiles,
-//   StickerObjectSource.
+//   PreferencesDataStore, DocumentFiles, StickerUploads (the lock per sticker
+//   and the write of `stickers.remoteUrl`, shared with the pack backup).
 // Don't put here: validation, the optimistic insert, staging the input, the
 //   block check and FAILED marking — they stay in MessageRepositoryImpl and
 //   OutboxWorker, where a definite block and an unanswerable block check part
@@ -39,19 +37,17 @@ import com.firestream.chat.data.crypto.EncryptedMessage
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
-import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.MessageSource
-import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.sticker.StickerFiles
+import com.firestream.chat.data.sticker.StickerUploads
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.KeyedMutex
 import com.firestream.chat.data.util.MediaFileManager
 import com.firestream.chat.data.util.VideoTranscoder
-import com.firestream.chat.data.util.parseStickerFormat
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -64,7 +60,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import java.io.File
-import java.io.FileNotFoundException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -122,9 +117,7 @@ class OutboxSender @Inject constructor(
     private val mediaFileManager: MediaFileManager,
     private val preferencesDataStore: PreferencesDataStore,
     private val documentFiles: DocumentFiles,
-    private val stickerDao: StickerDao,
-    private val stickerFiles: StickerFiles,
-    private val stickerObjectSource: StickerObjectSource,
+    private val stickerUploads: StickerUploads,
 ) {
 
     private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -135,9 +128,6 @@ class OutboxSender @Inject constructor(
     // start. Per id, so parallel sends of different messages never wait on
     // each other.
     private val locks = KeyedMutex<String>()
-
-    // Per sticker id, taken inside the message lock and never the other way round.
-    private val stickerLocks = KeyedMutex<String>()
 
     /**
      * Runs the pipeline for the row at [messageId] and returns it SENT — or, for
@@ -337,11 +327,9 @@ class OutboxSender @Inject constructor(
     /**
      * Where the backend holds a sticker's file: the url its library row already
      * has, else the object's, which is looked up and uploaded only when the
-     * backend does not hold it. The url is kept on the library row as well as on
-     * the message, so the next send of this sticker asks nobody.
-     *
-     * One sticker at a time: of two sends of a new sticker, the second waits and
-     * then finds the url the first one stored.
+     * backend does not hold it ([StickerUploads], one sticker at a time). The url
+     * is kept on the library row as well as on the message, so the next send of
+     * this sticker asks nobody.
      */
     private suspend fun withStickerUrl(row: Message): Message {
         // Already there: the library row had it at the insert, an earlier attempt
@@ -349,18 +337,7 @@ class OutboxSender @Inject constructor(
         if (row.mediaUrl != null) return row
         val id = row.stickerId?.takeIf(StickerFiles::isValidId)
             ?: throw IllegalStateException("Cannot send sticker message ${row.id}: it names no sticker")
-        val url = stickerLocks.withLock(id) {
-            val sticker = stickerDao.getSticker(id)
-                ?: throw IllegalStateException("Cannot send sticker message ${row.id}: the sticker is not in the library")
-            sticker.remoteUrl ?: run {
-                val format = parseStickerFormat(sticker.format)
-                val file = stickerFiles.fileFor(id, format)
-                if (!file.isFile) throw FileNotFoundException("Cannot send sticker message ${row.id}: its file is missing")
-                stickerObjectSource.ensureUploaded(id, format.extension, format.mimeType, file)
-                    .also { stickerDao.setRemoteUrl(id, it) }
-            }
-        }
-        return persist(row.copy(mediaUrl = url))
+        return persist(row.copy(mediaUrl = stickerUploads.ensureUploaded(id)))
     }
 
     /**

@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.repository.StickerRepositoryImpl
+import com.firestream.chat.data.repository.newStickerRepository
 import com.firestream.chat.domain.model.StickerFormat
+import com.firestream.chat.test.LottieFixtures.animation
+import com.firestream.chat.test.LottieFixtures.tgs
+import com.firestream.chat.test.LottieFixtures.waProps
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.waJson
 import com.firestream.chat.test.WebpFixtures.zip
@@ -108,6 +110,37 @@ class StickerDownloadsTest {
     }
 
     @Test
+    fun `a received Lottie sticker is stored as a Lottie file with its row and its emojis`() = runTest {
+        // What a sender uploads: the library's own file, the compressed animation.
+        val lottie = tgs(animation(1, customProps = waProps("SchoolDays", listOf("🚌"))))
+        val lottieId = StickerFiles.sha256Hex(lottie)
+        serve(lottie)
+
+        val file = downloads.ensureLocal(lottieId, URL)
+
+        assertEquals(files.fileFor(lottieId, StickerFormat.LOTTIE), file)
+        assertTrue(file!!.readBytes().contentEquals(lottie))
+        val row = db.stickerDao().getSticker(lottieId)!!
+        assertEquals(StickerFormat.LOTTIE.name, row.format)
+        assertTrue(row.isAnimated)
+        assertEquals(listOf("🚌"), row.emojis)
+        // Held now: a second message with this sticker downloads nothing.
+        assertEquals(file, downloads.ensureLocal(lottieId, "https://storage.example/elsewhere.tgs"))
+        verify(exactly = 1) { httpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `an animation sent as bare JSON is refused, because the library would keep it under another id`() = runTest {
+        // The bytes hash to the id the message claims. Stored, they would be compressed, and no longer do.
+        val json = animation(2)
+        serve(json)
+
+        assertNull(downloads.ensureLocal(StickerFiles.sha256Hex(json), URL))
+
+        assertEquals(emptyList<String>(), storedFiles())
+    }
+
+    @Test
     fun `bytes that do not hash to the id the message claims are refused, and nothing is stored`() = runTest {
         serve(sticker(2))
 
@@ -192,7 +225,7 @@ class StickerDownloadsTest {
     fun `a sticker received while a refused archive is undone keeps its file`() = runTest {
         val dao = spyk(db.stickerDao())
         val downloads = StickerDownloads(files, dao, httpClient)
-        val repository = StickerRepositoryImpl(dao, files, mockk<WhatsAppStickerFolder>(), mockk<PreferencesDataStore>())
+        val repository = newStickerRepository(dao, files)
         var receive: Deferred<File?>? = null
         coroutineScope {
             coEvery { dao.getStickers(any()) } coAnswers {

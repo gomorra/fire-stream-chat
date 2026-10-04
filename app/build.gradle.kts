@@ -438,6 +438,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
     implementation(libs.coil.gif)
+    // Lottie stickers (.was, .tgs): ui/components/StickerImage.kt plays them,
+    // data/sticker/LottieThumbnails.kt draws their first frame.
+    implementation(libs.lottie.compose)
     // Text of a PDF for the file bubble's excerpt (docs/plans/file-handling.md step 4);
     // the first-page thumbnail is the platform PdfRenderer.
     implementation(libs.pdfbox.android)
@@ -474,6 +477,9 @@ dependencies {
 
     // Play Services Location
     implementation(libs.play.services.location)
+
+    // The sticker maker's cutout: data/sticker/SubjectCutout.kt
+    implementation(libs.mlkit.subject.segmentation)
 
     // Baseline Profile
     implementation(libs.androidx.profileinstaller)

@@ -55,16 +55,18 @@ class WhatsAppStickerFolder @Inject constructor(
             Document.COLUMN_SIZE,
             Document.COLUMN_LAST_MODIFIED,
         )
-        private const val STICKER_SUFFIX = ".webp"
+        private val STICKER_SUFFIXES = listOf(WhatsAppStickerFile.WEBP_SUFFIX, WhatsAppStickerFile.LOTTIE_SUFFIX)
 
         /**
-         * The entries of [files] that can be stickers, newest first: a `.webp`
+         * The entries of [files] that can be stickers, newest first: a sticker's
          * name and a size the library accepts. That leaves out `.nomedia` and
          * anything [StickerFiles] would refuse unread.
          */
         internal fun stickersNewestFirst(files: List<WhatsAppStickerFile>): List<WhatsAppStickerFile> =
             files
-                .filter { it.name.endsWith(STICKER_SUFFIX, ignoreCase = true) && it.sizeBytes in 1..StickerFiles.MAX_BYTES }
+                .filter { file ->
+                    STICKER_SUFFIXES.any { file.name.endsWith(it, ignoreCase = true) } && file.sizeBytes in 1..StickerFiles.MAX_BYTES
+                }
                 .sortedByDescending { it.lastModified }
     }
 }

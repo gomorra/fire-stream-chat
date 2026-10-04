@@ -110,6 +110,7 @@ internal fun WhatsAppImportScreen(
                             isSelected = file.uri in state.selected,
                             onClick = onToggleFile,
                             enabled = !isImporting,
+                            hasStill = file.hasStill,
                         )
                     }
                 }

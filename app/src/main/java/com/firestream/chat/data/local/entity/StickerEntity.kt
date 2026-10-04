@@ -66,7 +66,10 @@ data class StickerEntity(
  * this user may write.
  *
  * Every change to a pack or its items sets [syncState] to
- * [StickerSyncState.PENDING] and moves [updatedAt].
+ * [StickerSyncState.PENDING] and moves [updatedAt] forward, never back and never
+ * to the value it had. `StickerSyncWorker` marks a pack synced only while
+ * [updatedAt] is still what it uploaded, and a restore applies a backend copy
+ * only when that copy's [updatedAt] is later.
  */
 @Entity(
     tableName = "sticker_packs",
@@ -97,7 +100,18 @@ data class StickerPackEntity(
 }
 
 /** Whether a pack's current state has reached the backend. */
-enum class StickerSyncState { PENDING, SYNCED }
+enum class StickerSyncState {
+    /** The row differs from the backend's copy, or the backend has none yet. */
+    PENDING,
+
+    SYNCED,
+
+    /**
+     * A deleted pack, kept as a tombstone until the backend's copy is deleted
+     * too. It has no items and no import key, and no query of the library returns it.
+     */
+    DELETED,
+}
 
 /** A sticker's place in a pack. A sticker can be in several packs, and is in each at most once. */
 @Entity(

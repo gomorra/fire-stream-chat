@@ -20,9 +20,12 @@ class WhatsAppStickerFolderTest {
                 file("empty.webp", size = 0, modified = 50),
                 file("huge.webp", size = StickerFiles.MAX_BYTES + 1L, modified = 60),
                 file("mid.webp", modified = 20),
+                // WhatsApp's Lottie stickers.
+                file("lottie.was", modified = 25),
+                file("pack.wastickers", modified = 70),
             )
         )
 
-        assertEquals(listOf("new.WEBP", "mid.webp", "old.webp"), listed.map { it.name })
+        assertEquals(listOf("new.WEBP", "lottie.was", "mid.webp", "old.webp"), listed.map { it.name })
     }
 }

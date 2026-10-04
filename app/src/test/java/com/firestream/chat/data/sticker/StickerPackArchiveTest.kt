@@ -1,6 +1,9 @@
 package com.firestream.chat.data.sticker
 
 import com.firestream.chat.data.sticker.StickerPackArchive.Limits
+import com.firestream.chat.test.LottieFixtures.animation
+import com.firestream.chat.test.LottieFixtures.tgs
+import com.firestream.chat.test.LottieFixtures.was
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.zip
 import kotlinx.coroutines.test.runTest
@@ -128,6 +131,49 @@ class StickerPackArchiveTest {
         val document = zip("word/document.xml" to ByteArray(40), "title.txt" to "Report".toByteArray())
 
         assertThrows(StickerArchiveException::class.java) { readBlocking(document, Limits()) }
+    }
+
+    @Test
+    fun `a was file hands over its animation and nothing else`() = runTest {
+        val json = animation(1)
+
+        val (summary, stickers) = read(was(json))
+
+        assertNull(summary.title)
+        assertEquals(0, summary.skipped)
+        assertArrayEquals(json, stickers.single())
+    }
+
+    @Test
+    fun `a tgs entry in a pack is handed over like a WebP`() = runTest {
+        val lottie = tgs(animation(2))
+        val webp = sticker(1)
+
+        val (_, stickers) = read(zip("a.tgs" to lottie, "b.webp" to webp, "title.txt" to "Mixed".toByteArray()))
+
+        assertArrayEquals(lottie, stickers[0])
+        assertArrayEquals(webp, stickers[1])
+    }
+
+    @Test
+    fun `an animation may be larger than a sticker file, up to its own cap`() = runTest {
+        val json = animation(3, extra = ""","pad":"${"a".repeat(3_000)}"""")
+        val limits = Limits(maxEntryBytes = 1_000, maxAnimationBytes = 5_000)
+
+        val (kept, stickers) = read(was(json), limits)
+        val (cut, none) = read(was(json), limits.copy(maxAnimationBytes = 2_000))
+
+        assertEquals(0, kept.skipped)
+        assertArrayEquals(json, stickers.single())
+        assertEquals(1, cut.skipped)
+        assertTrue(none.isEmpty())
+    }
+
+    @Test
+    fun `a zip with some other JSON file is not a sticker archive`() {
+        val archive = zip("contents.json" to animation(), "manifest.json" to "{}".toByteArray())
+
+        assertThrows(StickerArchiveException::class.java) { readBlocking(archive, Limits()) }
     }
 
     @Test

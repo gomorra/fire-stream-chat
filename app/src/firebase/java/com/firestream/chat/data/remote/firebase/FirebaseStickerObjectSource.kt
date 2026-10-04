@@ -3,7 +3,8 @@
 //   `stickers/<sha256>.<ext>`, looked up first and uploaded only when missing.
 // Owns: the `stickers/` path convention. The Storage rules make the object
 //   create-only and are kept in the Firebase console, not in this repo.
-// Collaborators: OutboxSender (the first send of a sticker), via the
+// Collaborators: StickerUploads (the first send or backup of a sticker) and
+//   StickerRepositoryImpl (the url of a restored sticker's file), via the
 //   StickerObjectSource interface in data/remote/source/.
 // Don't put here: message media (FirebaseStorageSource — `media/<chatId>/`),
 //   the local sticker directory (StickerFiles), the hash check of a downloaded
@@ -28,8 +29,12 @@ class FirebaseStickerObjectSource @Inject constructor(
     private val storage: FirebaseStorage,
 ) : StickerObjectSource {
 
+    override suspend fun urlIfPresent(id: String, extension: String): String? = urlIfPresent(objectOf(id, extension))
+
+    private fun objectOf(id: String, extension: String): StorageReference = storage.reference.child("$DIR/$id.$extension")
+
     override suspend fun ensureUploaded(id: String, extension: String, mimeType: String, file: File): String {
-        val ref = storage.reference.child("$DIR/$id.$extension")
+        val ref = objectOf(id, extension)
         urlIfPresent(ref)?.let { return it }
         val metadata = StorageMetadata.Builder().setContentType(mimeType).build()
         try {

@@ -113,6 +113,16 @@ class FirebaseStickerObjectSourceTest {
     }
 
     @Test
+    fun `the url of a sticker known only by its id is looked up, and a missing object is no url`() = runTest {
+        val notFound = storageError(StorageException.ERROR_OBJECT_NOT_FOUND)
+        every { ref.downloadUrl } returns done(url) andThen done(error = notFound)
+
+        assertEquals("https://storage.example/stickers/abc.webp", source.urlIfPresent("abc", "webp"))
+        assertEquals(null, source.urlIfPresent("abc", "webp"))
+        verify(exactly = 0) { ref.putFile(any(), any<StorageMetadata>()) }
+    }
+
+    @Test
     fun `a lookup that fails for another reason is not taken for a missing object`() = runTest {
         val offline = storageError(StorageException.ERROR_RETRY_LIMIT_EXCEEDED)
         every { ref.downloadUrl } returns done(error = offline)
