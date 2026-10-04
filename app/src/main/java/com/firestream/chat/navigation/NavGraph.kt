@@ -61,6 +61,7 @@ import com.firestream.chat.ui.share.SharePickerScreen
 import com.firestream.chat.ui.reminders.ScheduledRemindersScreen
 import com.firestream.chat.ui.starred.StarredMessagesScreen
 import com.firestream.chat.ui.stickers.StickerLibraryScreen
+import com.firestream.chat.ui.stickers.create.StickerCreateScreen
 import com.firestream.chat.ui.components.SCREEN_SLIDE_DURATION_MS
 import com.firestream.chat.ui.components.ScreenSlideEasing
 import kotlinx.coroutines.flow.first
@@ -135,6 +136,7 @@ object Routes {
     const val SCHEDULED_REMINDERS = "scheduled_reminders"
     const val ARCHIVED_CHATS = "archived_chats"
     const val STICKERS = "stickers"
+    const val STICKER_CREATE = "stickers/create"
     // Bottom nav tabs (no longer a separate nav route — handled by MainScreen tab state)
     // const val CALLS = "calls"
     // Phase 5 routes
@@ -509,6 +511,7 @@ fun FireStreamNavGraph(
                     }
                 },
                 onImportStickersClick = { navController.navigate(Routes.STICKERS) },
+                onCreateStickerClick = { navController.navigate(Routes.STICKER_CREATE) },
                 fromNotification = fromNotification
             )
         }
@@ -574,7 +577,15 @@ fun FireStreamNavGraph(
 
         // The sticker library and its two import routes
         composable(Routes.STICKERS) {
-            StickerLibraryScreen(onBackClick = { navController.popBackStack() })
+            StickerLibraryScreen(
+                onBackClick = { navController.popBackStack() },
+                onCreateClick = { navController.navigate(Routes.STICKER_CREATE) },
+            )
+        }
+
+        // The sticker maker, reached from the library and from the composer's Stickers tab
+        composable(Routes.STICKER_CREATE) {
+            StickerCreateScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Global search across every chat. Its own destination rather than a

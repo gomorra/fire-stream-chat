@@ -216,6 +216,18 @@ interface StickerDao {
     }
 
     /**
+     * A made sticker in one transaction: its row and its place at the end of
+     * the pack [packId]. Returns false, and writes nothing, when that pack is gone.
+     */
+    @Transaction
+    suspend fun addMadeSticker(packId: String, sticker: StickerEntity, now: Long): Boolean {
+        getPack(packId) ?: return false
+        mergeStickers(listOf(sticker))
+        addToPack(packId, listOf(sticker.id), atFront = false, now = now)
+        return true
+    }
+
+    /**
      * A new pack with [stickers] in the given order, after every other pack.
      * Returns false, and writes nothing, when a pack with its import key is
      * already there.

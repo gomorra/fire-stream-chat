@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.DriveFileMove
+import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
@@ -88,6 +89,7 @@ private val WHATSAPP_STICKER_FOLDER: Uri = DocumentsContract.buildDocumentUri(
 @Immutable
 internal data class StickerLibraryActions(
     val onBack: () -> Unit = {},
+    val onCreate: () -> Unit = {},
     val onImportFromWhatsApp: () -> Unit = {},
     val onImportFromFiles: () -> Unit = {},
     val onOpenPack: (String) -> Unit = {},
@@ -104,6 +106,8 @@ internal data class StickerLibraryActions(
 @Composable
 fun StickerLibraryScreen(
     onBackClick: () -> Unit,
+    // Opens the sticker maker.
+    onCreateClick: () -> Unit = {},
     viewModel: StickerLibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -156,9 +160,10 @@ fun StickerLibraryScreen(
             onImport = viewModel::importSelectedWhatsApp,
         )
     } else {
-        val actions = remember(viewModel, onBackClick) {
+        val actions = remember(viewModel, onBackClick, onCreateClick) {
             StickerLibraryActions(
                 onBack = onBackClick,
+                onCreate = onCreateClick,
                 onImportFromWhatsApp = { folderPicker.launch(WHATSAPP_STICKER_FOLDER) },
                 // Every type: a `.wastickers` archive has no mime type of its own. The import checks the bytes.
                 onImportFromFiles = { filePicker.launch(arrayOf("*/*")) },
@@ -256,6 +261,16 @@ private fun PackList(
     var deleting by remember { mutableStateOf<StickerPack?>(null) }
 
     LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
+        item(key = "create") {
+            ListItem(
+                headlineContent = { Text("Create") },
+                supportingContent = {
+                    Text("Make a sticker from one of your photos", style = MaterialTheme.typography.bodySmall)
+                },
+                leadingContent = { Icon(Icons.Default.AddPhotoAlternate, contentDescription = null) },
+                modifier = Modifier.clickable(onClick = actions.onCreate),
+            )
+        }
         item(key = "import-whatsapp") {
             ListItem(
                 headlineContent = { Text("From WhatsApp") },
@@ -281,7 +296,7 @@ private fun PackList(
                 item(key = "empty") {
                     EmptyHint(
                         title = "No stickers yet",
-                        body = "Import some from WhatsApp or from files to start your library",
+                        body = "Make one from a photo, or import some from WhatsApp or from files",
                         modifier = Modifier.fillMaxWidth().padding(vertical = 48.dp),
                     )
                 }

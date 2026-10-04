@@ -14,7 +14,8 @@
 //   listing), PreferencesDataStore (recents, device-only), StickerSyncScheduler
 //   (the backup run), StickerLibrarySync (the restore), StickerPackSource and
 //   StickerManifest (a viewed pack), StickerObjectSource and StickerDownloads
-//   (a missing file, found by its id and checked against it).
+//   (a missing file, found by its id and checked against it), StickerMaker
+//   (the draft and the bytes of a made sticker, which is stored like an import).
 // Don't put here: parsing of a file or an archive (domain/util/WebpContainer,
 //   data/sticker/), sending a sticker (MessageRepositoryImpl — "The repository
 //   decides who a send is for", docs/PATTERNS.md), the upload of a pack
@@ -34,6 +35,7 @@ import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.sticker.StickerLibrarySync
+import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.StickerManifest
 import com.firestream.chat.data.sticker.StickerPackArchive
 import com.firestream.chat.data.sticker.StoredSticker
@@ -44,6 +46,8 @@ import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerCrop
+import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
@@ -84,6 +88,7 @@ class StickerRepositoryImpl @Inject constructor(
     private val librarySync: StickerLibrarySync,
     private val syncScheduler: StickerSyncScheduler,
     private val authSource: AuthSource,
+    private val stickerMaker: StickerMaker,
 ) : StickerRepository {
 
     /**
@@ -340,6 +345,41 @@ class StickerRepositoryImpl @Inject constructor(
         if (stickerDao.installPack(pack, stickers)) syncScheduler.syncIfPending()
     }
 
+    override suspend fun prepareStickerDraft(sourceUri: String): Result<StickerDraft> =
+        resultOf { stickerMaker.prepare(sourceUri) }
+
+    override suspend fun createSticker(
+        imagePath: String,
+        crop: StickerCrop,
+        emojis: List<String>,
+        packId: String?,
+        packName: String,
+    ): Result<String> = resultOf {
+        // The pack is checked before anything is rendered or stored, so a refusal leaves no file behind.
+        val newPackTarget = if (packId == null) {
+            Target.loose(requireNotNull(cleanStickerText(packName)) { "A pack needs a name" })
+        } else {
+            require(requirePack(packId).kind == StickerPackKind.USER.name) { "Stickers cannot be added to this pack" }
+            null
+        }
+        val bytes = stickerMaker.render(imagePath, crop)
+        val tags = emojis.map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(StickerDraft.MAX_EMOJIS)
+        withContext(Dispatchers.IO) {
+            // Under the import lock, like an import: a refused archive deletes files that have no row yet.
+            importLock.withLock {
+                val stored = stickerFiles.store(bytes) ?: throw IllegalStateException(NOT_A_STICKER)
+                val now = System.currentTimeMillis()
+                val sticker = StickerEntity.of(stored, tags, now)
+                if (newPackTarget != null) {
+                    stickerDao.importInto(newPack(newPackTarget, now), listOf(sticker), now)
+                } else if (!stickerDao.addMadeSticker(packId!!, sticker, now)) {
+                    throw NoSuchElementException(PACK_GONE)
+                }
+                stored.id
+            }
+        }.also { syncScheduler.syncIfPending() }
+    }
+
     private suspend fun requirePack(packId: String): StickerPackEntity =
         stickerDao.getPack(packId) ?: throw NoSuchElementException(PACK_GONE)
 
@@ -408,6 +448,7 @@ class StickerRepositoryImpl @Inject constructor(
         const val PACK_GONE = "That pack no longer exists"
         const val PACK_UNAVAILABLE = "This pack is no longer available"
         const val FETCHES_AT_ONCE = 4
+        const val NOT_A_STICKER = "That picture could not be made into a sticker"
 
         /**
          * The import key of the copy of the pack [rootPackId]. It keeps a pack from

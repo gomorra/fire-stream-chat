@@ -374,6 +374,19 @@ class StickerDaoTest {
     }
 
     @Test
+    fun `a made sticker lands at the end of its pack and marks it pending, or writes nothing for a pack that is gone`() = runTest {
+        dao.insertPack(pack("mine").copy(syncState = StickerSyncState.SYNCED.name))
+
+        assertEquals(true, dao.addMadeSticker("mine", sticker("a"), now = 8L))
+        assertEquals(true, dao.addMadeSticker("mine", sticker("b"), now = 9L))
+        assertEquals(false, dao.addMadeSticker("ghost", sticker("c"), now = 9L))
+
+        assertEquals(listOf("a", "b"), dao.getStickerIds("mine"))
+        assertEquals(StickerSyncState.PENDING.name, syncState("mine"))
+        assertNull(dao.getSticker("c"))
+    }
+
+    @Test
     fun `a pack is installed once per import key, after every other pack`() = runTest {
         dao.insertPack(pack("first", sortOrder = 4))
         val copy = pack("copy", kind = "INSTALLED", importKey = "installed:root").copy(syncState = StickerSyncState.PENDING.name)

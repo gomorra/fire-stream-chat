@@ -1,6 +1,8 @@
 package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerCrop
+import com.firestream.chat.domain.model.StickerDraft
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackPreview
@@ -72,4 +74,27 @@ interface StickerRepository {
 
     /** Adds a viewed pack to the library as an `INSTALLED` copy. Adding one that is already there changes nothing. */
     suspend fun installPack(preview: StickerPackPreview): Result<Unit>
+
+    /**
+     * Prepares the photo at [sourceUri] for the sticker maker: the photo, and
+     * its subject cut out when this device can do that. Fails for a photo that
+     * cannot be read. The draft replaces the one prepared before it.
+     */
+    suspend fun prepareStickerDraft(sourceUri: String): Result<StickerDraft>
+
+    /**
+     * Makes a sticker of the draft picture at [imagePath], placed by [crop],
+     * and tags it with [emojis].
+     *
+     * It joins the pack [packId], which must be a `USER` pack. When [packId] is
+     * null it joins the pack named [packName], which is made when it is not
+     * there. Succeeds with the sticker's id.
+     */
+    suspend fun createSticker(
+        imagePath: String,
+        crop: StickerCrop,
+        emojis: List<String>,
+        packId: String?,
+        packName: String,
+    ): Result<String>
 }

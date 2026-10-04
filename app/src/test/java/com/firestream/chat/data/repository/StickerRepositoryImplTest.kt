@@ -13,9 +13,13 @@ import com.firestream.chat.data.remote.source.StickerObjectSource
 import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.data.sticker.StickerFiles
+import com.firestream.chat.data.sticker.StickerMaker
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerCrop
+import com.firestream.chat.domain.model.StickerDraft
+import com.firestream.chat.domain.model.StickerDraftImage
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
@@ -79,6 +83,7 @@ class StickerRepositoryImplTest {
     private val packSource = mockk<StickerPackSource> { every { isSupported } returns true }
     private val scheduler = mockk<StickerSyncScheduler>(relaxed = true)
     private val httpClient = mockk<OkHttpClient>()
+    private val maker = mockk<StickerMaker>()
 
     @Before
     fun setUp() {
@@ -99,6 +104,7 @@ class StickerRepositoryImplTest {
             stickerObjectSource = objectSource,
             packSource = packSource,
             syncScheduler = scheduler,
+            stickerMaker = maker,
         )
     }
 
@@ -695,6 +701,97 @@ class StickerRepositoryImplTest {
 
         repository.removeStickers(dogs.id, listOf(first)).getOrThrow()
         assertEquals(1, pack("Dogs").stickers.size)
+    }
+
+    // --- A made sticker ---
+
+    @Test
+    fun `a made sticker is stored under its hash and joins a new pack of the given name`() = runTest {
+        val bytes = sticker(7)
+        coEvery { maker.render("/draft/cutout.png", StickerCrop(scale = 2f)) } returns bytes
+
+        val id = repository.createSticker("/draft/cutout.png", StickerCrop(scale = 2f), listOf("😺"), null, "My stickers").getOrThrow()
+
+        assertEquals(StickerFiles.sha256Hex(bytes), id)
+        val pack = pack("My stickers")
+        assertEquals(StickerPackKind.USER, pack.kind)
+        assertEquals(listOf(id), pack.stickers.map { it.id })
+        assertEquals(listOf("😺"), pack.stickers.single().emojis)
+        assertTrue(File(pack.stickers.single().localPath).isFile)
+        assertEquals(StickerSyncState.PENDING.name, db.stickerDao().getPack(pack.id)!!.syncState)
+        coVerify { scheduler.syncIfPending() }
+    }
+
+    @Test
+    fun `a second made sticker joins the same named pack, after the first`() = runTest {
+        coEvery { maker.render(any(), any()) } returnsMany listOf(sticker(1), sticker(2))
+
+        val first = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "My stickers").getOrThrow()
+        val second = repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, " My stickers ").getOrThrow()
+
+        assertEquals(listOf(first, second), pack("My stickers").stickers.map { it.id })
+        assertEquals(1, packs().size)
+    }
+
+    @Test
+    fun `a made sticker joins the chosen pack of the user's own`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val catPack = pack("Cats")
+        coEvery { maker.render(any(), any()) } returns sticker(2)
+
+        val id = repository.createSticker("/draft/a.png", StickerCrop(), listOf("🐱"), catPack.id, "ignored").getOrThrow()
+
+        assertEquals(id, pack("Cats").stickers.last().id)
+        assertEquals(2, pack("Cats").stickers.size)
+        assertEquals("no pack is made beside it", 1, packs().size)
+    }
+
+    @Test
+    fun `a made sticker keeps three emojis, each once`() = runTest {
+        coEvery { maker.render(any(), any()) } returns sticker(3)
+
+        repository.createSticker("/draft/a.png", StickerCrop(), listOf("😺", " ", "😺", "🐶", "🦊", "🐸"), null, "Mine").getOrThrow()
+
+        assertEquals(listOf("😺", "🐶", "🦊"), pack("Mine").stickers.single().emojis)
+    }
+
+    @Test
+    fun `a made sticker is refused for a pack that is gone, is not the user's own, or has no name`() = runTest {
+        coEvery { maker.render(any(), any()) } returns sticker(4)
+        repository.importFrom(listOf(source("1.webp", sticker(1)))).getOrThrow()
+        val saved = packs().single { it.kind == StickerPackKind.SAVED }
+
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), "no such pack", "x").isFailure)
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), saved.id, "x").isFailure)
+        assertTrue(repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "  ").isFailure)
+
+        assertEquals(1, packs().size)
+        assertEquals(1, packs().single().stickers.size)
+        assertEquals("nothing was rendered or stored", 1, storedFiles().size)
+    }
+
+    @Test
+    fun `bytes that are no sticker, and a draft that cannot be rendered, make nothing`() = runTest {
+        coEvery { maker.render("/draft/bad.png", any()) } returns byteArrayOf(1, 2, 3)
+        coEvery { maker.render("/draft/gone.png", any()) } throws IllegalStateException("That picture is no longer available")
+
+        val notSticker = repository.createSticker("/draft/bad.png", StickerCrop(), emptyList(), null, "Mine")
+        val gone = repository.createSticker("/draft/gone.png", StickerCrop(), emptyList(), null, "Mine")
+
+        assertEquals("That picture could not be made into a sticker", notSticker.exceptionOrNull()?.message)
+        assertEquals("That picture is no longer available", gone.exceptionOrNull()?.message)
+        assertEquals(emptyList<StickerPack>(), packs())
+        assertEquals(emptyList<String>(), storedFiles())
+    }
+
+    @Test
+    fun `a draft is prepared by the maker, and its failure is a failed result`() = runTest {
+        val draft = StickerDraft(StickerDraftImage("/draft/original.png", 10, 10), null, null)
+        coEvery { maker.prepare("content://photo") } returns draft
+        coEvery { maker.prepare("content://gone") } throws IllegalStateException("That photo could not be read")
+
+        assertEquals(draft, repository.prepareStickerDraft("content://photo").getOrThrow())
+        assertTrue(repository.prepareStickerDraft("content://gone").isFailure)
     }
 
     // --- Recents and the folder ---

@@ -21,6 +21,34 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The sticker maker (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 8. JVM and Robolectric tests cover the geometry, the
+trim, the outline, the size loop with a stand-in encoder, the repository and the screen's
+states. ML Kit's cutout, the platform's WebP encoder and the pinch never ran. Nothing ran on
+a device.
+1. Settings → Storage → *Import stickers* → *Create*, and the **+** at the end of the Stickers
+   tab's pack row, both open the maker, and the photo picker opens with it.
+2. The first cutout on a phone waits for Play services to fetch the model
+   (`SubjectCutout`, at most 45 seconds). Check a fresh install: the cutout arrives, or the
+   screen says that no subject was cut out and a second try works once the model is there.
+3. The cutout follows the subject. *Outline* puts a white edge around it, round at corners
+   and without gaps around thin parts such as hair or fingers.
+4. *Original* shows the whole photo. A pinch and a drag crop it, and the picture cannot be
+   dragged off an edge it fills.
+5. The saved sticker looks like the preview, with a transparent background, in the library,
+   in the Stickers tab and in a chat on a second account.
+6. The file under `filesDir/stickers/` is a WebP of 512 × 512 and at most 100 KB. A detailed
+   photo still saves, at a lower quality.
+7. *Add emoji* opens the emoji sheet. The sticker is found by its emoji in the Stickers tab's
+   search and in the suggestion strip.
+8. A second sticker joins *My stickers* without asking. The pack is in `stickerPacks/` in the
+   Firestore console after the save, and the file under `stickers/` in Storage.
+9. On a phone without Play services, or the pocketbase flavor on one: the maker offers the
+   photo and the crop, and no cutout.
+10. A debug build opens the maker and a chat. `ChatScreen` gained one parameter, and only a
+    device runs the dex verifier (`docs/GOTCHAS.md`, register pressure).
+
 ### Lottie stickers (2026-10-04)
 
 `docs/plans/stickers-and-gifs.md` step 7. JVM and Robolectric tests cover the container, the
@@ -818,12 +846,20 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 ### Stickers & GIFs (4.6)
 
-Stickers are imported, sent from the composer's Stickers tab and shown in a chat. Lottie
-stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved under the account,
-and a received sticker's pack can be viewed and added. A GIF can be received and shown. The
-plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
+Stickers are imported or made from a photo, sent from the composer's Stickers tab and shown
+in a chat. Lottie stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved
+under the account, and a received sticker's pack can be viewed and added. A GIF can be
+received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
 
-- **Making a sticker from a photo** (step 8).
+- **Drawing on a made sticker, and placing emoji, text and shapes on it.** The sticker maker
+  has the cutout, the outline and the crop. The image editor's Draw and Overlay screens are
+  not mounted on it. They get their rasterizer through `ImageEditServices`, which only
+  `ChatViewModel` builds, and `ImageEditRasterizer.rasterize` writes JPEG, which drops the
+  cutout's transparency. Mounting them needs an output format on `rasterize` that keeps a
+  source with alpha as PNG, and a host for the services outside the chat screen.
+- **A made sticker's outline scales with the crop.** The outline is drawn once, around the
+  whole subject, when the photo is prepared. A zoom into the subject thickens it. An outline
+  of constant width would be drawn after the crop.
 - **A Lottie sticker sent to an older build shows as a broken image.** That build stores
   WebP only, and its bubble hands the url to an image decoder.
 - **Sending a GIF.** Nothing in the app picks one yet. The keyboard route is step 9. The

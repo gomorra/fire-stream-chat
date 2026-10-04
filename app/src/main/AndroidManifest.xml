@@ -36,6 +36,11 @@
         android:theme="@style/Theme.FireStreamChat"
         android:networkSecurityConfig="@xml/network_security_config">
 
+        <!-- Play services fetches the sticker maker's cutout model at install, not at the first cutout. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="subject_segment" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

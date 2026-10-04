@@ -478,6 +478,9 @@ dependencies {
     // Play Services Location
     implementation(libs.play.services.location)
 
+    // The sticker maker's cutout: data/sticker/SubjectCutout.kt
+    implementation(libs.mlkit.subject.segmentation)
+
     // Baseline Profile
     implementation(libs.androidx.profileinstaller)
     baselineProfile(project(":baselineprofile"))

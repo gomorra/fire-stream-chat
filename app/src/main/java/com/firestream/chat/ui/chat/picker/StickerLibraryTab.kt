@@ -17,12 +17,15 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,6 +63,9 @@ internal data class StickerShelf(
 
 internal const val RECENTS_SHELF_KEY = "recents"
 
+/** The key of the **+** that ends the pack row. No pack has it: a pack's key is its id, a UUID. */
+private const val CREATE_KEY = "create"
+
 /**
  * The pack row's entries: Recents, the favourites, then the packs in the user's
  * order. A shelf with no stickers is left out, so nothing in the row opens an
@@ -85,6 +91,7 @@ internal fun stickerShelves(packs: List<StickerPack>, recents: List<Sticker>): L
  *
  * @param recents the stickers sent most recently, newest first
  * @param onImport opens the sticker library screen, offered while the library is empty
+ * @param onCreate opens the sticker maker, from the **+** that ends the pack row
  */
 @Composable
 internal fun StickerLibraryTab(
@@ -94,6 +101,7 @@ internal fun StickerLibraryTab(
     onSelection: (PickerSelection.Sticker) -> Unit,
     onToggleFavourite: (String) -> Unit,
     onImport: () -> Unit,
+    onCreate: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Every send moves a sticker to the front of Recents. The shelf holds its
@@ -104,7 +112,7 @@ internal fun StickerLibraryTab(
     val shelves = remember(packs, frozenRecents) { stickerShelves(packs, frozenRecents) }
 
     if (shelves.isEmpty()) {
-        EmptyLibrary(onImport = onImport, modifier = modifier)
+        EmptyLibrary(onImport = onImport, onCreate = onCreate, modifier = modifier)
         return
     }
 
@@ -136,6 +144,16 @@ internal fun StickerLibraryTab(
             ) {
                 items(shelves, key = { it.key }) { shelf ->
                     ShelfButton(shelf = shelf, selected = shelf.key == active.key, onClick = { activeKey = shelf.key })
+                }
+                item(key = CREATE_KEY) {
+                    IconButton(onClick = onCreate, modifier = Modifier.size(48.dp)) {
+                        Icon(
+                            Icons.Default.Add,
+                            contentDescription = "Make a sticker",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
                 }
             }
         }
@@ -175,15 +193,18 @@ internal fun StickerLibraryTab(
 }
 
 @Composable
-private fun EmptyLibrary(onImport: () -> Unit, modifier: Modifier = Modifier) {
+private fun EmptyLibrary(onImport: () -> Unit, onCreate: () -> Unit, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        EmptyHint(title = "No stickers yet", body = "Bring them over from WhatsApp or from files.")
+        EmptyHint(title = "No stickers yet", body = "Bring them over from WhatsApp or from files, or make one from a photo.")
         Button(onClick = onImport, modifier = Modifier.padding(top = 12.dp)) {
             Text("Import stickers")
+        }
+        TextButton(onClick = onCreate) {
+            Text("Make a sticker")
         }
     }
 }

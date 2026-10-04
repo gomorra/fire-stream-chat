@@ -633,6 +633,12 @@ Both animate through a decoder attached per request. Previews show the first fra
 A sticker is sent from the composer's picker, whose second tab is the library, or from the
 suggestion strip that appears while the composer holds one emoji. Nothing sends a GIF yet.
 
+A sticker can be made from a photo. `StickerMaker` prepares a draft in `cacheDir/sticker-maker/`:
+the photo, its subject cut out by ML Kit, and the subject with a white outline. The maker's
+screen picks one of the three and a crop. `StickerGeometry` places the picture in the square for
+the preview and for the saved file alike. The result is a 512 × 512 WebP of at most 100 KB,
+stored like an imported sticker.
+
 The library is backed up under the account. Each pack is one Firestore document,
 `stickerPacks/{packId}`, a manifest that names its stickers by hash. `StickerSyncWorker` uploads
 every pack that changed, and a listener on the user's own manifests restores them into Room while
@@ -648,7 +654,7 @@ under *Image / Media Pipeline*.
 |---|---|
 | `app/src/main/java/com/firestream/chat/domain/model/Sticker.kt` | `Sticker` and `StickerFormat` (extension, mime type, and where a format's first frame is: `stillPathOf`) |
 | `app/src/main/java/com/firestream/chat/domain/model/StickerPack.kt` | `StickerPack`, `StickerPackKind`, `StickerPackPreview`, `WhatsAppStickerFile`, `StickerImportResult` |
-| `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, `toggleFavourite`, pack and sticker edits, `markUsed`, `ensureFile`, `viewPack`, `installPack` |
+| `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, `toggleFavourite`, pack and sticker edits, `markUsed`, `ensureFile`, `viewPack`, `installPack`, `prepareStickerDraft`, `createSticker` |
 | `app/src/main/java/com/firestream/chat/domain/util/WebpContainer.kt` | Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk |
 | `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `stillFor`, `open` for a uri, and `rowLock`, which keeps a file and its `stickers` row together. `store` tells a WebP, a `.tgs` and bare Lottie JSON apart by their first bytes. `storeReceived` keeps a downloaded file unchanged or not at all |
 | `app/src/main/java/com/firestream/chat/data/sticker/LottieContainer.kt` | A Lottie sticker out of its container: a `.tgs` (gzip) or the JSON a `.was` holds. The inflate cap, the nesting cap, no key twice in one object, what makes JSON an animation, no image assets, the layer count with precompositions laid out |
@@ -678,7 +684,7 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` and `rememberMessageStillModel` for the reply, forward and starred previews |
 | `app/src/main/java/com/firestream/chat/domain/util/StickerSearch.kt` | Pure: stickers by emoji tag across packs, and which composer text earns suggestions |
 | `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's picker (Emoji and Stickers tabs) and `StickerSuggestionStrip` |
-| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row, grid, search, the import button of an empty library |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row with the **+** that opens the maker, grid, search, the import button of an empty library |
 | `app/src/main/java/com/firestream/chat/ui/chat/StickerActionsSheet.kt` | The sheet a tap on a sticker bubble opens: add to or remove from the favourites, and *View pack* for a sticker that names one |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackSheet.kt` | The pack preview: name, stickers, *Add pack*, or that the library holds it already |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackPreviewViewModel.kt` | Looks a pack up each time the sheet opens, and installs it |
@@ -695,10 +701,17 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `recentStickerIdsFlow`, device-only |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryViewModel.kt` | The library screen's state: packs, the open pack and its selection, the WhatsApp folder view |
 | `app/src/main/java/com/firestream/chat/ui/stickers/StickerLabels.kt` | A pack's shown name (the unnamed kinds included), whether it can be renamed, the import summary line |
-| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryScreen.kt` | The pack list, a pack's grid, the folder and file pickers, rename / move / delete dialogs, the shared `StickerCell` and `StickerTopBar` |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryScreen.kt` | The pack list with *Create* above the import routes, a pack's grid, the folder and file pickers, rename / move / delete dialogs, the shared `StickerCell` and `StickerTopBar` |
 | `app/src/main/java/com/firestream/chat/ui/stickers/WhatsAppImportScreen.kt` | The granted folder as a multi-select grid with *Select all* and *Import N* |
 | `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | The *Import stickers* row |
-| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.STICKERS` |
+| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.STICKERS`, `Routes.STICKER_CREATE` |
+| `app/src/main/java/com/firestream/chat/domain/model/StickerDraft.kt` | `StickerDraft` and `StickerDraftImage` (a prepared photo's pictures), `StickerCrop` (scale and offset in the square) |
+| `app/src/main/java/com/firestream/chat/domain/util/StickerGeometry.kt` | Pure: where a picture sits in the square sticker, the crop's limits, the outline's width and the ring it is stamped along |
+| `app/src/main/java/com/firestream/chat/data/sticker/SubjectCutout.kt` | ML Kit subject segmentation behind one call. Waits for the model, and answers `null` without Play services or on any failure |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerEncoder.kt` | A bitmap to a lossy WebP, at the first quality that stays under 100 KB |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerMaker.kt` | The draft's files, the trim to the subject, the outline, and the render of one picture onto the 512 px canvas. Runs under `MediaProcessingLimiter` |
+| `app/src/main/java/com/firestream/chat/ui/stickers/create/StickerCreateViewModel.kt` | The maker's state: the draft, cutout or photo, outline, crop, emojis, the pack |
+| `app/src/main/java/com/firestream/chat/ui/stickers/create/StickerCreateScreen.kt` | The maker: the photo picker, the square preview with pinch and drag, the choices, the emoji sheet |
 | `app/src/test/java/com/firestream/chat/domain/util/WebpContainerTest.kt` | Byte fixtures, truncated and oversize chunks |
 | `app/src/test/java/com/firestream/chat/data/sticker/WaStickerMetadataTest.kt` | Metadata present, absent and malformed |
 | `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesTest.kt` | Hash naming, the limits, the `cacheDir` fence of `open` |
@@ -713,7 +726,7 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/data/outbox/OutboxSenderTest.kt` | The second send of a sticker uploads nothing; a GIF is never compressed; both resume points |
 | `app/src/test/java/com/firestream/chat/data/sticker/WhatsAppStickerFolderTest.kt` | The folder filter and sort |
 | `app/src/test/java/com/firestream/chat/data/local/dao/StickerDaoTest.kt` | Ordering queries and the transaction methods; tombstones, the compare-and-set mark, the newer-only merge, two packs with one import key |
-| `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryImplTest.kt` | Grouping, de-duplication, a refused archive, pack edits; the tombstone, the fetch of a missing file, viewing and installing a pack |
+| `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryImplTest.kt` | Grouping, de-duplication, a refused archive, pack edits; the tombstone, the fetch of a missing file, viewing and installing a pack; a made sticker's pack, emojis and refusals |
 | `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryTestFactory.kt` | `newStickerRepository` with mocked collaborators |
 | `app/src/test/java/com/firestream/chat/data/worker/StickerSyncWorkerTest.kt` | Pending to synced, each file uploaded once, the delete, a pack changed during its upload, the verdicts |
 | `app/src/test/java/com/firestream/chat/data/worker/StickerSyncSchedulerTest.kt` | The unique work's name, policy, constraint and backoff; nothing queued while every pack is synced |
@@ -726,12 +739,17 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/test/WebpFixtures.kt` | Builders for WebP, EXIF and zip test bytes |
 | `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryViewModelTest.kt` | Selection, pack reorder, both import routes, the summary line |
 | `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryScreenTest.kt` | The empty state, the loading state, the unnamed packs' labels |
+| `app/src/test/java/com/firestream/chat/domain/util/StickerGeometryTest.kt` | The fit, the zoom and the offset, the crop's limits, the outline's width and ring |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerEncoderTest.kt` | The size loop: the first quality that fits, nothing lower tried, a sticker too large at every quality |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerMakerTest.kt` | Real pixels: the trim, the outline, the draft's files, where a crop lands on the canvas, the path fence |
+| `app/src/test/java/com/firestream/chat/ui/stickers/create/StickerCreateViewModelTest.kt` | Which picture the choices amount to, the crop's reset and limits, the emoji cap, the pack choice, one save |
+| `app/src/test/java/com/firestream/chat/ui/stickers/create/StickerCreateScreenTest.kt` | What the maker offers with and without a cutout, the pack and emoji chips |
 | `app/src/test/java/com/firestream/chat/domain/util/StickerSearchTest.kt` | Tag matching, the variation selector, one result per sticker, what earns suggestions |
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatStickerManagersTest.kt` | The library mirror, `sendSticker` with `markUsed`, the favourite toggle and its fetch for a sticker the library lacks |
 | `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip |
 | `app/src/test/java/com/firestream/chat/test/fakes/StickerRepositoryMocks.kt` | `emptyStickerRepository`, `testSticker`, `testStickerPack` |
 
-**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`.
+**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`.
 
 **Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
 
