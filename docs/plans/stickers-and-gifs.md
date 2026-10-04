@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–9 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–10 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -778,6 +778,27 @@ Departures (for sign-off):
 
 A third-party key, a new outbound host, and a message whose file is not in Storage.
 
+**Approach**
+- Order: the key in `app/build.gradle.kts`, then `domain/util/KlipyUrls.kt` and `domain/model/OnlineMedia.kt`, then
+  `data/remote/source/KlipyMediaSource.kt`, the customer id in `PreferencesDataStore`, `OnlineMediaRepository` with its
+  implementation and its binding in `di/AppModule.kt`, then `MessageRepository.sendOnlineMedia`, then the no-copy rule
+  in `MediaFileManager`, then the sticker sheet in `ChatScreen`, then the docs.
+- `OutboxSender` and `OutboxJob` need no change. A row with a `mediaUrl` and no `localUri` already skips `prepareMedia`,
+  `withImageBounds`, `keepDocument` and `withStickerUrl`, and `needsUpload` is false for it. Tests pin that.
+- The no-copy rule sits in `MediaFileManager`, for every message type: `downloadFor` returns no file for a Klipy url, and
+  the one HTTP fetch there refuses such a url. So the auto-download, the chat-open scan, the backfill worker,
+  `ensureLocalFile` (favourite, open, share, save) and the viewer's download all keep nothing.
+- `KlipyMediaSource` throws errors it writes itself, without a cause. An OkHttp exception is not handed on, because its
+  message or its chain could name the request url.
+- `search` and `trending` return an `OnlineMediaPage` (items, page, `hasNext`), which step 11 pages by.
+- The customer id is cleared on sign-out with the sticker recents, so two accounts on one device do not share it.
+- A sticker bubble that names no library sticker opens no sheet. Its only rows keep a copy or view a pack.
+- Tests: `KlipyUrlsTest`, `KlipyMediaSourceTest` (MockWebServer), `OnlineMediaRepositoryImplTest`, new cases in
+  `MessageRepositoryStickerGifSendTest`, `MessageRepositoryForwardTest`, `OutboxSenderTest`, `OutboxJobTest` and
+  `MediaFileManagerTest`.
+- Further skills intended: `app-ui-design` (one line of `ChatScreen`), `simplify` if the diff passes 600 lines. No
+  screen sends a Klipy pick before step 11, so there is no CHANGELOG entry and no bump.
+
 **Decision taken** (owner, 2026-10-04): the standard integration. The app calls `api.klipy.com` and loads
 media from Klipy's hosts itself. There are no Cloud Functions in this plan, and `functions/` is not touched.
 Klipy's integration requirements forbid a server-side proxy and copies of its media without written approval.
@@ -852,6 +873,43 @@ Klipy's integration requirements forbid a server-side proxy and copies of its me
 in the main checkout and in the plan worktree, and into the environment of whatever builds the release APK.
 The Firebase secrets `FIRE_STREAM_GIF` and `KLIPY_API_KEY` are not used and can be destroyed.
 
+**Review outcome** (`/code-review`, then `/simplify`). This block and the `**Shipped**` line sit at the end of the section for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` found no path for the key into an error, no url that passes `KlipyUrls.isMedia` and reaches another host,
+  and no path that stores a Klipy file. Both were reasoned from the code, not run.
+- `/code-review` fixes: a response is closed when a cancel lands before its body is read; a Klipy message is no pending
+  download, so "Wi-Fi only" queues no retry for it on every chat open; an item with an odd slug stays in the results and
+  only its share report is refused; the `hd` file is never the one to send; both `when`s over the kind are exhaustive;
+  `OnlineMediaRepositoryImpl` has its AGENT-NOTE header; `OutboxJobTest` pins `needsUpload` for a Klipy row.
+- `/simplify` fixes: the pending-download rule moved into `MessageDao` (one SQL predicate for both queries, built from
+  the host names in `KlipyUrls`) in place of a filter per caller; the auto-download check sits in `tryAutoDownload`;
+  `klipyCustomerId` reads before it writes; the mime types come from `StickerFormat` and `GIF_MIME_TYPE`; the page is
+  clamped once.
+- Not taken: a refusal type of its own in place of `MediaLimitException`; the sticker tap decided in `MessageBubble`
+  (it is near the dex register ceiling, and `ChatScreen` is its only host); one wording for "not part of this build" in
+  the source and the repository; the Klipy id cleared somewhere other than `StickerLibrarySync.signingOut`; a host check
+  on a redirect from Klipy's API; a cheaper pre-check before `isMedia` parses a url; one parse per answer for the JSON.
+- `/code-review` ran before the `/simplify` fixes. They were not reviewed again. The gate ran after both.
+
+**Shipped** `2600fbe4` (2026-10-05) — tier: strong, tagged strong. skills: code-review, app-ui-design, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- **For sign-off: Coil's disk cache holds what it loads from Klipy.** A pick is not copied into the app's files, and the image loader still caches the bytes, like any picture loaded from a url. Klipy's rules ask for written approval for caching. `docs/BACKLOG.md` §4.6 has the two ways out.
+- **For sign-off: the released `v1.38.0` keeps a copy of a Klipy GIF.** It downloads any `GIF` into `filesDir/documents/`. A Klipy sticker plays from its url there, and its sheet's favourite row does nothing (`docs/BACKLOG.md` §4.6).
+- `OutboxSender` and `OutboxJob` are unchanged. A row with a `mediaUrl` and no `localUri` already skipped every upload step. Tests pin it.
+- The no-copy rule holds for every message type, not only `GIF` and `STICKER`: `MediaFileManager.downloadFor` returns no file for a Klipy url, and its one HTTP fetch refuses one. `MessageDao`'s two pending-download queries leave such rows out, with no schema change and no version bump.
+- A sticker bubble without a `stickerId` opens no sheet. The GIF bubble offered nothing that keeps a file before this step.
+- `search` and `trending` return an `OnlineMediaPage` (items, page, `hasNext`). A cancelled call throws its cancellation and is not a failure.
+- The send file is `md`, else `sm`, never `hd`. The preview is `sm`, else `xs`, else `md`. An item is left out only when no such file is on a Klipy media host.
+- `sendOnlineMedia` refuses with `MediaLimitException`, which `AppError.from` shows as a `Validation`. It also refuses a type that is not an image type.
+- `KlipyMediaSource` throws errors it writes itself, with no cause. A lost connection is an `IOException` that names only the class of the original. Requests carry `Cache-Control: no-store`, because the shared client has a disk cache and the url holds the key.
+- The requests send `page`, `per_page=24` and `customer_id`. No `locale`, `content_filter` or `format_filter` is sent.
+- The share report posts `{"customer_id": …}` as JSON. Klipy's docs could not be opened from this session, so the body's encoding is unverified (`docs/BACKLOG.md` §4.6).
+- The customer id is cleared on sign-out, in `StickerLibrarySync.signingOut`. The plan did not ask for that.
+- The build fails for a Klipy key with a character other than a letter, a digit, `-` or `_`.
+- The gap is confirmed: nothing checks the host of a received `mediaUrl` (`TECH_DEBT.md`, *Nothing checks the host of a received `mediaUrl`*).
+- The forward case is in `MessageRepositoryStickerGifSendTest`, not in `MessageRepositoryForwardTest`. Further new tests: `OnlineMediaRepositoryImplTest`, and cases in `MessageDaoOutboxQueueTest` and `MessageRepositoryLocalUriTest`.
+- `docs/BACKLOG.md` §4.6 said that search and media go through a Cloud Function. It states the decided rule now.
+- Not user-visible, so no CHANGELOG entry and no bump. Nothing ran against Klipy, on a device or an emulator. No key was set in this worktree, so the build under test had the feature off.
+
 ### Step 11 — GIFs tab and the online sticker catalogue
 
 - `ui/chat/gif/OnlineMediaViewModel.kt`: a debounced query, trending while the query is empty, paging by
@@ -879,6 +937,20 @@ The Firebase secrets `FIRE_STREAM_GIF` and `KLIPY_API_KEY` are not used and can 
   entry goes before it. `ComposerPickerCallbacks` has a seventh field, `onCreateSticker`, and no defaults.
 - **(step-9)** The composer's `BasicTextField` sits inside `KeyboardContentReceiver` in `ChatScreen.kt`. A search field
   in the GIFs tab is outside it and must stay so: it would send a keyboard GIF picked while searching.
+- **(step-10)** `search` and `trending` return `Result<OnlineMediaPage>`: `items`, `page` and `hasNext`. A cancelled
+  call throws `CancellationException` and returns no failure, so a search the next keystroke replaced needs no handling.
+- **(step-10)** An error from Klipy is a `KlipyException` with a message fit to show, or an `IOException` that
+  `AppError.from` reads as `Network`. `sendOnlineMedia` refuses a url that is not Klipy's with a `MediaLimitException`,
+  which becomes `AppError.Validation`.
+- **(step-10)** An `OnlineMedia` has `preview` (for the grid) and `send`. Both urls passed `KlipyUrls.isMedia`. A sticker's
+  file can be `image/gif` when Klipy has no `webp`.
+- **(step-10)** A sent Klipy sticker has no `stickerId`, and `ChatScreen` opens no sheet for it. It must not reach
+  `markUsed` or the Recents, which hold library ids.
+- **(step-10)** The requests send no `content_filter` and no `locale`. Decide here whether the tab sets them.
+  `KlipyMediaSource.fetchPage` is where they go.
+- **(step-10 /code-review)** Coil's disk cache keeps what the tab and the bubbles load from Klipy (`docs/BACKLOG.md`
+  §4.6). If the owner wants no cache, the previews' requests are where `diskCachePolicy` is switched off.
+- **(step-10)** `reportShare`'s body encoding is unverified. Check it with the real key during the device pass.
 - Tests: `OnlineMediaViewModelTest`, and a Robolectric test for the placeholder text, the notice, and the tab
   hidden without a key.
 - Docs: FEATURE-MAP, BACKLOG (the device checklist), CHANGELOG.
