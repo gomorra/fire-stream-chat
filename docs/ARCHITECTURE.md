@@ -21,7 +21,7 @@ Moved — see [SPEC.md](SPEC.md) for the full product feature list.
   - **Firestore**: Real-time NoSQL database for syncing encrypted payloads, user statuses, typing indicators, and call signaling.
   - **Firebase Authentication**: Phone authentication mechanism.
   - **Cloud Storage**: Hosting user avatars, images, and voice recordings.
-  - **Cloud Functions**: Server-side triggers — push notifications on new messages (`sendPushNotification`) and incoming calls (`sendCallPushNotification`). Runtime: Node.js 20.
+  - **Cloud Functions**: Server-side triggers — push notifications on new messages (`sendPushNotification`) and incoming calls (`sendCallPushNotification`) — and one callable, `getTurnCredentials`, which hands a signed-in user the login for the call relay. Runtime: Node.js 20.
   - **Firebase Cloud Messaging (FCM)**: Reliable push notifications for background delivery wake-ups and incoming call alerts.
 - **Cryptography**: `libsignal-android` for industry-standard Signal Protocol end-to-end encryption (including post-quantum Kyber pre-keys).
 - **Real-Time Communication**: `stream-webrtc-android` for WebRTC-based voice calls.
@@ -89,7 +89,7 @@ graph TD
 
 The most isolated layer, containing enterprise-wide and application-specific business logic.
 
-- **Models**: 18 plain Kotlin data classes (`Message`, `User`, `Chat`, `Contact`, `Poll`, `PollOption`, `CallState`, `CallLogEntry`, `CallSignalingData`, `IceCandidateData`, `GroupPermissions`, `GroupRole`, `ListData`, `ListItem`, `ListDiff`, `ListHistoryEntry`, `HistoryAction`, `MediaAttachment`, `SharedContent`, `MessageStatus`, `MessageType`, `ChatType`). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
+- **Models**: Plain Kotlin data classes (`Message`, `User`, `Chat`, `Contact`, `Poll`, `PollOption`, `CallState`, `CallLogEntry`, `CallSignalingData`, `IceCandidateData`, `IceServerData`, `GroupPermissions`, `GroupRole`, `ListData`, `ListItem`, `ListDiff`, `ListHistoryEntry`, `HistoryAction`, `MediaAttachment`, `SharedContent`, `MessageStatus`, `MessageType`, `ChatType`). Extracted from framework-specific models (like Room Entities or Firestore Snapshots).
 - **Repository Interfaces**: 8 abstractions (`AuthRepository`, `CallRepository`, `ChatRepository`, `ContactRepository`, `ListRepository`, `MessageRepository`, `PollRepository`, `UserRepository`) dictating what required data operations are available without knowing _how_ they're implemented.
 - **Use Cases**: Single-responsibility executors organized into `chat/`, `list/`, and `message/` subdirectories: `CheckGroupPermissionUseCase`, `SendListUpdateToChatsUseCase`, `SearchMessagesUseCase`.
 
@@ -189,7 +189,8 @@ sequenceDiagram
 ### Call Architecture Details
 
 - **`CallService`** (foreground service): Owns the call as a whole. That is the intents, the notification and the foreground type, the ring timeout, the status of the call document, the local media (the audio track and the camera), the audio session, and a map of `PeerSession`s keyed by remote user id. A 1:1 call has one session.
-- **`PeerSession`**: Owns one `PeerConnection` to one remote person. It negotiates the offer and answer, holds remote ICE candidates until the remote description is set, and drops duplicates. It reports connected, disconnected, failed, remote-track and video-line events through a channel, so `CallService` reacts on its own scope. `PeerConnection.close()` waits for the WebRTC signalling thread, so a session is never closed from inside one of its own callbacks. On connect it logs whether the path is direct or relayed (`IcePath`).
+- **`PeerSession`**: Owns one `PeerConnection` to one remote person. It negotiates the offer and answer, holds remote ICE candidates until the remote description is set, and drops duplicates. It reports connected, disconnected, failed, remote-track and video-line events through a channel, so `CallService` reacts on its own scope. `PeerConnection.close()` waits for the WebRTC signalling thread, so a session is never closed from inside one of its own callbacks. On connect it logs whether the path is direct or relayed (`IcePath`), and through which server when this side's end is the relay.
+- **The relay** (`IceServerProvider`, @Singleton): A connection is built with the servers this class hands out. They come from the `getTurnCredentials` function, which returns Cloudflare's STUN and TURN URLs and a login that is good for a day. The provider keeps a set for twelve hours. A caller waits at most three seconds and then gets public STUN servers alone, as it does after a failed fetch. The fetch runs on the application scope, so a caller that stops waiting does not cancel it. Nothing may wait between the ring and the offer, so the side that calls waits inside `CallRepository.createCall`, before the call document exists, and `CallService` then takes the kept set with `current()`. The side that answers fetches while it rings. It opens its session at once on a settled answer (`settled()`), and waits with `get()` only when the answer came faster than the servers. `CallActivity` starts the fetch when it opens (`CallRepository.prepareCall`). The pocketbase flavor has no relay.
 - **`PeerSignaling`**: What a session needs for one pair: send and observe the offer, the answer and the candidates. `OneToOneSignaling` implements it over `CallRepository` and maps caller and callee to the two candidate subcollections.
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>`, `StateFlow<CallUiControls>` (the own side) and `StateFlow<List<CallParticipant>>` (the other people). Bridges `CallService` ↔ UI without binding to the service. `beginCall()` gives every call fresh controls.
 - **The video line**: A call between two apps with video negotiates one video line, in both directions, with the offer and the answer. The side that offers adds a `SEND_RECV` transceiver, and the side that answers sets the offered one to `SEND_RECV`. `PeerSession.setCamera(track)` puts the camera track on the line or takes it off, and no new offer is needed. `videoAvailable` is true when the negotiated direction is `SEND_RECV`.
@@ -404,6 +405,7 @@ com.firestream.chat/
 │   │   ├── PeerSession.kt       # One PeerConnection to one remote person
 │   │   ├── PeerSignaling.kt     # Offer/answer/candidates for one pair + OneToOneSignaling
 │   │   ├── IcePath.kt           # Pure — direct or relayed, from the selected candidate pair
+│   │   ├── IceServerProvider.kt # @Singleton — the relay's servers: kept 12 h, a 3 s wait, STUN only on failure
 │   │   ├── LocalCamera.kt       # The call's own camera — start, stop, flip, release order
 │   │   ├── CallVideoSinks.kt    # @Singleton — one video View per participant, first frames
 │   │   ├── CallMediaPublisher.kt  # Own camera/mic state on the call document, only with an agreed video line
@@ -471,7 +473,7 @@ com.firestream.chat/
 ├── domain/
 │   ├── model/                   # Chat, Message, User, Contact, Poll, PollOption,
 │   │                            # CallState, CallLogEntry, CallSignalingData, SdpData,
-│   │                            # IceCandidateData, GroupPermissions, GroupRole,
+│   │                            # IceCandidateData, IceServerData, GroupPermissions, GroupRole,
 │   │                            # ListData, ListItem, ListDiff, ListType, GenericListStyle,
 │   │                            # ListHistoryEntry, HistoryAction, MediaAttachment,
 │   │                            # SharedContent, MessageStatus, MessageType, ChatType,

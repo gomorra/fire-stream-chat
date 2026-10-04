@@ -267,6 +267,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The relay login's lifetime is written down twice
+
+**The smell.** `getTurnCredentials` asks Cloudflare for a login that is good for 86400 seconds (`TURN_CREDENTIAL_TTL_SECONDS` in `functions/index.js`). `IceServerProvider.KEEP_MS` keeps a fetched set for twelve hours, half of that, so a call that starts on a kept set never outlives its login. Only two comments tie the numbers together. A shorter lifetime in the function leaves the app building calls on a login that has run out, and those calls have no relay.
+
+**Why we haven't fixed it.** The fix changes what the function returns and what `IceServerSource` returns: the set together with its lifetime, which the provider then halves. Both numbers are set once and nobody plans to change them.
+
+**When to revisit.** Before the lifetime in the function changes, or when the relay login becomes per call (`docs/BACKLOG.md` § *The relay hands a login to every signed-in user*).
+
+---
+
 ### The voice-message player prepares on the main thread
 
 **The smell.** `VoiceMessagePlayer` (`ui/chat/VoiceMessagePlayer.kt`) builds its `MediaPlayer` inside the Play button's `onClick` and calls the blocking `prepare()` there, on the main thread. For a voice note that is a remote `mediaUrl`, so a slow network holds the UI thread until the first bytes arrive — short recordings keep that brief, but it is the shape of an ANR. The file-handling work (2026-09-27) reused the player for audio *files*, which can be large, and worked around it by showing the inline player only once the file is on the device; it also added the try/catch that turns an unplayable source into "Can't play this file" instead of a crash.

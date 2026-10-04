@@ -754,6 +754,31 @@ with `--from 6`.
 
 Optional, see the checkpoint above. A secret and an authenticated endpoint are added here.
 
+**Approach**
+
+1. `functions/index.js`: `getTurnCredentials`, with the two secrets. Then `domain/model/IceServerData`,
+   `data/remote/source/IceServerSource`, `FirebaseIceServerSource` (with a pure parser for the
+   function's answer), the pocketbase one, and the two bindings.
+2. `data/call/IceServerProvider.kt`. The fetch runs on the application scope, so a caller that
+   stops waiting after three seconds does not cancel it, and the answer still fills the cache.
+   A failed fetch is not asked again for a minute.
+3. `WebRtcPeerConnectionFactory.createPeerConnection(observer, iceServers)` and
+   `PeerSession(iceServers)`. The `openrelay` constants go.
+4. Where the wait sits. Nothing may wait between the ring and the offer (step 3). The caller
+   therefore waits inside `CallRepository.createCall`, beside the capability read and before the
+   call document exists, and `CallService` then takes the set without waiting. The side that
+   answers fetches during the ring and waits before it opens its session.
+5. `CallActivity` warms through a new `CallRepository.prepareCall()`, so the UI gains no import
+   from `data/`.
+6. The checkpoint reads the relay's host from the log. The direct-or-relayed line names no server
+   today. `IcePath` gains the URL of the server that gave this side its relay candidate.
+7. Tests: `IceServerProviderTest` (cached set, expiry, timeout, the late answer kept, error, the
+   minute after an error, one fetch for two callers), `FirebaseIceServerSourceTest` (the parser),
+   new rows in `CallRepositoryImplTest`, `IcePathTest` and `PeerSessionTest`.
+8. One consequence of the spec: without the deployed function and its secrets, this build has no
+   relay at all. It goes into the Shipped block and the backlog.
+9. Skills: `code-review` (tagged), and `changelog-release` for the entry and the bump.
+
 - `functions/index.js`: `getTurnCredentials`, an `onCall` function that rejects a caller who is not
   signed in. It posts `{"ttl": 86400}` to
   `https://rtc.live.cloudflare.com/v1/turn/keys/<key id>/credentials/generate-ice-servers` with the
@@ -843,6 +868,16 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   which leaves `cameraOn` set in the holder for a call that is over. The serial dispatcher closes
   it. `cameraWanted`, `screenVisible` and `cameraDecided` are one small state machine: move it
   into the camera-switch class named below.
+- **(step-5)** `PeerSession` takes `iceServers`, and `CallService.openSession` gets them per
+  session: `IceServerProvider.current()` for the caller of a 1:1 call, who may not wait, and
+  `settled()` or `get()` for the side that answers. A mesh opens and reopens sessions during a
+  call. Resolve the set once when the call starts or is joined, with `get()`, keep it with the
+  call's state, and give every session of the call that set. A group call has no single fetch of
+  an offer, so joining may wait.
+- **(step-5 /code-review)** The side that answers a 1:1 call opens its session through
+  `serviceScope.launch`, then `mainHandler.post` with a check of `currentCallId`, when the
+  relay's servers are not there yet. It is one more posted block with an identity check. On the
+  serial dispatcher it is a plain suspending call.
 - **(step-3)** `PeerSession` takes `offerVideoLine`. A mesh session passes true: only an app with
   group calls joins one, and every such app takes a video line. `CallMediaPublisher` writes the
   1:1 call document only. A group call's `camera` and `mic` go to the member row.

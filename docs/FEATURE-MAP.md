@@ -19,7 +19,12 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 | `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns the call: intents, notification and foreground type, ring timeout, call status, the local audio track and the camera, each side's live camera and microphone state, the audio session (router + proximity lock), and a map of `PeerSession`s |
 | `app/src/main/java/com/firestream/chat/data/call/PeerSession.kt` | One `PeerConnection` to one remote person — offer/answer, the video line and whether both sides agreed to it, ICE candidates held until the remote description is set, duplicate filter, events through a channel |
 | `app/src/main/java/com/firestream/chat/data/call/PeerSignaling.kt` | What a session needs for one pair, and `OneToOneSignaling` over the call document |
-| `app/src/main/java/com/firestream/chat/data/call/IcePath.kt` | Pure — direct or relayed, from the selected candidate pair; logged on connect |
+| `app/src/main/java/com/firestream/chat/data/call/IcePath.kt` | Pure — direct or relayed, from the selected candidate pair, and the server behind this side's relay candidate; logged on connect |
+| `app/src/main/java/com/firestream/chat/data/call/IceServerProvider.kt` | `@Singleton` — the STUN and relay servers a connection is built with. Keeps a fetched set for twelve hours, waits at most three seconds, answers with STUN only on a failure or a timeout |
+| `app/src/main/java/com/firestream/chat/data/remote/source/IceServerSource.kt` | Where the relay's servers and login come from |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseIceServerSource.kt` | Calls the `getTurnCredentials` function and reads its answer |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseIceServerSource.kt` | No relay on this backend — returns nothing |
+| `app/src/main/java/com/firestream/chat/domain/model/IceServerData.kt` | One entry of a connection's server list: URLs and an optional login, which `toString` leaves out |
 | `app/src/main/java/com/firestream/chat/data/call/LocalCamera.kt` | The call's own camera — front first, 1280×720 at 30 fps, start, stop, flip, and the release order |
 | `app/src/main/java/com/firestream/chat/data/call/CallVideoSinks.kt` | `@Singleton` — hands a screen one video `View` per participant, keeps it on that participant's track, reports first frames |
 | `app/src/main/java/com/firestream/chat/data/call/CallMediaPublisher.kt` | Writes the own camera and microphone state to the call document — only once the call is connected and both sides agreed on the video line |
@@ -28,9 +33,9 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | `AudioManager.setCommunicationDevice()` wrapper — device callbacks, live `RouteState` |
 | `app/src/main/java/com/firestream/chat/data/call/ProximityLock.kt` | Proximity wake lock — held only while the playing route is the earpiece and no video shows |
 | `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications |
-| `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory with the call's EGL context and video codecs + ICE server config |
+| `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory with the call's EGL context and video codecs. `createPeerConnection` takes the ICE servers |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc (status, offer, answer, `media.<uid>`) + ICE subcollections |
-| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source. `createCall` reads the callee's `callVideoLine` before it rings |
+| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source. `createCall` reads the callee's `callVideoLine` and has the relay's servers fetched before it rings. `prepareCall` starts that fetch early |
 | `app/src/main/java/com/firestream/chat/data/repository/AuthRepositoryImpl.kt` | `announceCallVideoLine()` — writes `callVideoLine: true` to the own user document at app start (`FireStreamApp`) and when an existing user signs in |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseAuthSource.kt` | Writes and reads `users/{uid}.callVideoLine`; a new user document carries it from its creation |
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route. Owns the microphone and camera requests, the lock state, picture-in-picture, docking the call over its chat, and `outgoingIntent` / `stageIntent`. Reports itself as `CallSurface.STAGE` |
@@ -44,18 +49,20 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
-| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
+| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create. `getTurnCredentials` — callable, hands a signed-in user the relay's servers and a one-day login |
+| `app/src/test/java/com/firestream/chat/data/call/IceServerProviderTest.kt` | A kept set, expiry, the three-second wait, a late answer kept, a failure and the minute after it, one fetch for two callers |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseIceServerSourceTest.kt` | The function's answer read: a list, a single entry, URLs that are not STUN or TURN, other shapes |
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, participants, the call's chat, and the visibility rule: stage to card without a pause, off screen after a second with neither |
 | `app/src/test/java/com/firestream/chat/data/call/PeerSessionTest.kt` | Offer and answer flow, the offer with and without a video line, an app without video on either side, `setCamera`, held and duplicate candidates, events, failures, `close()` twice (MockK `PeerConnection`, fake `PeerSignaling`) |
 | `app/src/test/java/com/firestream/chat/data/call/CallMediaPublisherTest.kt` | No write without an agreed video line or before connect, every change written in order, the end of a call and the next one |
-| `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | `createCall`: the callee's `callVideoLine` read true, missing, failed and too slow, and read before the call document exists |
+| `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | `createCall`: the callee's `callVideoLine` read true, missing, failed and too slow, and read before the call document exists. The relay's servers fetched before it too, side by side with that read |
 | `app/src/test/java/com/firestream/chat/data/repository/AuthRepositoryImplCallVideoLineTest.kt` | The announcement at the sign-in of an existing user, none for a new one, signed out, a failed write |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseAuthSourceTest.kt` | `callVideoLine` written as an update and with a new user document, and read as false unless stored `true` |
 | `app/src/test/java/com/firestream/chat/data/call/LocalCameraTest.kt` | Which camera opens, start/stop/flip, failures, the release order (MockK capturer) |
 | `app/src/test/java/com/firestream/chat/data/call/CallVideoSinksTest.kt` | Bind and rebind of views, first frames, mirroring, a late EGL context, sinks off before anything is disposed (MockK views and tracks) |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSourceTest.kt` | The call document's `video` and `media` fields, written and read |
 | `app/src/test/java/com/firestream/chat/data/call/OneToOneSignalingTest.kt` | Caller/callee → candidate subcollection, answer written with the status, offer fetch failures |
-| `app/src/test/java/com/firestream/chat/data/call/IcePathTest.kt` | Direct, relayed and unknown pairs |
+| `app/src/test/java/com/firestream/chat/data/call/IcePathTest.kt` | Direct, relayed and unknown pairs, and the relay's server named only for this side's relay candidate |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |

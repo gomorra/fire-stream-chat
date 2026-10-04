@@ -1,5 +1,6 @@
 package com.firestream.chat.data.repository
 
+import com.firestream.chat.data.call.IceServerProvider
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.domain.model.OutgoingCall
@@ -8,6 +9,7 @@ import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.currentTime
@@ -28,6 +30,7 @@ class CallRepositoryImplTest {
 
     private val callSource: CallSignalingSource = mockk(relaxed = true)
     private val authSource: AuthSource = mockk(relaxed = true)
+    private val iceServerProvider: IceServerProvider = mockk(relaxed = true)
 
     private val repository = CallRepositoryImpl(
         callSource = callSource,
@@ -35,10 +38,12 @@ class CallRepositoryImplTest {
         messageSource = mockk(relaxed = true),
         chatDao = mockk(relaxed = true),
         sendClock = mockk(relaxed = true),
+        iceServerProvider = iceServerProvider,
     )
 
     @Before
     fun setUp() {
+        coEvery { iceServerProvider.get() } returns IceServerProvider.STUN_ONLY
         every { authSource.currentUserId } returns "caller1"
         coEvery { callSource.createCallDocument("caller1", "callee1", any()) } returns "call1"
     }
@@ -101,6 +106,47 @@ class CallRepositoryImplTest {
         }
     }
 
+    // The call service builds the offer the moment the call exists, from what the provider keeps.
+    @Test
+    fun `the relay's servers are fetched before the call document exists`() = runTest {
+        coEvery { iceServerProvider.get() } coAnswers {
+            delay(2_000)
+            IceServerProvider.STUN_ONLY
+        }
+
+        repository.createCall("callee1", video = false)
+
+        assertEquals(2_000, currentTime)
+        coVerifyOrder {
+            iceServerProvider.get()
+            callSource.createCallDocument("caller1", "callee1", false)
+        }
+    }
+
+    @Test
+    fun `the two waits before the ring run side by side`() = runTest {
+        coEvery { authSource.takesCallVideoLine("callee1") } coAnswers {
+            delay(2_500)
+            true
+        }
+        coEvery { iceServerProvider.get() } coAnswers {
+            delay(3_000)
+            IceServerProvider.STUN_ONLY
+        }
+
+        val call = repository.createCall("callee1", video = true).getOrThrow()
+
+        assertEquals(OutgoingCall("call1", videoLine = true), call)
+        assertEquals(3_000, currentTime)
+    }
+
+    @Test
+    fun `preparing a call starts the fetch and does not wait for it`() {
+        repository.prepareCall()
+
+        verify { iceServerProvider.warm() }
+    }
+
     @Test
     fun `signed out, nobody is asked and nothing rings`() = runTest {
         every { authSource.currentUserId } returns null
@@ -109,6 +155,7 @@ class CallRepositoryImplTest {
 
         assertTrue(result.isFailure)
         coVerify(exactly = 0) { authSource.takesCallVideoLine(any()) }
+        coVerify(exactly = 0) { iceServerProvider.get() }
         coVerify(exactly = 0) { callSource.createCallDocument(any(), any(), any()) }
     }
 }

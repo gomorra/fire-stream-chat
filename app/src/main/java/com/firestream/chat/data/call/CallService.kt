@@ -24,6 +24,7 @@ import com.firestream.chat.domain.model.CallMedia
 import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
+import com.firestream.chat.domain.model.IceServerData
 import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import dagger.hilt.android.AndroidEntryPoint
@@ -152,6 +153,7 @@ class CallService : Service() {
     @Inject lateinit var chatRepository: ChatRepository
     @Inject lateinit var callStateHolder: CallStateHolder
     @Inject lateinit var callVideoSinks: CallVideoSinks
+    @Inject lateinit var iceServerProvider: IceServerProvider
     @Inject lateinit var profileImageManager: ProfileImageManager
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -346,7 +348,9 @@ class CallService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
 
-        openSession(callId, userId)
+        // The callee is ringing and answers by fetching the offer once, so nothing waits here.
+        // CallRepository.createCall fetched the relay's servers before the call existed.
+        openSession(callId, userId, iceServerProvider.current())
         observeCallDocument(callId)
         startRingTimeout()
     }
@@ -382,6 +386,8 @@ class CallService : Service() {
         }
         startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification, serviceType)
 
+        // Fetched while it rings, so the answer does not wait for the relay's servers.
+        iceServerProvider.warm()
         observeCallDocument(callId)
         startRingTimeout()
     }
@@ -463,9 +469,22 @@ class CallService : Service() {
             )
         }
 
-        // The session fetches the offer, answers it, and writes the answer with status="answered".
-        openSession(callId, remoteUserId ?: "")
+        val remoteId = remoteUserId ?: ""
         remoteUserId?.let { resolveChat(callId, it) }
+        // The ring fetched the relay's servers, so they are normally here.
+        // The session fetches the offer, answers it, and writes the answer with status="answered".
+        iceServerProvider.settled()?.let { return openSession(callId, remoteId, it) }
+        serviceScope.launch {
+            // The answer came faster than the servers. The caller waits for the answer, so this
+            // side may wait for them.
+            val iceServers = iceServerProvider.get()
+            // Back on the main thread, where calls start and end by intent. A call that ended
+            // during the wait opens nothing.
+            mainHandler.post {
+                if (currentCallId != callId) return@post
+                openSession(callId, remoteId, iceServers)
+            }
+        }
     }
 
     /**
@@ -601,8 +620,11 @@ class CallService : Service() {
      * Open the connection to [remoteId] and start negotiating. The factory and the microphone
      * track are created with the first session and shared by every later one. In a 1:1 call the
      * caller makes the offer. Does nothing once the call's media is detached.
+     *
+     * @param iceServers from [IceServerProvider]: `current()` for the caller, who may not wait,
+     *   and `get()` for the side that answers.
      */
-    private fun openSession(callId: String, remoteId: String) {
+    private fun openSession(callId: String, remoteId: String, iceServers: List<IceServerData>) {
         synchronized(mediaLock) {
             if (sessions.containsKey(remoteId)) return
             val factory = factoryOrNull() ?: return
@@ -615,6 +637,7 @@ class CallService : Service() {
                 localTracks = listOf(audioTrack),
                 offers = isCaller,
                 offerVideoLine = calleeTakesVideoLine,
+                iceServers = iceServers,
                 scope = serviceScope,
                 logTag = TAG
             )

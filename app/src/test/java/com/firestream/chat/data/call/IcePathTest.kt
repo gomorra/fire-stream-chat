@@ -32,6 +32,31 @@ class IcePathTest {
         assertEquals("relayed (local relay, remote srflx)", path.describe())
     }
 
+    // What the checkpoint after the relay step reads from the log.
+    @Test
+    fun `this side's relay is named by the server that gave the candidate`() {
+        val path = IcePath.of(
+            candidate("relay"),
+            candidate("srflx"),
+            localServerUrl = "turn:turn.cloudflare.com:3478?transport=udp"
+        )
+
+        assertEquals(
+            "relayed (local relay, remote srflx) through turn:turn.cloudflare.com:3478?transport=udp",
+            path.describe()
+        )
+    }
+
+    // A server-reflexive candidate names the STUN server that saw it. That is no relay.
+    @Test
+    fun `a server is named only for a relay candidate, and only when WebRTC says which`() {
+        val reflexive = IcePath.of(candidate("srflx"), candidate("relay"), "stun:stun.cloudflare.com:3478")
+        assertNull(reflexive.localRelay)
+        assertEquals("relayed (local srflx, remote relay)", reflexive.describe())
+
+        assertEquals("relayed (local relay, remote host)", IcePath.of(candidate("relay"), candidate("host"), "").describe())
+    }
+
     @Test
     fun `a relay candidate on the remote side is relayed`() {
         assertTrue(IcePath.of(candidate("host"), candidate("relay")).isRelayed)

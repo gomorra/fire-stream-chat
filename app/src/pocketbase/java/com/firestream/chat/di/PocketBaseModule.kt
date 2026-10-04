@@ -17,6 +17,7 @@ import com.firestream.chat.data.remote.pocketbase.PocketBaseAuthSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseCallSignalingSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseChatSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseContactSource
+import com.firestream.chat.data.remote.pocketbase.PocketBaseIceServerSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseLifecycleHook
 import com.firestream.chat.data.remote.pocketbase.PocketBaseListHistorySource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseListSource
@@ -29,6 +30,7 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.ChatSource
 import com.firestream.chat.data.remote.source.ContactSource
+import com.firestream.chat.data.remote.source.IceServerSource
 import com.firestream.chat.data.remote.source.ListHistorySource
 import com.firestream.chat.data.remote.source.ListSource
 import com.firestream.chat.data.remote.source.MessageSource
@@ -70,6 +72,9 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindCallSignalingSource(impl: PocketBaseCallSignalingSource): CallSignalingSource
+
+    @Binds @Singleton
+    abstract fun bindIceServerSource(impl: PocketBaseIceServerSource): IceServerSource
 
     @Binds @Singleton
     abstract fun bindListSource(impl: PocketBaseListSource): ListSource

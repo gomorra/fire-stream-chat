@@ -16,6 +16,7 @@ package com.firestream.chat.data.call
 
 import android.util.Log
 import com.firestream.chat.domain.model.IceCandidateData
+import com.firestream.chat.domain.model.IceServerData
 import com.firestream.chat.domain.model.SdpData
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -98,6 +99,7 @@ sealed interface PeerSessionEvent {
  * @param offerVideoLine whether the offer carries the video line. Read only when [offers]: the
  *   side that answers takes the line the offer brings. False unless the other side is known to
  *   run an app with video.
+ * @param iceServers the STUN servers and the relay the connection is built with.
  * @param scope the owner's scope. The session runs in a child of it, which [close] cancels.
  * @param logTag the tag of every line this session logs.
  */
@@ -107,6 +109,7 @@ class PeerSession(
     private val localTracks: List<MediaStreamTrack>,
     private val offers: Boolean,
     private val offerVideoLine: Boolean,
+    private val iceServers: List<IceServerData>,
     scope: CoroutineScope,
     private val logTag: String = "PeerSession"
 ) {
@@ -166,7 +169,7 @@ class PeerSession(
     fun start() {
         if (!started.compareAndSet(false, true) || closed.get()) return
 
-        val pc = factory.createPeerConnection(observer)
+        val pc = factory.createPeerConnection(observer, iceServers)
         if (pc == null) {
             fail("no peer connection")
             return
@@ -431,7 +434,7 @@ class PeerSession(
         }
 
         override fun onSelectedCandidatePairChanged(event: CandidatePairChangeEvent) {
-            val selected = IcePath.of(event.local?.sdp, event.remote?.sdp)
+            val selected = IcePath.of(event.local?.sdp, event.remote?.sdp, event.local?.serverUrl)
             path = selected
             // The pair can be chosen after ICE reports connected, and it can change mid-call.
             if (connected) Log.i(logTag, "Path: ${selected.describe()}")

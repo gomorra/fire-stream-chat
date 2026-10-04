@@ -8,14 +8,22 @@ package com.firestream.chat.data.call
  * @param localType the `typ` of this side's candidate (`host`, `srflx`, `prflx`, `relay`), or null
  *   when the candidate line carries none.
  * @param remoteType the same for the remote side's candidate.
+ * @param localRelay the URL of the server that gave this side its relay candidate, such as
+ *   `turn:turn.cloudflare.com:3478?transport=udp`. Null when this side's candidate is no relay,
+ *   or WebRTC did not say. The other side's relay is never known here. A URL carries no login.
  */
-internal data class IcePath(val localType: String?, val remoteType: String?) {
+internal data class IcePath(
+    val localType: String?,
+    val remoteType: String?,
+    val localRelay: String?
+) {
 
     val isRelayed: Boolean get() = localType == RELAY || remoteType == RELAY
 
     /**
-     * The line [PeerSession] logs, e.g. `relayed (local relay, remote srflx)`. A pair with a type
-     * missing and no relay in it reads `unknown`, since the missing end could be the relay.
+     * The line [PeerSession] logs, e.g. `relayed (local relay, remote srflx) through
+     * turn:turn.cloudflare.com:3478?transport=udp`. A pair with a type missing and no relay in it
+     * reads `unknown`, since the missing end could be the relay.
      */
     fun describe(): String {
         val kind = when {
@@ -23,7 +31,8 @@ internal data class IcePath(val localType: String?, val remoteType: String?) {
             localType == null || remoteType == null -> UNKNOWN
             else -> "direct"
         }
-        return "$kind (local ${localType ?: UNKNOWN}, remote ${remoteType ?: UNKNOWN})"
+        val through = localRelay?.let { " through $it" }.orEmpty()
+        return "$kind (local ${localType ?: UNKNOWN}, remote ${remoteType ?: UNKNOWN})$through"
     }
 
     companion object {
@@ -31,9 +40,17 @@ internal data class IcePath(val localType: String?, val remoteType: String?) {
         private const val UNKNOWN = "unknown"
         private val TYPE = Regex("""\btyp (\w+)""")
 
-        /** Reads the path from the two candidate lines of the selected pair. */
-        fun of(localSdp: String?, remoteSdp: String?): IcePath =
-            IcePath(candidateType(localSdp), candidateType(remoteSdp))
+        /**
+         * Reads the path from the two candidate lines of the selected pair.
+         *
+         * @param localServerUrl the server that gathered this side's candidate, as WebRTC reports
+         *   it. Kept only for a relay candidate: a server-reflexive one names its STUN server.
+         */
+        fun of(localSdp: String?, remoteSdp: String?, localServerUrl: String? = null): IcePath {
+            val localType = candidateType(localSdp)
+            val relay = localServerUrl?.takeIf { localType == RELAY && it.isNotBlank() }
+            return IcePath(localType, candidateType(remoteSdp), relay)
+        }
 
         private fun candidateType(sdp: String?): String? =
             sdp?.let { TYPE.find(it)?.groupValues?.get(1) }

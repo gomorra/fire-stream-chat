@@ -2,11 +2,13 @@
 // Responsibility: WebRTC call signalling — create/end calls, exchange SDP +
 //   ICE candidates via Firestore. Also writes a CALL message into the chat
 //   so the call shows up in CallsScreen's call log. Decides, before it rings,
-//   whether the callee's app takes a video line.
+//   whether the callee's app takes a video line, and has the relay's servers
+//   fetched.
 // Owns: Coordination between FirestoreCallSource (signalling docs) and the
 //   message stream (call-log entries). Stateless — call state itself lives in
 //   CallStateHolder + CallService, not here.
-// Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService.
+// Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService,
+//   IceServerProvider (keeps the relay's servers; this class only asks for them).
 // Don't put here: PeerConnection lifecycle (PeerSession), in-call UI state
 //   (CallStateHolder), call-log derivation (CallsViewModel).
 // endregion
@@ -14,6 +16,7 @@
 package com.firestream.chat.data.repository
 
 import android.util.Log
+import com.firestream.chat.data.call.IceServerProvider
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
@@ -27,6 +30,8 @@ import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.OutgoingCall
 import com.firestream.chat.domain.model.SdpData
 import com.firestream.chat.domain.repository.CallRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -39,7 +44,10 @@ class CallRepositoryImpl @Inject constructor(
     private val messageSource: MessageSource,
     private val chatDao: ChatDao,
     private val sendClock: SendClock,
+    private val iceServerProvider: IceServerProvider,
 ) : CallRepository {
+
+    override fun prepareCall() = iceServerProvider.warm()
 
     override suspend fun createCall(calleeId: String, video: Boolean): Result<OutgoingCall> {
         return try {
@@ -47,7 +55,12 @@ class CallRepositoryImpl @Inject constructor(
                 ?: return Result.failure(Exception("Not authenticated"))
             // Before the call document exists. Creating it rings the callee, who answers by
             // fetching the offer once, so nothing may wait between the document and the offer.
-            val videoLine = calleeTakesVideoLine(calleeId)
+            // Both waits are bounded and run side by side. The call service then takes the
+            // relay's servers from the provider without waiting.
+            val videoLine = coroutineScope {
+                val relay = async { iceServerProvider.get() }
+                calleeTakesVideoLine(calleeId).also { relay.await() }
+            }
             val callId = callSource.createCallDocument(callerId, calleeId, video)
             Result.success(OutgoingCall(callId, videoLine))
         } catch (e: Exception) {

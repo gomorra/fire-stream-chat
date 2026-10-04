@@ -8,9 +8,15 @@ import kotlinx.coroutines.flow.Flow
 
 interface CallRepository {
     /**
+     * A call is about to start or to be answered. Fetches ahead what its connection needs, the
+     * relay's servers, and returns at once. Safe to call any number of times.
+     */
+    fun prepareCall()
+
+    /**
      * Ring [calleeId]. Before the call document exists it asks whether the callee's app takes a
-     * video line, and waits a bounded time for the answer. The caller builds its offer from
-     * [OutgoingCall.videoLine].
+     * video line and fetches the relay's servers, and waits a bounded time for both. The caller
+     * builds its offer from [OutgoingCall.videoLine].
      */
     suspend fun createCall(calleeId: String, video: Boolean): Result<OutgoingCall>
     suspend fun answerCall(callId: String): Result<Unit>

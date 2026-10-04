@@ -232,6 +232,20 @@ data class CallSignalingData(
 )
 ```
 
+### IceServerData
+
+Defined in `domain/model/IceServerData.kt`. One entry of the server list a call's connection is built with. `IceServerProvider` hands the list out.
+
+```kotlin
+data class IceServerData(
+    val urls: List<String>,          // stun:, turn: or turns: URLs, never empty
+    val username: String? = null,    // the relay's login; null for STUN
+    val credential: String? = null
+)
+```
+
+`toString()` leaves the login out, so an entry in a log line gives nothing away.
+
 ---
 
 **See also:** [SCHEMA-ROOM.md](SCHEMA-ROOM.md) (how these map to Room rows), [SCHEMA-FIRESTORE.md](SCHEMA-FIRESTORE.md) (how they map to Firestore docs), [ARCHITECTURE.md](ARCHITECTURE.md) (overall architecture).

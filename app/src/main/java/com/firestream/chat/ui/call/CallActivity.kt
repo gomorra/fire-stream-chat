@@ -30,6 +30,7 @@ import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallSurface
 import com.firestream.chat.domain.model.dockable
+import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.combine
@@ -48,6 +49,7 @@ class CallActivity : ComponentActivity() {
 
     @Inject lateinit var callStateHolder: CallStateHolder
     @Inject lateinit var callPlacer: OutgoingCallPlacer
+    @Inject lateinit var callRepository: CallRepository
 
     companion object {
         const val EXTRA_ACTION = "call_action"
@@ -118,6 +120,8 @@ class CallActivity : ComponentActivity() {
         )
         inPictureInPicture = isInPictureInPictureMode
 
+        // The stage opens for a call that is about to be placed or answered.
+        callRepository.prepareCall()
         if (savedInstanceState == null) {
             handleIntent()
         }

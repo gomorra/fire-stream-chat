@@ -1,6 +1,7 @@
 package com.firestream.chat.data.call
 
 import android.content.Context
+import com.firestream.chat.domain.model.IceServerData
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.DefaultVideoDecoderFactory
@@ -25,10 +26,6 @@ class WebRtcPeerConnectionFactory(context: Context) {
     companion object {
         private val initialized = AtomicBoolean(false)
 
-        private const val TURN_HOST = "openrelay.metered.ca"
-        private const val TURN_USERNAME = "openrelayproject"
-        private const val TURN_PASSWORD = "openrelayproject"
-
         fun initializeOnce(context: Context) {
             if (initialized.compareAndSet(false, true)) {
                 PeerConnectionFactory.initialize(
@@ -39,10 +36,12 @@ class WebRtcPeerConnectionFactory(context: Context) {
             }
         }
 
-        private fun buildTurnServer(url: String): PeerConnection.IceServer =
-            PeerConnection.IceServer.builder(url)
-                .setUsername(TURN_USERNAME)
-                .setPassword(TURN_PASSWORD)
+        private fun IceServerData.toIceServer(): PeerConnection.IceServer =
+            PeerConnection.IceServer.builder(urls)
+                .apply {
+                    username?.let { setUsername(it) }
+                    credential?.let { setPassword(it) }
+                }
                 .createIceServer()
     }
 
@@ -55,15 +54,6 @@ class WebRtcPeerConnectionFactory(context: Context) {
      * every video view are built on it, so a frame stays a texture from the camera to the screen.
      */
     val eglContext: EglBase.Context get() = eglBase.eglBaseContext
-
-    private val iceServers = listOf(
-        PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
-        PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
-        // TURN servers for NAT traversal (required for phone↔emulator and symmetric NAT)
-        buildTurnServer("turn:$TURN_HOST:80"),
-        buildTurnServer("turn:$TURN_HOST:443"),
-        buildTurnServer("turn:$TURN_HOST:443?transport=tcp"),
-    )
 
     init {
         initializeOnce(context)
@@ -79,8 +69,16 @@ class WebRtcPeerConnectionFactory(context: Context) {
             .createPeerConnectionFactory()
     }
 
-    fun createPeerConnection(observer: PeerConnection.Observer): PeerConnection? {
-        val rtcConfig = PeerConnection.RTCConfiguration(iceServers).apply {
+    /**
+     * @param iceServers the STUN servers and the relay of this connection, from
+     *   [IceServerProvider]. A relay is what connects two phones that have no direct path, such
+     *   as a phone and the emulator, or a phone behind a symmetric NAT.
+     */
+    fun createPeerConnection(
+        observer: PeerConnection.Observer,
+        iceServers: List<IceServerData>
+    ): PeerConnection? {
+        val rtcConfig = PeerConnection.RTCConfiguration(iceServers.map { it.toIceServer() }).apply {
             sdpSemantics = PeerConnection.SdpSemantics.UNIFIED_PLAN
             continualGatheringPolicy = PeerConnection.ContinualGatheringPolicy.GATHER_CONTINUALLY
         }

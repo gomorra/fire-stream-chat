@@ -1,6 +1,7 @@
 package com.firestream.chat.data.call
 
 import com.firestream.chat.domain.model.IceCandidateData
+import com.firestream.chat.domain.model.IceServerData
 import com.firestream.chat.domain.model.SdpData
 import io.mockk.every
 import io.mockk.mockk
@@ -54,6 +55,10 @@ class PeerSessionTest {
     private val scope = CoroutineScope(UnconfinedTestDispatcher() + SupervisorJob())
 
     private val connectionObserver = slot<PeerConnection.Observer>()
+    private val relay = listOf(
+        IceServerData(listOf("turn:turn.cloudflare.com:3478?transport=udp"), "user", "secret")
+    )
+    private val iceServerLists = mutableListOf<List<IceServerData>>()
     private val createObservers = mutableListOf<SdpObserver>()
     private val localDescriptions = mutableListOf<SessionDescription>()
     private val localObservers = mutableListOf<SdpObserver>()
@@ -76,7 +81,7 @@ class PeerSessionTest {
 
     @Before
     fun setUp() {
-        every { factory.createPeerConnection(capture(connectionObserver)) } returns pc
+        every { factory.createPeerConnection(capture(connectionObserver), capture(iceServerLists)) } returns pc
         every { pc.createOffer(capture(createObservers), capture(constraints)) } returns Unit
         every { pc.createAnswer(capture(createObservers), capture(constraints)) } returns Unit
         every { pc.setLocalDescription(capture(localObservers), capture(localDescriptions)) } returns Unit
@@ -102,7 +107,7 @@ class PeerSessionTest {
 
     /** @param offerVideoLine the other side is known to take video. Most tests are about that case. */
     private fun session(offers: Boolean, offerVideoLine: Boolean = true): PeerSession {
-        val session = PeerSession(factory, signaling, listOf(localTrack), offers, offerVideoLine, scope)
+        val session = PeerSession(factory, signaling, listOf(localTrack), offers, offerVideoLine, relay, scope)
         eventsJob = scope.launch { session.events.toList(events) }
         return session
     }
@@ -135,6 +140,13 @@ class PeerSessionTest {
         val field = RtpTransceiver.RtpTransceiverInit::class.java.getDeclaredField("direction")
         field.isAccessible = true
         return field.get(this) as RtpTransceiverDirection
+    }
+
+    @Test
+    fun `the connection is built with the servers the session was given`() {
+        session(offers = true).start()
+
+        assertEquals(listOf(relay), iceServerLists)
     }
 
     // ── Offer flow ───────────────────────────────────────────────────────────
@@ -611,7 +623,7 @@ class PeerSessionTest {
 
     @Test
     fun `a factory that returns no connection is a failure event`() {
-        every { factory.createPeerConnection(any()) } returns null
+        every { factory.createPeerConnection(any(), any()) } returns null
 
         session(offers = true).start()
 
@@ -664,7 +676,7 @@ class PeerSessionTest {
     fun `a close that lands while the connection is being created still closes it, once`() {
         lateinit var session: PeerSession
         // close() from another thread, between start()'s first check and the connection existing.
-        every { factory.createPeerConnection(any()) } answers {
+        every { factory.createPeerConnection(any(), any()) } answers {
             session.close()
             pc
         }
@@ -685,7 +697,7 @@ class PeerSessionTest {
         session.start()
         session.start()
 
-        verify(exactly = 1) { factory.createPeerConnection(any()) }
+        verify(exactly = 1) { factory.createPeerConnection(any(), any()) }
         verify(exactly = 1) { pc.createOffer(any(), any()) }
     }
 
@@ -708,7 +720,7 @@ class PeerSessionTest {
         session.close()
         session.start()
 
-        verify(exactly = 0) { factory.createPeerConnection(any()) }
+        verify(exactly = 0) { factory.createPeerConnection(any(), any()) }
     }
 
     @Test

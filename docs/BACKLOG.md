@@ -162,6 +162,36 @@ real video view.
 15. Dock, leave the app, and let the other side hang up. On return the strip says *Call ended*
     for a moment, however long ago the call ended. Decide whether that is wanted.
 
+### The Cloudflare relay for calls (2026-10-04)
+
+`docs/plans/video-calls.md` step 5. A call takes its relay from the `getTurnCredentials` function,
+and the app carries no other relay. **Until that function is deployed with its two secrets, this
+build has no relay at all:** a call connects only where a direct path exists,
+so a phone and the emulator, or two phones on mobile data, may not connect. Nothing ran on a device
+and the function was never deployed or called. JVM tests cover the provider, the reading of the
+function's answer and the order of the waits.
+1. Create a TURN key in the Cloudflare dashboard. Run `firebase functions:secrets:set
+   CLOUDFLARE_TURN_KEY_ID` and `… CLOUDFLARE_TURN_API_TOKEN`, then `firebase deploy --only
+   functions`. The deploy goes through and lists `getTurnCredentials`.
+2. One call on mobile data connects, and `adb logcat -s CallService` shows `Connected: relayed
+   (local relay, …) through turn:turn.cloudflare.com:…` or the same as a `Path:` line. If the line
+   says *relayed* without a server, WebRTC does not report the server on this path, and the
+   candidate's address has to be compared with Cloudflare's by hand.
+3. The first call after an app start rings without a visible extra wait, on Wi-Fi and on mobile
+   data. `adb logcat -s IceServerProvider` stays silent.
+4. Answer an incoming call from the notification with the app not running. It connects, and it
+   connects through the relay when the phone is on mobile data.
+5. Before the deploy: a call still rings within three seconds, `IceServerProvider` logs one
+   warning, and a call between two phones on one Wi-Fi connects directly.
+6. Read the function's log in the Firebase console after a few calls. It shows no token, no
+   username and no credential.
+7. Cloudflare's answer lists several STUN and TURN URLs. Check that the time from the answer to
+   *connected* stays under about two seconds on Wi-Fi.
+8. Answer a call in the last three seconds of its ring, on a slow connection. The side that
+   answers waits up to three seconds for the relay's servers before it writes the answer, and the
+   caller's ring timeout keeps running meanwhile. If the caller gives up while the other side
+   says *Connecting*, the wait on the answering side needs a shorter bound.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two
@@ -840,6 +870,16 @@ rewrite a call document could therefore put themselves between the two phones. `
 lets only the caller and the callee update a call, so today that is Firebase itself or a stolen
 account. Closing it means signing the offer and the answer with the Signal identity keys, or
 showing a short code both sides compare. Not planned (`docs/plans/video-calls.md`, risk 7).
+
+### The relay hands a login to every signed-in user
+
+`getTurnCredentials` checks only that the caller is signed in. Any account can ask for a relay
+login as often as it likes, each good for a day, and use it for traffic that has nothing to do
+with a call. Cloudflare bills relayed traffic beyond its free allowance to the owner. The app has
+no App Check, so a script with a valid account can call the function too. Options, cheapest
+first: a per-user limit in the function (one login per hour, counted in Firestore), a shorter
+lifetime with a fetch per call, App Check on the callable, or a login only for someone who is
+caller or callee of a ringing call document. Not planned. Watch the Cloudflare usage page.
 
 ### Group voice/video calls (4.3)
 - SFU (Selective Forwarding Unit) server for multi-party calls
