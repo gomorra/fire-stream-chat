@@ -68,12 +68,30 @@ sealed interface CallState {
     ) : CallState
 }
 
+/**
+ * The call can leave its stage and dock over its chat: it is running, and it is not a ring that
+ * came in. The stage offers to minimise exactly these calls, and the chat draws exactly these.
+ */
+val CallState.dockable: Boolean
+    get() = this is CallState.Live && this !is CallState.IncomingRinging
+
 enum class EndReason {
     HANGUP,
     REMOTE_HANGUP,
     DECLINED,
     TIMEOUT,
     ERROR
+}
+
+/**
+ * A place that can draw the running call. The camera runs only while one of them is on screen.
+ */
+enum class CallSurface {
+    /** The full-screen stage, its picture-in-picture window included. */
+    STAGE,
+
+    /** The card or the strip over the call's chat. */
+    DOCK
 }
 
 /**

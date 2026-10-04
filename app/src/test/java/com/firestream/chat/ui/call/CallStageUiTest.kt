@@ -13,6 +13,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
+import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
@@ -192,6 +196,61 @@ class CallStageUiTest {
 
         composeTestRule.onNodeWithTag(CallStageTags.DOCK).assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription("Minimise").assertIsDisplayed()
+    }
+
+    // ── The swipe up docks the call ─────────────────────────────────────────
+
+    @Test
+    fun `a swipe up on the stage minimises the call`() {
+        var minimised = 0
+        show(connectedStage(), CallScreenCallbacks(onMinimise = { minimised++ }))
+
+        composeTestRule.onNodeWithTag(CallStageTags.STAGE).performTouchInput {
+            swipeUp(startY = height * 0.6f, endY = height * 0.1f)
+        }
+
+        assertEquals(1, minimised)
+    }
+
+    @Test
+    fun `a short swipe, a swipe down and a tap do not minimise`() {
+        var minimised = 0
+        show(connectedStage(), CallScreenCallbacks(onMinimise = { minimised++ }))
+        val stage = composeTestRule.onNodeWithTag(CallStageTags.STAGE)
+
+        stage.performTouchInput { swipeUp(startY = height * 0.6f, endY = height * 0.6f - 30.dp.toPx()) }
+        stage.performTouchInput { swipeDown(startY = height * 0.2f, endY = height * 0.7f) }
+        stage.performClick()
+
+        assertEquals(0, minimised)
+    }
+
+    @Test
+    fun `a drag that starts on the self view moves the self view and does not minimise`() {
+        var minimised = 0
+        show(connectedStage(CallUiControls(cameraOn = true)), CallScreenCallbacks(onMinimise = { minimised++ }))
+
+        composeTestRule.onNodeWithTag(CallStageTags.SELF_TILE).performTouchInput {
+            swipeUp(startY = centerY, endY = centerY - 300.dp.toPx())
+        }
+
+        assertEquals(0, minimised)
+    }
+
+    @Test
+    fun `a swipe that starts on the dock does not minimise`() {
+        var minimised = 0
+        // Without a video line the camera button is disabled and takes no touch itself.
+        show(
+            connectedStage(CallUiControls(videoAvailable = false)),
+            CallScreenCallbacks(onMinimise = { minimised++ })
+        )
+
+        composeTestRule.onNodeWithContentDescription("Turn camera on").performTouchInput {
+            swipeUp(startY = centerY, endY = centerY - 300.dp.toPx())
+        }
+
+        assertEquals(0, minimised)
     }
 
     // ── The incoming ring ───────────────────────────────────────────────────

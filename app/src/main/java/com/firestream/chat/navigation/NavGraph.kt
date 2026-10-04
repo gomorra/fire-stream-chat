@@ -113,10 +113,45 @@ data class DeepLinkRequest(
     val chatId: String,
     val senderId: String,
     val messageId: String?,
+    // The user is going back to a chat they may still have open: a call that
+    // docks over its chat. See [warmDeepLinkAction].
+    val keepPlace: Boolean = false,
     // Monotonic within a process; makes every request instance distinct so the
     // re-drive effect re-runs even when chatId/senderId/messageId repeat.
     val token: Long = System.nanoTime(),
 )
+
+/** What a deep link does when it arrives while the graph is already showing something. */
+internal enum class WarmDeepLinkAction {
+    /** The chat is on screen. Nothing moves, and the thread keeps its place. */
+    STAY,
+
+    /** The chat is further down the back stack. Whatever covers it is closed. */
+    POP_TO_CHAT,
+
+    /** The chat is on screen and is re-entered with the link's arguments, which jumps to its target. */
+    REENTER,
+
+    /** The chat is opened on top of the stack. */
+    OPEN
+}
+
+/**
+ * A notification re-enters a chat that is already on screen, so the chat jumps to the message it
+ * names, and opens any other chat on top. A link that keeps its place ([DeepLinkRequest.keepPlace])
+ * goes back to the chat where it is instead: it must not scroll a thread the user is reading, and
+ * it must not stack the chat a second time over a screen that was opened from it.
+ *
+ * @param onTop the chat is the current destination.
+ * @param nearestChatInStack the nearest chat destination in the back stack is this chat.
+ */
+internal fun warmDeepLinkAction(keepPlace: Boolean, onTop: Boolean, nearestChatInStack: Boolean): WarmDeepLinkAction =
+    when {
+        keepPlace && onTop -> WarmDeepLinkAction.STAY
+        keepPlace && nearestChatInStack -> WarmDeepLinkAction.POP_TO_CHAT
+        onTop -> WarmDeepLinkAction.REENTER
+        else -> WarmDeepLinkAction.OPEN
+    }
 
 object Routes {
     const val LOGIN = "login"
@@ -265,6 +300,18 @@ fun FireStreamNavGraph(
         val current = navController.currentBackStackEntry
         val alreadyInThisChat = current?.destination?.route == Routes.CHAT &&
             current.arguments?.getString("chatId") == req.chatId
+        // Throws when no chat is in the back stack.
+        val nearestChat = runCatching { navController.getBackStackEntry(Routes.CHAT) }.getOrNull()
+        val action = warmDeepLinkAction(
+            keepPlace = req.keepPlace,
+            onTop = alreadyInThisChat,
+            nearestChatInStack = nearestChat?.arguments?.getString("chatId") == req.chatId,
+        )
+        if (action == WarmDeepLinkAction.STAY) return@LaunchedEffect
+        if (action == WarmDeepLinkAction.POP_TO_CHAT) {
+            navController.popBackStack(Routes.CHAT, inclusive = false)
+            return@LaunchedEffect
+        }
         navController.navigate(
             Routes.chat(
                 req.chatId,

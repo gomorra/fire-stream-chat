@@ -9,6 +9,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -80,7 +82,11 @@ internal fun StageDock(
         Surface(
             shape = RoundedCornerShape(36.dp),
             color = StageColors.Dock,
-            modifier = Modifier.testTag(CallStageTags.DOCK),
+            modifier = Modifier
+                .testTag(CallStageTags.DOCK)
+                // The dock takes every touch on it, a disabled button's too. The stage below
+                // then neither toggles its controls nor reads a swipe from here.
+                .pointerInput(Unit) { detectTapGestures { } },
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) {
                 if (!hangUpOnly) DockSwitches(controls, callbacks, onTouch)

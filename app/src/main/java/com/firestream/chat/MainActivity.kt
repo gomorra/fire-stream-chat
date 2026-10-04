@@ -35,6 +35,13 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_CHAT_ID: String = "chatId"
         const val EXTRA_SENDER_ID: String = "senderId"
         const val EXTRA_MESSAGE_ID: String = "messageId"
+
+        /**
+         * With a chat deep link: go back to the chat where it is. A chat that is open keeps its
+         * place in the thread, and one further down the back stack comes back up. Set by a call
+         * that docks over its chat.
+         */
+        const val EXTRA_KEEP_PLACE: String = "keepPlace"
         private const val SPLASH_SETTLE_TIMEOUT_MS = 1500L
     }
 
@@ -134,7 +141,12 @@ class MainActivity : ComponentActivity() {
         val chatId = intent?.getStringExtra(EXTRA_CHAT_ID) ?: return null
         val senderId = intent.getStringExtra(EXTRA_SENDER_ID) ?: return null
         val messageId = intent.getStringExtra(EXTRA_MESSAGE_ID)
-        return DeepLinkRequest(chatId = chatId, senderId = senderId, messageId = messageId)
+        return DeepLinkRequest(
+            chatId = chatId,
+            senderId = senderId,
+            messageId = messageId,
+            keepPlace = intent.getBooleanExtra(EXTRA_KEEP_PLACE, false),
+        )
     }
 
     private fun requestNotificationPermissionIfNeeded() {

@@ -187,8 +187,8 @@ internal fun StageIdentity(
 
 /** The one line under a name. It reads [text] itself, so a running timer recomposes only this. */
 @Composable
-internal fun StageStatus(text: () -> String, style: TextStyle) {
-    Text(text = text(), style = style, color = StageColors.DimText)
+internal fun StageStatus(text: () -> String, style: TextStyle, color: Color = StageColors.DimText) {
+    Text(text = text(), style = style, color = color, maxLines = 1)
 }
 
 @Composable

@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.call
 
 import android.Manifest
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.PictureInPictureParams
 import android.content.Context
@@ -22,10 +23,13 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
-import androidx.lifecycle.repeatOnLifecycle
+import com.firestream.chat.MainActivity
+import com.firestream.chat.R
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.CallSurface
+import com.firestream.chat.domain.model.dockable
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.combine
@@ -35,8 +39,9 @@ import javax.inject.Inject
 
 /**
  * The stage of a call, full screen. It owns what needs a permission or the window: the microphone
- * and camera requests, the lock state, picture-in-picture, and telling the service whether the
- * call is on screen. The service never asks for a permission.
+ * and camera requests, the lock state, picture-in-picture, and handing the call over to its chat,
+ * where the main activity draws it as a docked card. While it is started it reports itself as
+ * [CallSurface.STAGE]. The service never asks for a permission.
  */
 @AndroidEntryPoint
 class CallActivity : ComponentActivity() {
@@ -55,7 +60,10 @@ class CallActivity : ComponentActivity() {
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
 
-        private const val STATE_PREPARED_CALL = "prepared_call"
+        /** The intent that brings the stage of the running call to the front. */
+        fun stageIntent(context: Context): Intent = Intent(context, CallActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
 
         /**
          * The intent that places a call to [calleeId].
@@ -83,11 +91,11 @@ class CallActivity : ComponentActivity() {
     private var locked by mutableStateOf(false)
     private var inPictureInPicture by mutableStateOf(false)
 
-    /** Any video is on screen. Leaving the stage then goes into picture-in-picture. */
+    /** Any video is on screen. Leaving the app from the stage then goes into picture-in-picture. */
     private var videoShowing = false
 
-    /** The call this activity has already reported to and started the preview for. */
-    private var preparedCallId: String? = null
+    /** The stage is handing the call over to its chat. A docked call has no picture-in-picture. */
+    private var docking = false
 
     private var cameraRefusalExplained = false
 
@@ -108,7 +116,6 @@ class CallActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
-        preparedCallId = savedInstanceState?.getString(STATE_PREPARED_CALL)
         inPictureInPicture = isInPictureInPictureMode
 
         if (savedInstanceState == null) {
@@ -116,8 +123,16 @@ class CallActivity : ComponentActivity() {
         }
 
         lifecycleScope.launch {
-            repeatOnLifecycle(Lifecycle.State.STARTED) {
-                callStateHolder.callState.collect(::prepareCall)
+            // A call that ends while it is docked, or otherwise off the stage, closes the stage
+            // where it is. Only an end this activity watched: the state of the call before stays
+            // `Ended` until the next one starts. On the stage, CallScreen says so first and closes.
+            var watched = false
+            callStateHolder.callState.collect { state ->
+                if (state is CallState.Live) {
+                    watched = true
+                } else if (state is CallState.Ended && watched && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                    finish()
+                }
             }
         }
         lifecycleScope.launch {
@@ -129,7 +144,7 @@ class CallActivity : ComponentActivity() {
                 call is CallState.Live && showsVideo(controls, participants)
             }.distinctUntilChanged().collect { showing ->
                 videoShowing = showing
-                if (supportsPictureInPicture()) setPictureInPictureParams(pictureInPictureParams())
+                applyPictureInPictureParams()
             }
         }
 
@@ -153,21 +168,20 @@ class CallActivity : ComponentActivity() {
         handleIntent()
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        outState.putString(STATE_PREPARED_CALL, preparedCallId)
-    }
-
     override fun onStart() {
         super.onStart()
-        locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
-        reportVisible(true)
+        locked = keyguard().isKeyguardLocked
+        if (docking) {
+            docking = false
+            applyPictureInPictureParams()
+        }
+        callStateHolder.setSurfaceShowing(CallSurface.STAGE, true)
     }
 
     // The small window counts as on screen: it stops the activity only when it is closed.
     override fun onStop() {
         super.onStop()
-        reportVisible(false)
+        callStateHolder.setSurfaceShowing(CallSurface.STAGE, false)
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -197,7 +211,7 @@ class CallActivity : ComponentActivity() {
             chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return finishIfNoCall(),
             video = intent.getBooleanExtra(EXTRA_VIDEO, false)
         )
-        // The camera comes on in prepareCall, once the call exists.
+        // The service starts the preview of a video call once the call exists and the stage shows it.
         withCallPermissions(video = request.video) { callPlacer.place(request) }
     }
 
@@ -230,33 +244,58 @@ class CallActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * A call this activity has not seen yet: tell it that it is on screen, and start the preview
-     * of a call that was started as video. The ring never asks for the camera, and a locked
-     * phone shows no preview.
-     */
-    private fun prepareCall(state: CallState) {
-        val call = state as? CallState.Live ?: return
-        if (call.callId == preparedCallId) return
-        preparedCallId = call.callId
-        CallService.sendScreenVisible(this, true)
-        val preview = call.video && hasCamera() && when (call) {
-            is CallState.OutgoingRinging -> true
-            is CallState.IncomingRinging -> !locked
-            else -> false
-        }
-        if (preview) CallService.sendSetCamera(this, true)
-    }
-
-    private fun reportVisible(visible: Boolean) {
-        // Without a call the service has nothing to tell, and would be started for nothing.
-        if (callStateHolder.callState.value is CallState.Live) CallService.sendScreenVisible(this, visible)
-    }
-
     // ── Leaving the stage ───────────────────────────────────────────────────
 
-    /** Leave the stage and keep the call: the small window while video shows, the background otherwise. */
+    /**
+     * Leave the stage and keep the call: it docks over its chat. The arrow, the back button and a
+     * swipe up all end here. A locked phone asks for the unlock first, and stays on the stage
+     * when that is refused.
+     */
     private fun minimise() {
+        if (dockTarget() == null) return leaveWithoutDock()
+        if (!keyguard().isKeyguardLocked) return dock()
+        keyguard().requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
+            override fun onDismissSucceeded() {
+                locked = false
+                dock()
+            }
+        })
+    }
+
+    /** The chat and the person the running call docks to. Null for a ring that came in, and while the chat is not known. */
+    private fun dockTarget(): Pair<String, String>? {
+        if (!callStateHolder.callState.value.dockable) return null
+        val chatId = callStateHolder.chatId.value ?: return null
+        val remoteId = callStateHolder.participants.value.firstOrNull()?.id ?: return null
+        return chatId to remoteId
+    }
+
+    /**
+     * Open the call's chat in the main activity, which draws the call as a card, and move the
+     * stage's own task to the back. The hand-over is a short slide and fade.
+     */
+    private fun dock() {
+        // Read again: the call may have ended while the phone was being unlocked.
+        val (chatId, remoteId) = dockTarget() ?: return
+        docking = true
+        applyPictureInPictureParams()
+        val openChat = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_CHAT_ID, chatId)
+            putExtra(MainActivity.EXTRA_SENDER_ID, remoteId)
+            // The chat is usually still open under the stage. It keeps its place in the thread.
+            putExtra(MainActivity.EXTRA_KEEP_PLACE, true)
+        }
+        // The stage gives the call up now, so the chat draws the card as it comes in and not
+        // only once this activity has stopped. The camera keeps running through the gap.
+        callStateHolder.setSurfaceShowing(CallSurface.STAGE, false)
+        val handOver = ActivityOptions.makeCustomAnimation(this, R.anim.call_dock_chat_in, R.anim.call_dock_stage_out)
+        startActivity(openChat, handOver.toBundle())
+        moveTaskToBack(true)
+    }
+
+    /** A call whose chat is not known cannot dock. It leaves into the small window while video shows, and into the background otherwise. */
+    private fun leaveWithoutDock() {
         if (videoShowing && supportsPictureInPicture()) {
             enterPictureInPictureMode(pictureInPictureParams())
         } else {
@@ -264,12 +303,19 @@ class CallActivity : ComponentActivity() {
         }
     }
 
+    private fun keyguard() = getSystemService(KeyguardManager::class.java)
+
     private fun supportsPictureInPicture() =
         packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
 
+    private fun applyPictureInPictureParams() {
+        if (supportsPictureInPicture()) setPictureInPictureParams(pictureInPictureParams())
+    }
+
+    /** The home gesture goes into the small window while video shows. Docking does not. */
     private fun pictureInPictureParams() = PictureInPictureParams.Builder()
         .setAspectRatio(Rational(9, 16))
-        .setAutoEnterEnabled(videoShowing)
+        .setAutoEnterEnabled(videoShowing && !docking)
         .build()
 
     private fun finishIfNoCall() {
@@ -305,7 +351,9 @@ class CallActivity : ComponentActivity() {
     private fun explainCameraRefusal() {
         if (cameraRefusalExplained) return
         cameraRefusalExplained = true
-        Toast.makeText(this, "Without the camera permission the call goes on with the camera off", Toast.LENGTH_LONG)
-            .show()
+        Toast.makeText(this, CAMERA_REFUSED_MESSAGE, Toast.LENGTH_LONG).show()
     }
 }
+
+/** What the stage and the docked card say, once each, when the camera permission is refused. */
+internal const val CAMERA_REFUSED_MESSAGE = "Without the camera permission the call goes on with the camera off"

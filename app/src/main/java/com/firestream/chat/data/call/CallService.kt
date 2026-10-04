@@ -1,6 +1,7 @@
 package com.firestream.chat.data.call
 
 import android.Manifest
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.Service
 import android.content.Context
@@ -24,6 +25,7 @@ import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.repository.CallRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +55,6 @@ class CallService : Service() {
         const val ACTION_SELECT_AUDIO_ROUTE = "com.firestream.chat.call.SELECT_AUDIO_ROUTE"
         const val ACTION_SET_CAMERA = "com.firestream.chat.call.SET_CAMERA"
         const val ACTION_FLIP_CAMERA = "com.firestream.chat.call.FLIP_CAMERA"
-        const val ACTION_SET_SCREEN_VISIBLE = "com.firestream.chat.call.SET_SCREEN_VISIBLE"
 
         const val EXTRA_CALL_ID = "call_id"
         const val EXTRA_CHAT_ID = "chat_id"
@@ -66,7 +67,6 @@ class CallService : Service() {
         /** Outgoing only: the callee's app takes a video line. Absent means it does not. */
         const val EXTRA_VIDEO_LINE = "video_line"
         const val EXTRA_CAMERA_ON = "camera_on"
-        const val EXTRA_SCREEN_VISIBLE = "screen_visible"
 
         private const val TAG = "CallService"
         private const val RING_TIMEOUT_MS = 30_000L
@@ -146,22 +146,10 @@ class CallService : Service() {
             }
             context.startService(intent)
         }
-
-        /**
-         * Tell the running call whether a screen is showing it. The camera runs only while one
-         * does. Every call starts as not shown, so a screen reports once the call exists and
-         * again whenever it starts or stops showing it. Dropped when no call is running.
-         */
-        fun sendScreenVisible(context: Context, visible: Boolean) {
-            val intent = Intent(context, CallService::class.java).apply {
-                action = ACTION_SET_SCREEN_VISIBLE
-                putExtra(EXTRA_SCREEN_VISIBLE, visible)
-            }
-            context.startService(intent)
-        }
     }
 
     @Inject lateinit var callRepository: CallRepository
+    @Inject lateinit var chatRepository: ChatRepository
     @Inject lateinit var callStateHolder: CallStateHolder
     @Inject lateinit var callVideoSinks: CallVideoSinks
     @Inject lateinit var profileImageManager: ProfileImageManager
@@ -223,11 +211,17 @@ class CallService : Service() {
 
     /**
      * What was asked of the camera: the user's switch, and whether a screen shows the call. Both
-     * are written on the main thread by the intents and read by [syncCamera]'s job. The camera
-     * runs while both are true.
+     * are written on the main thread and read by [syncCamera]'s job. The camera runs while both
+     * are true.
      */
     @Volatile private var cameraWanted = false
     @Volatile private var screenVisible = false
+
+    /**
+     * The camera of this call has been decided once: by the preview of a video ring, or by a
+     * screen that switched it. The preview is offered only before that. Main thread.
+     */
+    private var cameraDecided = false
 
     /** What this side says on the call document, and whether it may say anything there. */
     private val mediaPublisher by lazy { CallMediaPublisher(callRepository, serviceScope) }
@@ -235,6 +229,7 @@ class CallService : Service() {
     private var ringTimeoutJob: Job? = null
     private var signalingJob: Job? = null
     private var framesJob: Job? = null
+    private var screenJob: Job? = null
     private var routeJob: Job? = null
 
     private var audioManager: AudioManager? = null
@@ -292,19 +287,21 @@ class CallService : Service() {
             ACTION_HANGUP -> hangup()
             ACTION_TOGGLE_MUTE -> toggleMute()
             ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
-            // A screen can send these three just after the call ended. Without a call they must
+            // A screen can send these two just after the call ended. Without a call they must
             // not leave a started service behind.
-            ACTION_SET_CAMERA, ACTION_FLIP_CAMERA, ACTION_SET_SCREEN_VISIBLE -> {
+            ACTION_SET_CAMERA, ACTION_FLIP_CAMERA -> {
                 if (currentCallId == null) {
                     // By start id: the start of the next call may already be on its way, and a
                     // bare stopSelf() would take that one down with this one.
                     stopSelf(startId)
                     return START_NOT_STICKY
                 }
-                when (intent.action) {
-                    ACTION_SET_CAMERA -> setCamera(intent.getBooleanExtra(EXTRA_CAMERA_ON, false))
-                    ACTION_FLIP_CAMERA -> flipCamera()
-                    else -> setScreenVisible(intent.getBooleanExtra(EXTRA_SCREEN_VISIBLE, false))
+                if (intent.action == ACTION_SET_CAMERA) {
+                    // A screen has spoken. A preview that has not started yet must not undo it.
+                    cameraDecided = true
+                    setCamera(intent.getBooleanExtra(EXTRA_CAMERA_ON, false))
+                } else {
+                    flipCamera()
                 }
             }
         }
@@ -335,7 +332,7 @@ class CallService : Service() {
         callMessageWritten = false
 
         val localAvatar = localAvatarPathFor(userId)
-        beginCall(callId, CallParticipant(userId, name, avatar, localAvatar))
+        beginCall(callId, CallParticipant(userId, name, avatar, localAvatar), chatId)
         // Known from the start, so no preview runs for a call that cannot send it.
         if (!videoLine) callStateHolder.updateControls { it.copy(videoAvailable = false) }
         callStateHolder.updateState(
@@ -368,7 +365,8 @@ class CallService : Service() {
         calleeTakesVideoLine = false
 
         val localAvatar = localAvatarPathFor(userId)
-        beginCall(callId, CallParticipant(userId, name, avatar, localAvatar))
+        // The chat is looked up when the call is answered. A ring cannot be docked.
+        beginCall(callId, CallParticipant(userId, name, avatar, localAvatar), chatId = null)
         callStateHolder.updateState(
             CallState.IncomingRinging(callId, userId, name, avatar, localAvatar, video)
         )
@@ -390,12 +388,13 @@ class CallService : Service() {
 
     /**
      * Everything a call starts with, whichever side starts it: fresh controls, the other person,
-     * nothing asked of the camera, and its media open.
+     * the chat if it is known, nothing asked of the camera, and its media open.
      */
-    private fun beginCall(callId: String, remote: CallParticipant) {
-        callStateHolder.beginCall(listOf(remote))
+    private fun beginCall(callId: String, remote: CallParticipant, chatId: String?) {
+        callStateHolder.beginCall(callId, listOf(remote), chatId)
         cameraWanted = false
         screenVisible = false
+        cameraDecided = false
         mediaPublisher.begin(callId)
         synchronized(mediaLock) { mediaOpen = true }
 
@@ -403,6 +402,35 @@ class CallService : Service() {
         framesJob = serviceScope.launch {
             callVideoSinks.framed.collect { callStateHolder.setFramed(it) }
         }
+        screenJob?.cancel()
+        screenJob = serviceScope.launch {
+            // The stage and the docked card report themselves to the holder. On the main thread,
+            // where the camera is switched and where the next call would begin.
+            callStateHolder.onScreen.collect { showing ->
+                mainHandler.post { if (currentCallId == callId) onScreenShowing(showing) }
+            }
+        }
+    }
+
+    /** The call came on screen, or has been off every screen for a moment. Main thread. */
+    private fun onScreenShowing(showing: Boolean) {
+        screenVisible = showing
+        if (showing && !cameraDecided) {
+            cameraDecided = true
+            // setCamera checks the permission and the video line itself.
+            if (wantsPreview()) return setCamera(true)
+        }
+        syncCamera()
+    }
+
+    /**
+     * A call started as video shows the own camera while it rings. The ring never asks for the
+     * permission, and a locked phone shows no preview.
+     */
+    private fun wantsPreview(): Boolean = callVideo && when (callStateHolder.callState.value) {
+        is CallState.OutgoingRinging -> true
+        is CallState.IncomingRinging -> !getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        else -> false
     }
 
     private fun answerIncomingCall() {
@@ -437,6 +465,20 @@ class CallService : Service() {
 
         // The session fetches the offer, answers it, and writes the answer with status="answered".
         openSession(callId, remoteUserId ?: "")
+        remoteUserId?.let { resolveChat(callId, it) }
+    }
+
+    /**
+     * The side that answers learns the call's chat here, so the call can dock over it. Only the
+     * holder is told. [currentChatId] stays unset on this side: it is what makes the caller, and
+     * only the caller, write the `CALL` message.
+     */
+    private fun resolveChat(callId: String, remoteId: String) {
+        serviceScope.launch {
+            chatRepository.getOrCreateChat(remoteId)
+                .onSuccess { chat -> callStateHolder.setChatId(callId, chat.id) }
+                .onFailure { e -> Log.w(TAG, "The call's chat is not known, so it cannot dock", e) }
+        }
     }
 
     private fun declineIncomingCall() {
@@ -715,12 +757,6 @@ class CallService : Service() {
             Log.w(TAG, "The camera stays off: the system refused the camera foreground type")
             cameraWanted = false
         }
-        syncCamera()
-    }
-
-    /** A screen started or stopped showing the call. The camera pauses while none does. Main thread. */
-    private fun setScreenVisible(visible: Boolean) {
-        screenVisible = visible
         syncCamera()
     }
 
@@ -1068,6 +1104,7 @@ class CallService : Service() {
         ringTimeoutJob?.cancel()
         signalingJob?.cancel()
         framesJob?.cancel()
+        screenJob?.cancel()
         mediaPublisher.end()
 
         releaseMedia(detachMedia())

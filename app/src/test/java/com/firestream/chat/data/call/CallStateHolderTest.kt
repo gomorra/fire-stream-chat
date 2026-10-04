@@ -3,15 +3,24 @@ package com.firestream.chat.data.call
 import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.CallSurface
 import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class CallStateHolderTest {
 
     private lateinit var holder: CallStateHolder
@@ -130,7 +139,7 @@ class CallStateHolderTest {
         holder.updateControls { it.copy(cameraOn = true, frontCamera = false, videoAvailable = false) }
         holder.updateAudioRoutes(listOf(CallAudioRoute.SPEAKER), CallAudioRoute.SPEAKER)
 
-        holder.beginCall(listOf(alice))
+        holder.beginCall("call1", listOf(alice))
 
         assertEquals(CallUiControls(), holder.uiControls.value)
     }
@@ -141,8 +150,8 @@ class CallStateHolderTest {
     fun `beginCall sets the people of the call, replacing the ones before`() {
         assertTrue(holder.participants.value.isEmpty())
 
-        holder.beginCall(listOf(alice))
-        holder.beginCall(listOf(bob))
+        holder.beginCall("call1", listOf(alice))
+        holder.beginCall("call1", listOf(bob))
 
         assertEquals(listOf(bob), holder.participants.value)
     }
@@ -157,7 +166,7 @@ class CallStateHolderTest {
 
     @Test
     fun `updateParticipant changes that participant and nobody else`() {
-        holder.beginCall(listOf(alice, bob))
+        holder.beginCall("call1", listOf(alice, bob))
 
         holder.updateParticipant("user2") { it.copy(cameraOn = true, micOn = false, connected = true) }
 
@@ -169,7 +178,7 @@ class CallStateHolderTest {
 
     @Test
     fun `updateParticipant for someone who is not in the call does nothing`() {
-        holder.beginCall(listOf(alice))
+        holder.beginCall("call1", listOf(alice))
 
         holder.updateParticipant("stranger") { it.copy(cameraOn = true) }
 
@@ -178,7 +187,7 @@ class CallStateHolderTest {
 
     @Test
     fun `setFramed marks who has a frame and clears everyone else`() {
-        holder.beginCall(listOf(alice, bob))
+        holder.beginCall("call1", listOf(alice, bob))
 
         holder.setFramed(setOf("user2", CallVideoSinks.LOCAL))
         assertEquals(listOf(alice.copy(hasFrame = true), bob), holder.participants.value)
@@ -192,7 +201,7 @@ class CallStateHolderTest {
 
     @Test
     fun `reset clears the participants`() {
-        holder.beginCall(listOf(alice))
+        holder.beginCall("call1", listOf(alice))
 
         holder.reset()
 
@@ -261,6 +270,105 @@ class CallStateHolderTest {
         holder.updateControls(CallUiControls(isMuted = true, audioRoute = CallAudioRoute.SPEAKER))
         assertTrue(holder.uiControls.value.isMuted)
         assertEquals(CallAudioRoute.SPEAKER, holder.uiControls.value.audioRoute)
+    }
+
+    // ── The call's chat ─────────────────────────────────────────────────────
+
+    @Test
+    fun `the caller's call knows its chat from the start`() {
+        holder.beginCall("call1", listOf(alice), chatId = "chat1")
+
+        assertEquals("chat1", holder.chatId.value)
+    }
+
+    @Test
+    fun `the side that answers learns the chat later`() {
+        holder.beginCall("call1", listOf(alice))
+        assertNull(holder.chatId.value)
+
+        holder.setChatId("call1", "chat1")
+
+        assertEquals("chat1", holder.chatId.value)
+    }
+
+    @Test
+    fun `a chat that is found after the next call began does not reach that call`() {
+        holder.beginCall("call1", listOf(alice))
+        holder.beginCall("call2", listOf(bob), chatId = "chat2")
+
+        holder.setChatId("call1", "chat1")
+
+        assertEquals("chat2", holder.chatId.value)
+    }
+
+    @Test
+    fun `the next call does not inherit the chat of the call before`() {
+        holder.beginCall("call1", listOf(alice), chatId = "chat1")
+        holder.beginCall("call2", listOf(bob))
+
+        assertNull(holder.chatId.value)
+    }
+
+    // ── On screen ───────────────────────────────────────────────────────────
+
+    private fun TestScope.collectOnScreen(): List<Boolean> {
+        val seen = mutableListOf<Boolean>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { holder.onScreen.collect { seen += it } }
+        return seen
+    }
+
+    @Test
+    fun `the stage hands over to the docked card without the call leaving the screen`() = runTest {
+        holder.setSurfaceShowing(CallSurface.STAGE, true)
+        val seen = collectOnScreen()
+
+        // The stage stops, and the card shows a moment later.
+        holder.setSurfaceShowing(CallSurface.STAGE, false)
+        advanceTimeBy(CallStateHolder.OFF_SCREEN_GRACE_MILLIS - 1)
+        holder.setSurfaceShowing(CallSurface.DOCK, true)
+        advanceTimeBy(10 * CallStateHolder.OFF_SCREEN_GRACE_MILLIS)
+
+        assertEquals(listOf(true), seen)
+    }
+
+    @Test
+    fun `the call is off screen one second after the last surface left`() = runTest {
+        holder.setSurfaceShowing(CallSurface.DOCK, true)
+        val seen = collectOnScreen()
+
+        holder.setSurfaceShowing(CallSurface.DOCK, false)
+        advanceTimeBy(CallStateHolder.OFF_SCREEN_GRACE_MILLIS - 1)
+        assertEquals(listOf(true), seen)
+
+        advanceTimeBy(2)
+        assertEquals(listOf(true, false), seen)
+    }
+
+    @Test
+    fun `both surfaces at once count as on screen until the last one leaves`() = runTest {
+        holder.setSurfaceShowing(CallSurface.STAGE, true)
+        holder.setSurfaceShowing(CallSurface.DOCK, true)
+        val seen = collectOnScreen()
+
+        holder.setSurfaceShowing(CallSurface.DOCK, false)
+        advanceTimeBy(10 * CallStateHolder.OFF_SCREEN_GRACE_MILLIS)
+        assertEquals(listOf(true), seen)
+
+        holder.setSurfaceShowing(CallSurface.STAGE, false)
+        advanceTimeBy(CallStateHolder.OFF_SCREEN_GRACE_MILLIS + 1)
+        assertEquals(listOf(true, false), seen)
+    }
+
+    @Test
+    fun `a surface that comes back shows the call again at once`() = runTest {
+        val seen = collectOnScreen()
+        advanceTimeBy(CallStateHolder.OFF_SCREEN_GRACE_MILLIS + 1)
+        assertEquals(listOf(false), seen)
+
+        holder.setSurfaceShowing(CallSurface.STAGE, true)
+        runCurrent()
+
+        assertEquals(listOf(false, true), seen)
     }
 
     @Test

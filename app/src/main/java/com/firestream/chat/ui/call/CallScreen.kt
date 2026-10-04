@@ -9,10 +9,16 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.systemGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -40,6 +46,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -49,6 +57,7 @@ import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
+import com.firestream.chat.domain.model.dockable
 import kotlinx.coroutines.delay
 
 /** The id the `videoTile` slot is asked for when it should draw the own camera. */
@@ -151,8 +160,7 @@ internal fun CallScreen(
         }
     }
 
-    val minimisable = callState is CallState.Live && callState !is CallState.IncomingRinging
-    BackHandler(enabled = minimisable, onBack = onMinimise)
+    BackHandler(enabled = callState.dockable, onBack = onMinimise)
 
     val callbacks = remember(viewModel, onAnswer, onSetCamera, onMinimise, onFinish) {
         CallScreenCallbacks(
@@ -170,15 +178,19 @@ internal fun CallScreen(
     val state = remember(callState, uiControls, participants, placing, locked, inPictureInPicture) {
         CallStageState(callState, uiControls, participants, placing, locked, inPictureInPicture)
     }
-    CallStage(state, callbacks) { participantId ->
-        // A video view is single-use: a tile that comes back gets a new one.
-        key(participantId) {
-            AndroidView(
-                factory = { context -> viewModel.createVideoView(context, participantId) },
-                onRelease = viewModel::releaseVideoView,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+    CallStage(state, callbacks) { participantId -> CallVideoView(viewModel, participantId) }
+}
+
+/** The video of a participant, or of the own camera for [SELF_TILE_ID], as a view of this activity. */
+@Composable
+internal fun CallVideoView(viewModel: CallViewModel, participantId: String) {
+    // A video view is single-use: a tile that comes back gets a new one.
+    key(participantId) {
+        AndroidView(
+            factory = { context -> viewModel.createVideoView(context, participantId) },
+            onRelease = viewModel::releaseVideoView,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -246,7 +258,8 @@ private fun RingScene(
     videoTile: @Composable (String) -> Unit,
     bottom: @Composable () -> Unit,
 ) {
-    Box(Modifier.fillMaxSize()) {
+    // Whatever can be minimised can be docked. A ring that came in cannot.
+    Box(if (onMinimise != null) Modifier.fillMaxSize().swipeUpToDock(onMinimise) else Modifier.fillMaxSize()) {
         if (state.selfVideo) {
             videoTile(SELF_TILE_ID)
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.48f)))
@@ -333,7 +346,9 @@ private fun ConnectedScene(
                     if (currentCanHide) chromeShown = !chromeShown
                     touches++
                 }
-            },
+            }
+            // After the taps in the chain, so it sees a touch before they claim it.
+            .swipeUpToDock(callbacks.onMinimise),
     ) {
         if (selfOnStage) {
             videoTile(SELF_TILE_ID)
@@ -370,20 +385,21 @@ private fun ConnectedScene(
 }
 
 /**
- * The other person's video, with [cover] over a glow until their camera is on and its first
+ * The other person's video, with [cover] over [backdrop] until their camera is on and its first
  * frame has arrived. The view is there from the moment the camera is on, so the frame has
- * somewhere to land.
+ * somewhere to land. [backdrop] is opaque: it hides a view that has no frame yet.
  */
 @Composable
-private fun RemoteTile(
+internal fun RemoteTile(
     remote: CallParticipant?,
     videoTile: @Composable (String) -> Unit,
+    backdrop: @Composable () -> Unit = { StageGlow() },
     cover: @Composable BoxScope.() -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
         if (remote != null && remote.cameraOn) videoTile(remote.id)
         if (remote?.showsVideo != true) {
-            StageGlow()
+            backdrop()
             cover()
         }
     }
@@ -411,9 +427,39 @@ private fun BoxScope.StageScrims(shown: Boolean) {
     )
 }
 
+private val SwipeToDockDistance = 72.dp
+
+/**
+ * A swipe up docks the call. It starts only where no child took the touch, so the self tile, the
+ * dock and the arrow keep theirs. It does not start in the bottom gesture strip, where a swipe up
+ * is Android's home gesture. A tap passes through untouched.
+ */
+@Composable
+private fun Modifier.swipeUpToDock(onDock: () -> Unit): Modifier {
+    val currentOnDock by rememberUpdatedState(onDock)
+    val homeStrip by rememberUpdatedState(WindowInsets.systemGestures.getBottom(LocalDensity.current))
+    return pointerInput(Unit) {
+        val distance = SwipeToDockDistance.toPx()
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = true)
+            if (down.position.y > size.height - homeStrip) return@awaitEachGesture
+            var travelled = 0f
+            val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, overSlop ->
+                change.consume()
+                travelled = overSlop
+            } ?: return@awaitEachGesture
+            val lifted = verticalDrag(drag.id) { change ->
+                travelled += change.positionChange().y
+                change.consume()
+            }
+            if (lifted && travelled <= -distance) currentOnDock()
+        }
+    }
+}
+
 /** The call's running time as text. The returned function reads state, so only its caller follows the clock. */
 @Composable
-private fun rememberElapsedText(startTime: Long): () -> String {
+internal fun rememberElapsedText(startTime: Long): () -> String {
     val seconds = remember(startTime) { mutableLongStateOf(elapsedSeconds(startTime)) }
     LaunchedEffect(startTime) {
         while (true) {

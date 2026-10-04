@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import com.firestream.chat.ui.call.CallActivity
+import com.firestream.chat.ui.call.DockedCall
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -1119,6 +1120,9 @@ fun ChatScreen(
                 // (imeOrPanelHeight), so the emoji panel can share the
                 // keyboard's space for a same-height handoff.
         ) {
+            // A call of this chat that left its stage. The thread starts below it.
+            DockedCall(chatId = viewModel.chatId)
+
             // Pinned message banner
             if (uiState.messages.pinnedMessages.isNotEmpty()) {
                 val pinned = uiState.messages.pinnedMessages.last()

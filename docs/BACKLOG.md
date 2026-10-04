@@ -104,10 +104,9 @@ emulator, and items 3 to 9 of the list above are checked through this screen.
    flash in between.
 6. Start as voice, then switch the camera on: the permission is asked once. Refuse it: one toast,
    and the call goes on.
-7. The *minimise* arrow, the back button and the home gesture go into picture-in-picture while
-   video shows, and the small window draws only the other person. Closing the window pauses the
-   camera. Without video the arrow sends the call to the background and the notification leads
-   back.
+7. The home gesture goes into picture-in-picture while video shows, and the small window draws
+   only the other person. Closing the window pauses the camera. The *minimise* arrow and the back
+   button dock the call, see the next list.
 8. A video call to a locked phone offers only *Answer* and connects with the camera off. *Answer*
    in the notification does the same.
 9. A call to a phone with an older build: the camera button is disabled, the line under it names
@@ -123,6 +122,45 @@ emulator, and items 3 to 9 of the list above are checked through this screen.
 
 Owed on hardware, from the plan's verification list: two phones on mobile data, a Bluetooth
 headset connected during video, and a phone with an older app version as the partner.
+
+### The call docked over its chat (2026-10-04)
+
+`docs/plans/video-calls.md` step 4a. Robolectric tests draw the card and the strip from plain
+state, and a unit test covers the one-second visibility rule. Nothing here has run on a device or
+an emulator: not the hand-over between the two activities, not the swipe, not the card with a
+real video view.
+1. During a video call, swipe up on the stage. The chat opens with the call as a card under the
+   top bar, after a short slide and fade. Neither picture blinks or freezes, and the camera
+   indicator stays on throughout.
+2. The swipe does not start from the self tile, the dock or the arrow, and a tap on the stage
+   still shows and hides the controls. A swipe from the bottom edge goes home, into
+   picture-in-picture, and does not dock.
+3. The *minimise* arrow and the back button dock the same way. From an outgoing ring too. An
+   incoming ring has neither, and its swipe does nothing.
+4. Docking never opens the small picture-in-picture window, also on the second and third time.
+5. With the card showing, type and send a message with the keyboard open. The composer stays
+   above the keyboard and at least one bubble of the thread stays visible on a small phone.
+6. A docked voice call rests as the strip. Switch the camera on there: the permission is asked
+   once from the chat, and the strip grows into the card. Switch it off: back to the strip.
+7. Push the card up: the strip. Tap the strip: the card. Pull the card down, or tap *Full
+   screen*: the stage is back, without a blink.
+8. Dock a call on the side that answered. Its chat opens, and no second `CALL` bubble appears
+   when the call ends.
+9. Dock from a locked phone: the unlock is asked first. Cancel it: the stage stays.
+10. Hang up on the other phone while docked: the card says *Call ended* and goes, and no call
+    task is left in the recents list. Open the chat again later: no *Call ended*.
+11. With a docked video call, open another chat, then leave the app: the camera indicator goes
+    out after about a second each time, and the other side sees the avatar. The notification
+    leads back to the stage.
+12. Dock while another chat is open in the main activity, and while the app's main task was
+    closed: the call's chat opens in both cases, and back from it does not land on the stage.
+13. A debug build opens a chat without a `VerifyError`. `ChatScreen` hosts `DockedCall`; check its
+    register count, and `DockedCard`'s, with the `dexdump` recipe in `docs/GOTCHAS.md`.
+14. Scroll up in the chat, start a call from it, and dock: the thread is where it was left. Open
+    the other person's profile from the docked chat, go to the stage through the notification,
+    and dock again: the chat is back, and one press of back leaves it.
+15. Dock, leave the app, and let the other side hang up. On return the strip says *Call ended*
+    for a moment, however long ago the call ended. Decide whether that is wanted.
 
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
