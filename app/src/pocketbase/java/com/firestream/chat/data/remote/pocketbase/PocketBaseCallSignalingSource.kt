@@ -33,6 +33,9 @@ class PocketBaseCallSignalingSource @Inject constructor() : CallSignalingSource 
         candidate: IceCandidateData
     ): Unit = throw NotImplementedError("PB v0 stub")
 
+    override suspend fun setMedia(callId: String, uid: String, camera: Boolean, mic: Boolean): Unit =
+        throw NotImplementedError("PB v0 stub")
+
     override fun observeCallDocument(callId: String): Flow<CallSignalingData> = emptyFlow()
 
     override fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>> =

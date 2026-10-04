@@ -188,10 +188,17 @@ sequenceDiagram
 
 ### Call Architecture Details
 
-- **`CallService`** (foreground service): Owns the call as a whole. That is the intents, the notification, the ring timeout, the status of the call document, the local audio track, the audio session, and a map of `PeerSession`s keyed by remote user id. A 1:1 call has one session.
-- **`PeerSession`**: Owns one `PeerConnection` to one remote person. It negotiates the offer and answer, holds remote ICE candidates until the remote description is set, and drops duplicates. It reports connected, disconnected, failed and remote-track events through a channel, so `CallService` reacts on its own scope. `PeerConnection.close()` waits for the WebRTC signalling thread, so a session is never closed from inside one of its own callbacks. On connect it logs whether the path is direct or relayed (`IcePath`).
+- **`CallService`** (foreground service): Owns the call as a whole. That is the intents, the notification and the foreground type, the ring timeout, the status of the call document, the local media (the audio track and the camera), the audio session, and a map of `PeerSession`s keyed by remote user id. A 1:1 call has one session.
+- **`PeerSession`**: Owns one `PeerConnection` to one remote person. It negotiates the offer and answer, holds remote ICE candidates until the remote description is set, and drops duplicates. It reports connected, disconnected, failed, remote-track and video-line events through a channel, so `CallService` reacts on its own scope. `PeerConnection.close()` waits for the WebRTC signalling thread, so a session is never closed from inside one of its own callbacks. On connect it logs whether the path is direct or relayed (`IcePath`).
 - **`PeerSignaling`**: What a session needs for one pair: send and observe the offer, the answer and the candidates. `OneToOneSignaling` implements it over `CallRepository` and maps caller and callee to the two candidate subcollections.
-- **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
+- **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>`, `StateFlow<CallUiControls>` (the own side) and `StateFlow<List<CallParticipant>>` (the other people). Bridges `CallService` ↔ UI without binding to the service. `beginCall()` gives every call fresh controls.
+- **The video line**: A call between two apps with video negotiates one video line, in both directions, with the offer and the answer. The side that offers adds a `SEND_RECV` transceiver, and the side that answers sets the offered one to `SEND_RECV`. `PeerSession.setCamera(track)` puts the camera track on the line or takes it off, and no new offer is needed. `videoAvailable` is true when the negotiated direction is `SEND_RECV`.
+- **Who is offered the video line**: An app from before video calls crashes on an offer with a video line. An app with video therefore writes `callVideoLine: true` to its user document when it starts, when an existing user signs in, and when it creates a new user document. `CallRepository.createCall` reads the callee's field before it creates the call document and returns it as `OutgoingCall.videoLine`. A missing field, a failed read and a read that takes over three seconds all mean no video line. `CallService` passes the answer to `PeerSession(offerVideoLine)`. Without the line the call runs as a voice call and `CallUiControls.videoAvailable` is false. An app from before video calls that places a call offers no line, so the side that answers needs no check.
+- **`LocalCamera`**: The call's own camera, front first, 1280×720 at 30 fps. It needs only the factory, so it can run as a preview while the call rings. `stop()` closes the camera device. It is never called on the main thread.
+- **The camera follows the screen**: The camera runs while the user switched it on (`ACTION_SET_CAMERA`) and a screen shows the call (`ACTION_SET_SCREEN_VISIBLE`). The service never asks for the `CAMERA` permission. While the camera is switched on, the foreground type is `microphone|camera`. A type the system refuses leaves the camera off and the call running.
+- **Live state** (`CallMediaPublisher`): Each side writes `media.<uid>` (`camera`, `mic`) on the call document, on connect and on every change, through one collector. It writes only in a call whose video line both sides agreed on. An app from before video calls that placed the call applies the answer again on every change of an answered call document, and ends the call when that fails. The other side's entry and the first frame of their video fill `CallParticipant` (`cameraOn`, `micOn`, `hasFrame`). The status of the document is acted on once per change, because these writes make an answered call emit many snapshots.
+- **`CallVideoSinks`** (@Singleton): The only place where a video track meets a `View`. `createView(context, participantId)` returns a view that follows that participant's track, and `LOCAL` is the own camera, mirrored for the front camera. A participant can have several views. The service closes it before a track or a connection is disposed.
+- **Release order**: `CallService.cleanup()` takes the call's media out of the service as one step and releases it on a thread of its own: capturer, texture helper, video source, tracks, connections, factory, EGL context.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
 - **`CallState`** (sealed interface): `Idle | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`.
 - **Audio session** (`startAudioSession()` / `stopAudioSession()` in `CallService`, idempotent and
@@ -200,6 +207,9 @@ sequenceDiagram
   appearing mid-call wins; a disconnect falls back to the earpiece, never the speaker); the router
   publishes what the OS *actually* reports, so the UI never shows Bluetooth before SCO is up.
   `ProximityLock` follows that reported route — the screen blanks only while the earpiece is playing.
+  Audio follows video: a call started as video, or one where video shows on either side, plays on
+  the speaker unless a headset is connected or the user picked a route, and takes no proximity lock
+  while video shows.
 
 ---
 
@@ -388,12 +398,15 @@ com.firestream.chat/
 │   │   ├── PeerSession.kt       # One PeerConnection to one remote person
 │   │   ├── PeerSignaling.kt     # Offer/answer/candidates for one pair + OneToOneSignaling
 │   │   ├── IcePath.kt           # Pure — direct or relayed, from the selected candidate pair
+│   │   ├── LocalCamera.kt       # The call's own camera — start, stop, flip, release order
+│   │   ├── CallVideoSinks.kt    # @Singleton — one video View per participant, first frames
+│   │   ├── CallMediaPublisher.kt  # Own camera/mic state on the call document, only with an agreed video line
 │   │   ├── CallStateHolder.kt   # @Singleton state bridge (service ↔ UI)
 │   │   ├── CallNotificationManager.kt
 │   │   ├── CallAudioRoutePolicy.kt  # Pure — which route wins, TYPE_* → CallAudioRoute
 │   │   ├── CallAudioRouter.kt   # setCommunicationDevice() wrapper + live RouteState
-│   │   ├── ProximityLock.kt     # Wake lock held only while the earpiece is playing
-│   │   └── WebRtcPeerConnectionFactory.kt
+│   │   ├── ProximityLock.kt     # Wake lock held only while the earpiece is playing and no video shows
+│   │   └── WebRtcPeerConnectionFactory.kt  # Factory, video codecs and the call's EGL context
 │   ├── crypto/
 │   │   ├── SignalManager.kt
 │   │   └── SignalProtocolStoreImpl.kt

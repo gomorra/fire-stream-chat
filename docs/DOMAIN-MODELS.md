@@ -186,14 +186,33 @@ enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
 // Where call audio plays. The router (data/call/CallAudioRouter) publishes what the OS reports.
 enum class CallAudioRoute { EARPIECE, SPEAKER, BLUETOOTH, WIRED_HEADSET }
 
+// The own side of the running call. A new call starts with the defaults.
 data class CallUiControls(
     val isMuted: Boolean,
     val audioRoute: CallAudioRoute,            // the route the OS reports, not the last tap
-    val availableRoutes: List<CallAudioRoute>  // display order; two or fewer → the button toggles
+    val availableRoutes: List<CallAudioRoute>, // display order; two or fewer → the button toggles
+    val cameraOn: Boolean,                     // the user switched the camera on; stays true while paused
+    val frontCamera: Boolean,                  // the camera in use is the front one
+    val videoAvailable: Boolean,               // false when the call has no agreed video line: the other app takes none
+    val cameraPaused: Boolean                  // switched on but not running: no screen shows the call
+)
+
+// One of the other people in the running call (exposed by CallStateHolder.participants)
+data class CallParticipant(
+    val id: String,
+    val name: String,
+    val avatarUrl: String?,
+    val localAvatarPath: String?,
+    val cameraOn: Boolean,                     // they say their camera is sending (call document)
+    val micOn: Boolean,                        // they say their microphone is open (call document)
+    val connected: Boolean,                    // the connection to them is up
+    val hasFrame: Boolean                      // a frame of their video arrived since their camera came on
 )
 ```
 
 The four states between `Idle` and `Ended` implement `CallState.Live` (`callId`, `video`, `withVideo()`). `video` says how the call was started. It sets the ring text and the call log entry. It is not the live camera state.
+
+A screen shows a participant's video only while `cameraOn` and `hasFrame` are both true, and the avatar otherwise.
 
 ### SdpData / IceCandidateData / CallSignalingData
 
@@ -202,11 +221,14 @@ Defined in `domain/model/CallSignalingData.kt`:
 ```kotlin
 data class SdpData(val sdp: String, val type: String)
 data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp: String)
+data class CallMedia(val camera: Boolean = false, val mic: Boolean = true)  // what one person says about their own side
+data class OutgoingCall(val callId: String, val videoLine: Boolean)        // CallRepository.createCall; videoLine = the callee's app takes a video line
 data class CallSignalingData(
     val callId: String, val callerId: String, val calleeId: String, val status: String,
     val offer: SdpData?, val answer: SdpData?,
     val createdAt: Long, val endedAt: Long?, val endReason: String?,
-    val video: Boolean                    // how the call was started; false when the document has no such field
+    val video: Boolean,                   // how the call was started; false when the document has no such field
+    val media: Map<String, CallMedia>     // live state per user id; no entry for someone who has written nothing
 )
 ```
 

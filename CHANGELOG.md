@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.39.0] — 2026-10-04
+
+### Fixed
+
+- **The mute button starts every call unmuted.** After a call that ended muted, the next call showed the microphone as muted while it was live. The call's controls now start fresh with every call.
+
 ## [1.37.0] — 2026-10-03
 
 ### Added

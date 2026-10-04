@@ -17,6 +17,9 @@ interface CallSignalingSource {
     suspend fun setAnswerAndAccept(callId: String, sdp: SdpData)
     suspend fun addIceCandidate(callId: String, subcollection: String, candidate: IceCandidateData)
 
+    /** Publish what [uid] says about their own camera and microphone. Only [uid]'s entry changes. */
+    suspend fun setMedia(callId: String, uid: String, camera: Boolean, mic: Boolean)
+
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>
 

@@ -2,11 +2,17 @@ package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
+import com.firestream.chat.domain.model.OutgoingCall
 import com.firestream.chat.domain.model.SdpData
 import kotlinx.coroutines.flow.Flow
 
 interface CallRepository {
-    suspend fun createCall(calleeId: String, video: Boolean): Result<String>
+    /**
+     * Ring [calleeId]. Before the call document exists it asks whether the callee's app takes a
+     * video line, and waits a bounded time for the answer. The caller builds its offer from
+     * [OutgoingCall.videoLine].
+     */
+    suspend fun createCall(calleeId: String, video: Boolean): Result<OutgoingCall>
     suspend fun answerCall(callId: String): Result<Unit>
     suspend fun declineCall(callId: String): Result<Unit>
     suspend fun endCall(callId: String, reason: String): Result<Unit>
@@ -14,6 +20,9 @@ interface CallRepository {
     suspend fun sendAnswer(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendAnswerAndAccept(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendIceCandidate(callId: String, isCaller: Boolean, candidate: IceCandidateData): Result<Unit>
+
+    /** Publish the signed-in user's own live state: whether the camera sends and the microphone is open. */
+    suspend fun setMedia(callId: String, camera: Boolean, mic: Boolean): Result<Unit>
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>
     suspend fun getCallById(callId: String): Result<CallSignalingData>

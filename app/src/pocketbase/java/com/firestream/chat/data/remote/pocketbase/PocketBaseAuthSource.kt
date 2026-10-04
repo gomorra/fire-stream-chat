@@ -105,6 +105,11 @@ class PocketBaseAuthSource @Inject constructor(
         runCatching { client.patch("/api/collections/users/records/$uid", body) }
     }
 
+    // Calls are a stub on this backend, so no app here takes a video line.
+    override suspend fun announceCallVideoLine(uid: String) = Unit
+
+    override suspend fun takesCallVideoLine(uid: String): Boolean = false
+
     override fun signOut() {
         client.clearSession()
         firebaseAuth.signOut()

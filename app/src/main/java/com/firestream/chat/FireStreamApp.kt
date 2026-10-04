@@ -23,6 +23,7 @@ import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.di.FlavorBootstrap
+import com.firestream.chat.domain.repository.AuthRepository
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -55,6 +56,10 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
 
     @Inject
     lateinit var imageEditRasterizer: ImageEditRasterizer
+
+    // Lazy: only the launched announcement needs it, so nothing is built on the main thread.
+    @Inject
+    lateinit var authRepository: dagger.Lazy<AuthRepository>
 
     @Inject
     @ApplicationScope
@@ -112,8 +117,17 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             imageEditRasterizer.sweepStale()
         }
         requeueQueuedSends()
+        announceCallVideoLine()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
+    }
+
+    // A caller offers a video line only to a user whose document says their app takes one. An
+    // app without video crashes on such an offer. Every process start says it again, so an
+    // updated app is offered video from its first start on, a start by a push included. The
+    // repository logs a failure; the next start is the retry.
+    private fun announceCallVideoLine() {
+        appScope.launch { authRepository.get().announceCallVideoLine() }
     }
 
     // An own row still SENDING belongs to the outbox: WorkManager already holds

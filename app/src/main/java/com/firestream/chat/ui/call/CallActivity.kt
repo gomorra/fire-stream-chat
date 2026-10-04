@@ -118,9 +118,10 @@ class CallActivity : ComponentActivity() {
         val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
 
         activityScope.launch {
-            callRepository.createCall(calleeId, video).onSuccess { callId ->
+            callRepository.createCall(calleeId, video).onSuccess { call ->
                 CallService.startOutgoing(
-                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl, video
+                    this@CallActivity, call.callId, chatId, calleeId, calleeName, calleeAvatarUrl, video,
+                    videoLine = call.videoLine
                 )
             }
         }

@@ -89,8 +89,43 @@ enum class CallAudioRoute {
     WIRED_HEADSET
 }
 
+/**
+ * The own side of the running call: what the user switched, and what the call allows.
+ *
+ * @param cameraOn the user switched the camera on. It stays true while the camera is paused.
+ * @param frontCamera the camera in use is the front one.
+ * @param videoAvailable false when the call has no video line both sides agreed on: the other
+ *   side's app takes none. The side that places the call knows from the start. The side that
+ *   answers knows once the offer is applied, and until then it is true, so the camera can be
+ *   switched on while the call rings.
+ * @param cameraPaused the camera is switched on but not running, because no screen shows the call.
+ */
 data class CallUiControls(
     val isMuted: Boolean = false,
     val audioRoute: CallAudioRoute = CallAudioRoute.EARPIECE,
-    val availableRoutes: List<CallAudioRoute> = listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER)
+    val availableRoutes: List<CallAudioRoute> = listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER),
+    val cameraOn: Boolean = false,
+    val frontCamera: Boolean = true,
+    val videoAvailable: Boolean = true,
+    val cameraPaused: Boolean = false
+)
+
+/**
+ * One of the other people in the running call, and what is known of them right now.
+ *
+ * @param cameraOn they say their camera is sending. From the call document.
+ * @param micOn they say their microphone is open. From the call document.
+ * @param connected the connection to them is up.
+ * @param hasFrame a frame of their video has arrived since their camera came on. A screen shows
+ *   their video only when this and [cameraOn] are true, and their avatar otherwise.
+ */
+data class CallParticipant(
+    val id: String,
+    val name: String,
+    val avatarUrl: String?,
+    val localAvatarPath: String? = null,
+    val cameraOn: Boolean = false,
+    val micOn: Boolean = true,
+    val connected: Boolean = false,
+    val hasFrame: Boolean = false
 )

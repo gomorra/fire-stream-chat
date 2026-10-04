@@ -46,6 +46,45 @@ back from Firestore.
 4. With step 4, before the functions are deployed: the ring starts as *Incoming Voice Call* and
    changes to *Incoming Video Call* without a second vibration or a second full-screen launch.
 
+### The camera and the video line of a call (2026-10-04)
+
+`docs/plans/video-calls.md` step 3. A call between two phones with this build negotiates a video
+line, and `CallService` can run the camera. No screen switches the camera on until step 4, so
+items 3 to 9 wait for it. JVM tests cover the session, the camera lifecycle and the views against
+mocks. Offer and answer between this build and a released one ran on the emulator with a probe
+app, without media. Nothing else here has run on a device, and the plan's two emulator checks were
+not made.
+1. A voice call in each direction still connects with audio both ways, between two phones with
+   this build. `adb logcat -s CallService` shows no `Session failed` line. Both user documents
+   carry `callVideoLine: true` after the apps started once.
+2. **An older build as the partner.** A voice call between this build and a build from before
+   video calls connects in each direction, with audio both ways, and stays up for a minute. The
+   older phone's user document has no `callVideoLine`. Mute on this build during the call: the
+   older build does not hang up. An older build crashes on an offer with a video line, so this is
+   the check that it is offered none and that its call document is left alone after the answer.
+3. **Renderer (plan risk 1).** Two video tiles that overlap, with rounded corners, draw correctly
+   on the emulator and on a phone. If `VideoTextureViewRenderer` does not, only
+   `CallVideoSinks.createView` changes: it returns a plain `View`.
+4. **The emulator's camera (plan risk 3).** `LocalCamera` opens the emulator's camera and the other
+   phone shows its picture. If it does not, the emulator joins with its camera off.
+5. Camera on mid-call from each side: the other side shows the picture, and the system's camera
+   indicator is on. Camera off: the avatar comes back and the indicator goes out.
+6. Flip: the back camera shows, and the self view is no longer mirrored.
+7. Leave the call screen with the camera on: the indicator goes out, and the other side shows the
+   avatar. Come back: the picture returns without a tap.
+8. Refuse the `CAMERA` permission, then switch the camera on: the call goes on with sound.
+9. While video shows on either side, the audio is on the speaker and a hand over the proximity
+   sensor does not blank the screen. With a headset connected the audio stays on the headset.
+10. Hang up with the camera on, a few times, and start the next call at once. The indicator goes
+    out, nothing crashes, and the next call's camera opens.
+11. Mute in one call and hang up. The next call starts with the microphone button not muted.
+12. A call placed with the network switched to a slow one still rings within a few seconds. The
+    ring waits at most three seconds for the callee's `callVideoLine`, and the call then runs
+    without video.
+
+Known limit, not a check: a phone that goes back to a build from before video calls keeps
+`callVideoLine: true` on its user document. A call to it crashes it until it updates again.
+
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
 `docs/plans/file-handling.md` steps 1–7. JVM/Robolectric tests cover the logic; these need two

@@ -69,6 +69,9 @@ class CallAudioRouter(
     /** Guarded by [lock]. What the OS says is playing; null until it first tells us. */
     private var currentRoute: CallAudioRoute? = null
 
+    /** Guarded by [lock]. The policy's `preferSpeaker`: a video call, or video showing right now. */
+    private var preferSpeaker = false
+
     private val deviceCallback = object : AudioDeviceCallback() {
         // Both arrays describe *all* devices, communication-capable or not, so they are ignored:
         // the policy only ever sees a fresh availableCommunicationDevices query.
@@ -117,6 +120,20 @@ class CallAudioRouter(
         }
     }
 
+    /**
+     * Tell the policy whether the speaker is the default: the call was started as video, or video
+     * is showing. Before [start] it only sets what the first routing uses. During the call it
+     * routes again, which moves an earpiece call to the speaker and leaves a headset or an explicit
+     * pick alone. Turning it off moves nothing.
+     */
+    fun setPreferSpeaker(prefer: Boolean) {
+        synchronized(lock) {
+            if (preferSpeaker == prefer) return
+            preferSpeaker = prefer
+            if (started) applyPolicy()
+        }
+    }
+
     /** Hand the audio device back to the system and stop listening. Safe to call twice. */
     fun stop() {
         synchronized(lock) {
@@ -128,6 +145,7 @@ class CallAudioRouter(
             previousAvailable = emptySet()
             userPick = null
             currentRoute = null
+            preferSpeaker = false
         }
     }
 
@@ -149,7 +167,7 @@ class CallAudioRouter(
     /** Caller must hold [lock]. */
     private fun applyPolicy(devices: List<AudioDeviceInfo> = audioManager.availableCommunicationDevices) {
         val live = devices.routes()
-        val resolved = CallAudioRoutePolicy.resolve(previousAvailable, live, currentRoute, userPick)
+        val resolved = CallAudioRoutePolicy.resolve(previousAvailable, live, currentRoute, userPick, preferSpeaker)
         previousAvailable = live
         // Rule 1's side effect: a pick the policy just overruled — preempted by a new headset, or
         // unplugged — is spent, and must not resurrect on the next device change.

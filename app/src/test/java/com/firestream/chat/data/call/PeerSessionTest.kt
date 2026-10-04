@@ -6,6 +6,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -21,16 +22,21 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.webrtc.IceCandidate
+import org.webrtc.MediaConstraints
 import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnection.IceConnectionState
+import org.webrtc.RtpSender
 import org.webrtc.RtpTransceiver
+import org.webrtc.RtpTransceiver.RtpTransceiverDirection
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.VideoTrack
 
 /**
  * Plain JUnit, no Robolectric and no native library: `PeerConnection` and the tracks are MockK'd,
@@ -61,14 +67,32 @@ class PeerSessionTest {
     private val first = IceCandidateData("0", 0, "candidate:1 1 udp 1 10.0.0.1 1000 typ host")
     private val second = IceCandidateData("0", 0, "candidate:2 1 udp 1 1.2.3.4 2000 typ srflx")
 
+    // The video line. What the connection negotiated is what the test sets as currentDirection.
+    private val videoSender: RtpSender = mockk(relaxed = true)
+    private val videoLine: RtpTransceiver = mockk(relaxed = true)
+    private val videoInits = mutableListOf<RtpTransceiver.RtpTransceiverInit>()
+    private val constraints = mutableListOf<MediaConstraints>()
+    private val camera: VideoTrack = mockk(relaxed = true)
+
     @Before
     fun setUp() {
         every { factory.createPeerConnection(capture(connectionObserver)) } returns pc
-        every { pc.createOffer(capture(createObservers), any()) } returns Unit
-        every { pc.createAnswer(capture(createObservers), any()) } returns Unit
+        every { pc.createOffer(capture(createObservers), capture(constraints)) } returns Unit
+        every { pc.createAnswer(capture(createObservers), capture(constraints)) } returns Unit
         every { pc.setLocalDescription(capture(localObservers), capture(localDescriptions)) } returns Unit
         every { pc.setRemoteDescription(capture(remoteObservers), capture(remoteDescriptions)) } returns Unit
         every { pc.addIceCandidate(any<IceCandidate>()) } returns true
+
+        every { videoLine.mediaType } returns MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO
+        every { videoLine.sender } returns videoSender
+        every { videoLine.currentDirection } returns RtpTransceiverDirection.SEND_RECV
+        every { videoLine.setDirection(any()) } returns true
+        every { videoSender.setTrack(any(), any()) } returns true
+        every {
+            pc.addTransceiver(any<MediaStreamTrack.MediaType>(), capture(videoInits))
+        } returns videoLine
+        // An offer from an older app brings no video line. Tests that need one say so.
+        every { pc.transceivers } returns emptyList()
     }
 
     @After
@@ -76,8 +100,9 @@ class PeerSessionTest {
         scope.cancel()
     }
 
-    private fun session(offers: Boolean): PeerSession {
-        val session = PeerSession(factory, signaling, listOf(localTrack), offers, scope)
+    /** @param offerVideoLine the other side is known to take video. Most tests are about that case. */
+    private fun session(offers: Boolean, offerVideoLine: Boolean = true): PeerSession {
+        val session = PeerSession(factory, signaling, listOf(localTrack), offers, offerVideoLine, scope)
         eventsJob = scope.launch { session.events.toList(events) }
         return session
     }
@@ -91,7 +116,26 @@ class PeerSessionTest {
         return session
     }
 
+    /** An answering session whose offer brought a video line, with its own answer set. */
+    private fun negotiatedAnswerer(): PeerSession {
+        signaling.offer = flowOf(offer)
+        every { pc.transceivers } returns listOf(videoLine)
+        val session = session(offers = false)
+        session.start()
+        remoteObservers.single().onSetSuccess()
+        createObservers.single().onCreateSuccess(SessionDescription(SessionDescription.Type.ANSWER, "answer-sdp"))
+        localObservers.single().onSetSuccess()
+        return session
+    }
+
     private fun IceCandidateData.toIce() = IceCandidate(sdpMid, sdpMLineIndex, sdp)
+
+    /** The init keeps its direction to itself, so the test looks inside. */
+    private fun RtpTransceiver.RtpTransceiverInit.direction(): RtpTransceiverDirection {
+        val field = RtpTransceiver.RtpTransceiverInit::class.java.getDeclaredField("direction")
+        field.isAccessible = true
+        return field.get(this) as RtpTransceiverDirection
+    }
 
     // ── Offer flow ───────────────────────────────────────────────────────────
 
@@ -136,6 +180,278 @@ class PeerSessionTest {
         assertEquals("answer-sdp", localDescriptions.single().description)
         assertEquals(listOf(answer), signaling.sentAnswers)
         verify(exactly = 0) { pc.createOffer(any(), any()) }
+    }
+
+    // ── The video line ───────────────────────────────────────────────────────
+
+    @Test
+    fun `an offering session offers one video line, to send and to receive`() {
+        session(offers = true).start()
+
+        verify(exactly = 1) { pc.addTransceiver(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO, any()) }
+        assertEquals(RtpTransceiverDirection.SEND_RECV, videoInits.single().direction())
+    }
+
+    // An app without video aborts the process when it applies an offer with a video line.
+    @Test
+    fun `an offer to an app without video carries no video line`() {
+        session(offers = true, offerVideoLine = false).start()
+
+        verify(exactly = 0) { pc.addTransceiver(any<MediaStreamTrack.MediaType>(), any()) }
+        // Still a call: the microphone goes out, and the offer asks for audio only.
+        verify { pc.addTrack(localTrack) }
+        assertEquals(listOf("OfferToReceiveAudio"), constraints.single().mandatory.map { it.key })
+        assertTrue(constraints.single().optional.isEmpty())
+    }
+
+    @Test
+    fun `an offer without a video line leaves video unavailable, and the camera stays off the connection`() {
+        val session = session(offers = true, offerVideoLine = false)
+        session.start()
+        session.setCamera(camera)
+
+        signaling.answers.tryEmit(answer)
+        remoteObservers.single().onSetSuccess()
+
+        assertFalse(session.videoAvailable)
+        assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = false)), events)
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+    }
+
+    @Test
+    fun `the side that answers takes an offered video line whatever it was told about offering`() {
+        signaling.offer = flowOf(offer)
+        every { pc.transceivers } returns listOf(videoLine)
+        session(offers = false, offerVideoLine = false).start()
+
+        remoteObservers.single().onSetSuccess()
+
+        verify(exactly = 1) { videoLine.setDirection(RtpTransceiverDirection.SEND_RECV) }
+    }
+
+    @Test
+    fun `neither the offer nor the answer is created with a video constraint`() {
+        session(offers = true).start()
+        signaling.offer = flowOf(offer)
+        session(offers = false).start()
+        // Only the answering session has a remote description so far. It answers now.
+        remoteObservers.single().onSetSuccess()
+
+        assertEquals(2, constraints.size)
+        constraints.forEach { created ->
+            assertTrue(created.mandatory.none { it.key == "OfferToReceiveVideo" })
+            assertTrue(created.optional.none { it.key == "OfferToReceiveVideo" })
+        }
+    }
+
+    @Test
+    fun `an answering session agrees to send on the offered video line before it answers`() {
+        signaling.offer = flowOf(offer)
+        every { pc.transceivers } returns listOf(videoLine)
+        session(offers = false).start()
+
+        remoteObservers.single().onSetSuccess()
+
+        verifyOrder {
+            videoLine.setDirection(RtpTransceiverDirection.SEND_RECV)
+            pc.createAnswer(any(), any())
+        }
+        // The line is the one the offer brought. The side that answers adds none.
+        verify(exactly = 0) { pc.addTransceiver(any<MediaStreamTrack.MediaType>(), any()) }
+    }
+
+    @Test
+    fun `an answering session takes the video line, not the audio line`() {
+        val audioLine: RtpTransceiver = mockk(relaxed = true) {
+            every { mediaType } returns MediaStreamTrack.MediaType.MEDIA_TYPE_AUDIO
+        }
+        signaling.offer = flowOf(offer)
+        every { pc.transceivers } returns listOf(audioLine, videoLine)
+        session(offers = false).start()
+
+        remoteObservers.single().onSetSuccess()
+
+        verify(exactly = 0) { audioLine.setDirection(any()) }
+        verify(exactly = 1) { videoLine.setDirection(RtpTransceiverDirection.SEND_RECV) }
+    }
+
+    @Test
+    fun `video is available to the side that offers once the answer agrees to both directions`() {
+        val session = session(offers = true)
+        session.start()
+        assertFalse(session.videoAvailable)
+
+        signaling.answers.tryEmit(answer)
+        // Not before the answer is applied.
+        assertFalse(session.videoAvailable)
+        remoteObservers.single().onSetSuccess()
+
+        assertTrue(session.videoAvailable)
+        assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = true)), events)
+    }
+
+    @Test
+    fun `video is available to the side that answers once its own answer is set`() {
+        signaling.offer = flowOf(offer)
+        every { pc.transceivers } returns listOf(videoLine)
+        val session = session(offers = false)
+        session.start()
+        remoteObservers.single().onSetSuccess()
+        createObservers.single().onCreateSuccess(SessionDescription(SessionDescription.Type.ANSWER, "answer-sdp"))
+        assertFalse(session.videoAvailable)
+
+        localObservers.single().onSetSuccess()
+
+        assertTrue(session.videoAvailable)
+        assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = true)), events)
+    }
+
+    @Test
+    fun `an older app that answers leaves video unavailable`() {
+        // It answers the line as receive-only, or rejects it: then the line reports no direction.
+        for (answered in listOf(RtpTransceiverDirection.SEND_ONLY, RtpTransceiverDirection.INACTIVE, null)) {
+            events.clear()
+            remoteObservers.clear()
+            every { videoLine.currentDirection } returns answered
+            val session = session(offers = true)
+            session.start()
+            session.setCamera(camera)
+
+            signaling.answers.tryEmit(answer)
+            remoteObservers.single().onSetSuccess()
+
+            assertFalse("answered $answered", session.videoAvailable)
+            assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = false)), events)
+        }
+        // The camera never goes out to an app that cannot show it.
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+    }
+
+    @Test
+    fun `an older app that offers leaves video unavailable`() {
+        // Its offer has no video line at all.
+        signaling.offer = flowOf(offer)
+        val session = session(offers = false)
+        session.start()
+        session.setCamera(camera)
+        remoteObservers.single().onSetSuccess()
+        createObservers.single().onCreateSuccess(SessionDescription(SessionDescription.Type.ANSWER, "answer-sdp"))
+
+        localObservers.single().onSetSuccess()
+
+        assertFalse(session.videoAvailable)
+        assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = false)), events)
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+    }
+
+    @Test
+    fun `the side that offers reports nothing about video for its own offer`() {
+        session(offers = true).start()
+        createObservers.single().onCreateSuccess(SessionDescription(SessionDescription.Type.OFFER, "offer-sdp"))
+
+        localObservers.single().onSetSuccess()
+
+        assertTrue(events.isEmpty())
+    }
+
+    // ── The camera ───────────────────────────────────────────────────────────
+
+    @Test
+    fun `a camera set while the call rings goes on the line once video is available`() {
+        val session = session(offers = true)
+        session.start()
+
+        session.setCamera(camera)
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+
+        signaling.answers.tryEmit(answer)
+        remoteObservers.single().onSetSuccess()
+
+        // The session does not own the track, so the sender must not dispose it.
+        verify(exactly = 1) { videoSender.setTrack(camera, false) }
+    }
+
+    @Test
+    fun `setCamera attaches at once on an agreed line, and detaches with null`() {
+        val session = negotiatedOfferer()
+
+        session.setCamera(camera)
+        session.setCamera(null)
+
+        verifyOrder {
+            videoSender.setTrack(camera, false)
+            videoSender.setTrack(null, false)
+        }
+    }
+
+    @Test
+    fun `the side that answers sends its camera on the offered line`() {
+        val session = negotiatedAnswerer()
+
+        session.setCamera(camera)
+
+        verify(exactly = 1) { videoSender.setTrack(camera, false) }
+    }
+
+    @Test
+    fun `setting the same camera again touches the line once`() {
+        val session = negotiatedOfferer()
+
+        session.setCamera(camera)
+        session.setCamera(camera)
+
+        verify(exactly = 1) { videoSender.setTrack(camera, false) }
+    }
+
+    @Test
+    fun `no camera and an agreed line is nothing to do`() {
+        val session = negotiatedOfferer()
+
+        session.setCamera(null)
+
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+    }
+
+    @Test
+    fun `a camera the line refuses is tried again with the next change`() {
+        every { videoSender.setTrack(camera, false) } returns false andThen true
+        val session = negotiatedOfferer()
+
+        session.setCamera(camera)
+        session.setCamera(camera)
+
+        verify(exactly = 2) { videoSender.setTrack(camera, false) }
+    }
+
+    @Test
+    fun `a camera track that is already disposed does not crash the session`() {
+        every { videoSender.setTrack(camera, false) } throws IllegalStateException("MediaStreamTrack has been disposed.")
+        val session = negotiatedOfferer()
+
+        session.setCamera(camera)
+
+        // Only the video line was reported. A dead track is the owner's teardown, not a failure.
+        assertEquals(listOf<PeerSessionEvent>(PeerSessionEvent.VideoLine(available = true)), events)
+    }
+
+    @Test
+    fun `a closed session leaves the line alone`() {
+        val session = negotiatedOfferer()
+        session.close()
+
+        session.setCamera(camera)
+
+        verify(exactly = 0) { videoSender.setTrack(any(), any()) }
+    }
+
+    @Test
+    fun `closing does not dispose the camera track`() {
+        val session = negotiatedOfferer()
+        session.setCamera(camera)
+
+        session.close()
+
+        verify(exactly = 0) { camera.dispose() }
     }
 
     // ── ICE candidates ───────────────────────────────────────────────────────
@@ -398,6 +714,7 @@ class PeerSessionTest {
     @Test
     fun `a closed session reports nothing, applies nothing and sends nothing`() {
         val session = negotiatedOfferer()
+        val reportedBefore = events.toList()
         session.close()
 
         connectionObserver.captured.onIceConnectionChange(IceConnectionState.FAILED)
@@ -405,7 +722,7 @@ class PeerSessionTest {
         signaling.candidates.tryEmit(listOf(first))
         createObservers.single().onCreateSuccess(SessionDescription(SessionDescription.Type.OFFER, "offer-sdp"))
 
-        assertTrue(events.isEmpty())
+        assertEquals(reportedBefore, events)
         assertTrue(signaling.sentCandidates.isEmpty())
         assertTrue(signaling.sentOffers.isEmpty())
         verify(exactly = 0) { pc.addIceCandidate(any<IceCandidate>()) }

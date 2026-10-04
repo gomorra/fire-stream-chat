@@ -1,11 +1,13 @@
 package com.firestream.chat.data.call
 
 import com.firestream.chat.domain.model.CallAudioRoute
+import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -18,6 +20,21 @@ class CallStateHolder @Inject constructor() {
 
     private val _uiControls = MutableStateFlow(CallUiControls())
     val uiControls: StateFlow<CallUiControls> = _uiControls.asStateFlow()
+
+    private val _participants = MutableStateFlow<List<CallParticipant>>(emptyList())
+
+    /** The other people in the call: one in a 1:1 call. The own side is in [uiControls]. */
+    val participants: StateFlow<List<CallParticipant>> = _participants.asStateFlow()
+
+    /**
+     * A call starts with [participants] and with fresh controls. The controls of the call before
+     * are still set until this runs: nothing clears them when a call ends, so the ended screen can
+     * go on showing them.
+     */
+    fun beginCall(participants: List<CallParticipant>) {
+        _uiControls.value = CallUiControls()
+        _participants.value = participants
+    }
 
     fun updateState(state: CallState) {
         _callState.value = state
@@ -46,24 +63,36 @@ class CallStateHolder @Inject constructor() {
         _uiControls.value = controls
     }
 
-    fun toggleMute() {
-        _uiControls.value = _uiControls.value.copy(isMuted = !_uiControls.value.isMuted)
+    /** Change the controls as one step. Writers on different threads do not lose each other's change. */
+    fun updateControls(change: (CallUiControls) -> CallUiControls) {
+        _uiControls.update(change)
     }
+
+    /** @return true when the call is muted after the flip. */
+    fun toggleMute(): Boolean = _uiControls.updateAndGet { it.copy(isMuted = !it.isMuted) }.isMuted
 
     /**
      * Publish the routes the OS offers and the one it is actually playing through. A null [current]
      * means the OS has not reported a route yet, and leaves the displayed one alone rather than
-     * guessing. Leaves mute alone either way.
+     * guessing. Leaves everything else alone either way.
      */
     fun updateAudioRoutes(available: List<CallAudioRoute>, current: CallAudioRoute?) {
-        _uiControls.value = _uiControls.value.copy(
-            audioRoute = current ?: _uiControls.value.audioRoute,
-            availableRoutes = available
-        )
+        _uiControls.update { it.copy(audioRoute = current ?: it.audioRoute, availableRoutes = available) }
+    }
+
+    /** Change the participant [id] as one step. Does nothing when they are not in the call. */
+    fun updateParticipant(id: String, change: (CallParticipant) -> CallParticipant) {
+        _participants.update { list -> list.map { if (it.id == id) change(it) else it } }
+    }
+
+    /** [ids] are the participants whose video has delivered a frame. Everyone else has none. */
+    fun setFramed(ids: Set<String>) {
+        _participants.update { list -> list.map { it.copy(hasFrame = it.id in ids) } }
     }
 
     fun reset() {
         _callState.value = CallState.Idle
         _uiControls.value = CallUiControls()
+        _participants.value = emptyList()
     }
 }

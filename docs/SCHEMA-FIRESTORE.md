@@ -11,6 +11,7 @@ users/{userId}
 ├── publicIdentityKey                           # Signal Protocol identity key
 ├── readReceiptsEnabled                         # privacy control
 ├── fcmToken                                    # push notification token
+├── callVideoLine                               # true = this user's app takes a video line in a call offer; absent = it does not
 └── blockedUsers/{targetUserId}                 # subcollection
     └── blockedAt
 
@@ -54,6 +55,7 @@ chats/{chatId}
 calls/{callId}
 ├── callerId, calleeId, status, createdAt, endedAt, endReason
 ├── video                                      # how the call was started; absent = voice (an older app)
+├── media: { userId → { camera, mic } }        # live state, each user writes their own entry; absent = camera off, mic on
 ├── offer: { sdp, type }                       # WebRTC SDP offer
 ├── answer: { sdp, type }                      # WebRTC SDP answer
 ├── callerCandidates/{id}                      # subcollection — ICE candidates
@@ -89,9 +91,11 @@ The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOn
 ### Key Patterns
 
 - **Array mutations** (`participants`, `admins`, `pendingMembers`, `sharedChatIds`): Use `FieldValue.arrayUnion()` / `arrayRemove()` for atomic updates.
-- **Per-key maps** (`typingUsers`, `unreadCounts`, `readBy`, `deliveredTo`): Updated via `FieldValue` dot-notation paths (e.g., `"unreadCounts.$userId"`).
+- **Per-key maps** (`typingUsers`, `unreadCounts`, `readBy`, `deliveredTo`, a call's `media`): Updated via `FieldValue` dot-notation paths (e.g., `"unreadCounts.$userId"`, `"media.$userId.camera"`).
 - **Encryption duality**: Messages store either `content` (plaintext — debug builds, or release builds where the user has opted out) or `ciphertext` + `signalType` (Signal-encrypted, release builds with E2E enabled). Never both.
 - **List items live in a subcollection.** Each item mutation is a single-doc write under `lists/{listId}/items/{itemId}`; `itemCount` / `checkedCount` on the parent metadata doc are kept in sync via `FieldValue.increment()` in the same batch. A one-shot `migrateEmbeddedItemsIfNeeded` upgrade runs on first observe for legacy lists that still carry an embedded `items[]` array.
+- **`callVideoLine` is a capability, written only as `true`.** An app that can take a video line in a call offer writes it when it starts and when an existing user signs in (`AuthRepository.announceCallVideoLine`). A new user document carries it from its creation. A caller reads the callee's field before it creates the call document (`CallRepository.createCall`) and offers the video line only on a stored `true`. Never write `false` and never remove the field: an app from before video calls crashes on an offer with a video line.
+- **A call's `media` is written only once both sides agreed on the video line.** An app from before video calls that placed the call applies the answer again on every change of an answered call document, and ends the call when that fails (`CallMediaPublisher`).
 - **Subcollection isolation**: `blockedUsers`, `messages`, `items`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
 
 ---

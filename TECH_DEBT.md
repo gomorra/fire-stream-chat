@@ -247,6 +247,26 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `CallService.mediaLock` is taken on the main thread
+
+**The smell.** `openSession` and `detachMedia` take `mediaLock` on the main thread: the first from the intent that starts or answers a call, the second from a hang-up. `driveCamera` holds the same lock on `serviceScope` across camera calls that wait, and `LocalCamera.stop()` waits for a camera that is still opening. A hang-up tapped while the camera opens or closes therefore holds the main thread for that long. `openSession` also builds the WebRTC factory there, which now creates an EGL context and the video codec factories.
+
+**Why we haven't fixed it.** The lock is what keeps opening a session, switching the camera and ending the call from interleaving. Narrowing it to field swaps re-opens those races. `docs/plans/video-calls.md` step 7 confines the call's state to one serial dispatcher that the intents post into, and then the main thread never takes the lock.
+
+**When to revisit.** With step 7 of the video-calls plan, or on the first ANR trace that points at `CallService.mediaLock`.
+
+---
+
+### The call capability is written on every process start
+
+**The smell.** `FireStreamApp.onCreate` writes `callVideoLine: true` to the own user document on every process start, a start by a push included (`AuthRepository.announceCallVideoLine`). After the first one each write changes nothing, and Firestore still bills it.
+
+**Why we haven't fixed it.** Writing once needs a DataStore key per signed-in uid, and a wrong "already written" leaves a user without video for good. The field has to be right before it has to be cheap.
+
+**When to revisit.** When a second capability joins it: write one capabilities field per installed app version, and remember the version that wrote it.
+
+---
+
 ### The voice-message player prepares on the main thread
 
 **The smell.** `VoiceMessagePlayer` (`ui/chat/VoiceMessagePlayer.kt`) builds its `MediaPlayer` inside the Play button's `onClick` and calls the blocking `prepare()` there, on the main thread. For a voice note that is a remote `mediaUrl`, so a slow network holds the UI thread until the first bytes arrive — short recordings keep that brief, but it is the shape of an ANR. The file-handling work (2026-09-27) reused the player for audio *files*, which can be large, and worked around it by showing the inline player only once the file is on the device; it also added the try/catch that turns an unplayable source into "Can't play this file" instead of a crash.
