@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, steps 1 to 4 shipped. The prototype verdict is in and written into steps 4, 4a and 9.
+Status: approved, steps 1 to 4a shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
 ## Context
 
@@ -634,6 +634,54 @@ Two activities hand one call over, and the camera follows whichever is on screen
 strip are C's: `DockedCall`, `DockedStrip` and `DockedBody` in `VariantCDocked.kt` on
 `prototype/video-call`. Rewrite them properly; do not copy them in.
 
+**Approach**
+
+1. State first. `CallSurface` (`STAGE`, `DOCK`) in `domain/model/CallState.kt`. `CallStateHolder`
+   gains the call's `chatId`, the set of surfaces that show the call, and `onScreen`: true while
+   any surface shows, and false one second after the last one left.
+2. `CallService`: `beginCall` takes the chat, the callee resolves it with
+   `ChatRepository.getOrCreateChat` when it answers (into the holder only, never into
+   `currentChatId`), `ACTION_SET_SCREEN_VISIBLE` goes, a collector of `onScreen` drives the camera,
+   and the preview of a video ring starts with the first surface that shows the call.
+3. `CallViewModel` exposes the chat, the surfaces and the camera switch. `CallActivity` reports
+   `STAGE` from `onStart` to `onStop`, docks (deep link to the chat, a slide and fade, its task to
+   the back, the unlock first on a locked phone), and finishes in the background when the call ends
+   there. `preparedCallId` and `reportVisible` go.
+4. `CallScreen`: a swipe up on the stage calls `onMinimise`. It starts only where no child took
+   the touch, and not in the bottom gesture strip.
+5. `ui/call/DockedCallCard.kt`: a stateless card and strip, and a stateful `DockedCall(chatId)`
+   that `ChatScreen` puts at the top of its content column.
+6. Tests: `DockedCallCardUiTest` (Robolectric: strip and card for voice and video, the resting
+   size, *Call ended*), `DockedCallRuleTest` (only in the call's chat, not while the stage shows,
+   not for an incoming ring), `CallStateHolderTest` (the chat, the visibility rule with virtual
+   time), and a swipe row in `CallStageUiTest`.
+7. One note is not followed. The step-4 /simplify note wants `Ended` to go back to `Idle` on the
+   holder. A stage that waits under a permission dialog sees `Idle` with nothing being placed, so
+   it would still need its own "an end I watched" rule. The card gets the same rule instead.
+8. This session has no device. The hand-over, the unlock and the card under the real keyboard go
+   to `docs/BACKLOG.md`.
+9. Skills: `app-ui-design` and `code-review` (tagged), `changelog-release` for the bump, and
+   `simplify` because the diff will pass 600 lines.
+
+**Shipped** `d849aa6a` (2026-10-04) — tier: strong, tagged strong. skills: app-ui-design, code-review, simplify, changelog-release. Reviewer models: simplify: sonnet, opus, sonnet, opus; code-review: opus, opus. CHANGELOG entry: `d849aa6a`.
+Departures (for sign-off):
+- **Nothing ran on a device or an emulator.** The hand-over between the two activities, the swipe, the unlock, the slide and fade, and the card with a real video view are unseen. Robolectric tests draw the card and the strip with a box in place of a video tile. `docs/BACKLOG.md` § *The call docked over its chat* lists fifteen checks.
+- The step-4 /simplify note about `Ended` going back to `Idle` on the holder is not followed. A stage that waits under a permission dialog sees `Idle` with nothing being placed, so it would still need its own rule. The card and `CallActivity` each keep "an end I watched" instead, as `CallScreen` does. `CallStateHolder.reset()` still has no caller.
+- A call whose chat is not known cannot dock. That is the side that answered, until `getOrCreateChat` returns, and for the whole call when that lookup fails. It is not retried. The arrow, the back button and the swipe then do what step 4 did: picture-in-picture while video shows, the background otherwise.
+- The dock's deep link carries a new extra, `MainActivity.EXTRA_KEEP_PLACE`. /code-review found that the plain deep link scrolled an open chat to its newest message and stacked the chat a second time over a screen opened from it. With the extra an open chat stays as it is, and a chat further down the back stack comes back up (`warmDeepLinkAction` in `NavGraph.kt`, with a test). Notifications behave as before.
+- The stage gives up its claim on the call the moment it docks, not when it stops. /code-review found that the chat otherwise came in bare and the card grew in afterwards.
+- The stage's dock now takes every touch on it. A tap on its padding no longer toggles the controls, and a swipe from a disabled button does not dock.
+- "Pulling the card down past its height" is a pull of 96 dp. The card does not follow the finger: it gives a little, and the size changes when it is let go. Pushing it up by 40 dp leaves the strip.
+- The card's picture is 30 % of the screen height, between 168 and 260 dp. Until the call connects, the own preview fills it.
+- A size the user chose holds until the call's resting size changes: video starting or stopping puts the call back into its resting size.
+- The card asks for the camera permission from the chat on the first tap of its camera button, and explains a refusal once.
+- A docked call that ends while the app is in the background says *Call ended* when the user returns, however long ago it ended. Check 15 in the backlog asks whether that is wanted.
+- `CallStage`'s status line is one line everywhere now (`StageStatus` gained `maxLines = 1`), because the card shares it.
+- Strings are literals, like the rest of the call screen.
+- Not done, from /simplify: one set of camera, flip and microphone buttons for the stage's dock and the card (`DockSwitches` and the card's buttons repeat the icon and label mapping), one source for the ring wording, and one camera-permission flow for the stage and the card. Notes for the chat intent and the holder's per-call state are in steps 6 and 9.
+- Not done, from /code-review: a test for the stateful `DockedCall` (the watched end, the `DOCK` report, the permission path). It needs a `CallViewModel`, which starts `CallService`. Two theoretical races stay: a preview posted while `cleanup()` runs on another thread can leave `cameraOn` set for the ended call (the same class as the `ACTION_SET_CAMERA` race, noted in step 7), and a call that ends in the frame before the stage stops may leave the stage open in the background.
+- `scripts/check-changelog-header.sh` was not run, as in steps 3 and 4.
+
 - A swipe up on the stage docks the call. The call's chat opens in the main activity with the call
   as a card under the chat's top bar. The thread and the composer below stay usable. The top bar's
   *minimise* arrow does the same.
@@ -741,6 +789,13 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   candidates are read and written by the two uids in its id. The 1:1 candidate subcollections are
   narrowed to the caller and the callee.
 - `firestore.indexes.json` (new, referenced from `firebase.json`) for the live-call query.
+- **(step-4a)** `CallStateHolder.beginCall(callId, participants, chatId)` carries the call's chat,
+  and `setChatId(callId, chatId)` drops a lookup that returns after the next call began. A group
+  call knows its chat from the call document (`chatId`), on every side, so no lookup is needed.
+- **(step-4a /simplify)** The holder guards the chat with a lock and a shadow call id. Group
+  members and links arrive late in the same way. One `MutableStateFlow` of a value keyed by the
+  call id (chat, participants, controls), changed with `update { if (it.callId == callId) … }`,
+  replaces the lock.
 - Tests: `MeshPlanTest` as a table (join order, both joining at once, rejoin with a new session id,
   the cap, leave, a stale row), `GroupLinkSignalingTest`, a repository test.
 - Docs: `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`.
@@ -783,6 +838,11 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   again and cancels a ring that lost a race with `cleanup()`. `onSessionConnected` calls
   `markVideo` a second time. All of that exists only because the call's state has no single
   thread. Delete it when the serial dispatcher lands, and keep one store.
+- **(step-4a /code-review)** `CallService.onScreenShowing` is posted to the main thread and checks
+  `currentCallId`. `cleanup()` can run on `serviceScope` between that check and `setCamera(true)`,
+  which leaves `cameraOn` set in the holder for a call that is over. The serial dispatcher closes
+  it. `cameraWanted`, `screenVisible` and `cameraDecided` are one small state machine: move it
+  into the camera-switch class named below.
 - **(step-3)** `PeerSession` takes `offerVideoLine`. A mesh session passes true: only an app with
   group calls joins one, and every such app takes a video line. `CallMediaPublisher` writes the
   1:1 call document only. A group call's `camera` and `mic` go to the member row.
@@ -847,6 +907,20 @@ Rewrite it properly; do not copy it in.
   `OutgoingCallPlacer.placing`. `CallStage`, `CallScreen`, `CallActivity.finishIfNoCall` and
   `CallViewModel.hangup()` each check both. A second way to place a call is the moment to fold
   them: a `CallState.Placing` on the holder, with a failure as `Ended(ERROR)`.
+- **(step-4a)** The docked call is `DockedCallCard(state, callbacks, onFullScreen, videoTile)` in
+  `ui/call/DockedCallCard.kt`. Its card draws one other person through `RemoteTile` and takes the
+  name from `CallStageState.person`. The strip draws one avatar. `docksIn` and `CallState.dockable`
+  decide where the call docks; a group ring that came in is not dockable either.
+- **(step-4a)** `CallActivity.dock()` opens the chat with `participants.first().id` as the deep
+  link's sender id. A group chat needs the hint a group notification uses
+  (`notificationPartnerHint` in `FCMService`).
+- **(step-4a /simplify)** Four places build `MainActivity`'s chat deep link by hand: `FCMService`,
+  `ReminderNotificationPoster`, `TimerAlarmReceiver` and `CallActivity.dock()`. Give `MainActivity`
+  a `chatIntent(context, chatId, partnerIdHint)` when the group path adds a fifth.
+- **(step-4a /simplify)** The stage's dock and the card each map the camera, flip and microphone
+  state to an icon and a label (`DockSwitches`, and `CameraButton` / `MicButton` in
+  `DockedCallCard.kt`). The grid adds a third place. Share them, with `CallControlColors` and the
+  size as parameters.
 - Tests (Robolectric): the layout for 2, 3 and 4, an enlarged tile, the docked grid, the banner's
   states, the picker's cap.
 - Docs: `SPEC.md`, `FEATURE-MAP.md`, `BACKLOG.md`, CHANGELOG `Added` — **Group calls**.
