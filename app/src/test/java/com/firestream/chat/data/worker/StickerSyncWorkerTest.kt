@@ -36,6 +36,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.IOException
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * The backup against a real in-memory library and a real sticker directory:
@@ -59,9 +60,11 @@ class StickerSyncWorkerTest {
         override fun classifyBackendError(error: Throwable): SendFailure? = null
     }
 
-    private val uploaded = mutableListOf<String>()
-    private val written = mutableListOf<RemoteStickerPack>()
-    private val deleted = mutableListOf<String>()
+    // Thread-safe: the worker uploads several files at once on Dispatchers.IO,
+    // and an append to a plain list from two threads can lose one of them.
+    private val uploaded = CopyOnWriteArrayList<String>()
+    private val written = CopyOnWriteArrayList<RemoteStickerPack>()
+    private val deleted = CopyOnWriteArrayList<String>()
 
     @Before
     fun setUp() {
