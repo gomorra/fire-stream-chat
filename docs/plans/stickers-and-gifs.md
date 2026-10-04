@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–8 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–9 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -699,6 +699,25 @@ Departures (for sign-off):
 
 ### Step 9 — GIFs and stickers from the keyboard
 
+**Approach**
+- Spike, first half, read from the library: the value-based `BasicTextField` talks to the keyboard through
+  `RecordingInputConnection`, whose `commitContent` returns false in foundation 1.10.4. `Modifier.contentReceiver` cannot
+  reach it, so the fallback ships: `InterceptPlatformTextInput` around the composer's field only. The emulator half
+  follows the build.
+- Order: `MessageRepositoryImpl.sendMediaMessage` (the `image/gif` branch), then `StickerMaker.convert` and a new
+  `StickerRepository.saveSticker(uri)`, then `ChatMessageSender.sendKeyboardContent` and the routing rule, then
+  `ui/chat/KeyboardContentReceiver.kt` and its mount in `ChatScreen`.
+- `saveSticker` stores a sticker file as it is and converts anything else to a WebP with `StickerEncoder`, long edge
+  512 px, shape kept. It puts the sticker into `SAVED` and returns its id, so nothing is looked up from an import result.
+- An edited GIF keeps `image/gif` in `PendingMedia.mimeType` while its `uri` is the editor's JPEG. `ChatMessageSender`
+  sends an item whose `uri` is not its `originalUri` as `image/jpeg`.
+- The keyboard's uri grant is held until the send has staged or stored the bytes, then released.
+- Tests: `KeyboardContentRouteTest`, `KeyboardContentReceiverTest` (Robolectric: the field's `EditorInfo` names the
+  types and `commitContent` reaches the callback), `ChatMessageSenderKeyboardContentTest`, the `image/gif` cases in
+  `MessageRepositoryStickerGifSendTest`, `saveSticker` cases in `StickerRepositoryImplTest`.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible). `simplify` if the diff passes
+  600 lines.
+
 - **Spike first:** confirm on the emulator that `Modifier.contentReceiver` delivers Gboard content to
   the composer's `BasicTextField`. Fallback: `InterceptPlatformTextInput` wrapping the input connection
   with `InputConnectionCompat` and `EditorInfoCompat.setContentMimeTypes`. If neither works, report
@@ -725,6 +744,33 @@ Departures (for sign-off):
   be decoded and encoded with it, which is the "convert before the import" option and needs no new `StickerFormat`.
   `StickerMaker.render` draws onto a 512 px square first, which a keyboard sticker may not want.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
+
+**Review outcome** (`/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- Fixes: `KeyboardContentReceiver` has its commit handling in one named function; `ChatMessageSender` reports each
+  route's failure where it happens, without rebuilding a `Result`; `StickerMaker.convert` has one `catch`; the list of
+  keyboard types uses `GIF_MIME_TYPE`.
+- Not taken: one shared "store this sticker into a pack" for `saveSticker`, `createSticker` and the import (it changes
+  step 8's code); the editor's output type as a constant on `ImageEditRasterizer` (`PendingMedia` would import from
+  `data/`, which `ArchitectureTest` allowlists per class); the keyboard GIF sent through `sendMediaMessage`; no
+  `KeyboardContentRoute` enum; a block body with an early return in `sendMediaMessage`; a re-indent of the composer's
+  `BasicTextField` under its new wrapper; a type sniff that skips the first read of a PNG.
+
+**Shipped** `5a98ac49` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The spike settled open risk 6. `Modifier.contentReceiver` does not work on the composer: the value-based `BasicTextField` talks to the keyboard through `RecordingInputConnection`, whose `commitContent` returns false (read from the bytecode of foundation 1.10.4). The fallback shipped: `InterceptPlatformTextInput` around the composer's field, with `EditorInfoCompat.setContentMimeTypes` and `InputConnectionCompat.createWrapper`.
+- The spike ran on the emulator (API 36, Gboard with a hardware keyboard). `dumpsys input_method` showed the four picture types on the focused composer. **One GIF and one sticker from Gboard were sent** from the emulator's account into the chat that was open there, with *gomorra*, at 20:22 and 20:23. Both arrived as a GIF bubble and a transparent sticker. They are real messages in that chat.
+- This branch's debug build was installed over the emulator's (`adb install -r`), which already ran this branch at step 8. The installed build is the one before the `/simplify` fixes.
+- A keyboard picture that is no sticker file is converted before the import, with `StickerEncoder`: long edge 512 px, shape kept, at most 100 KB. No PNG format was added to `StickerFormat`. A WebP or a Lottie file from the keyboard is stored as it is.
+- `StickerRepository.saveSticker(uri)` is new. It puts one picture into `SAVED` and returns its id, also when the library held it. `importFrom` is not used for the keyboard, so nothing is looked up by hash afterwards. A sticker file that names a pack still goes to `SAVED`.
+- The composer names `image/gif`, `image/webp`, `image/png` and `image/jpeg` to the keyboard. A picture pasted from Gboard's clipboard is therefore sent as a sticker (`docs/BACKLOG.md` §4.6).
+- A keyboard pick is sent at once, without a preview, like a pick from the Stickers tab. It is refused while a message is being edited. Text in the composer stays.
+- "Unedited" is decided in the UI: `PendingMedia.sendMimeType` is `image/jpeg` once the item's `uri` is an edit step, and the pick's type when the edits are undone. `sendMediaMessage` routes by type alone.
+- A GIF over 8 MB from the gallery or the share sheet is now refused. It used to go out as one still JPEG.
+- The keyboard's uri grant is requested in the composable and released when the send has staged or stored the bytes, also when the chat is left meanwhile.
+- `/simplify` was added at the re-decision, because the diff passed 600 lines. `/code-review` was not run: no rule asked for it.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit. `git tag -l v1.39.0` is empty.
+- One full test run was red in `ListRepositoryImplRaceTest`, a list test this step does not touch. The two runs after it were green with no change for it (`TECH_DEBT.md`).
+- Not checked: a phone, an on-screen Gboard, Samsung's keyboard, the gallery and share-sheet GIF on a device. The dex register check did not run; `ChatScreen` gained one wrapper call. Checklist: `docs/BACKLOG.md`, *GIFs and stickers from the keyboard*.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
 
@@ -776,6 +822,14 @@ are not deployed yet, so its online paths are checked on a device only after thi
 - **(step-7)** `StickerImage(format = LOTTIE)` plays from a local file only, and shows a placeholder for a url. An online
   sticker that is a Lottie file needs its download before its preview, or a still rendition from the provider. The
   import takes a `.tgs` and a `.was` by their bytes, so a downloaded one goes through `importFrom` like a WebP.
+- **(step-9)** `StickerRepository.saveSticker(uri)` puts one picture into `SAVED` and returns its sticker id, also when
+  the library held it. It converts a picture that is no sticker file to WebP. An online sticker pick is
+  `saveSticker(downloadedPath)` and then `ChatViewModel.sendSticker(id, null)`. The path must be inside `cacheDir`.
+- **(step-9)** `sendMediaMessage` hands an `image/gif` to `sendGifMessage`, so either call sends a GIF. `GIF_MIME_TYPE`
+  is in `domain/util/FileKind.kt`. `ChatMessageSender.sendKeyboardContent(uri, mimeType)` already sends a GIF uri
+  with the scroll and the error handling a GIFs tab needs.
+- **(step-9)** The composer's `BasicTextField` sits inside `KeyboardContentReceiver` in `ChatScreen.kt`. A search field
+  in the GIFs tab is outside it and must stay so: it would send a keyboard GIF picked while searching.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 
