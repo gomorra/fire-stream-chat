@@ -20,6 +20,7 @@ import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.util.ImageEditRasterizer
 import com.firestream.chat.data.worker.MediaBackfillWorker
+import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.di.FlavorBootstrap
@@ -52,6 +53,9 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
 
     @Inject
     lateinit var outboxScheduler: OutboxScheduler
+
+    @Inject
+    lateinit var stickerSyncScheduler: StickerSyncScheduler
 
     @Inject
     lateinit var imageEditRasterizer: ImageEditRasterizer
@@ -112,6 +116,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             imageEditRasterizer.sweepStale()
         }
         requeueQueuedSends()
+        syncPendingStickerPacks()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
     }
@@ -126,6 +131,12 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             runCatching { outboxScheduler.requeueAll() }
                 .onFailure { Log.w("FireStreamApp", "requeueAll failed", it) }
         }
+    }
+
+    // A sticker pack changed while offline, or in the moment a sync run ended,
+    // is still marked pending. This queues the run that backs it up.
+    private fun syncPendingStickerPacks() {
+        appScope.launch { stickerSyncScheduler.syncIfPending() }
     }
 
     private fun scheduleUpdateCheck() {

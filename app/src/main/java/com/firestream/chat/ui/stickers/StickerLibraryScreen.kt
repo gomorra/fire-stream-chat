@@ -67,7 +67,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.firestream.chat.ui.components.LibraryStickerImage
 import com.firestream.chat.ui.components.StickerImage
+import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 
@@ -352,7 +354,7 @@ private fun PackRow(
         leadingContent = {
             val first = pack.stickers.firstOrNull()
             if (first != null) {
-                StickerThumbnail(model = first.localPath, modifier = Modifier.size(48.dp))
+                LibraryStickerImage(sticker = first, modifier = Modifier.size(48.dp))
             } else {
                 Icon(Icons.Default.EmojiEmotions, contentDescription = null, modifier = Modifier.size(48.dp).padding(8.dp))
             }
@@ -406,8 +408,7 @@ private fun PackGrid(
     ) {
         items(pack.stickers, key = { it.id }) { sticker ->
             StickerCell(
-                id = sticker.id,
-                model = sticker.localPath,
+                sticker = sticker,
                 isSelected = sticker.id in selected,
                 // A tap picks only once a long press has started a selection.
                 onClick = if (selected.isNotEmpty()) onToggleSticker else NO_TAP,
@@ -467,8 +468,9 @@ internal fun stickerCellTag(stickerId: String): String = "sticker:$stickerId"
  * One sticker in a grid, with the mark of a selection drawn over it. The clicks
  * hand [id] back, so a grid passes the same two functions to every cell and a
  * toggle recomposes only the cell it changed.
+ *
+ * [model] is anything that is not a library sticker: a folder entry's uri.
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun StickerCell(
     id: String,
@@ -478,6 +480,37 @@ internal fun StickerCell(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     onLongClick: ((String) -> Unit)? = null,
+) {
+    StickerCellFrame(id, isSelected, onClick, modifier, enabled, onLongClick) {
+        StickerThumbnail(model = model, modifier = Modifier.fillMaxSize().padding(6.dp))
+    }
+}
+
+/** A library sticker in a grid. Its file is fetched when the cell is first shown without one. */
+@Composable
+internal fun StickerCell(
+    sticker: Sticker,
+    isSelected: Boolean,
+    onClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onLongClick: ((String) -> Unit)? = null,
+) {
+    StickerCellFrame(sticker.id, isSelected, onClick, modifier, enabled, onLongClick) {
+        LibraryStickerImage(sticker = sticker, modifier = Modifier.fillMaxSize().padding(6.dp))
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun StickerCellFrame(
+    id: String,
+    isSelected: Boolean,
+    onClick: (String) -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    onLongClick: ((String) -> Unit)?,
+    image: @Composable () -> Unit,
 ) {
     Box(
         modifier = modifier
@@ -492,7 +525,7 @@ internal fun StickerCell(
                 onLongClick = onLongClick?.let { { it(id) } },
             ),
     ) {
-        StickerThumbnail(model = model, modifier = Modifier.fillMaxSize().padding(6.dp))
+        image()
         if (isSelected) {
             Icon(
                 Icons.Default.CheckCircle,
@@ -504,7 +537,7 @@ internal fun StickerCell(
     }
 }
 
-/** A sticker's first frame. [model] is the path of the library's file or a folder entry's uri. */
+/** A sticker's first frame. [model] is a folder entry's uri. A library sticker is drawn by `LibraryStickerImage`. */
 @Composable
 internal fun StickerThumbnail(model: String, modifier: Modifier = Modifier) {
     StickerImage(model = model, modifier = modifier, animated = false)

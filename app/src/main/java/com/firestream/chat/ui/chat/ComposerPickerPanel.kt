@@ -127,8 +127,7 @@ internal fun StickerSuggestionStrip(
         ) {
             items(matches, key = { it.sticker.id }) { match ->
                 StickerCell(
-                    id = match.sticker.id,
-                    model = match.sticker.localPath,
+                    sticker = match.sticker,
                     isSelected = false,
                     onClick = { onSelection(PickerSelection.Sticker(it, match.packId)) },
                     modifier = Modifier.size(72.dp),

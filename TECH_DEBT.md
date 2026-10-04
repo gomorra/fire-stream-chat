@@ -575,15 +575,16 @@ and leaves every file. `StickerFiles.store` writes through a `.part` temp file, 
 death between the write and the rename leaves that file too.
 
 A received sticker adds a `stickers` row and a file that no pack holds (`StickerDownloads`).
+So does every sticker of a pack that was viewed and not added (`StickerRepositoryImpl.ensureFile`).
+A sign-out clears the rows and leaves the files, which the next user's restore takes back
+without a download when a hash matches.
 
 **Why we haven't fixed it.** A file is at most 1 MB and is shared: the same sticker can sit
 in several packs, in the recents list and in any number of messages, whose `localUri` is the
-file's path. Step 6 of `docs/plans/stickers-and-gifs.md` restores rows whose files are fetched
-later. Which files are unreferenced can only be decided once that exists.
+file's path. A sweep has to read all three, and a file it deletes wrongly costs one download.
 
-**When to revisit.** After step 6 of the plan, or when the directory's size shows up in a
-storage report. The fix is a sweep that deletes files no pack item, recent or message names,
-and every `.part` file.
+**When to revisit.** When the directory's size shows up in a storage report. The fix is a
+sweep that deletes files no pack item, recent or message names, and every `.part` file.
 
 ---
 
@@ -616,12 +617,79 @@ transaction methods (`addToPack`, `removeFromPack`, `moveBetweenPacks`, `reorder
 that through `touchPack`, but `insertItems`, `deleteItems` and `insertPack` are public on the
 same interface, so a caller can change a pack and leave it unmarked.
 
-**Why we haven't fixed it.** Nothing reads `syncState` yet, and the one caller,
-`StickerRepositoryImpl`, uses only the transaction methods. Hiding the single-statement
-writes needs an abstract-class DAO with protected members, which no DAO in this repo is.
+`StickerSyncWorker` reads the column, so a missed mark is a pack change that never reaches
+the backup. `updatePack` writes a whole row, `syncState` included, and is meant for the
+restore alone.
 
-**When to revisit.** In step 6 of `docs/plans/stickers-and-gifs.md`, when `StickerSyncWorker`
-starts to read the column. A missed mark is then a pack change that never reaches the backup.
+**Why we haven't fixed it.** `StickerRepositoryImpl` uses only the transaction methods. The
+restore (`applyRemotePack`, `installPack`) uses the single-statement writes inside its own
+transactions and sets `syncState` itself. Hiding them needs an abstract-class DAO with
+protected members, which no DAO in this repo is.
+
+**When to revisit.** When a second class starts to write packs, or when a pack is found
+unsynced with no pending mark. `StickerDaoTest` asserts the mark for each transaction method.
+
+---
+
+### The sticker backup has limits it does not report
+
+**The smell.** Five things in the sync of `stickerPacks/{packId}` are accepted, and none of
+them tells the user:
+
+- **A manifest lists at most 4000 stickers** (`StickerManifest.MAX_STICKERS`). A manifest is
+  one Firestore document of at most 1 MiB. A larger pack is backed up without its tail, and a
+  restore brings back the first 4000. A pack whose stickers carry many long emoji tags is cut
+  earlier, at 900 000 bytes of list (`MAX_LIST_BYTES`).
+- **The newer side wins, by each device's clock.** A restore replaces a local pack when the
+  backend's `updatedAt` is later (`StickerDao.applyRemotePack`). Two devices of one account
+  that edit the same pack lose the earlier edit whole, and a device with a wrong clock wins
+  or loses wrongly.
+- **The worker's write is not conditional on the backend's copy.** `StickerSyncWorker` checks
+  that the pack did not change locally right before it writes, and not what the backend holds.
+  A second device's newer manifest that lands in that moment is overwritten by the older one.
+  Both devices then show the newer state and the backup holds the older.
+- **A sign-out drops what was not uploaded yet.** `AuthRepositoryImpl.signOut` clears the
+  tables and cancels the sync. A pack changed offline and never synced is gone.
+- **A change in the moment a sync run ends waits for the next trigger.** The work is unique
+  with `KEEP`, so a request made while a run is finishing is dropped. The pack stays pending
+  until the next pack change, the next restore or the next app start (`StickerSyncScheduler`).
+
+**Why we haven't fixed it.** The app is used on one phone per account, a pack of 4000
+stickers is far from what an import produces today, and each fix is a design of its own:
+chunked manifests, a merge per sticker with server timestamps and a rule that refuses an
+older `updatedAt`, a flush before sign-out.
+
+**When to revisit.** When a second device per account is supported, when an import reports a
+pack near the cap, or when a user loses favourites over a sign-out.
+
+---
+
+### A sticker pack's id can be claimed by whoever writes its manifest first
+
+**The smell.** `firestore.rules` lets any signed-in user create `stickerPacks/{packId}` for an
+id no document has yet, as long as the document names the writer as `ownerId`. A pack id is
+random and private until a sticker from the pack is sent: the message carries it
+(`MessageRepositoryImpl.sendStickerMessage`). A recipient with a modified client can then
+create the manifest under that id, in two situations:
+
+- **Before the owner's first upload.** The send and the backup both wait for a connection, so
+  the message can arrive before `StickerSyncWorker` has written the manifest. The owner's write
+  is then an update of someone else's document, which the rules refuse. That pack is never
+  backed up: every run ends in `Result.failure()`.
+- **After the owner deleted the pack.** Old messages still name the id.
+
+In both, *View pack* on those messages shows the other user's manifest. Its sticker ids, names
+and sizes are checked like any manifest's (`StickerManifest`), and no url is taken from it.
+
+**Why we haven't fixed it.** It needs a hostile client among the signed-in users, which the
+plan accepts for the sticker files too (`docs/plans/stickers-and-gifs.md`, open risk 2). Rules
+cannot tell who minted a random id. The fix changes what a pack's document id is: derive it
+from the owner, `sha256(ownerUid + ":" + localPackId)`, send that id in messages, and let the
+`create` rule recompute it with `hashing.sha256`. That is a change to the pack model, and its
+rule cannot be tested in this repo, which has no rules emulator.
+
+**When to revisit.** Before the user base stops being closed, or when a pack is found pending
+with a manifest of another owner under its id. Found by `/code-review` on step 6 of the plan.
 
 ---
 

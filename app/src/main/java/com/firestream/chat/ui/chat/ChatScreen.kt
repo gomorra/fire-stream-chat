@@ -155,6 +155,7 @@ import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
 import com.firestream.chat.ui.components.placeholderLabel
 import com.firestream.chat.ui.components.stickerLabel
+import com.firestream.chat.ui.stickers.StickerPackSheet
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -345,6 +346,8 @@ fun ChatScreen(
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
     // The sticker bubble that was tapped, while its sheet is open.
     var stickerSheetMessage by remember { mutableStateOf<Message?>(null) }
+    // The pack that sheet's "View pack" asked for, while its preview is open.
+    var viewedStickerPackId by remember { mutableStateOf<String?>(null) }
     // Swipe-to-react panel state
     var swipeReactMessage by remember { mutableStateOf<Message?>(null) }
     // ID of the message whose reaction chips should be scrolled into view after reacting
@@ -2303,8 +2306,14 @@ fun ChatScreen(
             message = target,
             isFavourite = stickerId != null && stickerId in uiState.overlays.favouriteStickerIds,
             onToggleFavourite = { if (stickerId != null) viewModel.toggleStickerFavourite(stickerId, target) },
+            onViewPack = target.stickerPackId?.let { packId -> { viewedStickerPackId = packId } },
             onDismiss = { stickerSheetMessage = null },
         )
+    }
+
+    // Pack preview — "View pack" in the sticker sheet.
+    viewedStickerPackId?.let { packId ->
+        StickerPackSheet(packId = packId, onDismiss = { viewedStickerPackId = null })
     }
 
     // Forward picker — the chat picker the share target uses, slid in over the

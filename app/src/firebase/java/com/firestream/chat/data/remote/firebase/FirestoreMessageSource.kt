@@ -58,6 +58,18 @@ private const val TAG = "FirestoreMessageSource"
  */
 internal const val SEND_ACK_TIMEOUT_MS = 30_000L
 
+/**
+ * Runs [block] under [SEND_ACK_TIMEOUT_MS]; past it, an [IOException] naming
+ * [what]. A Firestore write completes only on the server's acknowledgement, so
+ * without a connection it would wait for as long as the connection is missing.
+ */
+internal suspend fun awaitAck(what: String, block: suspend () -> Unit) {
+    withTimeoutOrNull(SEND_ACK_TIMEOUT_MS) {
+        block()
+        true
+    } ?: throw IOException("$what not acknowledged within $SEND_ACK_TIMEOUT_MS ms — offline?")
+}
+
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
@@ -217,14 +229,6 @@ class FirestoreMessageSource @Inject constructor(
 
     private fun messageRef(chatId: String, messageId: String) =
         firestore.collection("chats").document(chatId).collection("messages").document(messageId)
-
-    /** Runs [block] under [SEND_ACK_TIMEOUT_MS]; past it, an [IOException] naming [what]. */
-    private suspend fun awaitAck(what: String, block: suspend () -> Unit) {
-        withTimeoutOrNull(SEND_ACK_TIMEOUT_MS) {
-            block()
-            true
-        } ?: throw IOException("$what not acknowledged within $SEND_ACK_TIMEOUT_MS ms — offline?")
-    }
 
     /**
      * The tombstone of a message deleted while it was queued (offline outbox plan

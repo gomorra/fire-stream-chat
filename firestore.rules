@@ -101,6 +101,23 @@ service cloud.firestore {
       }
     }
 
+    // ── Sticker Packs ────────────────────────────────────────────
+    // One manifest per pack: the backup of its owner's library, and what
+    // "View pack" reads for anyone a sticker from it was sent to. A pack id is
+    // random, so only someone who was given it can get the document. Listing
+    // is the owner's alone, and so is every write.
+    match /stickerPacks/{packId} {
+      allow get:    if isAuth();
+      allow list:   if isOwner(resource.data.ownerId);
+      allow create: if isOwner(request.resource.data.ownerId);
+      allow update: if isOwner(resource.data.ownerId)
+                    && request.resource.data.ownerId == resource.data.ownerId;
+      // Deleting a manifest that was never written is allowed: the app deletes
+      // by id without knowing whether an upload ever landed.
+      allow delete: if isAuth()
+                    && (resource == null || resource.data.ownerId == request.auth.uid);
+    }
+
     // ── Invite Links ─────────────────────────────────────────────
     match /inviteLinks/{token} {
       allow read:   if isAuth();

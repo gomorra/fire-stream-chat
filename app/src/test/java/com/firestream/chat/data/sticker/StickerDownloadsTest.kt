@@ -4,8 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
-import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.data.repository.StickerRepositoryImpl
+import com.firestream.chat.data.repository.newStickerRepository
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.waJson
@@ -192,7 +191,7 @@ class StickerDownloadsTest {
     fun `a sticker received while a refused archive is undone keeps its file`() = runTest {
         val dao = spyk(db.stickerDao())
         val downloads = StickerDownloads(files, dao, httpClient)
-        val repository = StickerRepositoryImpl(dao, files, mockk<WhatsAppStickerFolder>(), mockk<PreferencesDataStore>())
+        val repository = newStickerRepository(dao, files)
         var receive: Deferred<File?>? = null
         coroutineScope {
             coEvery { dao.getStickers(any()) } coAnswers {

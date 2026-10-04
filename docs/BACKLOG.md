@@ -53,6 +53,34 @@ JVM test decodes a frame, and no screen sends either type before step 5, so chec
 6. A debug build opens a chat. `MessageBubble` is close to the dex register ceiling
    (`docs/GOTCHAS.md`), and only a device runs the verifier.
 
+### Sticker backup, restore and shared packs (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 6. JVM and Robolectric tests cover the merge rules, the
+worker, the restore and the sheets against mocked backends. Nothing ran against Firestore or on a
+device. **First deploy `firestore.rules`**: until then every manifest write is refused, the sync
+run fails, and the packs stay pending.
+1. Import a pack, then look at `stickerPacks/` in the Firestore console. There is one document per
+   pack, with `ownerId`, the pack's fields and a `stickers` array. An imported pack's `importKey`
+   reads percent-encoded (`wa%3A…%00…`).
+2. Add a favourite and delete a pack. The favourites document changes and the deleted pack's
+   document is gone.
+3. Clear the app's data, or reinstall, and sign in. Open a chat and the Stickers tab: the packs and
+   the favourites return, in their order. Each sticker shows a grey placeholder first and then its
+   picture. A sticker can be sent once its picture shows.
+4. Import the same WhatsApp stickers again after the restore. No second pack appears.
+5. On a fresh install, add a favourite before opening a chat for the first time. After the restore
+   there is still one favourites shelf, holding the new favourite and the restored ones.
+6. With a second account: receive a sticker sent from a pack, tap it, *View pack*. The sheet shows
+   the pack's name and stickers. *Add pack* puts it in the library, and the sheet then says the pack
+   is in your library. A sticker from the favourites or from the loose stickers has no *View pack*.
+7. View a pack whose owner has deleted it: the sheet says the pack is no longer available.
+8. The first backup of a large library. WorkManager stops a run after ten minutes, and the next run
+   continues with the files that are left. Check that the packs do end up synced, and how long it takes.
+9. Sign out and sign in as another account on the same phone. The first account's packs and recents
+   are gone, and the second account's packs arrive.
+10. A debug build opens a chat and the sticker sheet. `ChatScreen` gained code, and only a device runs
+    the dex verifier (`docs/GOTCHAS.md`).
+
 ### Stickers tab in the composer (2026-10-04)
 
 `docs/plans/stickers-and-gifs.md` step 5. JVM and Robolectric tests cover the search, the managers
@@ -772,12 +800,11 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
 
 ### Stickers & GIFs (4.6)
 
-Stickers are imported, sent from the composer's Stickers tab and shown in a chat. A GIF can
-be received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it
-are open:
+Stickers are imported, sent from the composer's Stickers tab and shown in a chat. Packs and
+favourites are saved under the account, and a received sticker's pack can be viewed and added.
+A GIF can be received and shown. The plan is `docs/plans/stickers-and-gifs.md`, and these
+parts of it are open:
 
-- **Backup and sharing of packs.** The library lives on one device. Packs and favourites are
-  not saved under the account, and a received sticker's pack cannot be viewed or added (step 6).
 - **Lottie stickers** (`.was`, `.tgs`) and **making a sticker from a photo** (steps 7–8).
 - **Sending a GIF.** Nothing in the app picks one yet. The keyboard route is step 9. The
   in-app GIFs tab and the online sticker catalogue are steps 10–11.

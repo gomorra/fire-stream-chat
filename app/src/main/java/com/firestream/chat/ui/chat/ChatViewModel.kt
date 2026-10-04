@@ -432,11 +432,9 @@ class ChatViewModel @Inject constructor(
 
     /** Flips a sticker's favourite state. [message] is the bubble it was tapped in, null for a pick from the library. */
     fun toggleStickerFavourite(stickerId: String, message: Message? = null) =
-        messageActions.setStickerFavourite(
-            stickerId = stickerId,
-            favourite = stickerId !in _uiState.value.overlays.favouriteStickerIds,
-            message = message,
-        ) { line -> viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent(line)) } }
+        messageActions.toggleStickerFavourite(stickerId, message) { line ->
+            viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent(line)) }
+        }
 
     // ── Image editing ──
 

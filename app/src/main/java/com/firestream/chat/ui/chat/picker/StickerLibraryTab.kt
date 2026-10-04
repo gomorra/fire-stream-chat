@@ -40,8 +40,8 @@ import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.util.StickerSearch
 import com.firestream.chat.ui.stickers.EmptyHint
+import com.firestream.chat.ui.components.LibraryStickerImage
 import com.firestream.chat.ui.stickers.StickerCell
-import com.firestream.chat.ui.stickers.StickerThumbnail
 import com.firestream.chat.ui.stickers.label
 
 /**
@@ -164,8 +164,7 @@ internal fun StickerLibraryTab(
             }
             items(stickers, key = { it.id }) { sticker ->
                 StickerCell(
-                    id = sticker.id,
-                    model = sticker.localPath,
+                    sticker = sticker,
                     isSelected = false,
                     onClick = onPick,
                     onLongClick = onToggleFavourite,
@@ -216,7 +215,7 @@ private fun ShelfButton(shelf: StickerShelf, selected: Boolean, onClick: () -> U
             when {
                 shelf.key == RECENTS_SHELF_KEY -> Icon(Icons.Default.History, null, Modifier.size(22.dp), tint)
                 shelf.kind == StickerPackKind.FAVOURITES -> Icon(Icons.Default.StarBorder, null, Modifier.size(22.dp), tint)
-                else -> StickerThumbnail(model = shelf.stickers.first().localPath, modifier = Modifier.size(26.dp))
+                else -> LibraryStickerImage(sticker = shelf.stickers.first(), modifier = Modifier.size(26.dp))
             }
         }
     }

@@ -2,7 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.38.0] — 2026-10-04
+## [UNRELEASED] [1.39.0] — 2026-10-04
+
+### Added
+
+- **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library.
+
+## [1.38.0] — 2026-10-04
 
 ### Added
 

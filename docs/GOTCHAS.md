@@ -186,6 +186,22 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (the re-entry force-write in `RealtimePresenceSource.startPresence`) are gated on the
   last `.info/connected` value; the listener itself writes online on reconnect. Regression:
   `RealtimePresenceSourceTest.startPresence re-entry after a disconnect writes nothing until the reconnect`.
+- **A waiter on shared in-flight work must not inherit the first caller's cancellation.**
+  `CompletableDeferred.completeExceptionally` with a `CancellationException` makes every
+  `await()` throw that cancellation, inside coroutines nobody cancelled. A `LaunchedEffect`
+  then ends without a word, and a loop over a chat's downloads stops at that message. It shows
+  as soon as a UI scope shares a flight with longer-lived callers: a sticker cell that scrolls
+  away, and the chat-open scan waiting for the same download. `SingleFlight.run` calls
+  `currentCoroutineContext().ensureActive()` when its `await()` is cancelled, and runs the
+  block itself when the cancellation was not its own. A hand-written copy of the idiom needs
+  the same check. Regression:
+  `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
+- **A Firestore listener on a parallel executor can deliver snapshots out of order.**
+  `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
+  `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
+  differences then sees a removal before the addition it follows. Map off the main thread on
+  `Dispatchers.Default.limitedParallelism(1).asExecutor()`, which keeps the order
+  (`FirestoreStickerPackSource`).
 - **A snapshot filter that depends on the clock needs its own timer.** Filtering
   `typingUsers` by age inside the Firestore listener only re-runs when the document
   changes, so an entry whose typing-off write never landed (writer offline or killed)
@@ -238,6 +254,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   indicator — fires it) and must not overwrite a newer local value with them. Hit when the chat
   preview became a newer-only transaction: `ChatDao.upsertRemote` keeps a strictly newer local
   preview. Regression: `ChatDaoUpsertRemoteTest.upsertRemote keeps a local preview newer than the snapshot's`.
+- **A document missing from a Firestore query snapshot was not necessarily deleted.** A
+  listener's first snapshot can come from the local cache, which holds whatever was read
+  before and nothing after a reinstall. A mirror that deletes every local row the snapshot
+  lacks wipes its table on such a snapshot. A snapshot that is from the server can still be
+  older than a write this device made a moment later, when the collector is slow. So a
+  mirror deletes only on a `DocumentChange.Type.REMOVED` change, which is sent for a document
+  that was in the result and left it, and only a row with no local changes
+  (`FirestoreStickerPackSource.observeOwnPacks`, `StickerDao.removeIfSynced`). Such a flow
+  emits differences, so it needs `buffer(Channel.UNLIMITED)`: a `trySend` into a full default
+  buffer drops a difference that never comes again.
 - **Room's `@Upsert` with a partial entity keeps the columns the object does not carry; a
   `REPLACE` insert does not.** `OnConflictStrategy.REPLACE` deletes the row and inserts the
   new one, so every column the new object lacks goes back to its default. `messages` is split

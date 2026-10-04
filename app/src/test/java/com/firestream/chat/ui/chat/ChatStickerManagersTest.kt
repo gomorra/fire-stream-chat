@@ -53,7 +53,7 @@ class ChatStickerManagersTest {
     private val stickerRepository = mockk<StickerRepository>(relaxed = true) {
         every { observePacks() } returns packsFlow
         every { observeRecents() } returns recentsFlow
-        coEvery { setFavourite(any(), any()) } returns Result.success(Unit)
+        coEvery { toggleFavourite(any()) } returns Result.success(true)
     }
     private val messageRepository = FakeMessageRepository()
     private val uiState = MutableStateFlow(ChatUiState(session = SessionState(currentUserId = "uid1")))
@@ -159,52 +159,75 @@ class ChatStickerManagersTest {
 
     @Test
     fun `a library sticker is favourited without a download`() = runTest(mainDispatcherRule.testDispatcher) {
+        val message = Message(id = "m1", chatId = "chat1", type = MessageType.STICKER, stickerId = "cat")
+        var fetches = 0
+        messageRepository.ensureLocalFileResult = { fetches++; Result.success("/stickers/cat.webp") }
         var line: String? = null
 
-        actions().setStickerFavourite("cat", favourite = true) { line = it }
+        actions().toggleStickerFavourite("cat", message) { line = it }
         advanceUntilIdle()
 
-        coVerify { stickerRepository.setFavourite("cat", true) }
+        coVerify(exactly = 1) { stickerRepository.toggleFavourite("cat") }
+        assertEquals(0, fetches)
         assertEquals("Added to favourites", line)
     }
 
     @Test
-    fun `a received sticker without a local file is fetched before it is favourited`() =
+    fun `a received sticker the library does not hold yet is fetched, and then favourited`() =
         runTest(mainDispatcherRule.testDispatcher) {
             val message = Message(id = "m1", chatId = "chat1", type = MessageType.STICKER, stickerId = "cat")
             var fetched: Message? = null
             messageRepository.ensureLocalFileResult = { fetched = it; Result.success("/stickers/cat.webp") }
+            coEvery { stickerRepository.toggleFavourite("cat") } returnsMany listOf(
+                Result.failure(NoSuchElementException("That sticker is not in the library")),
+                Result.success(true),
+            )
+            var line: String? = null
 
-            actions().setStickerFavourite("cat", favourite = true, message = message) {}
+            actions().toggleStickerFavourite("cat", message) { line = it }
             advanceUntilIdle()
 
             assertEquals(message, fetched)
-            coVerify { stickerRepository.setFavourite("cat", true) }
+            coVerify(exactly = 2) { stickerRepository.toggleFavourite("cat") }
+            assertEquals("Added to favourites", line)
         }
 
     @Test
     fun `a refused sticker is not favourited`() = runTest(mainDispatcherRule.testDispatcher) {
         val message = Message(id = "m1", chatId = "chat1", type = MessageType.STICKER, stickerId = "cat")
+        coEvery { stickerRepository.toggleFavourite("cat") } returns Result.failure(NoSuchElementException("not held"))
         var line: String? = null
         // The fake's default: ensureLocalFile fails.
 
-        actions().setStickerFavourite("cat", favourite = true, message = message) { line = it }
+        actions().toggleStickerFavourite("cat", message) { line = it }
         advanceUntilIdle()
 
-        coVerify(exactly = 0) { stickerRepository.setFavourite(any(), any()) }
+        coVerify(exactly = 1) { stickerRepository.toggleFavourite("cat") }
         assertEquals("Couldn't save this sticker", line)
     }
 
     @Test
-    fun `taking a sticker out of the favourites needs no local file`() = runTest(mainDispatcherRule.testDispatcher) {
-        val message = Message(id = "m1", chatId = "chat1", type = MessageType.STICKER, stickerId = "cat")
-        var line: String? = null
+    fun `a favourite is taken out by the same toggle, and the repository says which way it went`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            coEvery { stickerRepository.toggleFavourite("cat") } returns Result.success(false)
+            var line: String? = null
 
-        actions().setStickerFavourite("cat", favourite = false, message = message) { line = it }
-        advanceUntilIdle()
+            actions().toggleStickerFavourite("cat") { line = it }
+            advanceUntilIdle()
 
-        coVerify { stickerRepository.setFavourite("cat", false) }
-        assertEquals("Removed from favourites", line)
-        assertNull(uiState.value.session.error)
-    }
+            assertEquals("Removed from favourites", line)
+            assertNull(uiState.value.session.error)
+        }
+
+    @Test
+    fun `a library sticker that cannot be toggled says so, without a fetch to blame`() =
+        runTest(mainDispatcherRule.testDispatcher) {
+            coEvery { stickerRepository.toggleFavourite("cat") } returns Result.failure(IllegalStateException("disk full"))
+            var line: String? = null
+
+            actions().toggleStickerFavourite("cat") { line = it }
+            advanceUntilIdle()
+
+            assertEquals("Couldn't update favourites", line)
+        }
 }

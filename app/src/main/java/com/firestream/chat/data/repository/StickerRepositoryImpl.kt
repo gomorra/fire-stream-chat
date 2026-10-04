@@ -1,20 +1,25 @@
 // region: AGENT-NOTE
 // Responsibility: The sticker library on this device — packs, their stickers,
-//   favourites and recents — and the import of sticker files and pack archives
-//   into it. Nothing here uploads or restores: a sticker's file reaches the
-//   backend when it is first sent (OutboxSender), and a received one arrives
-//   through StickerDownloads.
+//   favourites and recents — the import of sticker files and pack archives
+//   into it, and the view and install of a pack someone else shared. Every pack
+//   change asks for its backup, and observing the packs keeps the restore running.
 // Owns: which pack an imported sticker joins (its WhatsApp metadata, an archive's
 //   title, else the caller's loose pack or SAVED); the import key that lets a
-//   second import find the same pack; the import counts. One import runs at a time.
+//   second import find the same pack, and the one an installed copy is found by;
+//   the import counts; the fetch of a sticker's file when its row came first.
+//   One import runs at a time.
 // Collaborators: StickerDao (rows, and every multi-statement write as one
 //   transaction), StickerFiles (the content-addressed files), StickerPackArchive
 //   and WaStickerMetadata (untrusted input), WhatsAppStickerFolder (the folder
-//   listing), PreferencesDataStore (recents, device-only).
+//   listing), PreferencesDataStore (recents, device-only), StickerSyncScheduler
+//   (the backup run), StickerLibrarySync (the restore), StickerPackSource and
+//   StickerManifest (a viewed pack), StickerObjectSource and StickerDownloads
+//   (a missing file, found by its id and checked against it).
 // Don't put here: parsing of a file or an archive (domain/util/WebpContainer,
 //   data/sticker/), sending a sticker (MessageRepositoryImpl — "The repository
-//   decides who a send is for", docs/PATTERNS.md), anything a screen picks or
-//   launches (the composable owns its launchers).
+//   decides who a send is for", docs/PATTERNS.md), the upload of a pack
+//   (StickerSyncWorker) or the merge of a restored one (StickerDao.applyRemotePack),
+//   anything a screen picks or launches (the composable owns its launchers).
 // endregion
 
 package com.firestream.chat.data.repository
@@ -23,7 +28,13 @@ import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.StickerEntity
 import com.firestream.chat.data.local.entity.StickerPackEntity
+import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.remote.source.StickerObjectSource
+import com.firestream.chat.data.remote.source.StickerPackSource
+import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.data.sticker.StickerFiles
+import com.firestream.chat.data.sticker.StickerLibrarySync
+import com.firestream.chat.data.sticker.StickerManifest
 import com.firestream.chat.data.sticker.StickerPackArchive
 import com.firestream.chat.data.sticker.StoredSticker
 import com.firestream.chat.data.sticker.WaStickerMetadata
@@ -31,11 +42,13 @@ import com.firestream.chat.data.sticker.WhatsAppStickerFolder
 import com.firestream.chat.data.sticker.cleanStickerText
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.util.resultOf
+import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
+import com.firestream.chat.domain.model.StickerPackPreview
 import com.firestream.chat.domain.model.WhatsAppStickerFile
 import com.firestream.chat.domain.repository.StickerRepository
 import kotlinx.coroutines.Dispatchers
@@ -47,11 +60,15 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,6 +78,12 @@ class StickerRepositoryImpl @Inject constructor(
     private val stickerFiles: StickerFiles,
     private val whatsAppFolder: WhatsAppStickerFolder,
     private val preferences: PreferencesDataStore,
+    private val stickerDownloads: StickerDownloads,
+    private val stickerObjectSource: StickerObjectSource,
+    private val packSource: StickerPackSource,
+    private val librarySync: StickerLibrarySync,
+    private val syncScheduler: StickerSyncScheduler,
+    private val authSource: AuthSource,
 ) : StickerRepository {
 
     /**
@@ -70,13 +93,25 @@ class StickerRepositoryImpl @Inject constructor(
      */
     private val importLock = Mutex()
 
-    override fun observePacks(): Flow<List<StickerPack>> =
+    /** A grid shows dozens of cells at once, and each may ask for its file. */
+    private val fetches = Semaphore(FETCHES_AT_ONCE)
+
+    /**
+     * Stickers whose object the backend said it does not hold. A cell asks every
+     * time it is shown, and this answer does not change while the app runs.
+     */
+    private val notOnBackend: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+    override fun observePacks(): Flow<List<StickerPack>> = merge(
         combine(stickerDao.observePacks(), stickerDao.observePackStickers()) { packs, rows ->
             val stickersByPack = rows.groupBy({ it.packId }, { it.sticker })
             packs.map { pack -> pack.toDomain(stickersByPack[pack.id].orEmpty().mapNotNull { it.toSticker() }) }
         }.distinctUntilChanged()
             // Every emission maps the whole library, which must not happen on the collector's main thread.
-            .flowOn(Dispatchers.Default)
+            .flowOn(Dispatchers.Default),
+        // Emits nothing. Collecting it is what keeps the restore listening.
+        librarySync.whileObserved,
+    )
 
     @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeRecents(): Flow<List<Sticker>> =
@@ -95,7 +130,7 @@ class StickerRepositoryImpl @Inject constructor(
         resultOf {
             withContext(Dispatchers.IO) {
                 importLock.withLock { import(uris.distinct(), loosePackName?.let(::cleanStickerText)) }
-            }
+            }.also { syncScheduler.syncIfPending() }
         }
 
     private suspend fun import(uris: List<String>, loosePackName: String?): StickerImportResult {
@@ -185,16 +220,12 @@ class StickerRepositoryImpl @Inject constructor(
         else -> Target.SAVED
     }
 
-    override suspend fun setFavourite(stickerId: String, favourite: Boolean): Result<Unit> = resultOf {
+    override suspend fun toggleFavourite(stickerId: String): Result<Boolean> = resultOf {
         val now = System.currentTimeMillis()
-        if (favourite) {
-            if (!stickerDao.addFavourite(newPack(Target.FAVOURITES, now), stickerId, now)) {
-                throw NoSuchElementException("That sticker is not in the library")
-            }
-        } else {
-            stickerDao.getPackByImportKey(Target.FAVOURITES.importKey)
-                ?.let { stickerDao.removeFromPack(it.id, listOf(stickerId), now) }
-        }
+        val isFavourite = stickerDao.toggleFavourite(newPack(Target.FAVOURITES, now), stickerId, now)
+            ?: throw NoSuchElementException("That sticker is not in the library")
+        syncScheduler.syncIfPending()
+        isFavourite
     }
 
     override suspend fun renamePack(packId: String, name: String): Result<Unit> = resultOf {
@@ -204,14 +235,18 @@ class StickerRepositoryImpl @Inject constructor(
             "This pack cannot be renamed"
         }
         stickerDao.renamePack(packId, cleaned, System.currentTimeMillis())
+        syncScheduler.syncIfPending()
     }
 
     override suspend fun reorderPacks(packIds: List<String>): Result<Unit> = resultOf {
         stickerDao.reorderPacks(packIds, System.currentTimeMillis())
+        syncScheduler.syncIfPending()
     }
 
     override suspend fun deletePack(packId: String): Result<Unit> = resultOf {
-        stickerDao.deletePack(packId)
+        // The tombstone is what tells the backup to delete its copy. Without a backup nothing would collect it.
+        if (packSource.isSupported) stickerDao.deletePack(packId, System.currentTimeMillis()) else stickerDao.deletePackNow(packId)
+        syncScheduler.syncIfPending()
     }
 
     override suspend fun moveStickers(stickerIds: List<String>, fromPackId: String, toPackId: String): Result<Unit> =
@@ -220,14 +255,93 @@ class StickerRepositoryImpl @Inject constructor(
             if (!stickerDao.moveBetweenPacks(fromPackId, toPackId, stickerIds, System.currentTimeMillis())) {
                 throw NoSuchElementException(PACK_GONE)
             }
+            syncScheduler.syncIfPending()
         }
 
     override suspend fun removeStickers(packId: String, stickerIds: List<String>): Result<Unit> = resultOf {
         stickerDao.removeFromPack(packId, stickerIds, System.currentTimeMillis())
+        syncScheduler.syncIfPending()
     }
 
     override suspend fun markUsed(stickerId: String) {
         if (StickerFiles.isValidId(stickerId)) preferences.addRecentSticker(stickerId)
+    }
+
+    /**
+     * A restored pack, and a pack added from someone else, bring rows whose
+     * files are not here. The file is fetched from the object its id names,
+     * never from a url a manifest or a message carried, and [StickerDownloads]
+     * stores it only when its bytes hash to that id.
+     *
+     * A cell that scrolls away cancels its own fetch, so a fling through a large
+     * pack leaves no queue behind. The row's `remoteUrl` is not written here:
+     * `StickerUploads` finds the object again at the sticker's first send.
+     */
+    override suspend fun ensureFile(sticker: Sticker): Boolean {
+        if (!StickerFiles.isValidId(sticker.id) || sticker.id in notOnBackend) return false
+        return try {
+            withContext(Dispatchers.IO) {
+                if (stickerFiles.fileFor(sticker.id, sticker.format).isFile) return@withContext true
+                fetches.withPermit {
+                    val url = stickerDao.getSticker(sticker.id)?.remoteUrl
+                        ?: stickerObjectSource.urlIfPresent(sticker.id, sticker.format.extension)
+                    if (url == null) notOnBackend += sticker.id
+                    url != null && stickerDownloads.ensureLocal(sticker.id, url) != null
+                }
+            }
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            false
+        }
+    }
+
+    override suspend fun viewPack(packId: String): Result<StickerPackPreview> = resultOf {
+        // The id comes from a message, and it becomes a document path.
+        if (!StickerManifest.isValidPackId(packId)) throw NoSuchElementException(PACK_UNAVAILABLE)
+        val remote = packSource.fetchPack(packId) ?: throw NoSuchElementException(PACK_UNAVAILABLE)
+        val pack = StickerManifest.packOf(remote)
+        val stickers = StickerManifest.stickersOf(remote, System.currentTimeMillis()).mapNotNull { it.toSticker() }
+        if (stickers.isEmpty()) throw NoSuchElementException(PACK_UNAVAILABLE)
+        // A copy of a copy still names the pack it all started from.
+        val rootPackId = pack.originPackId ?: packId
+        StickerPackPreview(
+            packId = packId,
+            rootPackId = rootPackId,
+            name = pack.name.ifEmpty { DEFAULT_PACK_NAME },
+            publisher = pack.publisher,
+            stickers = stickers,
+            isInLibrary = remote.ownerId == authSource.currentUserId ||
+                stickerDao.getPack(rootPackId) != null ||
+                stickerDao.getPackByImportKey(installedKey(rootPackId)) != null,
+        )
+    }
+
+    override suspend fun installPack(preview: StickerPackPreview): Result<Unit> = resultOf {
+        val now = System.currentTimeMillis()
+        val pack = StickerPackEntity(
+            id = UUID.randomUUID().toString(),
+            name = preview.name,
+            publisher = preview.publisher,
+            kind = StickerPackKind.INSTALLED.name,
+            originPackId = preview.rootPackId,
+            importKey = installedKey(preview.rootPackId),
+            sortOrder = 0,
+            createdAt = now,
+            updatedAt = now,
+        )
+        val stickers = preview.stickers.map { sticker ->
+            StickerEntity(
+                id = sticker.id,
+                format = sticker.format.name,
+                width = sticker.width,
+                height = sticker.height,
+                isAnimated = sticker.isAnimated,
+                emojis = sticker.emojis,
+                createdAt = now,
+            )
+        }
+        // False: a copy is there already, which is what the caller wanted.
+        if (stickerDao.installPack(pack, stickers)) syncScheduler.syncIfPending()
     }
 
     private suspend fun requirePack(packId: String): StickerPackEntity =
@@ -293,5 +407,13 @@ class StickerRepositoryImpl @Inject constructor(
     private companion object {
         const val DEFAULT_PACK_NAME = "Stickers"
         const val PACK_GONE = "That pack no longer exists"
+        const val PACK_UNAVAILABLE = "This pack is no longer available"
+        const val FETCHES_AT_ONCE = 4
+
+        /**
+         * The import key of the copy of the pack [rootPackId]. It keeps a pack from
+         * being added twice, and it is backed up: the format must not change.
+         */
+        fun installedKey(rootPackId: String) = "installed:$rootPackId"
     }
 }

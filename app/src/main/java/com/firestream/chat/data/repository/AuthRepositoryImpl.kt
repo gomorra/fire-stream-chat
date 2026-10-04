@@ -5,7 +5,8 @@
 // Collaborators: AuthSource (interface — Firebase impl in firebase/, PocketBase
 //   impl bridges Firebase ID token → PB session), FirebaseMessaging (FCM tokens —
 //   both flavors keep FCM device-side), AppDatabase + SignalDatabase (clear on
-//   sign-out), SignalManager (re-init on sign-in), UserDao (cache the new user).
+//   sign-out), SignalManager (re-init on sign-in), UserDao (cache the new user),
+//   StickerLibrarySync (fences the sign-out against a sticker restore).
 // Don't put here: OTP send (FirebasePhoneAuth helper consumed by AuthViewModel),
 //   profile-edit operations (UserRepositoryImpl), session presence
 //   (PresenceSource), key-bundle exchange (KeySource).
@@ -20,6 +21,7 @@ import com.firestream.chat.data.local.SignalDatabase
 import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.source.AuthSource
+import com.firestream.chat.data.sticker.StickerLibrarySync
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.messaging.FirebaseMessaging
@@ -38,7 +40,8 @@ class AuthRepositoryImpl @Inject constructor(
     private val signalDatabase: SignalDatabase,
     private val userDao: UserDao,
     private val signalManager: SignalManager,
-    private val firebaseMessaging: FirebaseMessaging
+    private val firebaseMessaging: FirebaseMessaging,
+    private val stickerLibrarySync: StickerLibrarySync,
 ) : AuthRepository {
 
     override val currentUserId: String?
@@ -159,8 +162,12 @@ class AuthRepositoryImpl @Inject constructor(
     }
 
     override suspend fun signOut() {
-        database.clearAllTables()
-        signalDatabase.clearAllTables()
-        authSource.signOut()
+        // Fenced: a sticker restore that is still listening must not write this
+        // user's packs back into the tables the next user starts from.
+        stickerLibrarySync.signingOut {
+            database.clearAllTables()
+            signalDatabase.clearAllTables()
+            authSource.signOut()
+        }
     }
 }

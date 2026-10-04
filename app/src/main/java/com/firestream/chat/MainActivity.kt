@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -20,9 +21,12 @@ import kotlinx.coroutines.delay
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.share.SharedContentHolder
+import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.navigation.DeepLinkRequest
 import com.firestream.chat.navigation.FireStreamNavGraph
+import com.firestream.chat.ui.components.LocalStickerFetcher
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
@@ -46,6 +50,12 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var sharedContentHolder: SharedContentHolder
+
+    @Inject
+    lateinit var stickerRepository: StickerRepository
+
+    // One instance for the activity's life, so providing it never recomposes the tree.
+    private val stickerFetcher: suspend (Sticker) -> Boolean = { stickerRepository.ensureFile(it) }
 
     // Keeps the system splash on screen until the launch-restore has settled
     // (restored chat/list revealed, or nothing to restore). Flipped by
@@ -99,14 +109,17 @@ class MainActivity : ComponentActivity() {
                 AppTheme.SYSTEM -> isSystemInDarkTheme()
             }
             FireStreamTheme(darkTheme = useDark) {
-                FireStreamNavGraph(
-                    deepLinkRequest = deepLinkRequest.value,
-                    isShareIntent = isShareIntent,
-                    openSettings = openSettings,
-                    focusUpdate = focusUpdate,
-                    preferencesDataStore = preferencesDataStore,
-                    onLaunchSettled = { launchSettled.value = true }
-                )
+                // Every screen that shows a library sticker fetches a missing file through this.
+                CompositionLocalProvider(LocalStickerFetcher provides stickerFetcher) {
+                    FireStreamNavGraph(
+                        deepLinkRequest = deepLinkRequest.value,
+                        isShareIntent = isShareIntent,
+                        openSettings = openSettings,
+                        focusUpdate = focusUpdate,
+                        preferencesDataStore = preferencesDataStore,
+                        onLaunchSettled = { launchSettled.value = true }
+                    )
+                }
             }
         }
     }

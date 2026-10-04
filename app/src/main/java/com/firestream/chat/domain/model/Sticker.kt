@@ -9,8 +9,11 @@ enum class StickerFormat(val extension: String, val mimeType: String) {
  * One sticker in the library: an immutable file named by the SHA-256 of its bytes.
  *
  * [id] is that hash in lowercase hex, so two imports of the same bytes are one
- * sticker. [localPath] is where the file lives on this device. [emojis] are the
- * tags the sticker was imported with, the first of which stands for it in text.
+ * sticker. [localPath] is where the file lives on this device. A sticker that
+ * came back with a restored pack, or with a pack added from someone else, has
+ * its row before its file, so the path may name a file that is not there yet.
+ * [emojis] are the tags the sticker was imported with, the first of which
+ * stands for it in text.
  */
 data class Sticker(
     val id: String,

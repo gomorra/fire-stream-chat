@@ -5,8 +5,18 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.local.AppDatabase
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.data.local.entity.StickerEntity
+import com.firestream.chat.data.local.entity.StickerSyncState
+import com.firestream.chat.data.remote.source.RemoteSticker
+import com.firestream.chat.data.remote.source.RemoteStickerPack
+import com.firestream.chat.data.remote.source.StickerObjectSource
+import com.firestream.chat.data.remote.source.StickerPackSource
+import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
+import com.firestream.chat.data.worker.StickerSyncScheduler
+import com.firestream.chat.domain.model.Sticker
+import com.firestream.chat.domain.model.StickerFormat
 import com.firestream.chat.domain.model.StickerImportResult
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
@@ -15,14 +25,27 @@ import com.firestream.chat.test.WebpFixtures.sticker
 import com.firestream.chat.test.WebpFixtures.waJson
 import com.firestream.chat.test.WebpFixtures.zip
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import okhttp3.Call
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -30,6 +53,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.io.File
+import java.io.IOException
 
 /**
  * The library against a real in-memory database and a real sticker directory:
@@ -47,6 +71,10 @@ class StickerRepositoryImplTest {
     private val recentIds = MutableStateFlow(emptyList<String>())
     private val preferences = mockk<PreferencesDataStore>()
     private val folder = mockk<WhatsAppStickerFolder>()
+    private val objectSource = mockk<StickerObjectSource>()
+    private val packSource = mockk<StickerPackSource> { every { isSupported } returns true }
+    private val scheduler = mockk<StickerSyncScheduler>(relaxed = true)
+    private val httpClient = mockk<OkHttpClient>()
 
     @Before
     fun setUp() {
@@ -58,8 +86,43 @@ class StickerRepositoryImplTest {
         coEvery { preferences.addRecentSticker(any()) } answers {
             recentIds.value = listOf(firstArg<String>()) + (recentIds.value - firstArg<String>())
         }
-        repository = StickerRepositoryImpl(db.stickerDao(), files, folder, preferences)
+        repository = newStickerRepository(
+            stickerDao = db.stickerDao(),
+            stickerFiles = files,
+            whatsAppFolder = folder,
+            preferences = preferences,
+            stickerDownloads = StickerDownloads(files, db.stickerDao(), httpClient),
+            stickerObjectSource = objectSource,
+            packSource = packSource,
+            syncScheduler = scheduler,
+        )
     }
+
+    /** Makes every download answer with [body]. */
+    private fun serve(body: ByteArray) {
+        every { httpClient.newCall(any()) } answers {
+            mockk<Call> {
+                every { execute() } returns Response.Builder()
+                    .request(firstArg<Request>())
+                    .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body(body.toResponseBody())
+                    .build()
+            }
+        }
+    }
+
+    private fun remoteSticker(id: String, format: String = "WEBP") =
+        RemoteSticker(id = id, format = format, width = 512, height = 512, isAnimated = false, emojis = listOf("😺"))
+
+    private fun remotePack(
+        id: String,
+        ownerId: String = "someone",
+        originPackId: String? = null,
+        stickers: List<RemoteSticker>,
+    ) = RemoteStickerPack(
+        id = id, ownerId = ownerId, name = "Shared cats", publisher = "Ana", kind = "USER", originPackId = originPackId,
+        importKey = "wa:their-key", sortOrder = 4, createdAt = 10L, updatedAt = 20L, stickers = stickers,
+    )
 
     @After
     fun tearDown() {
@@ -322,24 +385,218 @@ class StickerRepositoryImplTest {
         repository.importFrom(listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, cats)))).getOrThrow()
         val (first, second) = pack("Cats").stickers.map { it.id }
 
-        repository.setFavourite(first, true).getOrThrow()
-        repository.setFavourite(second, true).getOrThrow()
-        repository.setFavourite(second, true).getOrThrow()
+        assertTrue(repository.toggleFavourite(first).getOrThrow())
+        assertTrue(repository.toggleFavourite(second).getOrThrow())
 
         val favourites = packs().single { it.kind == StickerPackKind.FAVOURITES }
         assertEquals(listOf(second, first), favourites.stickers.map { it.id })
         assertEquals("the sticker stays in its own pack", 2, pack("Cats").stickers.size)
 
-        repository.setFavourite(second, false).getOrThrow()
+        assertFalse(repository.toggleFavourite(second).getOrThrow())
 
         assertEquals(listOf(first), packs().single { it.kind == StickerPackKind.FAVOURITES }.stickers.map { it.id })
     }
 
     @Test
     fun `a sticker the library does not have cannot be a favourite`() = runTest {
-        assertTrue(repository.setFavourite("f".repeat(64), true).isFailure)
-        assertTrue(repository.setFavourite("f".repeat(64), false).isSuccess)
+        assertTrue(repository.toggleFavourite("f".repeat(64)).isFailure)
         assertEquals(emptyList<StickerPack>(), packs())
+    }
+
+    // --- Backup ---
+
+    @Test
+    fun `a deleted pack leaves a tombstone for the backup, and a new import of its source starts a new pack`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val deleted = pack("Cats").id
+
+        repository.deletePack(deleted).getOrThrow()
+
+        assertEquals(emptyList<StickerPack>(), packs())
+        val tombstone = db.stickerDao().getPackRow(deleted)!!
+        assertEquals(StickerSyncState.DELETED.name, tombstone.syncState)
+        assertNull("the key is free for the next import", tombstone.importKey)
+
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        assertEquals(1, pack("Cats").stickers.size)
+    }
+
+    @Test
+    fun `a backend that keeps no packs gets no tombstone`() = runTest {
+        every { packSource.isSupported } returns false
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)))).getOrThrow()
+        val deleted = pack("Cats").id
+
+        repository.deletePack(deleted).getOrThrow()
+
+        assertNull(db.stickerDao().getPackRow(deleted))
+    }
+
+    @Test
+    fun `every change to a pack asks for its backup`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, dogs)))).getOrThrow()
+        val cats = pack("Cats")
+        val dogs = pack("Dogs")
+        val sticker = cats.stickers.single().id
+
+        repository.toggleFavourite(sticker).getOrThrow()
+        repository.renamePack(cats.id, "Kittens").getOrThrow()
+        repository.reorderPacks(listOf(dogs.id, cats.id)).getOrThrow()
+        repository.moveStickers(listOf(sticker), cats.id, dogs.id).getOrThrow()
+        repository.removeStickers(dogs.id, listOf(sticker)).getOrThrow()
+        repository.deletePack(cats.id).getOrThrow()
+
+        // The import, and the six edits.
+        coVerify(exactly = 7) { scheduler.syncIfPending() }
+    }
+
+    // --- A sticker whose row came before its file ---
+
+    private suspend fun restoredRow(bytes: ByteArray): Sticker {
+        val id = StickerFiles.sha256Hex(bytes)
+        db.stickerDao().insertStickers(
+            listOf(StickerEntity(id = id, format = "WEBP", width = 512, height = 512, isAnimated = false, emojis = emptyList(), createdAt = 1L))
+        )
+        return Sticker(id, StickerFormat.WEBP, 512, 512, false, emptyList(), files.fileFor(id, StickerFormat.WEBP).absolutePath)
+    }
+
+    @Test
+    fun `a missing file is fetched from the object its id names`() = runTest {
+        val bytes = sticker(1, cats)
+        val restored = restoredRow(bytes)
+        coEvery { objectSource.urlIfPresent(restored.id, "webp") } returns OBJECT_URL
+        serve(bytes)
+
+        assertTrue(repository.ensureFile(restored))
+
+        assertTrue(File(restored.localPath).isFile)
+        assertNull("the url on the row is StickerUploads' to write", db.stickerDao().getSticker(restored.id)!!.remoteUrl)
+        // Held now: nobody is asked a second time.
+        assertTrue(repository.ensureFile(restored))
+        coVerify(exactly = 1) { objectSource.urlIfPresent(any(), any()) }
+    }
+
+    @Test
+    fun `an object that serves other bytes gives no file and no url`() = runTest {
+        val restored = restoredRow(sticker(1, cats))
+        coEvery { objectSource.urlIfPresent(restored.id, "webp") } returns OBJECT_URL
+        serve(sticker(2, dogs))
+
+        assertFalse(repository.ensureFile(restored))
+
+        assertEquals(emptyList<String>(), storedFiles())
+        assertNull(db.stickerDao().getSticker(restored.id)!!.remoteUrl)
+    }
+
+    @Test
+    fun `a failed lookup, a sticker the backend does not hold and an id that is no hash all answer false`() = runTest {
+        val restored = restoredRow(sticker(1, cats))
+        coEvery { objectSource.urlIfPresent(restored.id, "webp") } throws IOException("offline")
+        assertFalse(repository.ensureFile(restored))
+
+        coEvery { objectSource.urlIfPresent(restored.id, "webp") } returns null
+        assertFalse("a failed lookup is not remembered", repository.ensureFile(restored))
+        coVerify(exactly = 2) { objectSource.urlIfPresent(any(), any()) }
+
+        assertFalse("an object that is not there is not asked for again", repository.ensureFile(restored))
+        coVerify(exactly = 2) { objectSource.urlIfPresent(any(), any()) }
+
+        assertFalse(repository.ensureFile(restored.copy(id = "../../databases/app")))
+        verify(exactly = 0) { httpClient.newCall(any()) }
+    }
+
+    @Test
+    fun `a cell that scrolls away cancels its own fetch, and the next cell fetches the file`() = runTest {
+        val bytes = sticker(1, cats)
+        val restored = restoredRow(bytes)
+        val asked = CompletableDeferred<Unit>()
+        coEvery { objectSource.urlIfPresent(restored.id, "webp") } coAnswers {
+            asked.complete(Unit)
+            awaitCancellation()
+        } andThen OBJECT_URL
+        serve(bytes)
+
+        val cell = launch { repository.ensureFile(restored) }
+        asked.await()
+        cell.cancelAndJoin()
+
+        assertTrue(cell.isCancelled)
+        assertTrue(repository.ensureFile(restored))
+        assertTrue(File(restored.localPath).isFile)
+    }
+
+    // --- A pack someone shared ---
+
+    @Test
+    fun `a viewed pack lists its valid stickers, and adding it makes an INSTALLED copy that is backed up`() = runTest {
+        val first = "a".repeat(64)
+        val second = "b".repeat(64)
+        coEvery { packSource.fetchPack("their-pack") } returns remotePack(
+            id = "their-pack",
+            stickers = listOf(remoteSticker(first), remoteSticker("../escape"), remoteSticker(second), remoteSticker("c".repeat(64), "TGS")),
+        )
+
+        val preview = repository.viewPack("their-pack").getOrThrow()
+
+        assertEquals("Shared cats", preview.name)
+        assertEquals("Ana", preview.publisher)
+        assertEquals(listOf(first, second), preview.stickers.map { it.id })
+        assertEquals("their-pack", preview.rootPackId)
+        assertFalse(preview.isInLibrary)
+        assertEquals("viewing writes nothing", emptyList<StickerPack>(), packs())
+
+        repository.installPack(preview).getOrThrow()
+
+        val installed = packs().single()
+        assertEquals(StickerPackKind.INSTALLED, installed.kind)
+        assertEquals("their-pack", installed.originPackId)
+        assertEquals(listOf(first, second), installed.stickers.map { it.id })
+        assertFalse("a copy has an id of its own, which only this user writes", installed.id == "their-pack")
+        assertEquals(StickerSyncState.PENDING.name, db.stickerDao().getPackRow(installed.id)!!.syncState)
+        coVerify(exactly = 1) { scheduler.syncIfPending() }
+    }
+
+    @Test
+    fun `a pack that is already installed says so, and adding it again changes nothing`() = runTest {
+        coEvery { packSource.fetchPack("their-pack") } returns remotePack("their-pack", stickers = listOf(remoteSticker("a".repeat(64))))
+        val preview = repository.viewPack("their-pack").getOrThrow()
+        repository.installPack(preview).getOrThrow()
+
+        assertTrue(repository.viewPack("their-pack").getOrThrow().isInLibrary)
+        repository.installPack(preview).getOrThrow()
+
+        assertEquals(1, packs().size)
+    }
+
+    @Test
+    fun `a copy of a copy is recognised by the pack it started from`() = runTest {
+        val stickers = listOf(remoteSticker("a".repeat(64)))
+        coEvery { packSource.fetchPack("root") } returns remotePack("root", stickers = stickers)
+        coEvery { packSource.fetchPack("copy-of-root") } returns remotePack("copy-of-root", originPackId = "root", stickers = stickers)
+        repository.installPack(repository.viewPack("root").getOrThrow()).getOrThrow()
+
+        val viaCopy = repository.viewPack("copy-of-root").getOrThrow()
+
+        assertEquals("root", viaCopy.rootPackId)
+        assertTrue(viaCopy.isInLibrary)
+    }
+
+    @Test
+    fun `the user's own pack is in the library, whatever the rows say`() = runTest {
+        coEvery { packSource.fetchPack("mine") } returns remotePack("mine", ownerId = "uid1", stickers = listOf(remoteSticker("a".repeat(64))))
+
+        assertTrue(repository.viewPack("mine").getOrThrow().isInLibrary)
+    }
+
+    @Test
+    fun `a pack that is gone, is empty or has an id that is no document id cannot be viewed`() = runTest {
+        coEvery { packSource.fetchPack("gone") } returns null
+        coEvery { packSource.fetchPack("empty") } returns remotePack("empty", stickers = listOf(remoteSticker("not a hash")))
+
+        assertTrue(repository.viewPack("gone").isFailure)
+        assertTrue(repository.viewPack("empty").isFailure)
+        assertTrue(repository.viewPack("packs/../users/uid1").isFailure)
+        coVerify(exactly = 0) { packSource.fetchPack("packs/../users/uid1") }
     }
 
     @Test
@@ -417,5 +674,9 @@ class StickerRepositoryImplTest {
 
         assertEquals(listed, repository.listWhatsAppFolder("content://tree").getOrThrow())
         assertTrue(repository.listWhatsAppFolder("content://revoked").isFailure)
+    }
+
+    private companion object {
+        const val OBJECT_URL = "https://storage.example/stickers/object.webp"
     }
 }

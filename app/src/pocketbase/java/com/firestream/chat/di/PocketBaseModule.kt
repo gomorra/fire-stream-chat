@@ -24,6 +24,7 @@ import com.firestream.chat.data.remote.pocketbase.PocketBaseMessageSource
 import com.firestream.chat.data.remote.pocketbase.PocketBasePresenceSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseSendErrorClassifier
 import com.firestream.chat.data.remote.pocketbase.PocketBaseStickerObjectSource
+import com.firestream.chat.data.remote.pocketbase.PocketBaseStickerPackSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseStorageSource
 import com.firestream.chat.data.remote.pocketbase.PocketBaseUserSource
 import com.firestream.chat.data.remote.source.AuthSource
@@ -36,6 +37,7 @@ import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.PresenceSource
 import com.firestream.chat.data.remote.source.SendErrorClassifier
 import com.firestream.chat.data.remote.source.StickerObjectSource
+import com.firestream.chat.data.remote.source.StickerPackSource
 import com.firestream.chat.data.remote.source.StorageSource
 import com.firestream.chat.data.remote.source.UserSource
 import dagger.Binds
@@ -72,6 +74,9 @@ abstract class PocketBaseModule {
 
     @Binds @Singleton
     abstract fun bindStickerObjectSource(impl: PocketBaseStickerObjectSource): StickerObjectSource
+
+    @Binds @Singleton
+    abstract fun bindStickerPackSource(impl: PocketBaseStickerPackSource): StickerPackSource
 
     @Binds @Singleton
     abstract fun bindCallSignalingSource(impl: PocketBaseCallSignalingSource): CallSignalingSource

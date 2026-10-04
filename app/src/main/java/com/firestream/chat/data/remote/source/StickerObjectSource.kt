@@ -17,4 +17,11 @@ interface StickerObjectSource {
      * verifies the hash of what it downloads (`StickerDownloads`).
      */
     suspend fun ensureUploaded(id: String, extension: String, mimeType: String, file: File): String
+
+    /**
+     * The download url of the sticker [id] when the backend holds its object,
+     * else `null`. This is how a sticker known only by its id is fetched: the
+     * object is found by the name the id gives it, never by a url someone sent.
+     */
+    suspend fun urlIfPresent(id: String, extension: String): String?
 }

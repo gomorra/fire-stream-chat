@@ -4,9 +4,10 @@
 //   together with its `stickers` row.
 // Owns: the hash check of received bytes (a mismatch stores nothing); the
 //   refusals remembered for this process, so a bad sticker is fetched once.
-// Collaborators: MediaFileManager.downloadFor (the only caller — every download
-//   of a message's media is routed there), StickerFiles (the file, and the lock
-//   that keeps it with its row), StickerDao, OkHttpClient.
+// Collaborators: MediaFileManager.downloadFor (a message's sticker — every
+//   download of a message's media is routed there), StickerRepositoryImpl.ensureFile
+//   (a library row whose file is not here yet), StickerFiles (the file, and the
+//   lock that keeps it with its row), StickerDao, OkHttpClient.
 // Don't put here: uploads (StickerObjectSource), pack membership
 //   (StickerRepositoryImpl), the message row's localUri (the caller writes it),
 //   the auto-download preference (MessageRepositoryImpl, MediaBackfillWorker).

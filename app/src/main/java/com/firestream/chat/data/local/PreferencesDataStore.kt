@@ -381,4 +381,9 @@ class PreferencesDataStore @Inject constructor(
     suspend fun addRecentEmoji(emoji: String) = pushRecent(recentEmojisKey, emoji, cap = 40)
 
     suspend fun addRecentSticker(stickerId: String) = pushRecent(recentStickerIdsKey, stickerId, cap = 30)
+
+    /** Forgets the sticker recents. They are the signed-in user's, and the next user's library may hold the same stickers. */
+    suspend fun clearRecentStickers() {
+        context.dataStore.edit { prefs -> prefs.remove(recentStickerIdsKey) }
+    }
 }
