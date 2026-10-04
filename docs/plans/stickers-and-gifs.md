@@ -21,8 +21,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
 | Import sources | WhatsApp's sticker folder (one folder grant, multi-select grid) and files (`.webp`, `.wastickers`, later `.was` / `.tgs`) |
 | Library backup | Packs and favourites are saved under the account and restored on login |
 | GIF sources | Keyboard insertion and an in-app GIFs tab backed by Klipy |
-| Provider privacy | Search and media go through a Cloud Function. The provider never sees a user's IP, and the key lives in Functions secrets. The pocketbase flavor gets no GIFs tab and no online catalogue |
-| Recipient privacy | Unchanged from `docs/BACKLOG.md` §4.6: the recipient fetches from Storage only |
+| Provider privacy | The app calls Klipy itself, because Klipy's integration requirements forbid a proxy. Klipy sees the IP and the searches of a user who uses the GIFs tab or the online stickers. The key ships in the app. A build without a key has no GIFs tab and no online catalogue |
+| Recipient privacy | A GIF or sticker picked from Klipy is loaded by the recipient's device from Klipy, which sees its IP. Everything else is fetched from Storage only (`docs/BACKLOG.md` §4.6) |
 
 ## The model
 
@@ -41,6 +41,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
   carry a `syncState`. Recents stay in DataStore, device-only.
 - **A GIF is a plain media message.** `type = GIF`, bytes untouched, one upload per message, stored
   in `DocumentFiles` so it never reaches the gallery.
+- **A pick from Klipy is a message that points at Klipy.** Its `mediaUrl` is the Klipy url. Nothing is
+  uploaded, and no device keeps a copy of the file.
 - **Animated decoders are attached per request**, mirroring `ui/components/VideoFrameRequest.kt`.
   A global registration would start animating link previews and avatars.
 
@@ -69,8 +71,8 @@ bring over the stickers already used in WhatsApp, reached from a button in Setti
    download on first use (step 8).
 6. **`Modifier.contentReceiver` on the value-based `BasicTextField`** (`ChatScreen.kt:1929`) is
    unverified. Samsung's stock keyboard is reported to refuse content in Compose fields (step 9).
-7. **Klipy's response shape, CDN hosts, `customer_id` rule and re-hosting terms** could not be read
-   from its docs in planning. Step 10 confirms them first; terms that forbid re-upload are a `needs_decision`.
+7. **A Klipy pick lives on Klipy's servers.** Klipy forbids a proxy and copies of its media (step 10). The
+   message breaks if Klipy removes the file, and the key in the app can be read out of the APK.
 8. **Old builds show the new types as an empty text bubble** (`parseMessageType` falls back to `TEXT`).
 9. **Bytes sit unencrypted in Storage**, like every file today, and a pack manifest is readable by
    any signed-in user who has its id.
@@ -116,9 +118,8 @@ read later.
 
 Order: 1 → 2 ‖ 3 → 4 → 5 ‖ 6 ‖ 7 → 8 → 9 → 10 → 11
 
-The run does not stop after step 8 or step 10. The owner's tasks named under those two steps are done
-after step 11: the deploy of the two functions, then one device pass for Lottie, the maker and the
-online paths.
+The run does not stop after step 8 or step 10. One device pass after step 11 covers Lottie, the maker
+and the online paths. The Klipy key is the owner's task, named under step 10.
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -773,20 +774,13 @@ Departures (for sign-off):
 - One full test run was red in `ListRepositoryImplRaceTest`, a list test this step does not touch. The two runs after it were green with no change for it (`TECH_DEBT.md`).
 - Not checked: a phone, an on-screen Gboard, Samsung's keyboard, the gallery and share-sheet GIF on a device. The dex register check did not run; `ChatScreen` gained one wrapper call. Checklist: `docs/BACKLOG.md`, *GIFs and stickers from the keyboard*.
 
-### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
+### Step 10 — Klipy in the app: source, send and receive — skills: code-review; model: strong
 
-Authentication and an outbound fetch on user-supplied input.
+A third-party key, a new outbound host, and a message whose file is not in Storage.
 
-**Decision needed** Klipy's integration requirements forbid this step's design and part of step 11.
-Nothing of step 10 is built. The owner chooses one:
-- **A. Ask Klipy for written approval** (`developers@klipy.com`) of a server-side proxy and of copies kept
-  in Firebase Storage. Steps 10 and 11 wait for the answer.
-- **B. Standard integration.** The app calls `api.klipy.com` and loads media from `static.klipy.com` itself.
-  Step 10 is dropped. The key ships in the app. A picked GIF is sent as a message that carries the Klipy url,
-  and the recipient's device loads it from Klipy. An online sticker cannot be saved to the library. This
-  reverses the *Provider privacy* and *Recipient privacy* decisions.
-- **C. Drop the GIFs tab and the online catalogue.** The plan ends at step 9. GIFs still come from the keyboard,
-  the gallery and the share sheet.
+**Decision taken** (owner, 2026-10-04): the standard integration. The app calls `api.klipy.com` and loads
+media from Klipy's hosts itself. There are no Cloud Functions in this plan, and `functions/` is not touched.
+Klipy's integration requirements forbid a server-side proxy and copies of its media without written approval.
 
 **Klipy facts** (read from `docs.klipy.com` on 2026-10-04; every page has a plain copy at `<page url>.md`)
 - Rules (`/integration-requirements`). Requests and media loads must come from the end-user client. Routing
@@ -811,64 +805,83 @@ Nothing of step 10 is built. The owner chooses one:
   `customer_id`.
 - A key in testing mode allows 100 requests an hour. Production access is requested in the Partner Panel.
 
-- Confirm against `docs.klipy.com` before coding: GIF and sticker search and trending endpoints,
-  rendition fields, CDN host names, whether `customer_id` is required, attribution, re-hosting terms.
-- `functions/mediaProxy.js`, exported from `index.js`:
-  - `mediaSearch` (v2 `onCall`, auth required): `kind` is `gifs` or `stickers`, query or trending,
-    key from `defineSecret("FIRE_STREAM_GIF")`, returns trimmed items. Any `customer_id` is an HMAC of
-    the uid, never the uid.
-  - `mediaFetch` (v2 `onRequest`): verifies the ID token, then streams one media URL. `https` only,
-    host on an allowlist of the provider's CDN, redirects re-validated, byte cap, `image/*` only, a timeout.
-- Tests: `node --test` over the pure parts; `functions/package.json` gets a real `test` script.
-- Docs: `docs/CLOUD-FUNCTIONS.md`, and the function count in CLAUDE.md.
+- **The key.** `BuildConfig.KLIPY_API_KEY` for both flavors, read like the release signing values in
+  `app/build.gradle.kts`: the environment variable `KLIPY_API_KEY`, else `klipyApiKey` in `local.properties`,
+  else empty. An empty key turns the feature off. The key goes into no tracked file.
+- **No url in an error.** The key is a path segment of every request. No log line, exception message or
+  `AppError` may carry a request url. A test asserts this on a failed request.
+- `domain/model/OnlineMedia.kt`: kind (`GIF` or `STICKER`), slug, title, a preview rendition and a send
+  rendition, each with url, width, height and mime type.
+- `domain/repository/OnlineMediaRepository.kt`: `isAvailable`, `search(kind, query, page)`,
+  `trending(kind, page)`, `reportShare(media)`.
+- `data/remote/source/KlipyMediaSource.kt` on the OkHttp client from `di/NetworkModule.kt`. It keeps the
+  order Klipy returns. The preview is the `sm` rendition and the send rendition is `md`, `webp` before `gif`.
+  An item with no rendition that passes `KlipyUrls.isMedia` is left out.
+- `customer_id` is a random UUID kept in `PreferencesDataStore`, made on first use. It is never the uid or
+  anything derived from it.
+- `domain/util/KlipyUrls.kt`, pure: `isMedia(url)` is true for an `https` url whose host is exactly one of
+  the three media hosts, with no user info and no other port.
+- **Send.** `MessageRepository.sendOnlineMedia(chatId, media)`. A GIF becomes `type = GIF`. A sticker becomes
+  `type = STICKER` with `stickerId` and `stickerPackId` null. `mediaUrl` is the Klipy url as returned, with its
+  mime type and dimensions. There is no `localUri` and no upload. A url that fails `KlipyUrls.isMedia` is
+  refused with `AppError.Validation`.
+- The send goes through `SendTarget.forChat` and the outbox like every other send. `OutboxJob.UPLOAD_TYPES`
+  holds `GIF`, and `OutboxSender` runs `prepareMedia` for a GIF and `withStickerUrl` for a sticker. A row whose
+  `mediaUrl` is a Klipy url and that has no local file skips both.
+- **No copy.** `MediaFileManager.downloadFor` returns no file for a Klipy url, for both types, and the media
+  backfill skips such a message. The bubble then plays from the url, as it does for any message without a
+  local file. `StickerDownloads.ensureLocal` is not called for it.
+- Check every place that stores or re-sends a message's file, and offer nothing that keeps a copy of a Klipy
+  pick: favourite, add to a pack, save to the device, share to another app. A forward keeps the url and
+  uploads nothing. The reply thumbnail, the starred list, the reminder widget and the notification read the url.
+- Coil's disk cache holds what it loads from Klipy. Record that under Departures for sign-off.
+- No code was found that checks the host of a received `mediaUrl`. This step adds no general check. If the
+  step confirms the gap, it records it in `TECH_DEBT.md`.
+- Find out what the released `v1.38.0` does with a `STICKER` that has no `stickerId`, and with a `GIF` whose
+  url is not in Storage. Record both in `docs/BACKLOG.md` §4.6.
+- **(step-3)** `sendGifMessage` takes a local uri and uploads it. It stays as it is for the keyboard, the
+  gallery and the share sheet.
+- **(step-7)** A sticker without a local file renders from its url as a WebP. Klipy's sticker renditions are
+  `webp`, `gif` and `png`, never Lottie.
+- Tests: `KlipyMediaSourceTest` on MockWebServer (the four endpoints, paging, the order kept, a foreign host
+  left out, an error without the key), `KlipyUrlsTest`, and in the repository and outbox tests: the row a
+  Klipy send writes, nothing uploaded, `downloadFor` without a file.
+- Docs: `docs/SCHEMA-FIRESTORE.md` (a `mediaUrl` may be a Klipy url), `docs/BACKLOG.md` §4.6, FEATURE-MAP.
 
-**Owner, after step 11.** Deploy the two functions from the plan worktree. The secret `FIRE_STREAM_GIF`
-holds the Klipy key in the Firebase project `fire-stream-chat` (version 1), so step 10 only declares it
-with `defineSecret`. The key itself goes into no tracked file: the repository is public. Step 11 is built
-and gated against functions that are not deployed yet, so its online paths are checked on a device
-only after the deploy.
+**Owner, any time before the device pass.** Put the Klipy key into `local.properties` as `klipyApiKey=<key>`,
+in the main checkout and in the plan worktree, and into the environment of whatever builds the release APK.
+The Firebase secrets `FIRE_STREAM_GIF` and `KLIPY_API_KEY` are not used and can be destroyed.
 
 ### Step 11 — GIFs tab and the online sticker catalogue
 
-- `BuildConfig.SUPPORTS_ONLINE_MEDIA` per flavor, like `SUPPORTS_SIGNAL`.
-  `data/remote/source/OnlineMediaSource.kt` with a Firebase implementation (the `firebase-functions`
-  SDK is already a dependency, unused so far) and a pocketbase stub.
-- `domain/model/OnlineMedia.kt`, `domain/repository/OnlineMediaRepository.kt`: `search`, `trending`,
-  `download` into `cacheDir`.
-- `ui/chat/gif/OnlineMediaViewModel.kt` (debounced query, paging, `AppError`).
-  `ui/chat/picker/GifTab.kt`: animated previews through the proxy, the provider's required search hint
-  and attribution. The composer declares `GIF` only when the flag is on.
-- Stickers tab: an **Online** entry in the pack row and a *More online* section under a local search.
-  A pick is downloaded, imported into `SAVED` and sent; long-press adds it to favourites or a pack.
-- A GIF pick downloads the full rendition through the proxy, then calls `sendGifMessage`.
-- **(step-1)** `StickerFiles.open` reads a bare path or a `file://` uri only inside `cacheDir`. Keep the
-  download there, or the import refuses it.
+- `ui/chat/gif/OnlineMediaViewModel.kt`: a debounced query, trending while the query is empty, paging by
+  `has_next`, `AppError`.
+- `ui/chat/picker/GifTab.kt`: the search field's placeholder is *Search KLIPY*, which Klipy requires. The
+  grid keeps the order returned. Previews load straight from Klipy with the per-request animated decoder.
+  A *Powered by KLIPY* mark sits in the tab.
+- The composer declares `GIF`, and the Stickers tab shows its online parts, only when
+  `OnlineMediaRepository.isAvailable`.
+- **First use.** Before the first request, the tab shows a one-time notice: searches go to KLIPY, and the
+  people you send a pick to load it from KLIPY. Nothing is requested until it is accepted. The answer is a
+  DataStore flag.
+- Stickers tab: an **Online** entry in the pack row, and a *More online* section under a local search. Klipy's
+  results stay in their own grid or section and are never mixed into the local ones.
+- A pick is sent with `sendOnlineMedia`, with the scroll and the error handling of
+  `ChatMessageSender.sendKeyboardContent`. Then `reportShare` runs on the application scope, and its failure
+  is ignored. A long press on an online sticker offers nothing, because it cannot be kept.
 - **(step-5)** The composer's tabs are `COMPOSER_TABS` in `ui/chat/ComposerPickerPanel.kt`, and its `when` names
-  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the flag is on, and refresh the
-  `PickerTab` KDoc, which says nobody declares `GIF`.
+  `PickerTab.GIF` as an empty branch. Add the tab between Emoji and Stickers when the feature is available, and
+  refresh the `PickerTab` KDoc, which says nobody declares `GIF`.
 - **(step-5)** The pack row is built by `stickerShelves` in `StickerLibraryTab.kt`, and a local search by
   `StickerSearch.byEmojis`. The **Online** entry and the *More online* section go there. Picks leave through
   `ComposerPickerCallbacks`.
 - **(step-8)** The pack row's `LazyRow` ends with the **+** that opens the sticker maker (`CREATE_KEY`). The **Online**
   entry goes before it. `ComposerPickerCallbacks` has a seventh field, `onCreateSticker`, and no defaults.
-- **(step-6)** The long press that adds an online sticker to the favourites is `StickerRepository.toggleFavourite`.
-  `installPack` takes a `StickerPackPreview` read from a Firestore manifest, so an online pack is imported as files,
-  not installed. On pocketbase `StickerPackSource.isSupported` is false, like the flag this step adds.
-- **(step-6 /code-review)** `SingleFlight` no longer passes a cancelled first caller's cancellation to its waiters.
-  A download that a picker cell starts and cancels is safe to share with other callers.
-- **(step-7)** `StickerImage(format = LOTTIE)` plays from a local file only, and shows a placeholder for a url. An online
-  sticker that is a Lottie file needs its download before its preview, or a still rendition from the provider. The
-  import takes a `.tgs` and a `.was` by their bytes, so a downloaded one goes through `importFrom` like a WebP.
-- **(step-9)** `StickerRepository.saveSticker(uri)` puts one picture into `SAVED` and returns its sticker id, also when
-  the library held it. It converts a picture that is no sticker file to WebP. An online sticker pick is
-  `saveSticker(downloadedPath)` and then `ChatViewModel.sendSticker(id, null)`. The path must be inside `cacheDir`.
-- **(step-9)** `sendMediaMessage` hands an `image/gif` to `sendGifMessage`, so either call sends a GIF. `GIF_MIME_TYPE`
-  is in `domain/util/FileKind.kt`. `ChatMessageSender.sendKeyboardContent(uri, mimeType)` already sends a GIF uri
-  with the scroll and the error handling a GIFs tab needs.
 - **(step-9)** The composer's `BasicTextField` sits inside `KeyboardContentReceiver` in `ChatScreen.kt`. A search field
   in the GIFs tab is outside it and must stay so: it would send a keyboard GIF picked while searching.
-- Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
-- Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
+- Tests: `OnlineMediaViewModelTest`, and a Robolectric test for the placeholder text, the notice, and the tab
+  hidden without a key.
+- Docs: FEATURE-MAP, BACKLOG (the device checklist), CHANGELOG.
 
 ## Verification
 
@@ -881,8 +894,9 @@ only after the deploy.
   confirm the outbox finishes it.
 - **After step 6:** clear app data, sign in, and confirm packs and favourites return.
 - **After step 9:** insert a GIF and a sticker from Gboard; pick a `.gif` from the gallery.
-- **After step 11:** search and send with OkHttp logging on. The app contacts only the Functions host
-  and Storage, never the provider.
+- **After step 11:** search and send with a key set. The app contacts `api.klipy.com` and Klipy's three
+  media hosts. Nothing of a Klipy pick lands in Storage or under `filesDir`. A build without a key shows
+  no GIFs tab.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): the real WhatsApp
   folder grant, WhatsApp Business, Samsung's keyboard, the cutout model download, scroll performance
   with many animated bubbles.
