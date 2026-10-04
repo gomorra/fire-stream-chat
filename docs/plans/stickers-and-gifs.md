@@ -567,20 +567,54 @@ returns; a second account adds a pack from a received sticker.
 
 Authentication and an outbound fetch on user-supplied input.
 
+**Decision needed** Klipy's integration requirements forbid this step's design and part of step 11.
+Nothing of step 10 is built. The owner chooses one:
+- **A. Ask Klipy for written approval** (`developers@klipy.com`) of a server-side proxy and of copies kept
+  in Firebase Storage. Steps 10 and 11 wait for the answer.
+- **B. Standard integration.** The app calls `api.klipy.com` and loads media from `static.klipy.com` itself.
+  Step 10 is dropped. The key ships in the app. A picked GIF is sent as a message that carries the Klipy url,
+  and the recipient's device loads it from Klipy. An online sticker cannot be saved to the library. This
+  reverses the *Provider privacy* and *Recipient privacy* decisions.
+- **C. Drop the GIFs tab and the online catalogue.** The plan ends at step 9. GIFs still come from the keyboard,
+  the gallery and the share sheet.
+
+**Klipy facts** (read from `docs.klipy.com` on 2026-10-04; every page has a plain copy at `<page url>.md`)
+- Rules (`/integration-requirements`). Requests and media loads must come from the end-user client. Routing
+  them through a partner's server or proxy needs prior written approval. Media must be loaded from the urls
+  the API returns, unchanged. Storing, mirroring, re-hosting or caching media needs written approval too.
+  Results keep their order and are not filtered or mixed with another provider's.
+- Attribution (`/attribution`). The search field's placeholder must be *Search KLIPY*. A *Powered by KLIPY*
+  mark and a watermark are optional.
+- Endpoints, all `GET https://api.klipy.com/api/v1/{app_key}/…`: `gifs/search`, `gifs/trending`,
+  `stickers/search`, `stickers/trending`. The key is a path segment, so a request url is a secret and must
+  not be logged.
+- Query: `q` (search only), `page` (from 1), `per_page` (8 to 50, default 24), `customer_id`, `locale`
+  (ISO 3166 alpha-2), `content_filter` (`off`, `low`, `medium`, `high`), `format_filter` (comma-separated).
+  None is required.
+- `customer_id` is optional. It is a stable id per user, and the docs suggest a hash or a UUID.
+- Response: `{ result, data: { data: [item], current_page, per_page, has_next } }`. An item has `id` (number),
+  `slug`, `title`, `tags`, `type`, `blur_preview` (a `data:` JPEG) and `file`.
+- `file` is `{ hd, md, sm, xs }`, each a map from format to `{ url, width, height, size }`. A GIF has `gif`,
+  `webp`, `jpg`, `mp4`, `webm`. A sticker has `gif`, `webp`, `webm`, `png`.
+- Media hosts: `static.klipy.com`, `static1.klipy.com`, `static2.klipy.com`, https only.
+- A share is reported with `POST api/v1/{app_key}/gifs/share/{slug}` (and `stickers/share/{slug}`), body
+  `customer_id`.
+- A key in testing mode allows 100 requests an hour. Production access is requested in the Partner Panel.
+
 - Confirm against `docs.klipy.com` before coding: GIF and sticker search and trending endpoints,
   rendition fields, CDN host names, whether `customer_id` is required, attribution, re-hosting terms.
 - `functions/mediaProxy.js`, exported from `index.js`:
   - `mediaSearch` (v2 `onCall`, auth required): `kind` is `gifs` or `stickers`, query or trending,
-    key from `defineSecret("KLIPY_API_KEY")`, returns trimmed items. Any `customer_id` is an HMAC of
+    key from `defineSecret("FIRE_STREAM_GIF")`, returns trimmed items. Any `customer_id` is an HMAC of
     the uid, never the uid.
   - `mediaFetch` (v2 `onRequest`): verifies the ID token, then streams one media URL. `https` only,
     host on an allowlist of the provider's CDN, redirects re-validated, byte cap, `image/*` only, a timeout.
 - Tests: `node --test` over the pure parts; `functions/package.json` gets a real `test` script.
 - Docs: `docs/CLOUD-FUNCTIONS.md`, and the function count in CLAUDE.md.
 
-**Owner, after step 11.** Deploy the two functions from the plan worktree. The secret `KLIPY_API_KEY`
-is set in the Firebase project `fire-stream-chat` (version 1), so step 10 only declares it with
-`defineSecret`. The key itself goes into no tracked file: the repository is public. Step 11 is built
+**Owner, after step 11.** Deploy the two functions from the plan worktree. The secret `FIRE_STREAM_GIF`
+holds the Klipy key in the Firebase project `fire-stream-chat` (version 1), so step 10 only declares it
+with `defineSecret`. The key itself goes into no tracked file: the repository is public. Step 11 is built
 and gated against functions that are not deployed yet, so its online paths are checked on a device
 only after the deploy.
 
