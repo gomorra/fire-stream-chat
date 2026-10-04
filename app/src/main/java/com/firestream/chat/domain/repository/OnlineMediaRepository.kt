@@ -3,6 +3,7 @@ package com.firestream.chat.domain.repository
 import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.OnlineMediaKind
 import com.firestream.chat.domain.model.OnlineMediaPage
+import kotlinx.coroutines.flow.Flow
 
 /**
  * The online catalogue of GIFs and stickers (Klipy). Every call goes from this
@@ -12,6 +13,14 @@ interface OnlineMediaRepository {
 
     /** False in a build without a key. Nothing is requested then, and the UI offers nothing online. */
     val isAvailable: Boolean
+
+    /**
+     * Whether the user accepted the first-use notice on this device. The UI
+     * requests nothing before it did.
+     */
+    val noticeAccepted: Flow<Boolean>
+
+    suspend fun acceptNotice()
 
     /** Results for [query], in the provider's order. [page] counts from 1. */
     suspend fun search(kind: OnlineMediaKind, query: String, page: Int = 1): Result<OnlineMediaPage>

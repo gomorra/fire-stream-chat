@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.StickerRepository
@@ -169,6 +170,22 @@ internal class ChatMessageSender(
             } finally {
                 onHandled()
             }
+        }
+    }
+
+    /**
+     * Sends a GIF or a sticker picked from the online catalogue. The message
+     * points at the provider's url, so nothing is uploaded and the library is
+     * not touched: an online sticker has no id there, and never joins Recents.
+     *
+     * [onSent] runs once the message is queued. It does not run for a refused pick.
+     */
+    fun sendOnlineMedia(media: OnlineMedia, onSent: () -> Unit = {}) {
+        scope.launch {
+            scrollToBottom()
+            messageRepository.sendOnlineMedia(chatId, media)
+                .onSuccess { onSent() }
+                .onFailure(::showError)
         }
     }
 

@@ -7,21 +7,21 @@ import com.firestream.chat.domain.util.OverlayContent
  * what each of its hosts can actually do.
  *
  * The island of tabs in [PickerPanel] is **declared by the host**, not fixed
- * (`docs/plans/image-editor.md` §2.8). The composer offers emoji and the
- * sticker library. The reaction sheet and the caption bar offer emoji. The
- * image editor offers emoji, the bundled stickers, text and shapes. A host that
- * declares one tab renders no island at all, so nothing ever ships greyed-out
- * and unreachable.
+ * (`docs/plans/image-editor.md` §2.8). The composer offers emoji, the sticker
+ * library and, in a build with a KLIPY key, GIFs. The reaction sheet and the
+ * caption bar offer emoji. The image editor offers emoji, the bundled
+ * stickers, text and shapes. A host that declares one tab renders no island at
+ * all, so nothing ever ships greyed-out and unreachable.
  *
  * There are two sticker tabs, and no host declares both. [STICKER] is the
  * bundled vector pack, drawn onto a photo. [STICKER_LIBRARY] is the user's own
  * library, sent as a message.
  *
- * [GIF] is enumerated and declared by nobody yet. A GIF can be sent and shown
- * as a message, but there is nothing to pick one from until the search behind
- * the Cloud Function exists (`docs/plans/stickers-and-gifs.md`, step 11).
- * Placing one on a photo stays impossible while the output is a JPEG, since a
- * flattened animation is one frame.
+ * [GIF] is KLIPY's catalogue, and only the composer declares it. Its search
+ * hint is the wording KLIPY's attribution rules require. A pick is a message,
+ * and it leaves through the host's own callback, not as a [PickerSelection].
+ * Placing a GIF on a photo stays impossible while the output is a JPEG, since
+ * a flattened animation is one frame.
  */
 internal enum class PickerTab(
     /** The word on the island's active segment, and the handle a test grabs it by. */
@@ -45,7 +45,7 @@ internal enum class PickerTab(
     EMOJI(label = "Emoji", searchHint = "Search emoji…"),
     STICKER(label = "Stickers", searchHint = "Search stickers…"),
     STICKER_LIBRARY(label = "Stickers", searchHint = "Search stickers…"),
-    GIF(label = "GIFs", searchHint = "Search GIFs…"),
+    GIF(label = "GIFs", searchHint = "Search KLIPY"),
     TEXT(label = "Text", searchHint = null),
     SHAPE(label = "Shapes", searchHint = null),
 }

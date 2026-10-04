@@ -167,6 +167,8 @@ import androidx.compose.ui.window.Popup
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.firestream.chat.ui.chat.gif.OnlineMediaViewModel
+import com.firestream.chat.ui.chat.picker.OnlineMediaCallbacks
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
 import com.firestream.chat.domain.model.Message
@@ -2103,6 +2105,9 @@ fun ChatScreen(
                     .clipToBounds()
             ) {
                 if (showEmojiPanel || animatedPanelPx > 0) {
+                    // The GIFs tab and the online stickers. Made when the panel first opens.
+                    val onlineMedia: OnlineMediaViewModel = hiltViewModel()
+                    val onlineState by onlineMedia.uiState.collectAsState()
                     ComposerPickerPanel(
                         recentEmojis = uiState.overlays.recentEmojis,
                         stickerPacks = uiState.overlays.stickerPacks,
@@ -2135,7 +2140,18 @@ fun ChatScreen(
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .height(panelContentDp)
+                            .height(panelContentDp),
+                        online = onlineState,
+                        onlineCallbacks = remember(onlineMedia, viewModel) {
+                            OnlineMediaCallbacks(
+                                onQuery = onlineMedia::onQuery,
+                                onLoadMore = onlineMedia::loadMore,
+                                onRetry = onlineMedia::retry,
+                                onAcceptNotice = onlineMedia::acceptNotice,
+                                // KLIPY is told about a pick once it is sent.
+                                onPick = { media -> viewModel.sendOnlineMedia(media) { onlineMedia.onSent(media) } },
+                            )
+                        },
                     )
                 }
             }

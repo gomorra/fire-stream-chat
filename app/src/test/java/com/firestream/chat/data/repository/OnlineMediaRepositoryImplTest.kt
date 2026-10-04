@@ -11,6 +11,8 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -67,6 +69,18 @@ class OnlineMediaRepositoryImplTest {
         assertTrue(repository.trending(OnlineMediaKind.GIF).exceptionOrNull() is IOException)
         val cancelled = runCatching { repository.search(OnlineMediaKind.GIF, "cat") }
         assertTrue(cancelled.exceptionOrNull() is CancellationException)
+    }
+
+    @Test
+    fun `the first-use notice is the stored flag, and accepting it writes the flag`() = runTest {
+        every { preferences.klipyNoticeAcceptedFlow } returns flowOf(false)
+        coEvery { preferences.setKlipyNoticeAccepted() } returns Unit
+
+        assertFalse(repository.noticeAccepted.first())
+        repository.acceptNotice()
+
+        coVerify(exactly = 1) { preferences.setKlipyNoticeAccepted() }
+        coVerify(exactly = 0) { preferences.klipyCustomerId() }
     }
 
     private companion object {

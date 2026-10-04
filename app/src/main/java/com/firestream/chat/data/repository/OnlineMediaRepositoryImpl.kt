@@ -2,6 +2,7 @@
 // Responsibility: The online GIF and sticker catalogue behind OnlineMediaRepository.
 //   Adds the customer id to each call and turns a failure into a Result.
 // Owns: when the customer id is made — only when a request is about to go out.
+//   Hands on the first-use notice flag, which the UI checks before it requests.
 // Collaborators: KlipyMediaSource (the HTTP calls), PreferencesDataStore (the id).
 // Don't put here: sending a pick — MessageRepositoryImpl.sendOnlineMedia, per
 //   "The repository decides who a send is for" (docs/PATTERNS.md). Request urls
@@ -18,6 +19,7 @@ import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.model.OnlineMediaKind
 import com.firestream.chat.domain.model.OnlineMediaPage
 import com.firestream.chat.domain.repository.OnlineMediaRepository
+import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -33,6 +35,10 @@ class OnlineMediaRepositoryImpl @Inject constructor(
 ) : OnlineMediaRepository {
 
     override val isAvailable: Boolean get() = source.isAvailable
+
+    override val noticeAccepted: Flow<Boolean> get() = preferences.klipyNoticeAcceptedFlow
+
+    override suspend fun acceptNotice() = preferences.setKlipyNoticeAccepted()
 
     override suspend fun search(kind: OnlineMediaKind, query: String, page: Int): Result<OnlineMediaPage> =
         request { customerId -> source.search(kind, query, page, customerId) }

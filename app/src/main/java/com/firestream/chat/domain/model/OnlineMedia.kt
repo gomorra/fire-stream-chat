@@ -22,7 +22,13 @@ data class OnlineMedia(
     val title: String,
     val preview: OnlineMediaRendition,
     val send: OnlineMediaRendition,
-)
+) {
+    /**
+     * What tells this item from the others of a result list. It is the slug,
+     * or the url of the file to send for an item the provider gave no slug.
+     */
+    val key: String get() = slug.ifEmpty { send.url }
+}
 
 /** One page of results, in the provider's order. [hasNext] says whether [page] + 1 exists. */
 data class OnlineMediaPage(

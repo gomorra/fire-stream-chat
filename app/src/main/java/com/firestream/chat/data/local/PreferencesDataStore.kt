@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.firestream.chat.domain.model.ChatFontSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import java.util.UUID
@@ -75,6 +76,7 @@ class PreferencesDataStore @Inject constructor(
 
     // Klipy
     private val klipyCustomerIdKey = stringPreferencesKey("klipy_customer_id")
+    private val klipyNoticeAcceptedKey = booleanPreferencesKey("klipy_notice_accepted")
 
     // Lists sort option
     private val listSortOptionKey = stringPreferencesKey("list_sort_option")
@@ -411,5 +413,13 @@ class PreferencesDataStore @Inject constructor(
     /** Forgets the Klipy id, so the next user of this device gets one of their own. */
     suspend fun clearKlipyCustomerId() {
         context.dataStore.edit { prefs -> prefs.remove(klipyCustomerIdKey) }
+    }
+
+    /** Whether the first-use notice of the GIFs tab and the online stickers was accepted on this device. */
+    val klipyNoticeAcceptedFlow: Flow<Boolean> =
+        context.dataStore.data.map { it[klipyNoticeAcceptedKey] ?: false }.distinctUntilChanged()
+
+    suspend fun setKlipyNoticeAccepted() {
+        context.dataStore.edit { prefs -> prefs[klipyNoticeAcceptedKey] = true }
     }
 }

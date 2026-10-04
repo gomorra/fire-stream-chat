@@ -2,7 +2,13 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.39.0] — 2026-10-04
+## [UNRELEASED] [1.40.0] — 2026-10-05
+
+### Added
+
+- **A GIFs tab, and stickers from an online catalogue.** The emoji panel has a third tab, *GIFs*, with what is trending on KLIPY and a search. A tap sends the GIF. The Stickers tab has an *Online* entry in its pack row with KLIPY's stickers, and a sticker search shows KLIPY's matches in a *More online* section under your own. Before the first request a notice says what this means: your searches go to KLIPY, and a pick is loaded from KLIPY by you and by the people you send it to. Nothing is asked of KLIPY until you accept it. An online sticker cannot be added to the favourites or to a pack. Both are only in a build made with a KLIPY key.
+
+## [1.39.0] — 2026-10-04
 
 ### Added
 

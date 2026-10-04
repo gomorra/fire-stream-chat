@@ -37,6 +37,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.model.OnlineMedia
 import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
@@ -432,6 +433,9 @@ class ChatViewModel @Inject constructor(
 
     fun sendKeyboardContent(uri: Uri, mimeType: String, onHandled: () -> Unit) =
         messageSender.sendKeyboardContent(uri, mimeType, onHandled)
+
+    /** Sends a pick from the GIFs tab or the online stickers. [onSent] runs once it is queued. */
+    fun sendOnlineMedia(media: OnlineMedia, onSent: () -> Unit) = messageSender.sendOnlineMedia(media, onSent)
 
     /** Flips a sticker's favourite state. [message] is the bubble it was tapped in, null for a pick from the library. */
     fun toggleStickerFavourite(stickerId: String, message: Message? = null) =
