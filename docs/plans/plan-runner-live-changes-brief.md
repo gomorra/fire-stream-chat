@@ -260,6 +260,38 @@ Departures (for sign-off):
 
 ### Step 2 — Wait out a usage limit and resume the same session (`feat(plan-runner):`) — skills: code-review; model: max; budget: 40
 
+**Approach**
+- Order: fixtures, then the `e2e.sh` stub (init line, transcript, unique session id per call, the
+  limit behaviours) and its cases, run red. Then `lib.sh` with `selfcheck.sh` cases. Then
+  `run-plan.sh`: `run_session` (background `claude`, poll, stop, classify, wait, resume),
+  `judge_args`, the pre-launch wait, the re-run resume in `run_step`, the INT/TERM trap. Then
+  `report.sh`, then the docs. Skills beyond the floor: `simplify` (signals, a background process and
+  polling; the diff will pass 600 lines).
+- A `complete` or `budget` result is never a limit stop, whatever the stream says. That is how "a
+  step that ends `done` while its stream says `rejected`" validates and makes only the next launch wait.
+- The pre-launch wait (§0 25) sits at the top of `run_session`, so a nudge, a review and a judge wait
+  too, and in `launch` before its `launched` event. It is logged as `usage_limit` with kind `launch`,
+  closed by `resumed`, so a re-run never resumes on it (§0 26 resumes kinds `step` and `nudge` only).
+- `fixtures/result-api-error.json` is a 429 today. It becomes a non-429 API error; the 429 is
+  `result-usage-limit.json`.
+- Nothing here contradicts §0 or §2.
+
+**Shipped** `2c953b8d` (2026-10-04) — tier: max. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, opus, opus.
+Departures (for sign-off):
+- §0 17: a `complete` or `budget` result is never a limit stop, whatever the stream says. That is how a step that ends `done` in a used-up window validates and only the next launch waits.
+- §0 17 (c): the transcript counts only when the stop is its last main-chain message (a user entry after it is a resume's prompt), and only the transcript of the session the invocation's own stream names. `/code-review` found a resume that died before its init line re-reading the old stop and waiting again up to the cap; regression case added.
+- §0 25: the pre-launch wait runs at the top of every `run_session` (nudge, review and judge too) and in `launch` before its `launched` event, not only at the main loop's boundary. It is logged as `usage_limit` with kind `launch`, then `resumed`.
+- §0 12 and §0 26: a re-run that resumes a cut-off session does not sync the plan at that boundary, because the sync commit would land inside the step's range. `sync_plan` says so and syncs at the next boundary.
+- §0 26: a re-run also resumes a step blocked at the ceiling or the cap. It waits out the rest of the logged wait (`ts` + `wait_s`), so a fallback wait counts too. The cap counts the waits of one run, so the owner's re-run can go on.
+- §0 19: every limit stop waits at least `USAGE_WAIT_SLACK_S`, even when the reset is already past, so a stale reset cannot spend six resumes in a minute. New tunable `USAGE_SLICE_S` (60), so `e2e.sh` can use 1 s slices.
+- §0 22: a session the driver stops reports no cost, so its resume gets the budget less only what results reported (a known limit in contract §6). A re-run's resume subtracts what the log shows the session spent.
+- §0 23: a nudge has no fresh form. When it cannot be resumed, a step session with the Interrupted attempt block replaces it, on what is left of the step's budget.
+- §0 27: `result` events carry a `kind`. The judge's invocations are logged too (kind `judge`), and `report.sh` leaves them out of usd, turns and denials; three existing judge scenarios gained that event. A judge that fails keeps its cost.
+- `result-api-error.json` is now a 500. The stub's session ids are per call (`s<N>-<kind>-<behaviour>`), and a resume keeps its id. The e2e Ctrl-C case uses `set -m`, so the backgrounded driver does not start with SIGINT ignored.
+- Exit 5 reads "stopped for the owner" in the header (a pause during a wait is mid-step), and exit 130 is new. An EXIT trap stops a running session when the driver dies on its ERR trap.
+- Regression cases for review findings were written after their fixes; only the stale-transcript case was seen red: the re-run's budget and rest-of-wait, a judge's cost at the cap, a fresh review's own prompt, a fresh session that ends without a result (blocked, no loop).
+- `/simplify` fixes: two bugs in `run_session`'s fresh-session path (a fresh review or judge got the continue prompt; a fresh session without a result looped), one cost fold in `kind_spent`, one jq call in `cut_off`, `wait_until` folded into `wait_out`, a grep prefilter on the transcript. Skipped, and noted under step 3: moving the fresh-session fallback out of `run_session`, moving the cap out of `limit_wait`, a watcher process instead of the polling backoff, incremental stream reads, e2e tunables at 0, log and stream helper extraction.
+
 - `run-plan.sh`: §2.2 and §0 15–28. `run_session`, `judge_args`, the pre-launch wait and the
   re-run resume in `run_step`, the INT/TERM trap. `handle_result`'s `failed` arm loses its advice
   line for a 429, because a 429 no longer reaches it.
@@ -316,6 +348,17 @@ Departures (for sign-off):
   commit, and says so.
 - Not this step's: the planning session compares `scripts/run-plan.sh docs/plans/video-calls.md
   --dry-run` under the old and the new driver after the run. A step session may not start the driver.
+- **(step-2)** Step 2 ran `/simplify` on its own diff. A whole-branch pass should still look at
+  the places its reviewers raised and step 2 left:
+  - The cost-delta rule lives three times: `lib.sh` `pr_cost_delta` (in `run_session`), and jq in
+    `kind_spent` and in `report.sh`.
+  - `run_session` holds the one step-specific branch, where a nudge that cannot be resumed becomes a
+    step session.
+  - `claude_args` and `judge_args` overlap.
+  - The kind `launch` switches the slack floor and the cap off inside `limit_wait`.
+  - Every session polls in sleeps that grow from 50 ms to 1 s. A watcher process could replace them.
+  - `e2e.sh` takes about 90 s instead of 45 s. Its 1 s fallback and poll could drop to 0 in the
+    scenarios that do not measure them.
 
 ## 4. Known limits
 
