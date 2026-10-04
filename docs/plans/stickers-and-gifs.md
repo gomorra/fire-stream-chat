@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–6 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, steps 1–7 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -549,6 +549,27 @@ returns; a second account adds a pack from a received sticker.
 
 ### Step 7 — Lottie stickers
 
+**Approach**
+- Spike, done on the owner's phone: the folder holds one `.was` beside 195 `.webp` files. It is a zip with
+  `animation/animation.json` (deflated) and `animation/animation.json.trust_token`. So `.was` is readable and both
+  containers ship.
+- One stored shape for both containers: the animation JSON, gzip-compressed, as `<id>.tgs`. A `.tgs` is stored as it
+  is. A `.was` has its JSON re-packed, so the id is the hash of the stored bytes and the receive check is unchanged.
+- Order: `lottie-compose` in the catalog, `StickerFormat.LOTTIE`, `data/sticker/LottieContainer.kt` and its test, then
+  `StickerPackArchive` (hands over `animation.json` and `.tgs` entries), `StickerFiles.store` (sniffs WebP, gzip, JSON;
+  writes the PNG first frame through `data/sticker/LottieThumbnails.kt`), `WhatsAppStickerFolder` (`.was` names),
+  the repository, then `StickerImage` and the preview sites.
+- `StoredSticker` carries the parsed `WaStickerMetadata` in place of the raw EXIF chunk, since a Lottie sticker has
+  its tags in the JSON.
+- The thumbnail is `<sticker file>.png`, a rule in `domain/model/Sticker.kt` that the UI can read (`Sticker.stillPath`).
+  `StickerFiles.store` writes it, so an import, a received sticker and a restored one all get it.
+- `StickerImage` gets a `format` parameter. A Lottie sticker plays only from a local file. Until the download
+  lands, and for a refused sticker, the bubble shows a placeholder: unhashed JSON from a url is not parsed.
+- Tests: `LottieContainerTest`, new cases in `StickerPackArchiveTest`, `StickerFilesTest`, `StickerRepositoryImplTest`,
+  `StickerDownloadsTest`, `WhatsAppStickerFolderTest`, and a Robolectric test for the format switch.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible), `simplify` if the diff
+  passes 600 lines.
+
 - **Spike first:** open real `.was` files from the owner's folder and confirm the container. If it
   cannot be read, ship `.tgs` only and report `needs_decision`.
 - `lottie-compose` dependency. `StickerFormat.LOTTIE`. `data/sticker/LottieContainer.kt`: gzip or zip
@@ -572,6 +593,36 @@ returns; a second account adds a pack from a received sticker.
   `Sticker.localPath` and asks `LocalStickerFetcher` for a missing file. The format switch goes there as well.
 - Tests: `LottieContainerTest` (fixtures for both containers, oversize, not JSON), importer cases.
 
+**Review outcome** (`/code-review`, then `/simplify`). This block sits above the `**Shipped**` line for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` fixes: layers are counted with precompositions laid out, so one that refers to itself is refused; an object
+  that names a key twice is refused, because Lottie's parser and `org.json` read it differently; Lottie parses, builds and
+  draws the animation before anything is stored, and catches `StackOverflowError` and `OutOfMemoryError` there; a received
+  sticker is stored unchanged or not at all (`StickerFiles.storeReceived`); `Message.stickerFormat` reads the local file's
+  extension before the sender's mime type; an unreadable file shows the placeholder.
+- `/simplify` fixes: `StickerImage` gives Lottie the file path (`LottieCompositionSpec.File`), so a sticker shown again is
+  not read again; `storeReceived` replaced a flag; one hash per stored file; the `.was` suffix lives in `WhatsAppStickerFile`.
+- Not taken: one shared capped read for `LottieContainer.inflate` and `StickerFiles.readCapped`; skipping the parse of a
+  `.tgs` the directory already holds; one model type that picks the still or the animation for every surface; a `canRead()`
+  check on the first-frame file, which is app-private.
+- `/code-review` ran before the `/simplify` fixes. They were not reviewed again. The gate ran after both.
+
+**Shipped** `51f04ab4` (2026-10-04) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- The spike read one real `.was` from the owner's phone over adb (`STK-20260530-WA0012.was`, the only one beside 195 `.webp`). A copy is in `/tmp` on the host and in no commit. It is a zip with `animation/animation.json` and a `trust_token`. Its JSON has `metadata.customProps` with a pack id, emojis and no pack name.
+- A Lottie sticker is stored as gzip-compressed JSON, `<id>.tgs`, mime type `application/x-tgsticker`. A `.tgs` is stored as it is. The JSON of a `.was` is re-packed, so the stored file is not the `.was`, and its id is the hash of the re-packed file. The `trust_token` is dropped.
+- `StickerFiles.store` is the place that tells formats apart, by the first bytes: RIFF, gzip, or `{`. `StickerPackArchive` hands over an `animation.json` entry and `.tgs` entries, so a `.was` is read as a pack of one sticker. A bare `.json` file imports too.
+- A WhatsApp pack that has an id and no name is named by its id (`SchoolDays`). This also changes a WebP whose metadata has an id and no name: it used to join a pack named *WhatsApp* or *Stickers* under its own key.
+- An animation with an image asset is refused, in either container. So is one over 2 MB of JSON, 100 levels of nesting, 2000 laid-out layers, 120 frames per second, or with a key written twice or with an escape.
+- A sticker Lottie cannot draw is refused. The first frame is `<file>.png`, at most 256 px, and is written before the file.
+- A Lottie sticker plays only from the local file. Until its download lands, and for a refused one, the bubble shows a grey placeholder and the previews show the broken-image mark. A WebP still renders from its url.
+- The WhatsApp grid shows a `.was` as a cell with an animation mark. The picture is seen after the import.
+- An older build shows a received Lottie sticker as a broken image, and restores a pack without them (`docs/BACKLOG.md` §4.6).
+- `StoredSticker.exif` became `metadata`. `StickerFiles` has a default for its new `LottieThumbnails` parameter, for the tests. No `di/` file changed.
+- Lottie is 6.6.0. `LottieCompositionSpec.File` reads the `.tgs` itself, which `LottieStickerUiTest` proves by waiting for the composition.
+- `/code-review` and `/simplify` were added: the step parses untrusted files, and the diff passed 600 lines.
+- CHANGELOG: one entry in `[UNRELEASED] [1.39.0]`, which was a `feat` section already, so no bump. Its hash is added in the `docs(plan)` commit.
+- Nothing ran on a device or an emulator beyond the adb read. The dex register check did not run; `MessageBubble` gained one parameter on an existing call. Checklist: `docs/BACKLOG.md`, *Lottie stickers*.
+
 ### Step 8 — Make your own stickers
 
 - `play-services-mlkit-subject-segmentation`. `ui/stickers/create/`: pick a photo, cut out the
@@ -592,6 +643,8 @@ returns; a second account adds a pack from a received sticker.
 - **(step-6)** A new sticker joins a pack through a `StickerDao` transaction (`importInto`, `addToPack`), which marks
   the pack `PENDING`. `StickerRepositoryImpl` then calls `StickerSyncScheduler.syncIfPending()`, as after every edit,
   and `StickerSyncWorker` uploads the file. Nothing else is owed for the backup.
+- **(step-7)** `StoredSticker` carries `metadata` (pack and emojis read from the file), not the raw EXIF chunk. A made
+  sticker has none, so its emojis come from the maker's screen. `StickerImage` takes a `format`, which defaults to WebP.
 - Tests: the encoder's size loop, the outline geometry (pure), the ViewModel.
 
 **‖ Checkpoint.** Device pass for Lottie and the maker.
@@ -616,6 +669,10 @@ returns; a second account adds a pack from a received sticker.
   also marks it used.
 - **(step-6)** `importFrom` already asks for the backup of the `SAVED` pack. `StickerRepository.setFavourite` is gone:
   `toggleFavourite(stickerId)` decides the direction.
+- **(step-7)** `StickerFiles.store` tells the formats apart by the first bytes: RIFF is a WebP, a gzip header or a `{` is
+  a Lottie animation. A PNG is still refused. A new format needs its mime type in `StickerFormat`, because
+  `StickerFormat.ofMimeType` reads anything unknown as a WebP, and a first-frame rule in `stillPathOf` if no image
+  decoder draws it. `Message.stickerFormat` reads the local file's extension before the mime type.
 - Tests: the routing rule, and the `image/gif` branch in the repository test.
 
 ### Step 10 — Media proxy Cloud Functions — skills: code-review; model: strong
@@ -662,6 +719,9 @@ two functions. The `wizard` skill can script this.
   not installed. On pocketbase `StickerPackSource.isSupported` is false, like the flag this step adds.
 - **(step-6 /code-review)** `SingleFlight` no longer passes a cancelled first caller's cancellation to its waiters.
   A download that a picker cell starts and cancels is safe to share with other callers.
+- **(step-7)** `StickerImage(format = LOTTIE)` plays from a local file only, and shows a placeholder for a url. An online
+  sticker that is a Lottie file needs its download before its preview, or a still rendition from the provider. The
+  import takes a `.tgs` and a `.was` by their bytes, so a downloaded one goes through `importFrom` like a WebP.
 - Tests: `OnlineMediaViewModelTest`, a mapping test in `testFirebase`.
 - Docs: FEATURE-MAP, BACKLOG, CHANGELOG.
 
