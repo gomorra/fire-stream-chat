@@ -652,6 +652,12 @@ every pack that changed, and a listener on the user's own manifests restores the
 a sticker surface is open. A restored row comes before its file, which is fetched when the sticker
 is first shown. The same document is what **View pack** reads for the pack a received sticker
 names, and **Add pack** copies it into the library as an `INSTALLED` pack.
+
+GIFs and stickers can also come from Klipy's online catalogue, in a build that has a Klipy key
+(`BuildConfig.KLIPY_API_KEY`). The app calls Klipy itself, and a pick is a message whose `mediaUrl`
+is Klipy's url: nothing is uploaded, and no device keeps a copy of the file. `KlipyUrls.isMedia`
+says which urls those are, and `MediaFileManager` writes no file for one. `MessageDao` leaves
+such a message out of the pending downloads. No screen offers the catalogue yet.
 Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
 
 The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
@@ -683,9 +689,17 @@ under *Image / Media Pipeline*.
 | `app/src/main/java/com/firestream/chat/FireStreamApp.kt` | Queues the sticker sync on start, for a pack left pending |
 | `app/src/main/java/com/firestream/chat/MainActivity.kt` | Provides `LocalStickerFetcher` from `StickerRepository.ensureFile` for every screen |
 | `app/src/main/java/com/firestream/chat/data/remote/source/StickerRef.kt` | A message's sticker id and pack id, crossing the `MessageSource` boundary as one value |
-| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendStickerMessage` (the row is built from the library; which pack ids are shared) and `sendGifMessage` (the 8 MB guard) |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendStickerMessage` (the row is built from the library; which pack ids are shared), `sendGifMessage` (the 8 MB guard) and `sendOnlineMedia` (a row with Klipy's url and no file) |
 | `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `withStickerUrl` (the url from `StickerUploads`, persisted on the message) and the GIF's document route |
-| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles` |
+| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles`. A Klipy url gets no file, whatever the type |
+| `app/src/main/java/com/firestream/chat/domain/util/KlipyUrls.kt` | Pure: `isMedia`, true for an `https` url on one of Klipy's three media hosts |
+| `app/src/main/java/com/firestream/chat/domain/model/OnlineMedia.kt` | `OnlineMedia`, its kind and its two renditions (preview and send), `OnlineMediaPage` |
+| `app/src/main/java/com/firestream/chat/domain/repository/OnlineMediaRepository.kt` | `isAvailable`, `search`, `trending`, `reportShare` |
+| `app/src/main/java/com/firestream/chat/data/remote/source/KlipyMediaSource.kt` | Klipy's API on the shared OkHttp client: the four list endpoints and the share report. The key is a path segment, so no error it throws names a url |
+| `app/src/main/java/com/firestream/chat/data/repository/OnlineMediaRepositoryImpl.kt` | Adds the customer id (`PreferencesDataStore.klipyCustomerId`, a random UUID) to every call |
+| `app/src/test/java/com/firestream/chat/domain/util/KlipyUrlsTest.kt` | The three hosts, look-alike hosts, schemes, ports, user info, urls two parsers read differently |
+| `app/src/test/java/com/firestream/chat/data/remote/source/KlipyMediaSourceTest.kt` | MockWebServer: the endpoints, paging, the order kept, a foreign host left out, the share report, errors without the key |
+| `app/src/test/java/com/firestream/chat/data/repository/OnlineMediaRepositoryImplTest.kt` | The customer id on every call, a build without a key, a cancelled call |
 | `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
 | `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request. `LibraryStickerImage` draws a library sticker and asks `LocalStickerFetcher` for a file that is not there yet. The `format` switch: a Lottie sticker is drawn by Lottie, from a local file only |
 | `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` and `rememberMessageStillModel` for the reply, forward and starred previews |
@@ -761,7 +775,7 @@ under *Image / Media Pipeline*.
 
 **Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`. **From the keyboard:** `KeyboardContentReceiver` → `ChatViewModel.sendKeyboardContent` → `ChatMessageSender.sendKeyboardContent` → `MessageRepository.sendGifMessage`, or `StickerRepository.saveSticker` and then `sendStickerMessage`.
 
-**Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
+**Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route. **A Klipy pick:** `MessageRepository.sendOnlineMedia` → the outbox, where every upload step is skipped for a row that has its `mediaUrl` → `MessageWriter.write`. On every device `MediaFileManager.downloadFor` returns no file for it, and the bubble plays from the url.
 
 **Backup:** any pack change in `StickerRepositoryImpl` → `StickerSyncScheduler.syncIfPending` → `StickerSyncWorker` → `StickerUploads.ensureUploaded` per sticker → `StickerPackSource.writePack` → `StickerDao.markSynced`. **Restore:** collecting `StickerRepository.observePacks` → `StickerLibrarySync.whileObserved` → `StickerPackSource.observeOwnPacks` → `StickerDao.applyRemotePack`. A row's file: `LibraryStickerImage` → `LocalStickerFetcher` → `StickerRepository.ensureFile` → `StickerObjectSource.urlIfPresent` → `StickerDownloads.ensureLocal`. **A shared pack:** a tap on a sticker bubble → `StickerActionsSheet` → *View pack* → `StickerPackSheet` → `StickerRepository.viewPack` / `installPack`.
 

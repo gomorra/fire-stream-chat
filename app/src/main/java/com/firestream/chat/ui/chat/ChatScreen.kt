@@ -1449,7 +1449,9 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
-                                                onStickerClick = { stickerSheetMessage = message },
+                                                // A sticker picked online names no library sticker: it
+                                                // cannot be kept, so there is nothing to offer.
+                                                onStickerClick = { if (message.stickerId != null) stickerSheetMessage = message },
                                                 onOpenFile = { viewModel.openFile(message) },
                                                 filePreviews = viewModel.filePreviews,
                                                 onVideoClick = { source ->

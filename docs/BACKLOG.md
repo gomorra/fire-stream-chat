@@ -882,14 +882,30 @@ sticker can be inserted from the keyboard. The plan is `docs/plans/stickers-and-
 - **A Lottie sticker sent to an older build shows as a broken image.** That build stores
   WebP only, and its bubble hands the url to an image decoder.
 - **A GIFs tab and an online sticker catalogue.** A GIF is sent from the keyboard, the
-  gallery or the share sheet. The in-app GIFs tab and the online catalogue are steps 10–11.
+  gallery or the share sheet. The Klipy source and the send of a pick are built (step 10).
+  The GIFs tab and the online catalogue in the picker are step 11. A build needs a Klipy key
+  for them: `klipyApiKey` in `local.properties`, or `KLIPY_API_KEY` in the environment.
+- **A Klipy pick on the released `v1.38.0`.** That build knows `STICKER` and `GIF`, and not
+  the no-copy rule. A `STICKER` without a `stickerId` gets no local file there and plays
+  from Klipy's url. A tap on it opens the sticker sheet, whose *Add to favourites* does
+  nothing. A `GIF` whose url is Klipy's is downloaded into `filesDir/documents/` under the
+  auto-download preference, so that build keeps a copy, which Klipy's rules do not allow.
+  Builds before `v1.38.0` show either as an empty text bubble.
+- **Coil's disk cache holds what it loads from Klipy.** A pick is not copied into the app's
+  files, and the image loader still caches the bytes it fetched, like any picture loaded
+  from a url. Klipy's rules ask for written approval for caching. Either ask for it, or
+  load Klipy's urls with the disk cache switched off for that request.
+- **Klipy's share report is unverified.** `KlipyMediaSource.reportShare` posts
+  `{"customer_id": …}` as JSON to `gifs/share/{slug}`. Klipy's docs name the endpoint and
+  the field. The body's encoding was not checked against a real key.
 - **A picture pasted from the keyboard's clipboard becomes a sticker.** Every keyboard
   picture that is not a GIF is sent as a sticker, at most 512 px on its long edge. A
   screenshot pasted from Gboard's clipboard row is such a picture. A rule that tells a
   photo from a sticker, by its size or its lack of transparency, would send it as a photo.
-- **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage
-  only. Search and media go through a Cloud Function, so the provider never sees a user's
-  IP. The pocketbase flavor gets no GIFs tab.
+- **The provider-privacy rule for GIFs is decided.** The app calls Klipy itself, because
+  Klipy forbids a proxy. Klipy sees the IP and the searches of a user of the GIFs tab or
+  the online stickers, and the IP of everyone whose device shows a pick. Everything else is
+  fetched from Storage only.
 - **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
   flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
 - **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.

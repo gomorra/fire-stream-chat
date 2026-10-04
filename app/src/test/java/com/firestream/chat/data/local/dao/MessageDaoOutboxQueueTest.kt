@@ -12,6 +12,7 @@ import com.firestream.chat.data.outbox.outboxJob
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.util.KlipyUrls
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -129,6 +130,29 @@ class MessageDaoOutboxQueueTest {
         assertEquals(setOf("sticker", "gif"), dao.getMessagesWithoutLocalMediaForChat("c1").map { it.id }.toSet())
         assertEquals(setOf("sticker", "gif", "photo"), dao.getAllMediaMessages().map { it.id }.toSet())
         assertEquals("s", dao.getMessageById("sticker")!!.stickerId)
+    }
+
+    // A pick from Klipy plays from its url and never gets a local file. Left in
+    // these lists it would be asked for on every chat open and every backfill.
+    @Test
+    fun `a message on any of Klipy's media hosts is no pending download`() = runTest {
+        fun received(id: String, mediaUrl: String) = MessageRecord.fromDomain(
+            Message(
+                id = id, chatId = "c1", senderId = "them", type = MessageType.GIF, status = MessageStatus.SENT,
+                timestamp = 1_000L, mediaUrl = mediaUrl,
+            )
+        )
+        val picks = KlipyUrls.MEDIA_HOSTS.map { host -> received("pick-$host", "https://$host/ii/abc/cat.webp") }
+        dao.upsertRecords(
+            picks + listOf(
+                received("stored", "https://storage.example/o/cat.gif"),
+                received("lookalike", "https://static.klipy.com.evil.example/cat.gif"),
+            )
+        )
+
+        assertEquals(3, picks.size)
+        assertEquals(setOf("stored", "lookalike"), dao.getMessagesWithoutLocalMedia().map { it.id }.toSet())
+        assertEquals(setOf("stored", "lookalike"), dao.getMessagesWithoutLocalMediaForChat("c1").map { it.id }.toSet())
     }
 
     // The SQL predicate and MessageEntity.outboxJob must agree on what is queued.

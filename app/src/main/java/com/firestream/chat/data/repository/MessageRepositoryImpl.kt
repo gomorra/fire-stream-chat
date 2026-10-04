@@ -95,6 +95,8 @@ import com.firestream.chat.domain.model.MessageSearchLimits
 import com.firestream.chat.domain.model.MessageSearchResults
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.OnlineMedia
+import com.firestream.chat.domain.model.OnlineMediaKind
 import com.firestream.chat.domain.model.RecipientBlockedException
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.TimerAlarmSound
@@ -105,6 +107,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.util.MAX_DOCUMENT_BYTES
 import com.firestream.chat.domain.util.GIF_MIME_TYPE
+import com.firestream.chat.domain.util.KlipyUrls
 import com.firestream.chat.domain.util.MAX_GIF_BYTES
 import com.firestream.chat.domain.util.formatFileSize
 import kotlinx.coroutines.CancellationException
@@ -775,6 +778,41 @@ class MessageRepositoryImpl @Inject constructor(
             mimeType = mimeType,
         )
         queueSend(placeholder, mimeType)
+    }
+
+    /**
+     * A pick from Klipy is a message that points at Klipy. The row has the url
+     * as returned and no local file, so the outbox stages, uploads and keeps
+     * nothing: every step of `OutboxSender` that would is skipped for a row that
+     * already has its `mediaUrl`. A sticker names no library sticker and no pack.
+     */
+    override suspend fun sendOnlineMedia(chatId: String, media: OnlineMedia): Result<Message> = resultOf {
+        val senderId = authSource.currentUserId ?: throw Exception(ERR_NOT_AUTHENTICATED)
+        val file = media.send
+        // Before the insert: only Klipy's own media may be sent as a url nobody uploaded.
+        // MediaLimitException is the send guard that AppError.from shows as a Validation.
+        if (!KlipyUrls.isMedia(file.url) || !file.mimeType.startsWith("image/")) {
+            throw MediaLimitException("This pick can't be sent")
+        }
+
+        queueSend(
+            Message(
+                id = UUID.randomUUID().toString(),
+                chatId = chatId,
+                senderId = senderId,
+                content = "",
+                type = when (media.kind) {
+                    OnlineMediaKind.GIF -> MessageType.GIF
+                    OnlineMediaKind.STICKER -> MessageType.STICKER
+                },
+                status = MessageStatus.SENDING,
+                timestamp = sendClock.next(),
+                mediaUrl = file.url,
+                mediaWidth = file.width.takeIf { it > 0 },
+                mediaHeight = file.height.takeIf { it > 0 },
+                mimeType = file.mimeType,
+            )
+        )
     }
 
     override suspend fun retryFailedMessage(messageId: String): Result<Message> = resultOf {
@@ -1645,6 +1683,9 @@ class MessageRepositoryImpl @Inject constructor(
     }
 
     private fun tryAutoDownload(message: Message) {
+        // A pick from Klipy plays from its url and gets no file. Decided before the
+        // preference is read, so "Wi-Fi only" queues no retry for it.
+        if (KlipyUrls.isMedia(message.mediaUrl)) return
         downloadScope.launch {
             try {
                 val heldBackBy = if (message.type in PREFERENCE_GATED_TYPES) downloadsHeldBackBy() else null

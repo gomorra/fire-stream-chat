@@ -1030,6 +1030,44 @@ class OutboxSenderTest {
         assertEquals(listOf(Upload("gif1", "image/gif", reportsProgress = true)), uploads)
     }
 
+    // ── picks from Klipy ────────────────────────────────────────────────────
+
+    // A pick points at Klipy: the row has the url and no file. Storage, the
+    // sticker object and the documents dir are never asked. `stickerFiles` and
+    // `storageSource` are strict mocks, so a call would fail the test by itself.
+    @Test
+    fun `a GIF picked from Klipy is written with Klipy's url and uploads, reads and keeps nothing`() = runTest {
+        val url = "https://static.klipy.com/ii/abc/cat.webp"
+        store(
+            sending("gif1", MessageType.GIF).copy(mediaUrl = url, mimeType = "image/webp", mediaWidth = 320, mediaHeight = 240)
+        )
+
+        sender.send("gif1")
+
+        assertTrue(uploads.isEmpty())
+        coVerify(exactly = 0) { documentFiles.imageBounds(any()) }
+        coVerify(exactly = 0) { documentFiles.adopt(any(), any(), any(), any()) }
+        assertEquals(url, writes.single().mediaUrl)
+        assertEquals(MessageType.GIF, writes.single().type)
+        val sent = stored("gif1")
+        assertEquals(MessageStatus.SENT, sent.status)
+        assertNull(sent.localUri)
+    }
+
+    @Test
+    fun `a sticker picked from Klipy names no library sticker and is written with Klipy's url`() = runTest {
+        val url = "https://static2.klipy.com/ii/abc/wave.webp"
+        store(sending("st1", MessageType.STICKER).copy(mediaUrl = url, mimeType = "image/webp"))
+
+        sender.send("st1")
+
+        assertTrue(stickerUploads.isEmpty())
+        assertTrue(uploads.isEmpty())
+        coVerify(exactly = 0) { stickerDao.getSticker(any()) }
+        assertEquals(url, writes.single().mediaUrl)
+        assertNull(stored("st1").localUri)
+    }
+
     @Test
     fun `a voice message uploads as aac without progress and is written with its duration`() = runTest {
         store(sending("voice1", MessageType.VOICE, localUri = "/cache/voice1.aac").copy(duration = 5))

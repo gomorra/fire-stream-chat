@@ -604,8 +604,8 @@ closed, and the plan accepted this
 (`docs/plans/stickers-and-gifs.md`, open risk 2). The rules themselves are kept in the Firebase
 console and are not in this repo.
 
-**When to revisit.** Before the app is opened to users who are not trusted, or when step 10
-adds Cloud Functions that could own the upload. The fix is an upload through a function that
+**When to revisit.** Before the app is opened to users who are not trusted. The sticker plan
+adds no Cloud Function that could own the upload. The fix is an upload through a function that
 hashes the bytes and writes the object itself, with client writes to `stickers/` closed.
 
 ---
@@ -708,6 +708,30 @@ repository's test wiring: run the migration on the test dispatcher, or wait for
 
 **When to revisit.** The next time it fails, or when the list sync path is touched. A red gate
 that names this test is not the diff under test. Seen 2026-10-04.
+
+---
+
+### Nothing checks the host of a received `mediaUrl`
+
+**The smell.** A message's `mediaUrl` comes from its sender, and `firestore.rules` lets any
+participant write one. The receiving device requests whatever it names: the auto-download in
+`MessageRepositoryImpl.tryAutoDownload`, the chat-open scan and `MediaBackfillWorker` through
+`MediaFileManager.downloadFor`, and Coil in the bubble. So a participant with a modified client
+can make every other participant's device send a request to a host of their choice, which
+shows that host the device's IP and when the chat was opened. The same holds for
+`mediaThumbnailUrl`. `KlipyUrls.isMedia` is the only host rule, and it only decides that a
+Klipy url gets no local file.
+
+**Why we haven't fixed it.** The sticker plan found the gap and did not own it
+(`docs/plans/stickers-and-gifs.md`, step 10). A fix is an allowlist of hosts a `mediaUrl` may
+have: the flavor's Storage host, which `StorageSource` would have to name, and Klipy's three
+media hosts. It has to hold at every site that requests the url, the image loader included,
+and old messages must keep rendering. What a wrong object costs is bounded on the storing
+side: a sticker is hashed before it is kept, and a download is written under the message's
+own id.
+
+**When to revisit.** Before the app is opened to users who are not trusted, or when link
+previews or another feature adds a second kind of sender-chosen url.
 
 ---
 

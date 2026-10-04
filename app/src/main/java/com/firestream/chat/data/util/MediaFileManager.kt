@@ -7,6 +7,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.util.KlipyUrls
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -72,8 +73,10 @@ class MediaFileManager @Inject constructor(
      *   ([StickerDownloads]).
      * - Anything else goes through [downloadAndSave].
      *
-     * Returns `null` for a sticker that is refused: the message keeps rendering
-     * from its url and gets no local file. A failed download throws.
+     * Returns `null` for a sticker that is refused, and for a url on Klipy's
+     * media hosts, whatever the type: Klipy's media is not copied. The message
+     * keeps rendering from its url and gets no local file. A failed download
+     * throws.
      */
     suspend fun downloadFor(
         chatId: String,
@@ -83,9 +86,10 @@ class MediaFileManager @Inject constructor(
         fileName: String?,
         mimeType: String?,
         stickerId: String?,
-    ): File? = when (type) {
-        MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
-        MessageType.DOCUMENT, MessageType.GIF ->
+    ): File? = when {
+        KlipyUrls.isMedia(mediaUrl) -> null
+        type == MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
+        type == MessageType.DOCUMENT || type == MessageType.GIF ->
             downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl))
         else -> downloadAndSave(chatId, messageId, mediaUrl)
     }
@@ -125,8 +129,13 @@ class MediaFileManager @Inject constructor(
         }
     }
 
-    /** GETs [mediaUrl] and hands the body to [write]; a non-2xx answer throws. */
+    /**
+     * GETs [mediaUrl] and hands the body to [write]; a non-2xx answer throws.
+     * So does a url on Klipy's media hosts: every download here ends in a file,
+     * and [downloadAndSave] is also called with a url straight from a screen.
+     */
     private fun fetch(mediaUrl: String, write: (InputStream) -> Unit) {
+        check(!KlipyUrls.isMedia(mediaUrl)) { "This picture is shown from KLIPY and can't be saved" }
         val request = Request.Builder().url(mediaUrl).build()
         httpClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw Exception("Download failed: ${response.code}")

@@ -42,6 +42,9 @@ chats/{chatId}
     ├── stickerId, stickerPackId                # STICKER only — the SHA-256 of the sticker's bytes, and the pack it
     │                                           # was sent from (absent for favourites and loose stickers). Plaintext.
     │                                           # mediaUrl then points at the shared Storage object stickers/<id>.<ext>
+    │                                           # A GIF or STICKER picked from Klipy has a mediaUrl on static.klipy.com,
+    │                                           # static1.klipy.com or static2.klipy.com, and no stickerId. Nothing of it
+    │                                           # is in Storage, and no device keeps a copy (KlipyUrls.isMedia)
     ├── localUri                                # NOT synced to Firestore — Room only
     ├── replyToId, isForwarded, isPinned, duration
     ├── editedAt, deletedAt

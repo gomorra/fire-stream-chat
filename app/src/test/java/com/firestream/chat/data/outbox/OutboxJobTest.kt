@@ -54,6 +54,7 @@ class OutboxJobTest {
         assertTrue(row(type = MessageType.GIF).needsUpload)
         assertFalse("a sticker's file is small and shared, and is usually there already", row(type = MessageType.STICKER).needsUpload)
         assertFalse(row(type = MessageType.TEXT).needsUpload)
+        assertFalse("a pick from Klipy points at Klipy", row(type = MessageType.GIF, mediaUrl = "https://static.klipy.com/ii/cat.webp").needsUpload)
         assertFalse("a forward's media is the source's", row(type = MessageType.IMAGE, mediaUrl = "https://storage.example/src").needsUpload)
         assertFalse("a tombstone uploads nothing", row(type = MessageType.IMAGE, deletedAt = 5_000L).needsUpload)
         assertFalse("nothing to do, nothing to upload", row(type = MessageType.IMAGE, status = MessageStatus.SENT).needsUpload)

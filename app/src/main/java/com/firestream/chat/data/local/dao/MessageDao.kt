@@ -8,6 +8,7 @@ import androidx.room.Update
 import androidx.room.Upsert
 import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
+import com.firestream.chat.domain.util.KlipyUrls
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -16,6 +17,17 @@ import kotlinx.coroutines.flow.Flow
  * `AUTO_DOWNLOAD_TYPES` in `MessageRepositoryImpl`.
  */
 private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 'GIF'"
+
+/**
+ * A row still owed a local file: one of [LOCAL_MEDIA_TYPES] with a url and no
+ * file yet. A pick from Klipy is never owed one, since Klipy's media is not
+ * copied. The patterns match fewer urls than `KlipyUrls.isMedia` does (a port,
+ * capitals), and `MediaFileManager.downloadFor` refuses those.
+ */
+private const val OWED_LOCAL_MEDIA = "type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL" +
+    " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST}/%'" +
+    " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_1}/%'" +
+    " AND mediaUrl NOT LIKE 'https://${KlipyUrls.MEDIA_HOST_2}/%'"
 
 @Dao
 interface MessageDao {
@@ -299,13 +311,13 @@ interface MessageDao {
     @Query("UPDATE messages SET localUri = :localUri WHERE id = :messageId")
     suspend fun updateLocalUri(messageId: String, localUri: String?)
 
-    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    @Query("SELECT * FROM messages WHERE $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES)")
     suspend fun getAllMediaMessages(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND $OWED_LOCAL_MEDIA")
     suspend fun getMessagesWithoutLocalMediaForChat(chatId: String): List<MessageEntity>
 
     // Call log
