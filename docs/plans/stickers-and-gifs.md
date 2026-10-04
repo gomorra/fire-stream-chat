@@ -1,6 +1,6 @@
 # Stickers and GIFs
 
-Status: approved, steps 1–10 shipped. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
+Status: approved, all eleven steps shipped. The device pass after step 11 is open. The prototype's verdict is variant A, the island panel, and step 5 was built to it.
 
 ## Context
 
@@ -912,6 +912,28 @@ Departures (for sign-off):
 
 ### Step 11 — GIFs tab and the online sticker catalogue
 
+**Approach**
+- Order: the notice flag (`PreferencesDataStore`, `OnlineMediaRepository.noticeAccepted` / `acceptNotice`), then
+  `ui/chat/gif/OnlineMediaViewModel.kt` and its test, then `ui/chat/picker/GifTab.kt` (grid, notice, KLIPY mark), then
+  `StickerLibraryTab` (the **Online** shelf, *More online*), `ComposerPickerPanel`, `ChatMessageSender.sendOnlineMedia`,
+  `ChatViewModel` and the `ChatScreen` mount, then the docs.
+- The notice flag sits behind `OnlineMediaRepository`, so the ViewModel sees the domain only and `ArchitectureTest`
+  gets no new allowlist entry.
+- `OnlineMediaViewModel` is a Hilt ViewModel of its own, taken with `hiltViewModel()` where the panel is mounted. It
+  holds one feed per kind (query, items, page, `hasNext`, loading, error). A tab reports its query when it is shown,
+  and nothing is requested before the notice is accepted.
+- The send stays with `ChatViewModel` / `ChatMessageSender`. The share report runs in `OnlineMediaViewModel` on the
+  application scope, after the send succeeded, so `ChatViewModel`'s constructor is unchanged.
+- `ComposerPickerPanel` takes the online state and a second callback bundle, both with defaults, so the existing hosts
+  and tests compile unchanged. The GIFs tab is declared only when the state says the feature is available.
+- `PickerTab.GIF.searchHint` becomes *Search KLIPY*. The Stickers tab keeps its own hint, because its field searches
+  the library first. Its online section carries the *Powered by KLIPY* mark.
+- No `content_filter` and no `locale` are sent. Klipy's defaults apply.
+- Tests: `OnlineMediaViewModelTest`, `OnlineMediaTabsTest` (Robolectric: placeholder, notice, tab hidden without a key,
+  the Online shelf, a pick), a `ChatMessageSender` case for the online send, a repository case for the notice flag.
+- Further skills intended: `app-ui-design` (Compose), `changelog-release` (user-visible), `code-review` (two
+  `*ViewModel.kt` files change), `simplify` if the diff passes 600 lines.
+
 - `ui/chat/gif/OnlineMediaViewModel.kt`: a debounced query, trending while the query is empty, paging by
   `has_next`, `AppError`.
 - `ui/chat/picker/GifTab.kt`: the search field's placeholder is *Search KLIPY*, which Klipy requires. The
@@ -954,6 +976,41 @@ Departures (for sign-off):
 - Tests: `OnlineMediaViewModelTest`, and a Robolectric test for the placeholder text, the notice, and the tab
   hidden without a key.
 - Docs: FEATURE-MAP, BACKLOG (the device checklist), CHANGELOG.
+
+**Review outcome** (`/code-review`, then `/simplify`). This block and the `**Shipped**` line sit at the end of the section for the driver's check (`docs/GOTCHAS.md`, `grep -q`).
+- `/code-review` found no path on which a request reaches Klipy before the notice is accepted, no online sticker that
+  reaches `markUsed`, Recents or the favourites, and no GIFs tab or Online entry without a key. Reasoned from the code.
+- `/code-review` fixes: the Stickers tab stays on the pack it opened on when a first send adds Recents in front (the
+  first draft of this step broke that); a later page that brings nothing new ends the paging; a feed that failed is not
+  asked for again when its tab is shown again; accepting the notice loads the tab on screen and no other; items without
+  a slug are all kept, told apart by `OnlineMedia.key`.
+- `/simplify` fixes: `OnlineMedia.key` lives in the domain model, not in the UI; the notice flag's flow emits only on a
+  change; the `PickerTab` KDoc was reflowed.
+- Not taken: the old results kept on screen while a new search loads; a longer debounce, a minimum query length and a
+  kept trending page for the Stickers tab; the notice gate inside the repository; the share report made by
+  `ChatMessageSender`; a map of feeds in place of two fields; one function for `loadMore` and `retry`; the shared
+  online composables moved out of `GifTab.kt`; the Online shelf as an entry of the shelf model; a still preview or a
+  cap on GIFs that play in the grid.
+- `/code-review` ran before the `/simplify` fixes. They were not reviewed again. The gate ran after both.
+
+**Shipped** `d04c35de` (2026-10-05) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- **For sign-off: the Stickers tab's search field reads *Search stickers…*, not *Search KLIPY*.** Once the notice is accepted, a sticker search there also goes to Klipy, and its matches show in *More online* under a *Powered by KLIPY* mark. Klipy's attribution rule names the placeholder. The GIFs tab has it (`docs/BACKLOG.md` §4.6).
+- **For sign-off: the share report runs when the pick is queued in the outbox**, not when it is delivered. A pick that later fails in the outbox was still reported.
+- The first-use notice flag sits behind `OnlineMediaRepository` (`noticeAccepted`, `acceptNotice`), so the ViewModel sees the domain only. It is not cleared on sign-out: it is this device's answer.
+- `OnlineMediaViewModel` is taken with `hiltViewModel()` where `ChatScreen` mounts the panel. `ChatViewModel` only got `sendOnlineMedia(media, onSent)`, and its constructor is unchanged. `OnlineMediaViewModel.onSent` makes the share report.
+- The online state and its callbacks (`OnlineMediaCallbacks`) are a second pair of parameters of `ComposerPickerPanel` and `StickerLibraryTab`, with defaults. `ComposerPickerCallbacks` is unchanged.
+- A pick is sent at once, with no preview and no caption, also while a message is being edited.
+- A search waits 400 ms after the last keystroke. Trending is asked for once per open. The grid empties while a new search loads.
+- An item that a later page repeats is shown once. Klipy's order is kept. A page that brings nothing new ends the paging.
+- A failed load shows its message and *Try again*. Nothing retries by itself.
+- GIF previews play in the grid, two columns, each in its own shape. Online stickers show their first frame, four columns.
+- An empty library in a build with a key shows the pack row (Online and **+**) above the import buttons.
+- The notice names the sender's IP as well as the recipients'.
+- No `content_filter` and no `locale` are sent (`docs/BACKLOG.md` §4.6). The previews use Coil's disk cache like the bubbles, which step 10 put up for sign-off.
+- Tests: `OnlineMediaViewModelTest`, `OnlineMediaTabsTest`, `ChatMessageSenderOnlineMediaTest`, a notice case in `OnlineMediaRepositoryImplTest`, and a case in `ComposerPickerPanelTest` for the pack that stays open.
+- CHANGELOG: `v1.39.0` is tagged on main. The `[1.39.0]` header lost its prefix here and a new `[UNRELEASED] [1.40.0]` section holds this entry (`d04c35de`). A merge with main meets the same header line.
+- Nothing ran against Klipy, on a device or an emulator. No key was set in this worktree, so the app under test had the feature off, and the tests drive the tabs with stand-in results. The dex register check did not run; `ChatScreen` gained one `hiltViewModel()` call and one remembered bundle. Checklist: `docs/BACKLOG.md`, *The GIFs tab and the online stickers*.
 
 ## Verification
 
