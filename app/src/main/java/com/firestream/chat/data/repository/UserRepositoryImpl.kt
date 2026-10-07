@@ -109,9 +109,9 @@ class UserRepositoryImpl @Inject constructor(
         return try {
             val uid = authSource.currentUserId ?: throw Exception("Not authenticated")
             val parsedUri = Uri.parse(uri)
-            // Save local copy before uploading to avoid re-download
+            // The local copy is the scaled avatar: upload it, and keep it to avoid a re-download.
             val localFile = profileImageManager.saveLocalCopy(uid, parsedUri)
-            val url = storageSource.uploadAvatar(uid, parsedUri)
+            val url = storageSource.uploadAvatar(uid, Uri.fromFile(localFile))
             userSource.updateProfile(uid, mapOf("avatarUrl" to url))
             // Update cache immediately
             userDao.updateAvatarCache(uid, url, localFile.absolutePath)

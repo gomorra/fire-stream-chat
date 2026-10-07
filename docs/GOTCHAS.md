@@ -371,6 +371,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   row is enqueued, and the row points at the copy. A staging failure fails the send at once
   (a FAILED bubble) rather than queue a row nothing can read. Regression: `OutboxFilesTest`,
   `MessageRepositoryMediaSendFailureTest`.
+- **A heavily subsampled `BitmapFactory` decode can return a black bitmap.** It raises no
+  error. It hits a large camera original shown small, which Coil's default decoder reaches
+  by a power-of-two `inSampleSize`. Any request that shows a full-size photo small attaches
+  `ScaledImageDecoder.Factory()`, which decodes through `ImageDecoder.setTargetSize`.
+  Both the Shared Media grid and every avatar (`buildAvatarRequest`) do. Disabling hardware
+  bitmaps does not fix it. Regression: `AvatarRequestTest`, `ScaledImageDecoderTest`.
 - **WorkManager typed `setForeground` needs a manifest merge on Android 14+.** Declare
   `<service android:name="androidx.work.impl.foreground.SystemForegroundService"
   android:foregroundServiceType="dataSync" tools:node="merge"/>` or the worker 400s.

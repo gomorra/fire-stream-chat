@@ -1,12 +1,16 @@
 package com.firestream.chat.ui.components
 
+import android.content.Context
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -18,16 +22,19 @@ import coil.request.ImageRequest
 import java.io.File
 
 /**
- * Returns the best available image model for an avatar: prefers [localAvatarPath] if the file
- * exists, falls back to [avatarUrl], or null if neither is available.
+ * Returns the best available image model for an avatar: prefers [localAvatarPath] if it is a
+ * readable file, falls back to [avatarUrl], or null if neither is available.
+ *
+ * The readability check matches the message bubble's: a file that exists but can't be opened
+ * would otherwise commit Coil to a load that fails, with no fallback to the URL.
  *
  * Wrap in [remember] with keys [localAvatarPath] and [avatarUrl] at the call site.
  */
 fun resolveAvatarModel(localAvatarPath: String?, avatarUrl: String?): Any? =
-    if (localAvatarPath != null) {
-        val file = File(localAvatarPath)
-        if (file.exists()) file else avatarUrl
-    } else avatarUrl
+    localAvatarPath
+        ?.let(::File)
+        ?.takeIf { it.isFile && it.canRead() }
+        ?: avatarUrl
 
 /**
  * Stable Coil cache key for an avatar, or null when there's no image.
@@ -45,23 +52,33 @@ fun avatarCacheKey(localAvatarPath: String?, avatarUrl: String?): String? =
 
 /**
  * Builds a keyed Coil [ImageRequest] for an avatar, or null when there's no image (the
- * caller renders a letter/icon placeholder). The [memoryCacheKey]/[diskCacheKey] are the
- * stable [avatarCacheKey], which lets Coil serve a warm decoded bitmap on the first
- * composition frame — eliminating the blank-then-pop flash — and reload only when the
- * photo actually changes.
+ * caller renders a letter/icon placeholder).
+ *
+ * The memory and disk cache keys are the stable [avatarCacheKey]. Coil then serves a warm
+ * decoded bitmap on the first composition frame, and reloads only when the photo changes.
+ *
+ * The request decodes through [ScaledImageDecoder]. Avatars uploaded before upload-time
+ * scaling are full camera originals. Coil's default `BitmapFactory` decode reaches avatar
+ * size by a heavy power-of-two subsample, and that decode returns a black bitmap for them.
  */
+fun buildAvatarRequest(context: Context, localAvatarPath: String?, avatarUrl: String?): ImageRequest? {
+    val data = resolveAvatarModel(localAvatarPath, avatarUrl) ?: return null
+    val key = avatarCacheKey(localAvatarPath, avatarUrl)
+    return ImageRequest.Builder(context)
+        .data(data)
+        .memoryCacheKey(key)
+        .diskCacheKey(key)
+        .decoderFactory(ScaledImageDecoder.Factory())
+        .crossfade(true)
+        .build()
+}
+
+/** [buildAvatarRequest], remembered per [localAvatarPath] and [avatarUrl]. */
 @Composable
 fun rememberAvatarRequest(localAvatarPath: String?, avatarUrl: String?): ImageRequest? {
     val context = LocalContext.current
     return remember(localAvatarPath, avatarUrl) {
-        val data = resolveAvatarModel(localAvatarPath, avatarUrl) ?: return@remember null
-        val key = avatarCacheKey(localAvatarPath, avatarUrl)
-        ImageRequest.Builder(context)
-            .data(data)
-            .memoryCacheKey(key)
-            .diskCacheKey(key)
-            .crossfade(true)
-            .build()
+        buildAvatarRequest(context, localAvatarPath, avatarUrl)
     }
 }
 
@@ -75,12 +92,15 @@ fun UserAvatar(
     localAvatarPath: String? = null
 ) {
     val request = rememberAvatarRequest(localAvatarPath, avatarUrl)
+    // A load that fails shows the icon placeholder rather than an empty circle.
+    var failed by remember(request) { mutableStateOf(false) }
 
-    if (request != null) {
+    if (request != null && !failed) {
         AsyncImage(
             model = request,
             contentDescription = contentDescription,
             contentScale = ContentScale.Crop,
+            onError = { failed = true },
             modifier = modifier
                 .clip(CircleShape)
         )

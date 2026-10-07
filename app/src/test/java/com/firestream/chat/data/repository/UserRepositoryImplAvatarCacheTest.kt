@@ -203,16 +203,18 @@ class UserRepositoryImplAvatarCacheTest {
     // then handed to the sources (whose signatures still take Uri).
 
     @Test
-    fun `uploadAvatar saves local copy before uploading`() = runTest {
+    fun `uploadAvatar uploads the scaled local copy, not the original`() = runTest {
         val uriString = "content://media/picker/1"
         val parsedUri = mockk<Uri>()
+        val localUri = mockk<Uri>()
         val localFile = mockk<File> { every { absolutePath } returns "/local/avatar.jpg" }
 
         mockkStatic(Uri::class)
         every { Uri.parse(uriString) } returns parsedUri
+        every { Uri.fromFile(localFile) } returns localUri
         every { authSource.currentUserId } returns "uid1"
         coEvery { profileImageManager.saveLocalCopy("uid1", parsedUri) } returns localFile
-        coEvery { storageSource.uploadAvatar("uid1", parsedUri) } returns "https://firebase.com/new.jpg"
+        coEvery { storageSource.uploadAvatar("uid1", localUri) } returns "https://firebase.com/new.jpg"
         coEvery { userSource.updateProfile("uid1", any()) } just Runs
         coEvery { userDao.updateAvatarCache("uid1", "https://firebase.com/new.jpg", "/local/avatar.jpg") } just Runs
 
@@ -221,7 +223,7 @@ class UserRepositoryImplAvatarCacheTest {
         assertTrue(result.isSuccess)
         coVerify(ordering = Ordering.ORDERED) {
             profileImageManager.saveLocalCopy("uid1", parsedUri)
-            storageSource.uploadAvatar("uid1", parsedUri)
+            storageSource.uploadAvatar("uid1", localUri)
         }
         coVerify { userDao.updateAvatarCache("uid1", "https://firebase.com/new.jpg", "/local/avatar.jpg") }
         unmockkStatic(Uri::class)
@@ -245,8 +247,9 @@ class UserRepositoryImplAvatarCacheTest {
         mockkStatic(Uri::class)
         every { Uri.parse(uriString) } returns parsedUri
         every { authSource.currentUserId } returns "uid1"
+        every { Uri.fromFile(localFile) } returns mockk()
         coEvery { profileImageManager.saveLocalCopy("uid1", parsedUri) } returns localFile
-        coEvery { storageSource.uploadAvatar("uid1", parsedUri) } throws RuntimeException("Upload failed")
+        coEvery { storageSource.uploadAvatar("uid1", any()) } throws RuntimeException("Upload failed")
 
         val result = repository.uploadAvatar(uriString)
 

@@ -41,6 +41,16 @@ class ResolveAvatarModelTest {
     }
 
     @Test
+    fun `falls back to remote url when local path is not a file`() {
+        val directory = tempFolder.newFolder("profile_pictures")
+        val url = "https://cdn.example.com/avatar.jpg"
+
+        val model = resolveAvatarModel(directory.absolutePath, url)
+
+        assertEquals(url, model)
+    }
+
+    @Test
     fun `returns null when both inputs are null`() {
         val model = resolveAvatarModel(localAvatarPath = null, avatarUrl = null)
 
