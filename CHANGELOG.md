@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **Profile pictures no longer show as black circles.** Avatars were stored as the full camera photo and shrunk to avatar size by a decode that returns a black image for some large photos, so on Android 17 every avatar in the app went black. Avatars now decode the same way as the Shared Media grid, which has no such problem, and a picture that fails to load shows the placeholder icon instead of an empty circle. A new profile or group picture is also scaled to at most 1024 px before it is uploaded, so it is a fraction of the size for everyone who downloads it.
+- **Profile pictures no longer show as black circles.** Avatars were stored as the full camera photo and shrunk to avatar size by a decode that returns a black image for some large photos, so on Android 17 every avatar in the app went black. Avatars now decode the same way as the Shared Media grid, which has no such problem, and a picture that fails to load shows the placeholder icon instead of an empty circle. A new profile or group picture is also scaled to at most 1024 px before it is uploaded, so it is a fraction of the size for everyone who downloads it. (`226004e4`)
 
 ## [1.39.0] — 2026-10-04
 
