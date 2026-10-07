@@ -267,7 +267,11 @@ class MediaFileManager @Inject constructor(
         if (!root.exists()) return 0
 
         var moved = 0
-        val chatDirs = root.listFiles()?.filter { it.isDirectory } ?: return 0
+        // The old Android/media root also holds the old avatar cache, which is not a chat
+        // folder. Moving it would publish every avatar in the Pictures folder.
+        val chatDirs = root.listFiles()
+            ?.filter { it.isDirectory && it.name != ProfileImageManager.PROFILE_FOLDER }
+            ?: return 0
 
         for (chatDir in chatDirs) {
             val chatId = chatDir.name

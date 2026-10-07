@@ -71,6 +71,28 @@ class MediaFileManagerTest {
         sourceFile.delete()
     }
 
+    // ── old-storage migration ──────────────────────────────────────────────
+
+    @Test
+    fun `migrateOldStorage leaves the avatar cache in Android media alone`() = runTest {
+        // The old Android/media root also holds profile_pictures/, which is not a chat
+        // folder. Migrating it moved every avatar into the public Pictures folder and
+        // deleted the cache.
+        val externalRoot = File.createTempFile("mfm-media-", "").apply { delete(); mkdirs() }
+        val avatar = File(externalRoot, "profile_pictures/uid1.jpg").apply {
+            parentFile!!.mkdirs()
+            writeText("avatar")
+        }
+        every { context.externalMediaDirs } returns arrayOf(externalRoot)
+
+        val moved = manager.migrateOldStorage()
+
+        assertEquals(0, moved)
+        assertTrue(avatar.exists())
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+        externalRoot.deleteRecursively()
+    }
+
     // ── documents: private file, never MediaStore ─────────────────────────
 
     // Regression: every DOCUMENT download went through MediaStore.Images, which

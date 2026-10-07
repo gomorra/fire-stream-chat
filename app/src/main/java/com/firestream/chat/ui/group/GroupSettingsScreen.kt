@@ -73,13 +73,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import coil.compose.AsyncImage
 import com.firestream.chat.ui.chat.FullscreenImageViewer
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
-import com.firestream.chat.ui.components.rememberAvatarRequest
+import com.firestream.chat.ui.components.AvatarImage
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -178,15 +176,12 @@ fun GroupSettingsScreen(
                                 .clickable(enabled = chat.avatarUrl != null || chat.localAvatarPath != null) { fullscreenGroupAvatar = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            val groupAvatarRequest = rememberAvatarRequest(chat.localAvatarPath, chat.avatarUrl)
-                            if (groupAvatarRequest != null) {
-                                AsyncImage(
-                                    model = groupAvatarRequest,
-                                    contentDescription = "Group avatar",
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
+                            AvatarImage(
+                                localAvatarPath = chat.localAvatarPath,
+                                avatarUrl = chat.avatarUrl,
+                                contentDescription = "Group avatar",
+                                modifier = Modifier.fillMaxSize()
+                            ) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()

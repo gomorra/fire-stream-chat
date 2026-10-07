@@ -239,9 +239,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   content LIKE …)` short-circuit first so the no-query path doesn't scan every row's
   content against `'%%'`. See `MessageDao.searchMessages`, whose one query serves both the in-chat and the global scope via `(:chatId IS NULL OR chatId = :chatId)`.
 
-- **Shared-storage files: `exists()` is not enough.** MediaStore files from a prior
-  install can pass `File.exists()` yet throw `EACCES` on open. Gate with
-  `exists() && isFile && canRead()`.
+- **Shared-storage files: `exists()` is not enough, and neither is `canRead()`.** MediaStore
+  files from a prior install can pass `File.exists()` yet throw `EACCES` on open. Gate with
+  `exists() && isFile && canRead()`, and still fall back when the open fails. `canRead()` can
+  pass too, because `Android/media` and `Pictures/` go through the FUSE layer. A cache only
+  this app reads belongs in `filesDir`, which skips that layer. The avatar cache lives there
+  for this reason: on Android 17 its `Android/media` copies failed to load, and the URL
+  fallback behind `canRead()` never ran (2026-10-07).
 - **Firestore echoes your own write under its client-set id before the server has it.**
   Message ids are Room row ids, so `document(id).set()` fires the snapshot listener at once
   with that id and the payload's `status = SENT` while `metadata.hasPendingWrites()` is still

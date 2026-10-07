@@ -28,14 +28,15 @@ class ProfileImageManager @Inject constructor(
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
 
-    private val profileDir: File by lazy {
-        val dir = File(
-            context.externalMediaDirs?.firstOrNull() ?: context.filesDir,
-            PROFILE_FOLDER
-        )
-        dir.mkdirs()
-        dir
-    }
+    /**
+     * The avatar cache, in internal storage.
+     *
+     * Not `Android/media`: that folder goes through the shared-storage FUSE layer, where a file
+     * can pass `exists()` and `canRead()` and still fail to open. `mkdirs()` runs on each access
+     * because a folder deleted from under the app would otherwise fail every later download.
+     */
+    private val profileDir: File
+        get() = File(context.filesDir, PROFILE_FOLDER).also { it.mkdirs() }
 
     fun getLocalFile(id: String): File = File(profileDir, "$id.jpg")
 
@@ -139,8 +140,20 @@ class ProfileImageManager @Inject constructor(
         getLocalFile(id).delete()
     }
 
+    /**
+     * Deletes the avatar cache that older versions kept in `Android/media`. The repositories
+     * download each avatar again into [profileDir], because [fileExists] only looks there.
+     */
+    @Suppress("DEPRECATION")
+    fun deleteLegacyExternalCache() {
+        context.externalMediaDirs?.firstOrNull()
+            ?.let { File(it, PROFILE_FOLDER) }
+            ?.deleteRecursively()
+    }
+
     companion object {
-        private const val PROFILE_FOLDER = "profile_pictures"
+        /** The avatar folder's name, in internal storage and in the old `Android/media` location. */
+        const val PROFILE_FOLDER = "profile_pictures"
 
         /** Long-edge cap for an uploaded avatar. Avatars show at 96dp at most, and fullscreen. */
         internal const val AVATAR_MAX_EDGE = 1024

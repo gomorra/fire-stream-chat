@@ -31,14 +31,16 @@ class ProfileImageManagerTest {
     private val context = mockk<Context>()
     private val httpClient = mockk<OkHttpClient>()
 
-    private lateinit var profileDir: File
+    private lateinit var filesDir: File
+    private lateinit var externalMediaDir: File
     private lateinit var manager: ProfileImageManager
 
     @Before
     fun setUp() {
-        profileDir = tempDir.newFolder("profile_pictures")
-        // externalMediaDirs returns our temp dir's parent so profileDir = parent/profile_pictures
-        every { context.externalMediaDirs } returns arrayOf(tempDir.root)
+        filesDir = tempDir.newFolder("files")
+        externalMediaDir = tempDir.newFolder("media")
+        every { context.filesDir } returns filesDir
+        every { context.externalMediaDirs } returns arrayOf(externalMediaDir)
 
         manager = ProfileImageManager(context, httpClient, MediaProcessingLimiter())
     }
@@ -47,6 +49,27 @@ class ProfileImageManagerTest {
     fun `getLocalFile returns file in profile directory`() {
         val file = manager.getLocalFile("user123")
         assertTrue(file.absolutePath.endsWith("profile_pictures/user123.jpg"))
+    }
+
+    @Test
+    fun `avatar cache lives in internal storage, not Android media`() {
+        // Android/media goes through the shared-storage FUSE layer, which can report a
+        // file readable and then refuse to open it. Internal storage never does.
+        val file = manager.getLocalFile("user123")
+
+        assertEquals(File(filesDir, "profile_pictures/user123.jpg"), file)
+    }
+
+    @Test
+    fun `deleteLegacyExternalCache removes the old Android media avatar folder`() {
+        val legacy = File(externalMediaDir, "profile_pictures/user123.jpg").apply {
+            parentFile!!.mkdirs()
+            writeText("old")
+        }
+
+        manager.deleteLegacyExternalCache()
+
+        assertFalse(legacy.parentFile!!.exists())
     }
 
     @Test

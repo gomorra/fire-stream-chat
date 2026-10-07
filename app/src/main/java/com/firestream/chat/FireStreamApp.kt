@@ -19,6 +19,7 @@ import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.util.ImageEditRasterizer
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.data.worker.UpdateCheckWorker
@@ -59,6 +60,9 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
 
     @Inject
     lateinit var imageEditRasterizer: ImageEditRasterizer
+
+    @Inject
+    lateinit var profileImageManager: ProfileImageManager
 
     @Inject
     @ApplicationScope
@@ -114,6 +118,7 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             // an unswept edit cache grows per edit *step* and never shrinks;
             // sweepStale keeps only what a recent send might still retry.
             imageEditRasterizer.sweepStale()
+            profileImageManager.deleteLegacyExternalCache()
         }
         requeueQueuedSends()
         syncPendingStickerPacks()

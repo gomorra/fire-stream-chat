@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.components
 
 import android.content.Context
+import android.util.Log
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
@@ -82,6 +83,59 @@ fun rememberAvatarRequest(localAvatarPath: String?, avatarUrl: String?): ImageRe
     }
 }
 
+/** Where [AvatarImage] is loading from. It tries the local file first. */
+internal enum class AvatarSource { LOCAL, REMOTE, NONE }
+
+/**
+ * The source to try after a load fails. A failed local file falls back to [avatarUrl]. A
+ * failed URL, or a local file with no URL behind it, gives up and shows the placeholder.
+ */
+internal fun avatarSourceAfterError(failedOnLocalFile: Boolean, avatarUrl: String?): AvatarSource =
+    if (failedOnLocalFile && avatarUrl != null) AvatarSource.REMOTE else AvatarSource.NONE
+
+/**
+ * An avatar image, or [placeholder] when there is none or it cannot be loaded.
+ *
+ * A local file that fails to load is retried from [avatarUrl]. That covers a cache file that
+ * exists but can't be opened. Each failure is logged under the `AvatarImage` tag.
+ */
+@Composable
+fun AvatarImage(
+    localAvatarPath: String?,
+    avatarUrl: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    placeholder: @Composable () -> Unit,
+) {
+    var source by remember(localAvatarPath, avatarUrl) { mutableStateOf(AvatarSource.LOCAL) }
+    val request = rememberAvatarRequest(
+        localAvatarPath = localAvatarPath.takeIf { source == AvatarSource.LOCAL },
+        avatarUrl = avatarUrl.takeIf { source != AvatarSource.NONE },
+    )
+
+    if (request == null) {
+        placeholder()
+        return
+    }
+    AsyncImage(
+        model = request,
+        contentDescription = contentDescription,
+        contentScale = ContentScale.Crop,
+        onError = { error ->
+            val failedOnLocalFile = error.result.request.data is File
+            Log.w(
+                TAG,
+                "Avatar failed to load from the ${if (failedOnLocalFile) "local file" else "URL"}",
+                error.result.throwable,
+            )
+            source = avatarSourceAfterError(failedOnLocalFile, avatarUrl)
+        },
+        modifier = modifier,
+    )
+}
+
+private const val TAG = "AvatarImage"
+
 @Composable
 fun UserAvatar(
     avatarUrl: String?,
@@ -91,20 +145,12 @@ fun UserAvatar(
     modifier: Modifier = Modifier,
     localAvatarPath: String? = null
 ) {
-    val request = rememberAvatarRequest(localAvatarPath, avatarUrl)
-    // A load that fails shows the icon placeholder rather than an empty circle.
-    var failed by remember(request) { mutableStateOf(false) }
-
-    if (request != null && !failed) {
-        AsyncImage(
-            model = request,
-            contentDescription = contentDescription,
-            contentScale = ContentScale.Crop,
-            onError = { failed = true },
-            modifier = modifier
-                .clip(CircleShape)
-        )
-    } else {
+    AvatarImage(
+        localAvatarPath = localAvatarPath,
+        avatarUrl = avatarUrl,
+        contentDescription = contentDescription,
+        modifier = modifier.clip(CircleShape),
+    ) {
         Surface(
             modifier = modifier,
             shape = CircleShape,
