@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Changed
 
-- **Searching emoji and stickers no longer hides behind the keyboard.** The keyboard used to open over the whole emoji panel, covering the search field and its results. Opening the search now brings up the keyboard straight away. Emoji results show as one row directly above the keyboard, with your message still in view, so you can pick several in a row. Sticker search slides up to fill the screen below the chat's header, with the results between the search field and the keyboard. Picking a sticker from it sends the sticker and closes the search.
+- **Searching emoji and stickers no longer hides behind the keyboard.** The keyboard used to open over the whole emoji panel, covering the search field and its results. Opening the search now brings up the keyboard straight away. Emoji results show as one row directly above the keyboard, with your message still in view, so you can pick several in a row. Sticker search slides up to fill the screen below the chat's header, with the results between the search field and the keyboard. Picking a sticker from it sends the sticker and closes the search. (`aaaa089b`)
 
 ## [1.39.1] — 2026-10-07
 
