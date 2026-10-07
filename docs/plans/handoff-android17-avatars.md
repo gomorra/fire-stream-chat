@@ -1,6 +1,6 @@
 # Handover: avatars don't load on Android 17
 
-Status: open. Written 2026-10-07 at the end of a session that tried two fixes. Read this before touching avatar code.
+Status: open, waiting on the phone results in steps 1 to 6. Written 2026-10-07 after two fixes that did not help. Read this before touching avatar code.
 
 ## Symptom
 
@@ -33,18 +33,31 @@ The hypothesis was that reading the cached file fails. The cache lived in `exter
 
 Result: on v1.40.1 avatars still do not show. So either the URL load fails as well, or the file opens fine and the decode fails. The logcat (step 1 below) tells which.
 
+## Facts from the code
+
+These hold on v1.40.1 and decide how to read the phone results.
+
+- **Release builds keep their log calls.** `app/proguard-rules.pro` has no `-assumenosideeffects` rule for `android.util.Log`, so the updater build logs under `AvatarImage`. R8 renames Coil's classes in stack traces, but platform exceptions and messages stay readable.
+- **The placeholder icon means one of two things.** `AvatarImage` shows it after a failed load, which always logs an `AvatarImage` line. It also shows it when `avatarUrl` and `localAvatarPath` are both null, which logs nothing. A placeholder with no log line means no avatar data reached the UI.
+- **The fullscreen viewer logs too.** `FullscreenImageViewer` logs a failed load under the tag `FullscreenImageViewer`. It shows "Failed to load" after a load error and "No image data" when it has no model. It uses Coil's default decoder and its own memory cache key.
+- **Received message images use the same download path as avatars.** `MediaFileManager.fetch` and `ProfileImageManager.downloadAvatar` both make a plain GET through the same `OkHttpClient`, and both buckets are Firebase Storage. So if images received from someone else load on Android 17, fetching from Firebase Storage works on that phone.
+- **The avatar request before v1.39.1 used Coil's default decoder** and still failed (the black circle). Its disk cache key is the URL, which is also Coil's default for a URL. So the avatar request differs from a message image request only in its memory cache key and, since v1.39.1, `ScaledImageDecoder`.
+
 ## Next steps, in order
 
-1. **Read the logcat.** With the phone on USB, run `adb logcat -s AvatarImage`, then open the chat list. Each failed avatar logs whether the local file or the URL failed, plus the exception. This is the single most useful piece of evidence. No session has seen it yet.
+1. **Read the logcat.** With the phone on USB, run `adb logcat -c`, then `adb logcat -v time -s AvatarImage FullscreenImageViewer skia ImageDecoder BitmapFactory > avatar-log.txt`, then open the chat list. Each failed avatar logs whether the local file or the URL failed, plus the exception. `skia` carries the platform's own decode errors. This is the single most useful piece of evidence. No session has seen it yet.
 2. **Clear the app's cache once** (Android Settings → Apps → FireStream → Storage → Clear cache, not storage). Coil's disk cache (`cacheDir/image_cache`, keyed by avatar URL) could hold a bad entry that every URL load reads back.
 3. **Upload a new avatar on the Android 17 phone** and see whether that one shows. Since v1.39.1, new uploads are re-encoded at 1024 px. Old avatars are raw camera originals. If only the new one shows, the problem is the old files' format, and hypothesis A below gains weight.
 4. **Open an avatar fullscreen** (tap the big avatar on a profile). `FullscreenImageViewer` loads through `SubcomposeAsyncImage` with Coil's default decoder and shows a labelled error. If fullscreen works but small avatars don't, look at the avatar request (decoder, size, cache keys) rather than at the file.
+5. **Inspect an avatar file.** A session cannot read Firestore or list Storage: there are no credentials in the container, and the build's `google-services.json` is a placeholder. The owner copies one `avatarUrl` (Firestore `users/<uid>`) or the Storage download link for `avatars/<uid>/profile.jpg`. `firebasestorage.googleapis.com` is reachable from a cloud session. Treat the `token=` part as a secret and keep it out of commits and logs.
+6. **Ask the owner three questions.** Which app version is on the Android 16 device? An old version there may draw every avatar from its old local cache and never fetch a URL. Did avatars show on the Android 17 phone before its OS update? Do images *received* from someone else load on it, or only images it sent itself?
 
 ## Hypotheses still open
 
-- **A. The old avatar files are a format Android 17 fails to decode.** They are raw camera originals, possibly Ultra HDR JPEGs with a gainmap, or HEIC. Message images are re-encoded by `ImageCompressor` before sending, which would explain why they load on Android 17 while old avatars do not. Check by downloading an avatar (`avatars/<uid>/profile.jpg` in Firebase Storage; the URL is the user's `avatarUrl`) and inspecting it, e.g. `exiftool -a -G1 file.jpg | grep -i -E "hdrgm|gainmap|MPF|MPImage"`. If this holds, the fix is a decode fallback in `ScaledImageDecoder` (for example decode without the gainmap, or fall back to `BitmapFactory`), or re-encoding avatars server side or on next upload.
-- **B. The URL load fails, not the file.** The avatar URLs are Firebase Storage download URLs with `?token=`, fetched by Coil through the app's `OkHttpClient`. The logcat in step 1 decides this.
-- **C. Something in the avatar request itself.** Message images load through the same `ImageLoader` (`FireStreamApp.newImageLoader`) on Android 17, so Coil itself works. The differences in the avatar request are: `memoryCacheKey`/`diskCacheKey` set to the URL, `ScaledImageDecoder`, and `crossfade`.
+- **A. The old avatar files are a format Android 17 fails to decode.** They are raw camera originals, possibly Ultra HDR JPEGs with a gainmap, or HEIC. Message images are re-encoded by `ImageCompressor` before sending, which would explain why they load on Android 17 while old avatars do not. Check by downloading an avatar (`avatars/<uid>/profile.jpg` in Firebase Storage; the URL is the user's `avatarUrl`) and inspecting it, e.g. `exiftool -a -G1 file.jpg | grep -i -E "hdrgm|gainmap|MPF|MPImage"`. If this holds, the fix is a decode fallback in `ScaledImageDecoder` (for example decode without the gainmap, or fall back to `BitmapFactory`), or re-encoding avatars server side or on next upload. Prediction: fullscreen fails too, the log shows an `ImageDecoder` or `skia` decode error, and a newly uploaded avatar shows.
+- **B. The URL load fails, not the file.** The avatar URLs are Firebase Storage download URLs with `?token=`, fetched by Coil through the app's `OkHttpClient`. The logcat in step 1 decides this. Prediction: the `AvatarImage` line says "from the URL" with an HTTP code or an `IOException`, and fullscreen fails the same way.
+- **C. Something in the avatar request itself.** Message images load through the same `ImageLoader` (`FireStreamApp.newImageLoader`) on Android 17, so Coil itself works. The differences in the avatar request are: `memoryCacheKey`/`diskCacheKey` set to the URL, `ScaledImageDecoder`, and `crossfade`. This is the weakest hypothesis, because the request failed before `ScaledImageDecoder` existed and its disk cache key equals Coil's default. Prediction: fullscreen works while small avatars fail.
+- **D. No avatar data reaches the UI on that phone.** `avatarUrl` and `localAvatarPath` are both null in its Room rows. Prediction: no `AvatarImage` log lines at all, and fullscreen shows "No image data" or does not open.
 
 ## Code map
 
