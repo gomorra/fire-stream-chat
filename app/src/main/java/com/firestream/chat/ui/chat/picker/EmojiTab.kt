@@ -23,6 +23,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -33,6 +36,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -48,6 +52,8 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -66,6 +72,9 @@ private const val SIZE_MAX = 5.0f
 private const val SIZE_DEFAULT = 1.0f
 // Gap between the held cell and the size panel beside it
 private val SIZE_PANEL_GAP = 8.dp
+// The search strip: one row of cells at the minimum touch target
+private val EMOJI_STRIP_CELL = 48.dp
+private val EMOJI_STRIP_HEIGHT = 56.dp
 
 // ---------------------------------------------------------------------------
 // Grid item model for the flat LazyVerticalGrid
@@ -445,6 +454,71 @@ internal fun EmojiTab(
                     scope.launch { gridState.scrollToItem(target) }
                 }
             )
+        }
+    }
+}
+
+// ===========================================================================
+// Search strip
+// ===========================================================================
+
+/**
+ * Emoji search as a single row, for a host that keeps the keyboard directly
+ * under the search row (the composer's compact search layout).
+ *
+ * One row is enough for emoji: a few letters narrow thousands of names to a
+ * handful, and the composer stays in view above, so each pick shows up where
+ * it lands. A tap inserts the emoji at its normal size. The long-press size
+ * drag stays on the full grid, because a drag up from a row this short would
+ * run into the conversation.
+ *
+ * With no query yet the row offers the recents, frozen for the session like the
+ * grid's, so the strip is useful before the first letter is typed.
+ */
+@Composable
+internal fun EmojiSearchStrip(
+    query: String,
+    recentEmojis: List<String>,
+    onSelection: (PickerSelection.Emoji) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sessionRecents = remember { recentEmojis.distinct() }
+    val emojis = remember(query, sessionRecents) {
+        if (query.isBlank()) sessionRecents else EmojiSearchData.searchEmojis(query)
+    }
+    val rowState = rememberLazyListState()
+    // A new query is a new list: start it from its best match, not from
+    // wherever the previous query's row was scrolled to.
+    LaunchedEffect(query) { rowState.scrollToItem(0) }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(EMOJI_STRIP_HEIGHT)
+            .semantics { contentDescription = "Emoji results" },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (emojis.isEmpty()) {
+            Text(
+                text = if (query.isBlank()) "Type to search emoji" else "No emoji found",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
+        } else {
+            LazyRow(
+                state = rowState,
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                items(emojis, key = { it }) { emoji ->
+                    EmojiCell(
+                        emoji = emoji,
+                        modifier = Modifier.size(EMOJI_STRIP_CELL),
+                        onClick = { onSelection(PickerSelection.Emoji(emoji, SIZE_DEFAULT)) },
+                    )
+                }
+            }
         }
     }
 }

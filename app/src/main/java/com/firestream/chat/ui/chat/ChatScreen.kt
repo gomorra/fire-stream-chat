@@ -6,6 +6,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import com.firestream.chat.ui.call.CallActivity
+import com.firestream.chat.ui.chat.picker.rememberPickerPanelState
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -45,6 +46,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -129,6 +131,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -343,6 +346,52 @@ fun ChatScreen(
     // Registered before the dictation BackHandler below so dictation keeps
     // precedence (Compose gives it to the later-registered handler).
     BackHandler(enabled = showEmojiPanel && !imeVisible) { showEmojiPanel = false }
+
+    // The picker's tab, search and query live here rather than in the panel.
+    // While a search runs the panel changes place (composerSearchLayout), and
+    // the query and the focused field have to go with it.
+    val pickerState = rememberPickerPanelState(COMPOSER_PICKER_TABS)
+    val pickerSearchLayout =
+        if (showEmojiPanel) composerSearchLayout(pickerState.searchingTab, imeVisible)
+        else ComposerSearchLayout.PANEL
+    val pickerMounted = showEmojiPanel || animatedPanelPx > 0
+    // Each open starts on the first tab with the search closed, as it did when
+    // the panel owned this state and was disposed on close.
+    LaunchedEffect(pickerMounted) {
+        if (!pickerMounted) pickerState.reset(COMPOSER_PICKER_TABS.first())
+    }
+    val composerPickerCallbacks = ComposerPickerCallbacks(
+        onEmoji = { emoji, size ->
+            // Insert at the caret (replacing any selection), not at
+            // the end — the picker must work mid-sentence.
+            applyComposerEdit(
+                insertAtCursor(
+                    text = messageText,
+                    selection = inputCursor,
+                    insertion = emoji,
+                    emojiSizes = pendingEmojiSizes,
+                    insertionSize = size,
+                )
+            )
+        },
+        onBackspace = {
+            applyComposerEdit(deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes))
+        },
+        onRecentEmojiUsed = { viewModel.addRecentEmoji(it) },
+        onSticker = {
+            viewModel.sendSticker(it.stickerId, it.packId)
+            // A sticker picked from a search ends the search. The picker and
+            // the keyboard close so the sticker is seen landing in the chat.
+            if (pickerState.searchOpen) {
+                pickerState.closeSearch()
+                showEmojiPanel = false
+                keyboardController?.hide()
+            }
+        },
+        onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
+        onImportStickers = onImportStickersClick,
+        onCreateSticker = onCreateStickerClick,
+    )
 
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
@@ -1122,7 +1171,7 @@ fun ChatScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(modifier = Modifier.fillMaxSize()) { Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -1978,6 +2027,10 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(composerFocusRequester)
+                            // Typing into the message ends a picker search: the
+                            // strip would otherwise sit over a keyboard that
+                            // no longer types into it.
+                            .onFocusChanged { if (it.isFocused) pickerState.closeSearch() }
                             .padding(
                                 start = 16.dp,
                                 end = if (uiState.composer.editingMessage == null) 48.dp else 16.dp,
@@ -2096,47 +2149,57 @@ fun ChatScreen(
                         ime = imeInsets,
                         navBars = navBarInsets,
                         panelPx = { animatedPanelPx },
-                        imeMaxOverlapPx = imeMaxOverlapPx
+                        imeMaxOverlapPx = imeMaxOverlapPx,
+                        stripOnKeyboard = pickerSearchLayout == ComposerSearchLayout.STRIP
                     )
                     .clipToBounds()
             ) {
-                if (showEmojiPanel || animatedPanelPx > 0) {
+                if (pickerMounted && pickerSearchLayout != ComposerSearchLayout.FULL) {
+                    val strip = pickerSearchLayout == ComposerSearchLayout.STRIP
                     ComposerPickerPanel(
                         recentEmojis = uiState.overlays.recentEmojis,
                         stickerPacks = uiState.overlays.stickerPacks,
                         recentStickers = uiState.overlays.recentStickers,
-                        callbacks = ComposerPickerCallbacks(
-                            onEmoji = { emoji, size ->
-                                // Insert at the caret (replacing any selection), not at
-                                // the end — the picker must work mid-sentence.
-                                applyComposerEdit(
-                                    insertAtCursor(
-                                        text = messageText,
-                                        selection = inputCursor,
-                                        insertion = emoji,
-                                        emojiSizes = pendingEmojiSizes,
-                                        insertionSize = size,
-                                    )
-                                )
-                            },
-                            onBackspace = {
-                                applyComposerEdit(
-                                    deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
-                                )
-                            },
-                            onRecentEmojiUsed = { viewModel.addRecentEmoji(it) },
-                            onSticker = { viewModel.sendSticker(it.stickerId, it.packId) },
-                            onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
-                            onImportStickers = onImportStickersClick,
-                            onCreateSticker = onCreateStickerClick,
-                        ),
+                        callbacks = composerPickerCallbacks,
+                        state = pickerState,
+                        compact = strip,
+                        // The strip is as tall as its content and sits on the
+                        // keyboard; the panel is the keyboard's height.
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .height(panelContentDp)
+                            .then(if (strip) Modifier else Modifier.height(panelContentDp))
                     )
                 }
             }
+        }
+
+        // Sticker search slides up over the conversation and the composer,
+        // from under the top bar down to the keyboard. A pick is sent at once,
+        // so the composer is not needed while it is open. It is drawn here, as
+        // a sibling of the Column, because the Column has no room to give it.
+        AnimatedVisibility(
+            visible = pickerSearchLayout == ComposerSearchLayout.FULL,
+            enter = slideInVertically(tween(220)) { it / 3 } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(180)) { it / 3 } + fadeOut(tween(180)),
+        ) {
+            ComposerPickerPanel(
+                recentEmojis = uiState.overlays.recentEmojis,
+                stickerPacks = uiState.overlays.stickerPacks,
+                recentStickers = uiState.overlays.recentStickers,
+                callbacks = composerPickerCallbacks,
+                state = pickerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                    .background(MaterialTheme.colorScheme.surface)
+                    // Swallows touches on the overlay's empty space, which
+                    // would otherwise reach the conversation underneath.
+                    .pointerInput(Unit) {}
+                    .imePadding()
+            )
+        }
         }
     }
 
@@ -2700,13 +2763,29 @@ private fun Modifier.imeOrPanelHeight(
     ime: WindowInsets,
     navBars: WindowInsets,
     panelPx: () -> Int,
-    imeMaxOverlapPx: MutableIntState
+    imeMaxOverlapPx: MutableIntState,
+    stripOnKeyboard: Boolean
 ): Modifier = layout { measurable, constraints ->
     val overlap = (ime.getBottom(this) - navBars.getBottom(this)).coerceAtLeast(0)
     if (overlap > imeMaxOverlapPx.intValue) imeMaxOverlapPx.intValue = overlap
-    val height = maxOf(overlap, panelPx())
-    val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    if (stripOnKeyboard) {
+        // Emoji search: the strip keeps its own height and sits on top of the
+        // keyboard, so the region is the keyboard plus the strip. The panel's
+        // height is a floor while the keyboard is still sliding in.
+        val placeable = measurable.measure(
+            Constraints(
+                minWidth = constraints.maxWidth,
+                maxWidth = constraints.maxWidth,
+                maxHeight = constraints.maxHeight,
+            )
+        )
+        val height = maxOf(overlap + placeable.height, panelPx()).coerceAtMost(constraints.maxHeight)
+        layout(placeable.width, height) { placeable.place(0, 0) }
+    } else {
+        val height = maxOf(overlap, panelPx())
+        val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
 }
 
 /**

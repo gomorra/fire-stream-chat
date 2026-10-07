@@ -22,11 +22,14 @@ import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Sticker
 import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.util.StickerSearch
+import com.firestream.chat.ui.chat.picker.EmojiSearchStrip
 import com.firestream.chat.ui.chat.picker.EmojiTab
 import com.firestream.chat.ui.chat.picker.PickerPanel
+import com.firestream.chat.ui.chat.picker.PickerPanelState
 import com.firestream.chat.ui.chat.picker.PickerSelection
 import com.firestream.chat.ui.chat.picker.PickerTab
 import com.firestream.chat.ui.chat.picker.StickerLibraryTab
+import com.firestream.chat.ui.chat.picker.rememberPickerPanelState
 import com.firestream.chat.ui.stickers.StickerCell
 
 /** What the composer's picker hands back. One bundle, to stay under the parameter ceiling (docs/GOTCHAS.md). */
@@ -50,6 +53,11 @@ internal data class ComposerPickerCallbacks(
  *
  * The backspace key is on both tabs. It edits the composer, which is on screen
  * above either of them, and a key that came and went would shift the island.
+ *
+ * Opening the search focuses its field, so the keyboard comes up at once.
+ * Where the panel goes then is the host's call, made from [state] by
+ * [composerSearchLayout]. When the host asks for [compact], the emoji tab
+ * becomes a single row of results above the search row.
  */
 @Composable
 internal fun ComposerPickerPanel(
@@ -58,10 +66,15 @@ internal fun ComposerPickerPanel(
     recentStickers: List<Sticker>,
     callbacks: ComposerPickerCallbacks,
     modifier: Modifier = Modifier,
+    state: PickerPanelState = rememberPickerPanelState(COMPOSER_PICKER_TABS),
+    compact: Boolean = false,
 ) {
     PickerPanel(
-        tabs = COMPOSER_TABS,
+        tabs = COMPOSER_PICKER_TABS,
         modifier = modifier,
+        state = state,
+        compact = compact,
+        focusSearchOnOpen = true,
         searchTrailing = { PickerBackspaceKey(onClick = callbacks.onBackspace) },
     ) { tab, query ->
         when (tab) {
@@ -75,14 +88,17 @@ internal fun ComposerPickerPanel(
                 onCreate = callbacks.onCreateSticker,
             )
 
-            PickerTab.EMOJI -> EmojiTab(
-                query = query,
-                recentEmojis = recentEmojis,
-                onSelection = { pick ->
+            PickerTab.EMOJI -> {
+                val onSelection: (PickerSelection.Emoji) -> Unit = { pick ->
                     callbacks.onEmoji(pick.emoji, pick.size)
                     callbacks.onRecentEmojiUsed(pick.emoji)
-                },
-            )
+                }
+                if (compact) {
+                    EmojiSearchStrip(query = query, recentEmojis = recentEmojis, onSelection = onSelection)
+                } else {
+                    EmojiTab(query = query, recentEmojis = recentEmojis, onSelection = onSelection)
+                }
+            }
 
             // Not declared by the composer. Named rather than swept into an
             // `else`, so a tab added to the enum fails to compile here.
@@ -91,7 +107,37 @@ internal fun ComposerPickerPanel(
     }
 }
 
-private val COMPOSER_TABS = listOf(PickerTab.EMOJI, PickerTab.STICKER_LIBRARY)
+internal val COMPOSER_PICKER_TABS = listOf(PickerTab.EMOJI, PickerTab.STICKER_LIBRARY)
+
+/** Where the composer puts its picker. */
+internal enum class ComposerSearchLayout {
+    /** In the keyboard's place, under the composer. No search runs, or the keyboard is down. */
+    PANEL,
+
+    /** One row of results and the search row, directly on top of the keyboard. The composer stays in view. */
+    STRIP,
+
+    /** Over the conversation and the composer, from the top bar down to the keyboard. */
+    FULL,
+}
+
+/**
+ * Where the composer puts its picker while [searchingTab] is being searched.
+ *
+ * - **Emoji search is a strip** while the keyboard is up. You often pick
+ *   several emoji in a row and want to see them land in the message, and a
+ *   few letters leave few enough results for one row. With the keyboard down
+ *   the panel is back in its place and the results are the full grid.
+ * - **Sticker search fills the screen.** Stickers are large, so they need the
+ *   room, and each pick is sent at once, so the composer is not needed.
+ *   GIF search will work the same way once the composer offers it.
+ */
+internal fun composerSearchLayout(searchingTab: PickerTab?, imeVisible: Boolean): ComposerSearchLayout =
+    when (searchingTab) {
+        PickerTab.EMOJI -> if (imeVisible) ComposerSearchLayout.STRIP else ComposerSearchLayout.PANEL
+        PickerTab.STICKER_LIBRARY, PickerTab.GIF -> ComposerSearchLayout.FULL
+        PickerTab.STICKER, PickerTab.TEXT, PickerTab.SHAPE, null -> ComposerSearchLayout.PANEL
+    }
 
 /** How many stickers the strip offers. More than a few screens of them is a search, which the tab does. */
 private const val MAX_SUGGESTIONS = 24
