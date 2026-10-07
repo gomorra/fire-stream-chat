@@ -175,9 +175,10 @@ shell existed.
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the compact layout (results above the search row), and the slots a host fills |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanelState.kt` | The active tab, the open search and the per-tab query, hoistable so a host can move the panel while a search runs |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`STICKER` is the editor's bundled pack, `STICKER_LIBRARY` the user's library, `GIF` is declared by nobody) and the `PickerSelection` a tab hands back |
-| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's two-tab picker, its callbacks bundle, and `StickerSuggestionStrip` above the composer |
+| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's two-tab picker, its callbacks bundle, `composerSearchLayout` (where the picker goes while a search runs), and `StickerSuggestionStrip` above the composer |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The library as a tab: the pack row (Recents, favourites, packs), the active pack's grid, search by emoji, the empty state's import button |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiGridLayout.kt` | Pure layout arithmetic for the emoji grid — which row and column each item lands on once headers span a row, and which side of the held cell the size panel fits on |
@@ -187,6 +188,7 @@ shell existed.
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Owns `recentEmojis` in `OverlaysState` and the DataStore write behind it |
 | `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelTest.kt` | That the one-tab hosts are unchanged by the extraction, and the chrome only a multi-tab host sees |
+| `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelStateTest.kt` | The state's query and tab rules, and `composerSearchLayout`: emoji search is a strip on the keyboard, sticker and GIF search fill the screen |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerTab.kt` | The bundled pack as a grid, drawn by the same code that paints a placed sticker |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/TextTab.kt` | A single-line draft, its solid/outline style and the shared colour strip; places on an explicit Add |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/ShapeTab.kt` | Rectangle / rounded / ellipse / line / arrow, each previewed in the colour and fill it will be placed with |
@@ -756,7 +758,7 @@ under *Image / Media Pipeline*.
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatStickerManagersTest.kt` | The library mirror, `sendSticker` with `markUsed`, the favourite toggle and its fetch for a sticker the library lacks |
 | `app/src/test/java/com/firestream/chat/ui/chat/KeyboardContentReceiverTest.kt` | The composer field's `EditorInfo` names the picture types, and a `commitContent` on its connection reaches the callback |
 | `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageSenderKeyboardContentTest.kt` | A keyboard GIF is sent as a GIF, any other picture is saved and sent as a sticker, and the keyboard's grant is always released |
-| `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip |
+| `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip, the search field's focus, the compact emoji strip, a query surviving a move |
 | `app/src/test/java/com/firestream/chat/test/fakes/StickerRepositoryMocks.kt` | `emptyStickerRepository`, `testSticker`, `testStickerPack` |
 
 **Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`. **From the keyboard:** `KeyboardContentReceiver` → `ChatViewModel.sendKeyboardContent` → `ChatMessageSender.sendKeyboardContent` → `MessageRepository.sendGifMessage`, or `StickerRepository.saveSticker` and then `sendStickerMessage`.

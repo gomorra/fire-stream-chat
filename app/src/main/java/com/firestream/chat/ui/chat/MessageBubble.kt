@@ -606,7 +606,7 @@ private fun ReplyPreviewRow(
 }
 
 // The side of a sticker in a bubble.
-private val STICKER_BUBBLE_SIZE = 160.dp
+internal val STICKER_BUBBLE_SIZE = 160.dp
 
 // Width and fill of the bubble. A bare sticker is as wide as the sticker and has no fill.
 private fun Modifier.bubbleFrame(isBareSticker: Boolean, color: Color, shape: Shape): Modifier =

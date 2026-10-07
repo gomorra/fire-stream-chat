@@ -7,12 +7,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.domain.model.Sticker
@@ -20,9 +23,12 @@ import com.firestream.chat.domain.model.StickerPack
 import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.test.fakes.testSticker
 import com.firestream.chat.test.fakes.testStickerPack
+import com.firestream.chat.ui.chat.picker.PickerPanelState
 import com.firestream.chat.ui.chat.picker.PickerSelection
+import com.firestream.chat.ui.chat.picker.PickerTab
 import com.firestream.chat.ui.stickers.stickerCellTag
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -214,6 +220,107 @@ class ComposerPickerPanelTest {
         composeTestRule.waitForIdle()
         composeTestRule.onNodeWithTag(stickerCellTag("dog")).performClick()
 
+        assertEquals(listOf(PickerSelection.Sticker("dog", "animals")), picks)
+    }
+
+    // ── Search ───────────────────────────────────────────────────────────────
+
+    @Test
+    fun `opening the search focuses its field, so the keyboard comes up at once`() {
+        setPanel()
+
+        composeTestRule.onNodeWithContentDescription("Search").performClick()
+
+        composeTestRule.onNodeWithContentDescription("Search field").assertIsFocused()
+    }
+
+    @Test
+    fun `the compact emoji search is one row of results above the search field`() {
+        val state = PickerPanelState(PickerTab.EMOJI).apply { openSearch() }
+        val emojis = mutableListOf<String>()
+        composeTestRule.setContent {
+            MaterialTheme {
+                ComposerPickerPanel(
+                    recentEmojis = listOf("😀"),
+                    stickerPacks = emptyList(),
+                    recentStickers = emptyList(),
+                    callbacks = ComposerPickerCallbacks({ emoji, _ -> emojis += emoji }, {}, {}, {}, {}, {}, {}),
+                    state = state,
+                    compact = true,
+                )
+            }
+        }
+
+        // No query yet: the row offers the recents.
+        composeTestRule.onNodeWithText("😀").assertIsDisplayed()
+
+        composeTestRule.onNodeWithContentDescription("Search field").performTextInput("cat")
+        composeTestRule.waitForIdle()
+        val strip = composeTestRule.onNodeWithContentDescription("Emoji results").fetchSemanticsNode().boundsInRoot
+        val field = composeTestRule.onNodeWithContentDescription("Search field").fetchSemanticsNode().boundsInRoot
+        assertTrue("results sit above the field", strip.bottom <= field.top)
+
+        composeTestRule.onNodeWithText("😺").performClick()
+        assertEquals(listOf("😺"), emojis)
+        // Picking keeps the search open, so several emoji can be picked in a row.
+        assertEquals(PickerTab.EMOJI, state.searchingTab)
+        assertEquals("cat", state.query)
+    }
+
+    @Test
+    fun `the compact emoji search says when nothing matches`() {
+        val state = PickerPanelState(PickerTab.EMOJI, initialSearchOpen = true, initialQuery = "zzzzqq")
+        composeTestRule.setContent {
+            MaterialTheme {
+                ComposerPickerPanel(
+                    recentEmojis = emptyList(),
+                    stickerPacks = emptyList(),
+                    recentStickers = emptyList(),
+                    callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, {}, {}, {}, {}),
+                    state = state,
+                    compact = true,
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("No emoji found").assertIsDisplayed()
+    }
+
+    @Test
+    fun `a hoisted state carries the query when the panel is mounted somewhere else`() {
+        val state = PickerPanelState(PickerTab.STICKER_LIBRARY, initialSearchOpen = true, initialQuery = "dog")
+        var place by mutableStateOf(0)
+        composeTestRule.setContent {
+            MaterialTheme {
+                // Two call sites, as the composer has: the keyboard's place and the overlay.
+                if (place == 0) {
+                    ComposerPickerPanel(
+                        recentEmojis = emptyList(),
+                        stickerPacks = listOf(pack("animals", StickerPackKind.USER, cat, dog)),
+                        recentStickers = emptyList(),
+                        callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, { picks += it }, {}, {}, {}),
+                        state = state,
+                        modifier = Modifier.height(360.dp),
+                    )
+                } else {
+                    ComposerPickerPanel(
+                        recentEmojis = emptyList(),
+                        stickerPacks = listOf(pack("animals", StickerPackKind.USER, cat, dog)),
+                        recentStickers = emptyList(),
+                        callbacks = ComposerPickerCallbacks({ _, _ -> }, {}, {}, { picks += it }, {}, {}, {}),
+                        state = state,
+                        modifier = Modifier.height(600.dp),
+                    )
+                }
+            }
+        }
+
+        place = 1
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithContentDescription("Search field").assertTextContains("dog")
+        composeTestRule.onNodeWithTag(stickerCellTag("dog")).performClick()
+        composeTestRule.onNodeWithTag(stickerCellTag("cat")).assertDoesNotExist()
         assertEquals(listOf(PickerSelection.Sticker("dog", "animals")), picks)
     }
 }
