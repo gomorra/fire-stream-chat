@@ -4,7 +4,7 @@ This document covers everything needed to cut a signed release: keystore generat
 
 ## Overview
 
-Releases are produced by `.github/workflows/release-apk.yml` on every push of a `v*` git tag (or via manual `workflow_dispatch`). The workflow:
+Releases are produced by `.github/workflows/release-apk.yml` on every push of a `v*` git tag, or by a manual `workflow_dispatch`. A dispatch on `main` for a tag that does not exist yet creates the tag first (see [Releasing without pushing a tag](#releasing-without-pushing-a-tag)). The workflow:
 
 1. Builds the selected flavor(s) — `firebase` only by default; pocketbase requires manual dispatch (see [Selecting flavors](#selecting-flavors)).
 2. Signs each APK with the release keystore stored in GitHub Secrets.
@@ -108,7 +108,28 @@ The script automates the flow below — read this if something fails, or if you 
 
 The workflow runs against the tagged commit, where `versionName` resolves to `X.Y.Z` exactly (untagged builds carry a `-dev+<sha>` suffix so dev APKs can never masquerade as a release). Existing installs pick the new release up via the in-app updater within 24 hours, or immediately when the user taps "Check for updates" in Settings. Users who enable **Settings → Auto-download updates on Wi-Fi** (opt-in, off by default) have the new APK downloaded automatically in the background when the daily check runs on an unmetered network, so it's already on-device and only the tap-to-install step remains.
 
-By default a tag push builds **firebase only**. To include pocketbase, see the next section.
+By default a tag push builds **firebase only**. To include pocketbase, see [Selecting flavors](#selecting-flavors).
+
+### Releasing without pushing a tag
+
+A Claude Code cloud session can push to `main` but cannot push tags. It releases in two steps instead:
+
+```bash
+./scripts/cut-release.sh X.Y.Z --tag-in-ci
+gh workflow run release-apk.yml --ref main -f tag=vX.Y.Z
+```
+
+The first command makes the same release commit and pushes only `main`. The second starts the workflow; a session without `gh` uses the GitHub connector's `run_workflow` with the same ref and input. The workflow then creates `vX.Y.Z` itself and builds it.
+
+The workflow creates the tag only when all of these hold. Otherwise it fails before building:
+
+- the dispatch ran on `main`
+- `main`'s head commit is named `chore(release): vX.Y.Z`
+- `CHANGELOG.md`'s top section at that commit is the released `## [X.Y.Z] — …` header
+
+So dispatch right after the push, before anything else lands on `main`. If something did land, the release commit is no longer the head and the workflow refuses. Create the tag on the release commit by hand, or cut the next version.
+
+A tag the workflow pushes with `GITHUB_TOKEN` starts no other workflow, so the tag push trigger does not build a second time. A dispatch for a tag that already exists builds that tag, as before.
 
 To build a "fake older" APK locally for testing the in-app updater, override at the command line:
 

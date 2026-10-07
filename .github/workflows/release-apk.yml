@@ -72,6 +72,46 @@ jobs:
             echo "build_pocketbase=$build_pocketbase"
           } >> "$GITHUB_OUTPUT"
 
+      # A dispatch for a tag that does not exist yet creates it. This is how a
+      # session that cannot push tags releases: `cut-release.sh --tag-in-ci`
+      # pushes only the release commit, then the session dispatches this
+      # workflow on main. The tag goes on the commit the dispatch ran at, and
+      # only if that commit is the release commit for this exact version.
+      # A tag pushed with GITHUB_TOKEN starts no workflow, so the tag push
+      # trigger above does not build a second time.
+      - name: Create the tag when a dispatch finds none
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          GH_REF: ${{ github.ref }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG exists. Building it."
+            exit 0
+          fi
+          if [ "$GH_REF" != "refs/heads/main" ]; then
+            echo "::error::Tag $TAG does not exist. Only a dispatch on main creates it (this one ran on $GH_REF)."
+            exit 1
+          fi
+          subject=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
+          if [ "$subject" != "chore(release): $TAG" ]; then
+            echo "::error::Tag $TAG does not exist, and main's head $SHA is '$subject', not 'chore(release): $TAG'. Run 'scripts/cut-release.sh $VERSION --tag-in-ci' first, and dispatch before anything else lands on main."
+            exit 1
+          fi
+          changelog=$(gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/CHANGELOG.md?ref=$SHA")
+          header=$(grep -m1 '^## ' <<<"$changelog" || true)
+          if [[ "$header" != "## [$VERSION] "* ]]; then
+            echo "::error::CHANGELOG.md's top section at $SHA is '$header', not the released '## [$VERSION] — …' header."
+            exit 1
+          fi
+          gh api "repos/$REPO/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" >/dev/null
+          echo "Created tag $TAG at $SHA."
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0

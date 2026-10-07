@@ -4,7 +4,7 @@
 # docs/RELEASING.md "Cutting a release".
 #
 # Usage:
-#   scripts/cut-release.sh X.Y.Z [--dry-run]
+#   scripts/cut-release.sh X.Y.Z [--dry-run] [--tag-in-ci]
 #
 # What it does:
 #   1. Runs preflight checks (git repo, branch, clean tree, not behind
@@ -15,6 +15,10 @@
 #
 # --dry-run runs every preflight check (which can still fail) but performs
 # no mutation — it only prints what would happen.
+#
+# --tag-in-ci commits and pushes main only, with no tag. It is for a session
+# that cannot push tags. The caller then dispatches release-apk.yml on main
+# with tag=vX.Y.Z, and the workflow creates the tag on the release commit.
 
 set -euo pipefail
 
@@ -23,16 +27,20 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 usage() {
-    echo "Usage: $(basename "$0") X.Y.Z [--dry-run]" >&2
+    echo "Usage: $(basename "$0") X.Y.Z [--dry-run] [--tag-in-ci]" >&2
 }
 
 VERSION=""
 DRY_RUN=0
+TAG_IN_CI=0
 
 for arg in "$@"; do
     case "$arg" in
         --dry-run)
             DRY_RUN=1
+            ;;
+        --tag-in-ci)
+            TAG_IN_CI=1
             ;;
         -h|--help)
             usage
@@ -201,10 +209,17 @@ run git add CHANGELOG.md
 # NOTE: must stay a plain single-line -m. Never a heredoc, never piped into
 # git commit — a repo hook blocks heredoc commits and hangs otherwise.
 run git commit -m "chore(release): $TAG"
-run git tag "$TAG"
-# --atomic: the tag must never reach origin without the branch. A tag alone
-# starts the release build from a commit that is not on origin/main.
-run git push --atomic origin main "$TAG"
+if [[ "$TAG_IN_CI" -eq 1 ]]; then
+    # No tag here: release-apk.yml creates it when dispatched on main. It
+    # refuses unless main's head is this commit, so dispatch before anything
+    # else lands on main.
+    run git push origin main
+else
+    run git tag "$TAG"
+    # --atomic: the tag must never reach origin without the branch. A tag alone
+    # starts the release build from a commit that is not on origin/main.
+    run git push --atomic origin main "$TAG"
+fi
 
 # ---------------------------------------------------------------------------
 # Epilogue (always printed, including under --dry-run)
@@ -213,8 +228,20 @@ run git push --atomic origin main "$TAG"
 echo
 if [[ "$DRY_RUN" -eq 1 ]]; then
     info "Dry run complete — nothing was changed."
+elif [[ "$TAG_IN_CI" -eq 1 ]]; then
+    info "Release commit for $TAG pushed. No tag yet."
 else
     info "Release $TAG pushed."
+fi
+if [[ "$TAG_IN_CI" -eq 1 ]]; then
+    info "Now dispatch release-apk.yml on main. It creates $TAG and builds it:"
+    echo
+    echo "    gh workflow run release-apk.yml --ref main -f tag=$TAG"
+    echo
+    info "(or the GitHub connector's run_workflow with the same ref and input)."
+    info "Dispatch before anything else lands on main: the workflow only tags"
+    info "a head commit named 'chore(release): $TAG'."
+    exit 0
 fi
 info "release-apk.yml now builds the firebase flavor only on this tag push."
 info "pocketbase is NOT built automatically — if pocketbase installs should get this"
