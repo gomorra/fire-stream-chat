@@ -21,6 +21,24 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Picker search above the keyboard (2026-10-07)
+
+`ComposerPickerPanel` search layouts. Robolectric covers the strip, the hoisted state and the
+layout decision. No test runs a real keyboard, so nothing about the insets has been seen.
+1. Emoji tab → search button: the keyboard opens at once. One row of results and the search
+   field sit directly on the keyboard, and the composer stays visible above them.
+2. Pick two emoji from the strip: both land in the composer and the search stays open.
+   The backspace key in the search row deletes from the composer.
+3. Back hides the keyboard: the full emoji panel returns, filtered by the query. Tap the field:
+   the strip comes back. A second Back closes the search.
+4. Tap the composer during an emoji search: the search closes and the keyboard types into the message.
+5. Stickers tab → search button: the picker slides up to just below the top bar, the keyboard
+   opens under it, and the conversation and composer are hidden. Nothing behind it takes a tap.
+6. Pick a sticker from that search: it is sent, and the picker and keyboard close.
+7. Back with the keyboard down, or the field's ×: the overlay slides away and the Stickers tab is
+   back in the keyboard's place.
+8. Rotate during each search, and repeat once in split screen.
+
 ### GIFs and stickers from the keyboard (2026-10-04)
 
 `docs/plans/stickers-and-gifs.md` step 9. Checked on the emulator (API 36, Gboard with a

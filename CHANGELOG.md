@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.40.0] — 2026-10-07
+
+### Changed
+
+- **Searching emoji and stickers no longer hides behind the keyboard.** The keyboard used to open over the whole emoji panel, covering the search field and its results. Opening the search now brings up the keyboard straight away. Emoji results show as one row directly above the keyboard, with your message still in view, so you can pick several in a row. Sticker search slides up to fill the screen below the chat's header, with the results between the search field and the keyboard. Picking a sticker from it sends the sticker and closes the search. (`aaaa089b`)
+
 ## [1.39.1] — 2026-10-07
 
 ### Fixed
