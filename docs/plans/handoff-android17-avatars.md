@@ -8,7 +8,7 @@ Status: open. Written 2026-10-07 at the end of a session that tried two fixes. R
 - On Android 16 every avatar loads. Treat the account and server data as the same.
 - Up to v1.39.0 each avatar was a **black circle**. From v1.39.1 on it is the **placeholder icon** where `UserAvatar` is used.
 - The phone runs **v1.40.1**, delivered by the in-app updater, and avatars still do not show. Both fixes below are on the phone and neither helped.
-- Message images load on Android 16 (confirmed by the owner). **On Android 17 this is unknown.** Find out first. If message images also fail on Android 17, the cause is in the shared image path (Coil `ImageLoader`, `OkHttpClient`, decoding), not in avatar code, and hypothesis A below loses its basis.
+- Message images load on both Android 16 and Android 17 (confirmed by the owner). So the shared image path works on Android 17: the Coil `ImageLoader`, the `OkHttpClient` and the default decoder. What fails is specific to avatars, either their files or their request.
 
 ## What was tried
 
@@ -42,9 +42,9 @@ Result: on v1.40.1 avatars still do not show. So either the URL load fails as we
 
 ## Hypotheses still open
 
-- **A. The old avatar files are a format Android 17 fails to decode.** They are raw camera originals, possibly Ultra HDR JPEGs with a gainmap, or HEIC. Message images are re-encoded by `ImageCompressor` before sending, which would explain it if they load on Android 17. Check by downloading an avatar (`avatars/<uid>/profile.jpg` in Firebase Storage; the URL is the user's `avatarUrl`) and inspecting it, e.g. `exiftool -a -G1 file.jpg | grep -i -E "hdrgm|gainmap|MPF|MPImage"`. If this holds, the fix is a decode fallback in `ScaledImageDecoder` (for example decode without the gainmap, or fall back to `BitmapFactory`), or re-encoding avatars server side or on next upload.
+- **A. The old avatar files are a format Android 17 fails to decode.** They are raw camera originals, possibly Ultra HDR JPEGs with a gainmap, or HEIC. Message images are re-encoded by `ImageCompressor` before sending, which would explain why they load on Android 17 while old avatars do not. Check by downloading an avatar (`avatars/<uid>/profile.jpg` in Firebase Storage; the URL is the user's `avatarUrl`) and inspecting it, e.g. `exiftool -a -G1 file.jpg | grep -i -E "hdrgm|gainmap|MPF|MPImage"`. If this holds, the fix is a decode fallback in `ScaledImageDecoder` (for example decode without the gainmap, or fall back to `BitmapFactory`), or re-encoding avatars server side or on next upload.
 - **B. The URL load fails, not the file.** The avatar URLs are Firebase Storage download URLs with `?token=`, fetched by Coil through the app's `OkHttpClient`. The logcat in step 1 decides this.
-- **C. Something specific to Coil 2.7.0 on Android 17.** It's less likely while message images load through the same `ImageLoader` (`FireStreamApp.newImageLoader`). The differences in the avatar request are: `memoryCacheKey`/`diskCacheKey` set to the URL, `ScaledImageDecoder`, and `crossfade`.
+- **C. Something in the avatar request itself.** Message images load through the same `ImageLoader` (`FireStreamApp.newImageLoader`) on Android 17, so Coil itself works. The differences in the avatar request are: `memoryCacheKey`/`diskCacheKey` set to the URL, `ScaledImageDecoder`, and `crossfade`.
 
 ## Code map
 
