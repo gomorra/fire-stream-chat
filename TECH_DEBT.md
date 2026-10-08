@@ -299,6 +299,23 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Calls — leftovers from the 2026-10-08 bug sweep
+
+**The smell.** The call bug sweep (an independent review included) fixed the call state, the call log, `CallService`'s teardown and the call screen's launches, and left these:
+- `CallService` has no JVM seam. Its threading, its teardown order and its end-of-call writes are guarded by review and the on-device checklist in `docs/BACKLOG.md`, not by tests. Extracting the per-call fields and transitions into a plain `CallSession` class would make them testable.
+- `CallRepositoryImpl` wraps every call in `catch (e: Exception)`, which also catches `CancellationException`. A cancelled caller gets `Result.failure` and runs on. `CallService` no longer depends on cancelling a repository call, but the trap stays for the next caller. See `docs/GOTCHAS.md`.
+- A call can wait forever in two places. Nothing times out `Connecting` if ICE never reaches `FAILED`, which continual gathering makes possible. And `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
+- `firestore.rules`: any signed-in user can read and add ICE candidates to any call whose id they know, and either party can rewrite `callerId`, `calleeId` and `status`. Candidates carry IP addresses.
+- `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.
+- `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
+- The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
+
+**Why we haven't fixed it.** None of these is a crash or a privacy leak on the firebase flavor today. The rules and the Cloud Functions need an emulator run and a deploy, which a cloud session cannot do. The `CallSession` extraction is a refactor of a class this sweep just rewrote for threading, and it deserves its own reviewed change.
+
+**When to revisit.** The next change to `CallService` starts with the `CallSession` extraction. The rules and the push TTL go with the next Firebase deploy. The `Connecting` timeout belongs to the first report of a call stuck on "Connecting…".
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

@@ -208,6 +208,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   block itself when the cancellation was not its own. A hand-written copy of the idiom needs
   the same check. Regression:
   `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
+- **`catch (e: Exception)` around a suspend call also catches cancellation.** The
+  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }`, so a
+  coroutine cancelled while suspended in one gets a failure back and carries on. `CallService`'s
+  ring timeout kept running after the call's cleanup cancelled it, and tore the call down a
+  second time on another thread. Do not rely on `cancel()` to stop the code after a repository
+  call: check that the work is still wanted before acting on the result.
 - **A Firestore listener on a parallel executor can deliver snapshots out of order.**
   `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
   `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
@@ -255,6 +261,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (`RawMessage.hasPendingWrites`, checked in `MessageRepositoryImpl.reconcileRawMessage`).
   Regression: `MessageRepositorySnapshotTest.a pending echo of our own write leaves the
   local SENDING row alone`.
+- **A listener sees your own Firestore `update()` before the `await()` returns.** The SDK
+  applies the write to its cache and fires listeners at once, while `await()` waits for the
+  server. `CallService`'s ring timeout awaited `endCall("timeout")` and only then logged the
+  call, so its own "ended" echo reached the signalling listener first and was handled as the
+  other side hanging up: every unanswered call was logged as `remote_hangup`. Record what you
+  did before you write the status your own listener reacts to, or stop the listener first.
 - **A retried Firestore write must not `set()` over a document that may already exist.**
   `firestore.rules` lets any participant `update` a message, so a blind re-`set()` wipes the
   recipient's `readBy` / `deliveredTo` / `reactions`. Retry with `waitForPendingWrites()`
@@ -387,6 +399,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **A `com.android.test` submodule can't use a versioned `alias()`** for an
   already-loaded plugin — AGP rejects it. Use bare `id("com.android.test")` without a
   version (see `:baselineprofile`).
+- **WebRTC calls back on its signaling thread, and the factory owns that thread.**
+  `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
+  frees the factory's threads. Tearing a call down from one of those callbacks destroys the
+  thread the callback is running on. Hop to the main thread first (`CallService.onMain`).
+  `PeerConnection.close()` frees nothing: only `dispose()` releases the native connection and
+  the observer it holds. `PeerConnectionFactory.builder()` makes an audio device module that
+  nothing releases unless you pass your own and call `release()` after `dispose()`.
 - **A `NotificationChannel`'s sound and vibration are frozen at creation.** Editing the
   code that builds one changes nothing on a device where it already exists —
   `createNotificationChannel` silently ignores sound/vibration/importance changes to a
