@@ -156,8 +156,7 @@ internal class CallSession(
                         // The caller hung up, or the ring timed out, before this phone heard about
                         // it. Answering now would overwrite "ended" with "answered" and connect to
                         // no one.
-                        stateHolder.updateState(CallState.Ended(callId, EndReason.REMOTE_HANGUP))
-                        finish()
+                        close(EndReason.REMOTE_HANGUP)
                         return@onSuccess
                     }
                     val offer = data.offer
@@ -197,8 +196,7 @@ internal class CallSession(
     fun decline() {
         if (isFinished) return
         appScope.launch { repository.declineCall(callId) }
-        stateHolder.updateState(CallState.Ended(callId, EndReason.DECLINED))
-        finish()
+        close(EndReason.DECLINED)
     }
 
     // ──────────────────────────────────────────────────────────────────────────

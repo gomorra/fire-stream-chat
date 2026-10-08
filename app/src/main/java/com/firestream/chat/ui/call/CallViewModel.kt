@@ -74,17 +74,21 @@ class CallViewModel @Inject constructor(
         if (closed) return
         val placing = callStateHolder.startPlacing(calleeId, calleeName, calleeAvatarUrl) ?: return
         placed = PlacedCall(placing.placingId, chatId)
-        appScope.launch { setUp(placing.placingId, calleeId, chatId, calleeName, calleeAvatarUrl) }
+        appScope.launch { setUp(placing, chatId) }
     }
 
-    private suspend fun setUp(placingId: Long, calleeId: String, chatId: String, calleeName: String, calleeAvatarUrl: String?) {
+    private suspend fun setUp(placing: CallState.Placing, chatId: String) {
+        val placingId = placing.placingId
         // The create goes on after a timeout, so a call it creates late is ended, not left ringing.
-        val creating = appScope.async { callRepository.createCall(calleeId) }
+        val creating = appScope.async { callRepository.createCall(placing.calleeId) }
         val created = withTimeoutOrNull(CREATE_TIMEOUT_MS) { creating.await() }
         if (created == null) {
             Log.w(TAG, "Creating the call took too long")
-            if (callStateHolder.failPlacing(placingId)) _setupFailed.trySend(Unit)
-            creating.await().onSuccess { callId -> endUnheldCall(callId, chatId, EndReason.ERROR) }
+            val timedOut = callStateHolder.failPlacing(placingId)
+            if (timedOut) _setupFailed.trySend(Unit)
+            // A Cancel, or a closed screen, may have ended the placing before the timeout did.
+            val reason = if (timedOut) EndReason.ERROR else EndReason.HANGUP
+            creating.await().onSuccess { callId -> endUnheldCall(callId, chatId, reason) }
             return
         }
         val callId = created.getOrElse { e ->
@@ -98,7 +102,7 @@ class CallViewModel @Inject constructor(
             return
         }
         try {
-            CallService.startOutgoing(context, callId, chatId, calleeId, calleeName, calleeAvatarUrl)
+            CallService.startOutgoing(context, callId, chatId, placing.calleeId, placing.calleeName, placing.calleeAvatarUrl)
         } catch (e: IllegalStateException) {
             // Android 12+ will not start a foreground service once the app is in the background,
             // and a slow setup can outlast the user leaving the app.

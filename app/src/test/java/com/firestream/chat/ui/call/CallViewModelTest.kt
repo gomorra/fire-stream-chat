@@ -297,6 +297,24 @@ class CallViewModelTest {
     }
 
     @Test
+    fun `a create that lands after Cancel and the timeout is ended as a hang-up`() = runTest {
+        val viewModel = viewModelIn(ViewModelStore())
+        viewModel.placeTestCall()
+        runCurrent()
+        viewModel.hangup()
+        advanceTimeBy(CallViewModel.CREATE_TIMEOUT_MS)
+        runCurrent()
+
+        created.complete(Result.success("call1"))
+        runCurrent()
+
+        assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
+        coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
+        coVerify(exactly = 1) { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0) }
+        assertNull(withTimeoutOrNull(1_000) { viewModel.setupFailed.first() })
+    }
+
+    @Test
     fun `a failure after Cancel does not say the call could not start`() = runTest {
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()

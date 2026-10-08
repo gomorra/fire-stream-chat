@@ -9,6 +9,7 @@ import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -78,6 +79,22 @@ class CallRepositoryImplTest {
 
         val resumed = calls.filter { (_, call) -> resumesAfterCancellation(call) }.keys
         assertEquals(emptySet<String>(), resumed)
+    }
+
+    @Test
+    fun `an end is written as its wire name, which the push function reads`() = runTest {
+        // functions/callPush.js tells a declined call from a missed one by these exact strings.
+        coEvery { callSource.updateCallStatus(any(), any(), any()) } returns Unit
+        coEvery { messageSource.sendCallMessage(any(), any(), any(), any(), any()) } returns "m1"
+        every { messageSource.lastContentFor(any()) } returns "Call"
+
+        repository.endCall("c1", EndReason.REMOTE_HANGUP)
+        repository.declineCall("c2")
+        repository.logCallMessage("chat1", EndReason.TIMEOUT, 0)
+
+        coVerify { callSource.updateCallStatus("c1", "ended", "remote_hangup") }
+        coVerify { callSource.updateCallStatus("c2", "declined", "declined") }
+        coVerify { messageSource.sendCallMessage("chat1", "me", "timeout", 0, any()) }
     }
 
     @Test

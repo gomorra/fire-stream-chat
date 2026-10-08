@@ -27,6 +27,13 @@ class CallNotificationManager(private val context: Context) {
         const val NOTIFICATION_ID_INCOMING = 9002
         const val NOTIFICATION_ID_RING_FALLBACK = 9003
 
+        /**
+         * Request codes of the two Decline actions. Their intents differ only in extras, which a
+         * PendingIntent's identity ignores, so the codes must differ.
+         */
+        private const val REQUEST_DECLINE = 3
+        private const val REQUEST_DECLINE_FALLBACK = 5
+
         private val RING_VIBRATION_PATTERN = longArrayOf(0, 1000, 1000)
     }
 
@@ -146,7 +153,7 @@ class CallNotificationManager(private val context: Context) {
         // notification.
         return ringing(callerName, fullScreenPending)
             .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
-            .addAction(declineAction(requestCode = 3, callId = null))
+            .addAction(declineAction(REQUEST_DECLINE, callId = null))
             .setOngoing(true)
             .setAutoCancel(false)
             .build()
@@ -180,7 +187,7 @@ class CallNotificationManager(private val context: Context) {
 
         return ringing(callerName, ringPending)
             .setContentIntent(ringPending)
-            .addAction(declineAction(requestCode = 5, callId = callId))
+            .addAction(declineAction(REQUEST_DECLINE_FALLBACK, callId = callId))
             .setAutoCancel(true)
             .setTimeoutAfter(CallSession.RING_TIMEOUT_MS)
             .build()

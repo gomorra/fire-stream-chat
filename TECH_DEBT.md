@@ -129,7 +129,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **Why we haven't fixed it.** A notification needs the concrete Activity class for its PendingIntent. The clean alternatives (an `Intent` factory bound in `di/`, or routing through `MainActivity` deep-link extras like FCM notifications do) are pure ceremony for one class reference.
 
-**When to revisit.** The next time call-notification code is touched. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation").
+**When to revisit.** With the video-calls plan, which adds to the same intent contract. The fix is a call-screen intent contract in `data/call/`, used by `CallActivity`, `CallLaunch`, `ChatScreen`, `CallsScreen` and `CallNotificationManager`, plus one entry for it in the UI→data allowlist. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation"). Deferred on 2026-10-08, when the fallback ring added five of `CallActivity`'s extras here: the fix touches about 30 references in five files, outside the call fixes that release carried.
 
 ---
 
@@ -299,16 +299,18 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### Calls — what the JVM tests cannot reach
+### Calls — the known limits
 
 **The smell.**
 - `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service enters and leaves the foreground, how it stops by start id, and how WebRTC's callbacks reach the main thread are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - The fallback ring that `FCMService` posts when Android will not start the call service does not know when the caller hangs up. It rings until it is declined or times out with the ring, 30 s at most. Opening it after the call ended shows "Call Ended".
-- An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification.
+- The call document's `status` and `endReason` are read as strings. `CallSignalingData` carries them raw, and `CallSession` decodes them where it reads them. Writes go through `EndReason`, so the wire names have one source.
+- An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification. If the placed call's document already existed, its callee rang and the chat records nothing. The incoming call replaces the placing with a plain state write, so neither the setup nor a Cancel owns that record.
+- A call that rings in while the microphone prompt for an outgoing call is up, and ends there, closes the call screen 1.5 s later, and the prompt with it. The outgoing call is not placed until the user taps call again. It needs the first call ever, an incoming call, and its end, all within the prompt.
 
-**Why we haven't fixed it.** Both adapters are thin layers over Android and WebRTC, which Robolectric cannot run: WebRTC needs its native library, and the foreground-service checks are the platform's. A test there would mostly check its own mocks. The fallback ring is the rare path, and listening to the call document from a push needs a running service, the very thing Android refused. The missed-call push that follows a hang-up could stop the ring, but it does not name the call, so it could stop the ring of the caller's next call.
+**Why we haven't fixed it.** Both adapters are thin layers over Android and WebRTC, which Robolectric cannot run: WebRTC needs its native library, and the foreground-service checks are the platform's. A test there would mostly check its own mocks. The fallback ring is the rare path, and listening to the call document from a push needs a running service, the very thing Android refused. The missed-call push that follows a hang-up could stop the ring, but it does not name the call, so it could stop the ring of the caller's next call. The call document's strings are decoded in one place, and typing them would change the signalling source on both flavors with no change in behaviour.
 
-**When to revisit.** When a bug is traced to either adapter, or when the fallback ring turns out to fire often.
+**When to revisit.** When a bug is traced to either adapter, or when the fallback ring turns out to fire often. Type the call document's fields when it gains a status or a reason, as video calls would.
 
 ---
 
