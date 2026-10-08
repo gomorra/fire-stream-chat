@@ -6,6 +6,8 @@ import org.webrtc.AudioTrack
 import org.webrtc.MediaConstraints
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.audio.AudioDeviceModule
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicBoolean
 
 class WebRtcPeerConnectionFactory(context: Context) {
@@ -37,6 +39,12 @@ class WebRtcPeerConnectionFactory(context: Context) {
     private val factory: PeerConnectionFactory
     private var audioSource: AudioSource? = null
 
+    /**
+     * Built here rather than left to the factory builder: the module the builder makes itself has
+     * no owner, so nothing ever released it, and one leaked with every call.
+     */
+    private val audioDeviceModule: AudioDeviceModule
+
     private val iceServers = listOf(
         PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer(),
         PeerConnection.IceServer.builder("stun:stun1.l.google.com:19302").createIceServer(),
@@ -48,7 +56,10 @@ class WebRtcPeerConnectionFactory(context: Context) {
 
     init {
         initializeOnce(context)
-        factory = PeerConnectionFactory.builder().createPeerConnectionFactory()
+        audioDeviceModule = JavaAudioDeviceModule.builder(context.applicationContext).createAudioDeviceModule()
+        factory = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(audioDeviceModule)
+            .createPeerConnectionFactory()
     }
 
     fun createPeerConnection(observer: PeerConnection.Observer): PeerConnection? {
@@ -73,5 +84,6 @@ class WebRtcPeerConnectionFactory(context: Context) {
         audioSource?.dispose()
         audioSource = null
         factory.dispose()
+        audioDeviceModule.release()
     }
 }

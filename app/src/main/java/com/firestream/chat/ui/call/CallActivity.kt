@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.call
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
@@ -8,22 +9,22 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.domain.model.CallState
-import com.firestream.chat.domain.repository.CallRepository
+import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -31,10 +32,10 @@ import javax.inject.Inject
 class CallActivity : ComponentActivity() {
 
     @Inject lateinit var callStateHolder: CallStateHolder
-    @Inject lateinit var callRepository: CallRepository
     @Inject lateinit var preferencesDataStore: PreferencesDataStore
 
-    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Outlives a rotation, so the call setup and a pending permission request are not lost to one. */
+    private val viewModel: CallViewModel by viewModels()
 
     companion object {
         const val EXTRA_ACTION = "call_action"
@@ -46,21 +47,19 @@ class CallActivity : ComponentActivity() {
         const val ACTION_ANSWER = "answer"
     }
 
-    // Deferred action to run after permission is granted
-    private var pendingAction: (() -> Unit)? = null
-
     private val requestAudioPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
+        val action = viewModel.pendingMicAction
+        viewModel.pendingMicAction = null
         if (granted) {
-            pendingAction?.invoke()
+            action?.let(::runMicAction)
         } else {
             Toast.makeText(this, "Microphone permission is required for calls", Toast.LENGTH_LONG).show()
             if (callStateHolder.callState.value is CallState.Idle) {
-                finish()
+                finishAndRemoveTask()
             }
         }
-        pendingAction = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +70,14 @@ class CallActivity : ComponentActivity() {
             handleIntent()
         }
 
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.setupFailed.collect {
+                    Toast.makeText(this@CallActivity, "Couldn't start the call", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+
         setContent {
             val appTheme by preferencesDataStore.appThemeFlow.collectAsState(initial = AppTheme.SYSTEM)
             val useDark = when (appTheme) {
@@ -79,33 +86,74 @@ class CallActivity : ComponentActivity() {
                 AppTheme.SYSTEM -> isSystemInDarkTheme()
             }
             FireStreamTheme(darkTheme = useDark) {
-                CallScreen(onFinish = { finish() })
+                CallScreen(
+                    // Out of Recents too: relaunching a finished call screen from there must not
+                    // bring back the intent that placed or answered its call.
+                    onFinish = { finishAndRemoveTask() },
+                    onAnswer = { withAudioPermission(MicAction.ANSWER) },
+                    viewModel = viewModel
+                )
             }
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onPause() {
+        super.onPause()
+        // Back or finishAndRemoveTask(). A setup still running must end its call, not start it.
+        if (isFinishing) viewModel.onScreenClosed()
+    }
+
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent()
     }
 
     private fun handleIntent() {
-        when (intent?.getStringExtra(EXTRA_ACTION)) {
-            ACTION_OUTGOING -> withAudioPermission { startOutgoingCall() }
-            ACTION_ANSWER -> withAudioPermission { answerCall() }
+        val launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        val launch = callLaunchFor(
+            action = intent.getStringExtra(EXTRA_ACTION),
+            launchedFromHistory = launchedFromHistory,
+            callOngoing = callStateHolder.callState.value.isOngoing
+        )
+        when (launch) {
+            CallLaunch.PLACE_CALL -> placeOutgoingCall()
+            CallLaunch.ANSWER -> withAudioPermission(MicAction.ANSWER)
+            CallLaunch.SHOW -> Unit
+            CallLaunch.CLOSE -> finishAndRemoveTask()
         }
     }
 
-    private fun withAudioPermission(action: () -> Unit) {
+    /** Run [action] now if the microphone is granted, or after the user grants it. */
+    private fun withAudioPermission(action: MicAction) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             == PackageManager.PERMISSION_GRANTED
         ) {
-            action()
+            runMicAction(action)
         } else {
-            pendingAction = action
+            viewModel.pendingMicAction = action
             requestAudioPermission.launch(Manifest.permission.RECORD_AUDIO)
         }
+    }
+
+    private fun runMicAction(action: MicAction) {
+        when (action) {
+            MicAction.PLACE_CALL -> startOutgoingCall()
+            MicAction.ANSWER -> CallService.sendAction(this, CallService.ACTION_ANSWER)
+        }
+    }
+
+    /**
+     * Runs before the permission prompt. The call screen composes behind the prompt, and the
+     * previous call's Ended state would finish this activity underneath it.
+     */
+    private fun placeOutgoingCall() {
+        if (!callStateHolder.prepareOutgoingCall()) {
+            // A call is already running. This screen shows it instead of placing a second one.
+            Toast.makeText(this, "You're already in a call", Toast.LENGTH_SHORT).show()
+            return
+        }
+        withAudioPermission(MicAction.PLACE_CALL)
     }
 
     private fun startOutgoingCall() {
@@ -113,22 +161,6 @@ class CallActivity : ComponentActivity() {
         val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
         val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
         val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
-
-        activityScope.launch {
-            callRepository.createCall(calleeId).onSuccess { callId ->
-                CallService.startOutgoing(
-                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl
-                )
-            }
-        }
-    }
-
-    private fun answerCall() {
-        CallService.sendAction(this, CallService.ACTION_ANSWER)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        activityScope.cancel()
+        viewModel.placeCall(calleeId, chatId, calleeName, calleeAvatarUrl)
     }
 }

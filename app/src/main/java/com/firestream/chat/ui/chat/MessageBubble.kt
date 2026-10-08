@@ -118,6 +118,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
+import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -1261,8 +1262,9 @@ private fun MessageBubbleBody(
             )
             MessageType.CALL -> {
                 val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
-                val isMissed = !isOwnMessage && endReason == "timeout"
                 val isDeclined = !isOwnMessage && endReason == "declined"
+                val isMissed = !isDeclined &&
+                    CallDirection.of(isOwnMessage, message.duration) == CallDirection.MISSED
                 val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
                 val callIcon = when {
                     isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed

@@ -299,6 +299,27 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### Calls — known problems left unfixed
+
+**The smell.** These call problems are known and not fixed:
+- `CallService` has no JVM seam. Its threading, its teardown order, how it stops and its end-of-call writes are guarded by review and the on-device checklist in `docs/BACKLOG.md`, not by tests. Extracting the per-call fields and transitions into a plain `CallSession` class would make them testable.
+- `CallRepositoryImpl` wraps every call in `catch (e: Exception)`, which also catches `CancellationException`. A cancelled caller gets `Result.failure` and runs on. `CallService` no longer depends on cancelling a repository call, but the trap stays for the next caller. See `docs/GOTCHAS.md`.
+- A call can wait forever in two places. Nothing times out `Connecting` if ICE never reaches `FAILED`, which continual gathering makes possible. And `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
+- `firestore.rules`: any signed-in user can read and add ICE candidates to any call whose id they know, and either party can rewrite `callerId`, `calleeId` and `status`. Candidates carry IP addresses.
+- `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.
+- `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
+- The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
+- The callee runs its own 30 s ring timeout. If it fires before the caller's, the caller sees "ended" and logs the call as `remote_hangup`, not `timeout`. The callee's timer starts only once the push arrives, so it normally fires second.
+- A call that ends while its call screen is in the background leaves the screen in Recents until it is next shown. It then shows "Call Ended" and closes itself.
+- `CallStateHolder` has no state for a call being placed. From `prepareOutgoingCall()` until the service publishes `OutgoingRinging`, the state reads `Idle`. So `CallViewModel` holds its setup open until the service publishes, `failOutgoingCall` replaces only `Idle`, and an incoming call can still ring during the setup, which the service then ends. A `CallState.Placing` that counts as ongoing would replace all three, and would let the screen show "Calling…" instead of a blank screen. A `Placing` that is never cleared would block every call, so it needs a timeout of its own.
+- A declined call reads "Declined" in the chat and "Missed" in the Calls tab. `CallDirection` has no declined value, and whether the Calls tab should say "Declined" is a product decision.
+
+**Why we haven't fixed it.** None of these is a crash or a privacy leak on the firebase flavor today. The ring-timeout race needs unusual timing and changes only the logged reason. The rules and the Cloud Functions need an emulator run and a deploy, which a cloud session cannot do. The `CallSession` extraction is a refactor of a class this sweep just rewrote for threading, and it deserves its own reviewed change.
+
+**When to revisit.** The next change to `CallService`'s per-call state starts with the `CallSession` extraction. The rules and the push TTL go with the next Firebase deploy. The `Connecting` timeout belongs to the first report of a call stuck on "Connecting…". `CallState.Placing` goes with the `CallSession` extraction or the next change to call setup, whichever comes first.
+
+---
+
 ## Declined — not worth the churn
 
 ### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)

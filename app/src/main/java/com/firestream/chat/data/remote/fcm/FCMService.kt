@@ -4,6 +4,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.MessagingStyle
 import androidx.core.app.Person
@@ -12,9 +13,9 @@ import com.firestream.chat.R
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -39,6 +40,10 @@ class FCMService : FirebaseMessagingService() {
     @Inject lateinit var activeChatTracker: ActiveChatTracker
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private companion object {
+        const val TAG = "FCMService"
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -181,10 +186,15 @@ class FCMService : FirebaseMessagingService() {
         val callerAvatarUrl = data["callerAvatarUrl"]
 
         // Don't start if already in a call
-        val currentState = callStateHolder.callState.value
-        if (currentState !is CallState.Idle && currentState !is CallState.Ended) return
+        if (callStateHolder.callState.value.isOngoing) return
 
-        CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
+        try {
+            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
+        } catch (e: IllegalStateException) {
+            // Android 12+ lets a push start a foreground service only if it arrived at high
+            // priority, and FCM can lower an app's priority. Missing the call beats crashing.
+            Log.w(TAG, "Could not ring for call $callId", e)
+        }
     }
 
     private fun showNotification(

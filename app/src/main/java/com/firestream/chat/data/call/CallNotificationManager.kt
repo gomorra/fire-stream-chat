@@ -6,6 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.firestream.chat.ui.call.CallActivity
 
@@ -13,9 +15,18 @@ class CallNotificationManager(private val context: Context) {
 
     companion object {
         const val CHANNEL_CALL = "fire_stream_calls"
-        const val CHANNEL_INCOMING_CALL = "fire_stream_incoming_calls"
+
+        /**
+         * Rings with the user's ringtone. Android freezes a channel's sound when the channel is
+         * created, so the silent channel that came before it is deleted rather than edited.
+         */
+        const val CHANNEL_INCOMING_CALL = "fire_stream_incoming_calls_ringing"
+        private const val CHANNEL_INCOMING_CALL_SILENT = "fire_stream_incoming_calls"
+
         const val NOTIFICATION_ID_ONGOING = 9001
         const val NOTIFICATION_ID_INCOMING = 9002
+
+        private val RING_VIBRATION_PATTERN = longArrayOf(0, 1000, 1000)
     }
 
     private val notifManager = context.getSystemService(NotificationManager::class.java)
@@ -37,6 +48,7 @@ class CallNotificationManager(private val context: Context) {
             }
         )
 
+        manager.deleteNotificationChannel(CHANNEL_INCOMING_CALL_SILENT)
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_INCOMING_CALL,
@@ -44,7 +56,16 @@ class CallNotificationManager(private val context: Context) {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Incoming call alerts"
-                setSound(null, null)
+                // The ringtone stream, so the ring volume and the ringer mode apply.
+                setSound(
+                    Settings.System.DEFAULT_RINGTONE_URI,
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                enableVibration(true)
+                vibrationPattern = RING_VIBRATION_PATTERN
             }
         )
     }
@@ -137,6 +158,12 @@ class CallNotificationManager(private val context: Context) {
             .setOngoing(true)
             .setAutoCancel(false)
             .build()
+            // Repeat the ringtone and the vibration until the call is answered, declined or over.
+            // CallService then replaces this notification with a silent one, or removes it, and
+            // the system stops the ring with it. Its ring timeout ends an unanswered call after
+            // 30 s, which bounds the ring. setTimeoutAfter would not: the system never times out
+            // a foreground service's notification.
+            .apply { flags = flags or Notification.FLAG_INSISTENT }
     }
 
     fun updateNotification(notification: Notification, id: Int = NOTIFICATION_ID_ONGOING) {

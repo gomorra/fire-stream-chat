@@ -21,6 +21,37 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Calls — teardown, ringing, answering and the call log (2026-10-08)
+
+`CallService` runs a call's work on the main thread, disposes the `PeerConnection` and its audio
+module, and records how a call ended on the application scope. The incoming-call channel rings.
+JVM tests cover the call state, the call log, the launch decision, the outgoing setup and the
+notification channel.
+No test runs WebRTC, the foreground service or a notification sound, so none of this has been
+seen on a phone.
+1. Upgrade over an existing install (a fresh one hides channel problems). Locked phone, incoming
+   call: it rings and vibrates until answered, declined or cancelled by the caller, and stops at
+   once in each case. Silent mode: no ring. Vibrate mode: vibration only.
+2. Fresh install on Android 14+, microphone never granted: answer with the green button on the
+   full-screen call screen. The permission prompt appears, and the call connects once allowed.
+3. Connected call, then Wi-Fi off on one phone: the call ends with an error and neither app
+   crashes. Then a call where both people hang up at the same moment.
+4. Ten calls in a row: memory does not climb from call to call (Android Studio memory profiler).
+5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
+6. After a call, both phones' chat lists show the call as the chat's last message.
+7. Cancel an outgoing call before it is answered: the other phone shows a missed call, in the
+   chat and in the Calls tab.
+8. During a call, open another chat and tap call: "You're already in a call", and the call goes
+   on. Rotate right after tapping call: the call still starts. Open a finished call's card from
+   Recents: no new call is placed.
+9. With mobile data slowed or briefly off, tap call and press Back before it rings, once
+   straight away and once after turning the phone: the other phone does not ring, or stops at
+   once. Tap call twice quickly: it rings once.
+10. Fresh install: rotate while the microphone prompt is up, then allow. The call starts.
+    Do the same when answering with the green button: the call connects.
+11. Hang up, then have the other phone call straight back, twice. Each call rings: the service
+    stops and starts cleanly between calls.
+
 ### Crop frame above the keyboard (2026-10-08)
 
 `ZoomCropSurface` resizes with `ViewportGeometry.transformAfterResize`. JVM tests cover the

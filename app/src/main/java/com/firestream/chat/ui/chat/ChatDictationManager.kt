@@ -20,7 +20,7 @@ import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.util.DictationEvent
 import com.firestream.chat.data.util.SpeechRecognizerManager
 import com.firestream.chat.domain.model.AppError
-import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.isOngoing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -70,7 +70,7 @@ internal class ChatDictationManager(
     fun start(languageTag: String) {
         if (session != null) return
         if (!_uiState.value.dictation.isAvailable) return
-        if (callStateHolder.callState.value !is CallState.Idle) {
+        if (callStateHolder.callState.value.isOngoing) {
             _uiState.update {
                 it.copy(dictation = it.dictation.copy(
                     error = AppError.Validation(context.getString(R.string.dictation_in_call))

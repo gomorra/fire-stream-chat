@@ -45,9 +45,15 @@ import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import kotlinx.coroutines.delay
 
+/**
+ * @param onAnswer answers the ringing call. The host must check the microphone permission first:
+ *   answering makes the call service a microphone foreground service, which Android 14+ refuses
+ *   without RECORD_AUDIO.
+ */
 @Composable
 internal fun CallScreen(
     onFinish: () -> Unit,
+    onAnswer: () -> Unit,
     viewModel: CallViewModel = hiltViewModel()
 ) {
     val callState by viewModel.callState.collectAsState()
@@ -72,7 +78,7 @@ internal fun CallScreen(
                 callerName = state.callerName,
                 callerAvatarUrl = state.callerAvatarUrl,
                 callerLocalAvatarPath = state.callerLocalAvatarPath,
-                onAnswer = viewModel::answer,
+                onAnswer = onAnswer,
                 onDecline = viewModel::decline
             )
             is CallState.OutgoingRinging -> OutgoingRingingContent(
