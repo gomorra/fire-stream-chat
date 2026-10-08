@@ -118,7 +118,7 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.firestream.chat.R
 import com.firestream.chat.data.remote.LinkPreview
-import com.firestream.chat.domain.model.CallDirection
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -1261,22 +1261,20 @@ private fun MessageBubbleBody(
                 previews = callbacks.filePreviews,
             )
             MessageType.CALL -> {
-                val endReason = message.content // "hangup", "remote_hangup", "declined", "timeout", "error"
-                val isDeclined = !isOwnMessage && endReason == "declined"
-                val isMissed = !isDeclined &&
-                    CallDirection.of(isOwnMessage, message.duration) == CallDirection.MISSED
-                val callColor = if (isMissed || isDeclined) MaterialTheme.colorScheme.error else textColor
-                val callIcon = when {
-                    isMissed || isDeclined -> Icons.AutoMirrored.Filled.CallMissed
-                    else -> Icons.Default.Call
+                // A call message's content is how the call ended, e.g. "declined".
+                val callType = CallLogType.of(isOwnMessage, message.content, message.duration)
+                val callColor = if (callType.isMissedOrDeclined) MaterialTheme.colorScheme.error else textColor
+                val callIcon = if (callType.isMissedOrDeclined) {
+                    Icons.AutoMirrored.Filled.CallMissed
+                } else {
+                    Icons.Default.Call
                 }
-                val callLabel = when {
-                    isOwnMessage && endReason == "timeout" -> "No answer"
-                    isOwnMessage && endReason == "declined" -> "Declined"
-                    isOwnMessage -> "Outgoing call"
-                    isMissed -> "Missed call"
-                    isDeclined -> "Declined"
-                    else -> "Incoming call"
+                val callLabel = when (callType) {
+                    CallLogType.OUTGOING -> "Outgoing call"
+                    CallLogType.NO_ANSWER -> "No answer"
+                    CallLogType.OUTGOING_DECLINED, CallLogType.DECLINED -> "Declined"
+                    CallLogType.INCOMING -> "Incoming call"
+                    CallLogType.MISSED -> "Missed call"
                 }
                 val durationSeconds = message.duration ?: 0
                 val callDetail = when {

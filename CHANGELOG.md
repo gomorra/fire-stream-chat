@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.40.3] — 2026-10-08
+
+### Fixed
+
+- **The Calls tab says "Declined" the way the chat does.** A call you declined showed as *Declined* in the chat but as *Missed* in the Calls tab. A call of yours that the other person declined showed as *Declined* in the chat but as *No answer* in the Calls tab. Both now read *Declined* in the Calls tab too, in the list and in the call's details. A call you declined stays red, as it is in the chat. Calls already in your history are shown the new way. (`5c3dd0f2`)
+
 ## [1.40.2] — 2026-10-08
 
 ### Fixed

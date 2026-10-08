@@ -61,8 +61,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.CallLogEntry
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.ui.call.CallActivity
 import com.firestream.chat.ui.components.UserAvatar
@@ -196,7 +196,7 @@ private fun CallLogRow(
     modifier: Modifier = Modifier
 ) {
     val missedColor = MaterialTheme.colorScheme.error
-    val isMissed = entry.direction == CallDirection.MISSED
+    val isMissedOrDeclined = entry.type.isMissedOrDeclined
 
     Row(
         modifier = modifier
@@ -219,23 +219,23 @@ private fun CallLogRow(
             Text(
                 text = entry.displayName,
                 style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.5.sp),
-                color = if (isMissed) missedColor else MaterialTheme.colorScheme.onSurface,
+                color = if (isMissedOrDeclined) missedColor else MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(modifier = Modifier.height(2.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
-                    imageVector = directionIcon(entry.direction),
+                    imageVector = typeIcon(entry.type),
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
-                    tint = if (isMissed) missedColor else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isMissedOrDeclined) missedColor else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = buildCallLabel(entry),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (isMissed) missedColor else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isMissedOrDeclined) missedColor else MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
@@ -268,25 +268,30 @@ private fun formatCallDuration(durationSeconds: Int): String {
     return if (m > 0) "${m}m ${s}s" else "${s}s"
 }
 
-private fun directionIcon(direction: CallDirection): ImageVector = when (direction) {
-    CallDirection.OUTGOING -> Icons.AutoMirrored.Filled.CallMade
-    CallDirection.INCOMING -> Icons.AutoMirrored.Filled.CallReceived
-    CallDirection.MISSED -> Icons.AutoMirrored.Filled.CallMissed
+private fun typeIcon(type: CallLogType): ImageVector = when (type) {
+    CallLogType.OUTGOING, CallLogType.NO_ANSWER, CallLogType.OUTGOING_DECLINED ->
+        Icons.AutoMirrored.Filled.CallMade
+    CallLogType.INCOMING -> Icons.AutoMirrored.Filled.CallReceived
+    CallLogType.MISSED, CallLogType.DECLINED -> Icons.AutoMirrored.Filled.CallMissed
 }
 
-private fun directionLabel(direction: CallDirection): String = when (direction) {
-    CallDirection.OUTGOING -> "Outgoing call"
-    CallDirection.INCOMING -> "Incoming call"
-    CallDirection.MISSED -> "Missed call"
+private fun typeLabel(type: CallLogType): String = when (type) {
+    CallLogType.OUTGOING, CallLogType.NO_ANSWER, CallLogType.OUTGOING_DECLINED -> "Outgoing call"
+    CallLogType.INCOMING -> "Incoming call"
+    CallLogType.MISSED -> "Missed call"
+    CallLogType.DECLINED -> "Declined call"
+}
+
+/** How a call that never connected ended. An INCOMING call always connected. */
+private fun unconnectedLabel(type: CallLogType): String = when (type) {
+    CallLogType.OUTGOING, CallLogType.NO_ANSWER -> "No answer"
+    CallLogType.OUTGOING_DECLINED, CallLogType.DECLINED -> "Declined"
+    CallLogType.INCOMING, CallLogType.MISSED -> "Missed"
 }
 
 private fun buildCallLabel(entry: CallLogEntry): String {
     val durationSeconds = entry.durationSeconds ?: 0
-    return when {
-        durationSeconds > 0 -> formatCallDuration(durationSeconds)
-        entry.direction == CallDirection.OUTGOING -> "No answer"
-        else -> "Missed"
-    }
+    return if (durationSeconds > 0) formatCallDuration(durationSeconds) else unconnectedLabel(entry.type)
 }
 
 private fun formatRelativeTimestamp(timestamp: Long): String {
@@ -352,13 +357,13 @@ private fun CallDetailSheet(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Direction
+                // Type
                 InfoRow(
-                    icon = directionIcon(entry.direction),
-                    iconTint = if (entry.direction == CallDirection.MISSED)
+                    icon = typeIcon(entry.type),
+                    iconTint = if (entry.type.isMissedOrDeclined)
                         MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                    text = directionLabel(entry.direction)
+                    text = typeLabel(entry.type)
                 )
 
                 // Date/time
@@ -371,13 +376,7 @@ private fun CallDetailSheet(
                 }
 
                 // End reason
-                val endReason = when {
-                    entry.direction == CallDirection.MISSED -> "Missed"
-                    durationSeconds > 0 -> "Ended"
-                    entry.direction == CallDirection.OUTGOING -> "No answer"
-                    else -> "Declined"
-                }
-                InfoRow(text = endReason)
+                InfoRow(text = if (durationSeconds > 0) "Ended" else unconnectedLabel(entry.type))
             }
 
             Spacer(modifier = Modifier.height(24.dp))

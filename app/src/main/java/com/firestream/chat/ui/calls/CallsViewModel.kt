@@ -3,8 +3,8 @@ package com.firestream.chat.ui.calls
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.firestream.chat.domain.model.AppError
-import com.firestream.chat.domain.model.CallDirection
 import com.firestream.chat.domain.model.CallLogEntry
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
@@ -109,7 +109,7 @@ class CallsViewModel @Inject constructor(
                 otherPartyId = otherPartyId,
                 displayName = displayName,
                 avatarUrl = contact?.avatarUrl,
-                direction = CallDirection.of(message.senderId == currentUserId, message.duration),
+                type = CallLogType.of(message.senderId == currentUserId, message.content, message.duration),
                 durationSeconds = message.duration,
                 timestamp = message.timestamp
             )

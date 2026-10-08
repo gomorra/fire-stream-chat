@@ -1,18 +1,16 @@
 # Handover: the call bug sweep, reviewed
 
-Status: the sweep's fixes and the fixes from its review are on branch `ccr-1f47c45a-cg4lbj`, on top of `66eee5d` (main). The review is finished. No pull request is open, and nothing has run on a phone. Updated 2026-10-08.
+Status: the sweep and its review merged to `main` in pull request #78 and shipped in v1.40.2. The owner settled both open decisions, listed at the end of this file. Only the phone checks are left: nothing has run on a phone yet. Updated 2026-10-08.
 
 ## What is left
 
-1. The owner settles the open decisions at the end of this file.
-2. Open a pull request from `ccr-1f47c45a-cg4lbj` to `main`. CI runs only on pull requests and on pushes to `main`.
-3. Run the phone checks in `docs/BACKLOG.md`, "Calls — teardown, ringing, answering and the call log (2026-10-08)".
+1. Run the phone checks in `docs/BACKLOG.md`, "Calls — teardown, ringing, answering and the call log (2026-10-08)".
 
 ## Where everything is
 
 Each of these is the source of truth. This handover does not repeat them.
 
-- Commits: `git log --oneline 66eee5d..ccr-1f47c45a-cg4lbj`. There is one commit per area, and each message says what it fixes and why:
+- Commits: `git log --oneline 66eee5d..700783c`, merged in pull request #78. There is one commit per area, and each message says what it fixes and why:
   - `aec1caa` ringing
   - `6646712` the call log and Calls-tab names
   - `53a2958` call state and the call screen
@@ -20,6 +18,7 @@ Each of these is the source of truth. This handover does not repeat them.
   - `12d14a3` Calls-tab names that survive a contacts reload (from the review)
   - `9cdf267` outgoing-call setup in `CallViewModel` (from the review)
   - `219499e` `CallService` stops only when no newer start is queued (from the review)
+  - `5c3dd0f2` the Calls tab says "Declined" the way the chat does (the owner's decision, after the merge)
   - The other commits are docs and CHANGELOG hashes.
 - User-visible summary: the call entries under `[UNRELEASED] [1.40.2]` in `CHANGELOG.md`.
 - Problems left unfixed, with reasons: `TECH_DEBT.md`, "Calls — known problems left unfixed".
@@ -82,8 +81,9 @@ Out of scope: everything in the TECH_DEBT entry named above.
 - **Gradle daemon heap.** The daemon (`-Xmx4g`) filled its old generation after about eight builds and slowed to a crawl. Run `./gradlew --stop` and start again.
 - **Issue tracker.** `docs/agents/issue-tracker.md` does not exist. The `code-review` skill mentions it; this work has no issue.
 
-## Open decisions for the owner
+## Decisions
 
-- Incoming calls now ring with the default ringtone, which changes behaviour. If silent calls were deliberate, revert `aec1caa`.
-- A declined call reads "Declined" in the chat and "Missed" in the Calls tab. Should the Calls tab say "Declined" too?
-- A pull request from `ccr-1f47c45a-cg4lbj` to `main` is not open yet.
+The owner settled both on 2026-10-08.
+
+- Incoming calls keep ringing with the default ringtone. The silent channel came with the first `CallService` commit, `4b51c28f`, which gives no reason for it.
+- A declined call reads "Declined" in the Calls tab as it does in the chat, for both people (`5c3dd0f2`). `CallLogType` replaced `CallDirection` as the one rule both screens label a call from.
