@@ -109,6 +109,13 @@ class CallsScreenUiTest {
     }
 
     @Test
+    fun `my call that I cancelled while it rang reads as no answer`() {
+        showCall(senderId = me, endReason = "hangup", durationSeconds = 0)
+
+        composeTestRule.onNodeWithText("No answer").assertIsDisplayed()
+    }
+
+    @Test
     fun `a connected call shows its duration`() {
         showCall(senderId = them, endReason = "hangup", durationSeconds = 65)
 

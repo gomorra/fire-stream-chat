@@ -31,10 +31,10 @@ class CallLogTypeTest {
     }
 
     @Test
-    fun `a call I placed that ended early for another reason is outgoing`() {
-        assertEquals(CallLogType.OUTGOING, mine("hangup", 0))
-        assertEquals(CallLogType.OUTGOING, mine("remote_hangup", 0))
-        assertEquals(CallLogType.OUTGOING, mine("error", null))
+    fun `a call I placed that never connected for another reason is no answer`() {
+        assertEquals(CallLogType.NO_ANSWER, mine("hangup", 0))
+        assertEquals(CallLogType.NO_ANSWER, mine("remote_hangup", 0))
+        assertEquals(CallLogType.NO_ANSWER, mine("error", null))
     }
 
     @Test
@@ -62,8 +62,8 @@ class CallLogTypeTest {
     }
 
     @Test
-    fun `an unknown end reason reads like any other early end`() {
-        assertEquals(CallLogType.OUTGOING, mine("busy", 0))
+    fun `an unknown end reason reads like any other call that never connected`() {
+        assertEquals(CallLogType.NO_ANSWER, mine("busy", 0))
         assertEquals(CallLogType.MISSED, received("busy", 0))
     }
 

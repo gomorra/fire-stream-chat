@@ -282,7 +282,7 @@ private fun typeLabel(type: CallLogType): String = when (type) {
     CallLogType.DECLINED -> "Declined call"
 }
 
-/** How a call that never connected ended. An INCOMING call always connected. */
+/** How a call that never connected ended. An OUTGOING or INCOMING call always connected. */
 private fun unconnectedLabel(type: CallLogType): String = when (type) {
     CallLogType.OUTGOING, CallLogType.NO_ANSWER -> "No answer"
     CallLogType.OUTGOING_DECLINED, CallLogType.DECLINED -> "Declined"

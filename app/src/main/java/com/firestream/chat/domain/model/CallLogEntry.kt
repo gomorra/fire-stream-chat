@@ -16,10 +16,10 @@ data class CallLogEntry(
  * label a call from this, so the two cannot disagree.
  */
 enum class CallLogType {
-    /** The viewer placed the call. It connected, or it ended early for a reason no other type names. */
+    /** The viewer placed the call, and it connected. */
     OUTGOING,
 
-    /** The viewer placed the call, and nobody answered before the ring timeout. */
+    /** The viewer placed the call, and it never connected. It rang out, the viewer hung up, or it failed. */
     NO_ANSWER,
 
     /** The viewer placed the call, and the other person declined it. */
@@ -51,13 +51,9 @@ enum class CallLogType {
             val connected = (durationSeconds ?: 0) > 0
             val reason = EndReason.entries.firstOrNull { it.name.equals(endReason, ignoreCase = true) }
             return when {
-                isOwnMessage && connected -> OUTGOING
-                isOwnMessage && reason == EndReason.TIMEOUT -> NO_ANSWER
-                isOwnMessage && reason == EndReason.DECLINED -> OUTGOING_DECLINED
-                isOwnMessage -> OUTGOING
-                connected -> INCOMING
-                reason == EndReason.DECLINED -> DECLINED
-                else -> MISSED
+                connected -> if (isOwnMessage) OUTGOING else INCOMING
+                reason == EndReason.DECLINED -> if (isOwnMessage) OUTGOING_DECLINED else DECLINED
+                else -> if (isOwnMessage) NO_ANSWER else MISSED
             }
         }
     }
