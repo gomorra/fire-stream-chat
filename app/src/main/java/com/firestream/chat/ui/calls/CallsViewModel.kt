@@ -8,6 +8,7 @@ import com.firestream.chat.domain.model.CallLogEntry
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.Contact
 import com.firestream.chat.domain.model.Message
+import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.ContactRepository
@@ -49,6 +50,12 @@ class CallsViewModel @Inject constructor(
     private val userObservers = mutableMapOf<String, kotlinx.coroutines.Job>()
     private var cachedObservedIds: Set<String> = emptySet()
 
+    /** The contacts as [ContactRepository] last emitted them. */
+    private var savedContacts: Map<String, Contact> = emptyMap()
+
+    /** The profile of each other party in the log, from [observeOtherPartyUsers]. */
+    private val profiles = mutableMapOf<String, User>()
+
     init {
         loadContacts()
         loadCallLog()
@@ -59,11 +66,29 @@ class CallsViewModel @Inject constructor(
             contactRepository.getContacts()
                 .catch { }
                 .collect { contacts ->
-                    _uiState.value = _uiState.value.copy(
-                        contacts = contacts.associateBy { it.uid }
-                    )
+                    savedContacts = contacts.associateBy { it.uid }
+                    publishContacts()
                 }
         }
+    }
+
+    /**
+     * Publish the saved contacts with each profile's name and avatar laid over them. A caller who
+     * is not a contact is known only from their profile, so a contacts reload must not replace the
+     * published map.
+     */
+    private fun publishContacts() {
+        val merged = savedContacts + profiles.mapValues { (userId, user) ->
+            savedContacts[userId]?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
+                ?: Contact(
+                    uid = userId,
+                    phoneNumber = user.phoneNumber,
+                    displayName = user.displayName,
+                    avatarUrl = user.avatarUrl,
+                    isRegistered = true
+                )
+        }
+        _uiState.value = _uiState.value.copy(contacts = merged)
     }
 
     private fun buildEntries(
@@ -128,18 +153,8 @@ class CallsViewModel @Inject constructor(
                     }
                     .catch { }
                     .collect { user ->
-                        val updated = _uiState.value.contacts[userId]
-                            ?.copy(avatarUrl = user.avatarUrl, displayName = user.displayName)
-                            ?: Contact(
-                                uid = userId,
-                                phoneNumber = user.phoneNumber,
-                                displayName = user.displayName,
-                                avatarUrl = user.avatarUrl,
-                                isRegistered = true
-                            )
-                        _uiState.value = _uiState.value.copy(
-                            contacts = _uiState.value.contacts + (userId to updated)
-                        )
+                        profiles[userId] = user
+                        publishContacts()
                     }
             }
         }
@@ -149,12 +164,11 @@ class CallsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true)
             try {
-                val contacts = contactRepository.getContacts().first()
-                val contactMap = contacts.associateBy { it.uid }
-                _uiState.value = _uiState.value.copy(contacts = contactMap)
+                savedContacts = contactRepository.getContacts().first().associateBy { it.uid }
+                publishContacts()
                 val messages = messageRepository.getCallLog().first()
                 val chats = chatRepository.getChats().first()
-                val entries = buildEntries(messages, chats, contactMap)
+                val entries = buildEntries(messages, chats, _uiState.value.contacts)
                 _uiState.value = _uiState.value.copy(entries = entries)
             } catch (e: Exception) {
                 _uiState.value = _uiState.value.copy(error = AppError.from(e))

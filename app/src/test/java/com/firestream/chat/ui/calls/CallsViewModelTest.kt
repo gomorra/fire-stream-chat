@@ -233,6 +233,48 @@ class CallsViewModelTest {
         assertEquals("Alice", vm.uiState.value.entries.single().displayName)
     }
 
+    /** A received call from Bob, who is not a contact, so only Bob's profile carries the name. */
+    private fun givenCallFromNonContactBob() {
+        every { userRepository.observeUser(otherUserId) } returns flowOf(
+            User(uid = otherUserId, displayName = "Bob", phoneNumber = "+5678")
+        )
+        val message = Message(
+            id = "m1", chatId = chatId, senderId = otherUserId,
+            type = MessageType.CALL, content = "hangup", duration = 30
+        )
+        every { messageRepository.getCallLog() } returns flowOf(listOf(message))
+        every { chatRepository.getChats() } returns flowOf(listOf(testChat))
+    }
+
+    @Test
+    fun `a caller who is not a contact keeps their name when the contacts load again`() = runTest {
+        // Room emits the contacts again on every change, a sync or a cached avatar among them.
+        val contacts = MutableStateFlow<List<Contact>>(emptyList())
+        every { contactRepository.getContacts() } returns contacts
+        givenCallFromNonContactBob()
+        val vm = buildViewModel()
+        advanceUntilIdle()
+
+        contacts.value = listOf(testContact.copy(uid = "user3", displayName = "Carol"))
+        advanceUntilIdle()
+
+        assertEquals("Bob", vm.uiState.value.entries.single().displayName)
+        assertEquals("Bob", vm.uiState.value.contacts[otherUserId]?.displayName)
+    }
+
+    @Test
+    fun `a caller who is not a contact keeps their name after a refresh`() = runTest {
+        every { contactRepository.getContacts() } returns flowOf(emptyList())
+        givenCallFromNonContactBob()
+        val vm = buildViewModel()
+        advanceUntilIdle()
+
+        vm.refresh()
+        advanceUntilIdle()
+
+        assertEquals("Bob", vm.uiState.value.entries.single().displayName)
+    }
+
     @Test
     fun `display name resolved from contacts map`() = runTest {
         val message = Message(
