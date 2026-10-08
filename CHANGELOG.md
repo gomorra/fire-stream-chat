@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **The Calls tab says "Declined" the way the chat does.** A call you declined showed as *Declined* in the chat but as *Missed* in the Calls tab. A call of yours that the other person declined showed as *Declined* in the chat but as *No answer* in the Calls tab. Both now read *Declined* in the Calls tab too, in the list and in the call's details. A call you declined stays red, as it is in the chat. Calls already in your history are shown the new way.
+- **The Calls tab says "Declined" the way the chat does.** A call you declined showed as *Declined* in the chat but as *Missed* in the Calls tab. A call of yours that the other person declined showed as *Declined* in the chat but as *No answer* in the Calls tab. Both now read *Declined* in the Calls tab too, in the list and in the call's details. A call you declined stays red, as it is in the chat. Calls already in your history are shown the new way. (`5c3dd0f2`)
 
 ## [1.40.2] — 2026-10-08
 
