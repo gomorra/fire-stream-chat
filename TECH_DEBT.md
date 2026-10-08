@@ -74,7 +74,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.** Two related list-sync bugs shipped in 2026-04-23/24 — `e3c2c9c` (new items colliding on `order` after deletes) and `eed7519` (receiver's live updates clobbered by a race between `observeList`'s metadata listener, its items listener, and `ensureListSyncRunning`'s `observeMyLists` sync). Both were caught by dogfooding, not by tests. The race-condition class in particular can't be reliably reproduced in `runTest` with mocked DAOs: I tried adding a unit test for `eed7519`, found it passed even with the mutex reverted (false negative), and pulled it. The per-list mutex fix is logically correct but has no executable regression guard.
 
 **Why we haven't fixed it.** The gap is two pieces, and neither is a drive-by:
-- No Firebase emulator harness. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
+- No Firebase emulator harness for the app. `firestore-rules-tests/` runs `firestore.rules` in the emulator from Node, but nothing runs the app sources against it. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
 - No white-box tripwire asserting that `listDao.insert` callers in `ListRepositoryImpl.observeList`'s two listeners and `ensureListSyncRunning` hold `mutexFor(listId)`. A future refactor that accidentally strips one of the three `mutexFor(...).withLock { ... }` blocks would re-introduce `eed7519` silently. Five-minute test, lasts forever.
 
 **When to revisit.** Planned-for-soon, not deferred indefinitely — the user flagged a longer development horizon on 2026-04-24 and asked what coverage was in place. The trigger is the next free half-day: scaffold the emulator task first (`sender + receiver` repository instances against one emulator, asserting Room convergence on list add/toggle/clear, chat send/receive, and shared-list fan-out — ~5–10 tests total, not a full suite), then the tripwire test. Skip property-based / stress tests; they'll only produce the same false-negatives my pulled test did.
@@ -304,7 +304,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.** These call problems are known and not fixed:
 - `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service stops, and how WebRTC's callbacks reach the main thread, are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
-- `firestore.rules`: any signed-in user can read and add ICE candidates to any call whose id they know, and either party can rewrite `callerId`, `calleeId` and `status`. Candidates carry IP addresses.
 - `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.
 - `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
 - The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
@@ -733,8 +732,8 @@ and sizes are checked like any manifest's (`StickerManifest`), and no url is tak
 plan accepts for the sticker files too (`docs/plans/stickers-and-gifs.md`, open risk 2). Rules
 cannot tell who minted a random id. The fix changes what a pack's document id is: derive it
 from the owner, `sha256(ownerUid + ":" + localPackId)`, send that id in messages, and let the
-`create` rule recompute it with `hashing.sha256`. That is a change to the pack model, and its
-rule cannot be tested in this repo, which has no rules emulator.
+`create` rule recompute it with `hashing.sha256`. That is a change to the pack model. Its rule
+would get emulator tests in `firestore-rules-tests/`, next to the calls rules.
 
 **When to revisit.** Before the user base stops being closed, or when a pack is found pending
 with a manifest of another owner under its id. Found by `/code-review` on step 6 of the plan.
