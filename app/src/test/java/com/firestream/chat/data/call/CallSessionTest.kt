@@ -68,12 +68,16 @@ class CallSessionTest {
 
     private fun TestScope.rootScope() = CoroutineScope(coroutineContext + SupervisorJob()).also { scopes += it }
 
+    /** The placing of the outgoing call, which the call screen started. */
+    private var placing: CallState.Placing? = null
+
     private fun TestScope.newSession(isCaller: Boolean): CallSession {
         if (isCaller) {
-            // The call screen publishes the placing, and records its document, before the service
+            // The call screen starts the placing, and records its document, before the service
             // starts the call.
-            stateHolder.prepareOutgoingCall("u2", "Alice", null)
-            stateHolder.placingCreated(CALL)
+            placing = stateHolder.startPlacing("u2", "Alice", null)!!.also {
+                stateHolder.placingCreated(it.placingId, CALL)
+            }
         }
         return session(isCaller)
     }
@@ -150,7 +154,7 @@ class CallSessionTest {
     @Test
     fun `a call whose placing was cancelled is ended instead of rung`() = runTest {
         val session = newSession(isCaller = true)
-        stateHolder.cancelPlacing()
+        stateHolder.cancelPlacing(placing!!.placingId)
 
         session.startOutgoing()
         runCurrent()

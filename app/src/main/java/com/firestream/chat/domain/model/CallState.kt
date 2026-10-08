@@ -5,10 +5,12 @@ sealed interface CallState {
 
     /**
      * This phone is placing a call to [calleeId]: the call document is being created, or the call
-     * is on its way to the call service. [callId] is null until the document exists. The service
-     * replaces this with [OutgoingRinging]. Counts as ongoing, so no other call starts meanwhile.
+     * is on its way to the call service. [placingId] tells one placing from the next, and [callId]
+     * is null until the document exists. The service replaces this with [OutgoingRinging]. Counts
+     * as ongoing, so no other call starts meanwhile.
      */
     data class Placing(
+        val placingId: Long,
         val calleeId: String,
         val calleeName: String,
         val calleeAvatarUrl: String?,

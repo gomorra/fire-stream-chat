@@ -326,10 +326,11 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **`advanceUntilIdle()` stops once only `backgroundScope` work is left.** It leaves that
   work unrun. A component given `backgroundScope` as its scope then never gets going: a
   collector misses every emission, and a one-shot `launch` never starts. Both read exactly
-  like a broken production diff. A coroutine that finishes can take the `runTest` scope
-  itself (`CallViewModelTest`). A never-completing collector (`Chat*Manager`,
-  `ChatMessageLoader`) would hang the test there (`UncompletedCoroutinesError`). Give it a
-  root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
+  like a broken production diff. A coroutine that always finishes can take the `runTest`
+  scope itself. One that may not finish would hang the test there
+  (`UncompletedCoroutinesError`): a never-completing collector (`Chat*Manager`,
+  `ChatMessageLoader`), or a call create the test never completes (`CallViewModelTest`).
+  Give it a root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
   SupervisorJob())`, and cancel that scope in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
 - **`advanceUntilIdle()` runs every pending timeout.** It moves virtual time forward until

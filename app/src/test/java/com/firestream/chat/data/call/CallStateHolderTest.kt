@@ -4,9 +4,11 @@ import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
+import com.firestream.chat.domain.model.isOngoing
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -143,43 +145,59 @@ class CallStateHolderTest {
     }
 
     @Test
-    fun `placing a call replaces the call that ended, with fresh controls`() {
+    fun `preparing an outgoing call forgets the call that ended`() {
         holder.updateState(CallState.Connected("call1", "user2", "Alice", null, 1000L))
-        holder.toggleMute()
         holder.updateState(CallState.Ended("call1", EndReason.REMOTE_HANGUP))
 
-        // The call screen finishes itself 1.5 s after it sees Ended; the new call's screen must not.
-        assertTrue(holder.prepareOutgoingCall("user3", "Bob", null))
+        // The call screen finishes itself 1.5 s after it sees Ended. The new call's screen must not.
+        assertTrue(holder.prepareOutgoingCall())
 
-        assertEquals(CallState.Placing("user3", "Bob", null), holder.callState.value)
-        assertEquals(CallUiControls(), holder.uiControls.value)
+        assertEquals(CallState.Idle, holder.callState.value)
     }
 
     @Test
-    fun `placing a call is refused while a call is ongoing`() {
+    fun `a prepared call is not ongoing, so a call that comes in during the microphone prompt rings`() {
+        holder.prepareOutgoingCall()
+
+        assertFalse(holder.callState.value.isOngoing)
+    }
+
+    @Test
+    fun `preparing an outgoing call is refused while a call is ongoing`() {
         val ongoing = CallState.Connected("call1", "user2", "Alice", null, 1000L)
         holder.updateState(ongoing)
         holder.toggleMute()
 
-        assertFalse(holder.prepareOutgoingCall("user3", "Bob", null))
+        assertFalse(holder.prepareOutgoingCall())
 
         assertEquals(ongoing, holder.callState.value)
         assertTrue(holder.uiControls.value.isMuted)
     }
 
     @Test
+    fun `placing a call publishes it with fresh controls`() {
+        holder.toggleMute()
+
+        val placing = holder.startPlacing("user2", "Alice", null)
+
+        assertEquals(placing, holder.callState.value)
+        assertEquals("user2", placing?.calleeId)
+        assertEquals(CallUiControls(), holder.uiControls.value)
+    }
+
+    @Test
     fun `a second call cannot be placed while one is being placed`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
+        val first = holder.startPlacing("user2", "Alice", null)
 
-        assertFalse(holder.prepareOutgoingCall("user3", "Bob", null))
+        assertNull(holder.startPlacing("user3", "Bob", null))
 
-        assertEquals(CallState.Placing("user2", "Alice", null), holder.callState.value)
+        assertEquals(first, holder.callState.value)
     }
 
     @Test
     fun `the service takes over only the placing of its own call`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
-        assertTrue(holder.placingCreated("call1"))
+        val placing = holder.startPlacing("user2", "Alice", null)!!
+        assertTrue(holder.placingCreated(placing.placingId, "call1"))
         val other = CallState.OutgoingRinging("call2", "user2", "Alice", null)
         val ringing = CallState.OutgoingRinging("call1", "user2", "Alice", null)
 
@@ -191,57 +209,85 @@ class CallStateHolderTest {
 
     @Test
     fun `a placing gets one document`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
+        val placing = holder.startPlacing("user2", "Alice", null)!!
 
-        assertTrue(holder.placingCreated("call1"))
-        assertFalse(holder.placingCreated("call2"))
+        assertTrue(holder.placingCreated(placing.placingId, "call1"))
+        assertFalse(holder.placingCreated(placing.placingId, "call2"))
 
-        assertEquals(CallState.Placing("user2", "Alice", null, callId = "call1"), holder.callState.value)
+        assertEquals(placing.copy(callId = "call1"), holder.callState.value)
     }
 
     @Test
-    fun `a cancelled placing ends as a hang-up and cannot be taken over`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
-        holder.placingCreated("call1")
+    fun `a cancelled placing ends as a hang-up, says which call it had, and cannot be taken over`() {
+        val placing = holder.startPlacing("user2", "Alice", null)!!
+        holder.placingCreated(placing.placingId, "call1")
 
-        assertTrue(holder.cancelPlacing())
+        assertEquals(placing.copy(callId = "call1"), holder.cancelPlacing(placing.placingId))
 
         assertEquals(CallState.Ended("call1", EndReason.HANGUP), holder.callState.value)
-        assertFalse(holder.placingCreated("call1"))
+        assertFalse(holder.placingCreated(placing.placingId, "call1"))
         assertFalse(holder.takeOverPlacing(CallState.OutgoingRinging("call1", "user2", "Alice", null)))
     }
 
     @Test
-    fun `a failed placing ends the screen that waits for it`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
+    fun `an old placing never touches the next one`() {
+        // Cancel the call to Alice while its document is created, then call Bob at once.
+        val toAlice = holder.startPlacing("user2", "Alice", null)!!
+        holder.cancelPlacing(toAlice.placingId)
+        holder.prepareOutgoingCall()
+        val toBob = holder.startPlacing("user3", "Bob", null)!!
 
-        assertTrue(holder.failPlacing(callId = null))
+        assertFalse(holder.placingCreated(toAlice.placingId, "callAlice"))
+        assertFalse(holder.failPlacing(toAlice.placingId))
+        assertNull(holder.cancelPlacing(toAlice.placingId))
+
+        assertEquals(toBob, holder.callState.value)
+    }
+
+    @Test
+    fun `a failed placing ends the screen that waits for it`() {
+        val placing = holder.startPlacing("user2", "Alice", null)!!
+
+        assertTrue(holder.failPlacing(placing.placingId))
 
         assertEquals(CallState.Ended("", EndReason.ERROR), holder.callState.value)
     }
 
     @Test
     fun `a failed placing leaves alone a call that is not being placed`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
+        val placing = holder.startPlacing("user2", "Alice", null)!!
         val ringing = CallState.IncomingRinging("call9", "user3", "Bob", null)
         holder.updateState(ringing)
 
-        assertFalse(holder.failPlacing(callId = null))
-        assertFalse(holder.cancelPlacing())
+        assertFalse(holder.failPlacing(placing.placingId))
+        assertNull(holder.cancelPlacing(placing.placingId))
 
         assertEquals(ringing, holder.callState.value)
     }
 
     @Test
-    fun `failing a placing needs its call`() {
-        holder.prepareOutgoingCall("user2", "Alice", null)
-        holder.placingCreated("call1")
+    fun `exactly one of the service and a Cancel wins a placing`() {
+        repeat(ROUNDS) { round ->
+            val callId = "call$round"
+            holder.prepareOutgoingCall()
+            val placing = holder.startPlacing("user2", "Alice", null)!!
+            holder.placingCreated(placing.placingId, callId)
+            val ringing = CallState.OutgoingRinging(callId, "user2", "Alice", null)
+            val start = CyclicBarrier(2)
+            var tookOver = false
+            val service = thread {
+                start.await()
+                tookOver = holder.takeOverPlacing(ringing)
+            }
+            start.await()
+            val cancelled = holder.cancelPlacing(placing.placingId) != null
+            service.join()
 
-        assertFalse(holder.failPlacing(callId = null))
-        assertFalse(holder.failPlacing("call2"))
-        assertTrue(holder.failPlacing("call1"))
-
-        assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
+            assertTrue("round $round: one side must win, and only one", tookOver != cancelled)
+            val expected = if (tookOver) ringing else CallState.Ended(callId, EndReason.HANGUP)
+            assertEquals(expected, holder.callState.value)
+            holder.updateState(CallState.Ended(callId, EndReason.HANGUP))
+        }
     }
 
     @Test

@@ -37,14 +37,12 @@ class CallScreenPlacingUiTest {
     private val holder = CallStateHolder()
 
     private fun showPlacing() {
-        holder.prepareOutgoingCall("u2", "Alice", null)
+        // Nothing runs this scope, so the call is never created: it stays being placed.
+        val viewModel = CallViewModel(holder, mockk(), TestScope(), app)
+        viewModel.placeCall("u2", "chat1", "Alice", null)
         composeTestRule.setContent {
             MaterialTheme {
-                CallScreen(
-                    onFinish = {},
-                    onAnswer = {},
-                    viewModel = CallViewModel(holder, mockk(), TestScope(), app),
-                )
+                CallScreen(onFinish = {}, onAnswer = {}, viewModel = viewModel)
             }
         }
     }

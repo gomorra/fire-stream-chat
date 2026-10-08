@@ -21,7 +21,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/CallHost.kt` | What a `CallSession` needs from Android; `CallService` implements it |
 | `app/src/main/java/com/firestream/chat/data/call/CallMedia.kt` | One call's connection as the session sees it, and the `ConnectionChange`s it reports |
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcCallMedia.kt` | `CallMedia` over a WebRTC `PeerConnection`; posts WebRTC callbacks to the main thread and drops them after dispose |
-| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call; the placing of an outgoing call: `prepareOutgoingCall`, `placingCreated`, `takeOverPlacing`, `failPlacing`, `cancelPlacing` (compare-and-set, so the setup and the service never both win) |
+| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call; the placing of an outgoing call: `prepareOutgoingCall` before the microphone prompt, then `startPlacing`, `placingCreated`, `takeOverPlacing`, `failPlacing`, `cancelPlacing`, each keyed by the placing's id (compare-and-set, so the setup and the service never both win) |
 | `app/src/main/java/com/firestream/chat/domain/model/CallState.kt` | Call states, `Placing` included, `isOngoing` (the one "am I in a call" rule), `CallUiControls` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row; `CallLogType.of` — the one rule for how a call reads (outgoing, no answer, incoming, missed, declined), used by the Calls tab and `MessageBubble`'s call row |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
@@ -37,7 +37,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route; owns the microphone permission and the launch decision |
 | `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); a ring from the fallback notification; `MicAction`, what waits on the microphone prompt; `closesUnseen`, which closes a screen whose call ended while it was not shown |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
-| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents; outgoing-call setup on the application scope, bounded at both steps, ended instead if the screen closed or Cancel was pressed; the action waiting on the microphone prompt |
+| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents; outgoing-call setup on the application scope, bounded at every step, ended instead if the screen closed or Cancel was pressed; a created call that no service holds is ended and recorded in the chat; the action waiting on the microphone prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | Mute / hang up / route control |
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
@@ -47,7 +47,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | `incoming_call` push → `CallService.startIncoming`, or the fallback ring when Android refuses the start; a call-message push notifies only a missed call (`callPushNotificationText`) |
 | `firestore.rules` | `calls/{callId}`: only the caller and the callee read and write it; the status only moves forward; each side writes its own SDP and its own ICE candidate list |
 | `firestore-rules-tests/calls.test.js` | Every call write the app makes passes the rules, and the abuses fail (Firestore emulator; `npm test` in that folder) |
-| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, the placing transitions |
+| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, the placing transitions by placing id, and the service racing a Cancel for a placing |
 | `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed; the fallback ring times out with the ring and opens the call screen to ring (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
 | `app/src/test/java/com/firestream/chat/data/call/CallSessionTest.kt` | A call's transitions on fakes of `CallHost` and `CallMedia`: offer and answer, candidates once each, the clock, the ring timeout, how each end is recorded, late events after the end |
@@ -55,7 +55,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/domain/model/CallLogTypeTest.kt` | The call-log rule — a received call that never connected is missed, a declined call is declined on both sides |
 | `app/src/test/java/com/firestream/chat/ui/call/CallLaunchTest.kt` | Recents never places, answers or rings a call again; a call screen closes when its call ends unseen |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenAnswerUiTest.kt` | Answer goes to the host's permission check, not straight to the service |
-| `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, ended if the screen closed or Cancel was pressed, both timeouts, a failure leaves a call that rang meanwhile alone (Robolectric) |
+| `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, ended if the screen closed or Cancel was pressed, every timeout, a late create ended and recorded, a cancelled call's late create leaves the next call alone, a failure leaves a call that rang meanwhile alone (Robolectric) |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenPlacingUiTest.kt` | A call being placed shows the callee and "Calling..."; Cancel ends it without the service |
 | `app/src/test/java/com/firestream/chat/ui/chat/CallMessageBubbleUiTest.kt` | The call row's label in a chat |
 | `app/src/test/java/com/firestream/chat/data/remote/fcm/CallPushNotificationTextTest.kt` | Only a missed call notifies; a push without the duration says "Call" |
@@ -66,7 +66,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/ui/call/CallAudioRouteUiTest.kt` | Route button branch (≤2 toggles, 3 opens the sheet) + sheet rows |
 | `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation; names that arrive after the log, and profile names that outlive a contacts reload |
 
-**Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallActivity` (`ACTION_OUTGOING`) → `CallStateHolder.prepareOutgoingCall()` → `CallViewModel.placeCall()` → `CallRepository.createCall()` → `CallService.startOutgoing()` foregrounds. Incoming: the `incoming_call` push → `FCMService.handleIncomingCall` → `CallService.startIncoming()`.
+**Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallActivity` (`ACTION_OUTGOING`) → `CallStateHolder.prepareOutgoingCall()` → microphone prompt → `CallViewModel.placeCall()` → `CallStateHolder.startPlacing()` → `CallRepository.createCall()` → `CallService.startOutgoing()` foregrounds. Incoming: the `incoming_call` push → `FCMService.handleIncomingCall` → `CallService.startIncoming()`.
 
 ---
 

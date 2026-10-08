@@ -192,7 +192,7 @@ sequenceDiagram
 - **`CallSession`**: One call, without Android or WebRTC: its signalling, its timer (ringing, connecting, a lost connection), the states it publishes, and the end-of-call writes. It reaches Android through `CallHost` and the connection through `CallMedia`, so `CallSessionTest` drives it on the JVM.
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
-- **`CallState`** (sealed interface): `Idle | Placing | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`. `Placing` covers an outgoing call from the tap until the service takes it over, and counts as ongoing.
+- **`CallState`** (sealed interface): `Idle | Placing | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`. `Placing` covers an outgoing call from the moment its setup starts, after the microphone prompt, until the service takes it over. It counts as ongoing.
 - **Audio session** (`startAudioSession()` / `stopAudioSession()` in `CallService`, idempotent and
   mutually exclusive): sets `MODE_IN_COMMUNICATION`, then `CallAudioRouter` picks the route through
   `AudioManager.setCommunicationDevice()`. `CallAudioRoutePolicy` is the pure decision (a headset

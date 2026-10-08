@@ -14,7 +14,7 @@ import com.firestream.chat.domain.repository.CallRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +22,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 @HiltViewModel
@@ -47,73 +46,89 @@ class CallViewModel @Inject constructor(
     /** Emits when an outgoing call could not be created. */
     val setupFailed: Flow<Unit> = _setupFailed.receiveAsFlow()
 
-    /** The running [placeCall], until it hands the call to [CallService] or fails. */
-    private var setup: Job? = null
+    /** The call this screen placed last: its placing, and the chat it is in. Main thread only. */
+    private var placed: PlacedCall? = null
+
+    private class PlacedCall(val placingId: Long, val chatId: String)
 
     /**
      * Set when the call screen closes for good. A rotation keeps this ViewModel, so it is not a
-     * close. The setup reads it on the application scope's thread.
+     * close. Main thread only.
      */
-    private val closed = AtomicBoolean(false)
+    private var closed = false
 
     /**
-     * Create the call and hand it to [CallService]. The screen has published [CallState.Placing]
-     * for it first, with [CallStateHolder.prepareOutgoingCall]. Does nothing while an earlier call
-     * is still being set up.
+     * Publish the call as being placed, then create it and hand it to [CallService]. Does nothing
+     * while a call is ongoing, this screen's own placing included.
      *
      * The setup runs on the application scope. The call document rings the callee as soon as it
-     * exists, so a setup cancelled halfway would leave them ringing. A setup that finishes after
-     * the screen closed ends its call instead, and touches no state the next screen may own.
+     * exists, so a setup cancelled halfway would leave them ringing. Each step is bounded, and a
+     * failed step ends the placing before anything is written, so the placing never stays up to
+     * block every later call.
      *
-     * Both steps are bounded, so a stuck setup cannot leave the placing up and block every call.
+     * The setup touches only its own placing. A Cancel, or a closed screen, can end it at any
+     * stage. Whoever ends a placing whose document exists also ends the call and records it,
+     * because no service holds that call.
      */
     fun placeCall(calleeId: String, chatId: String, calleeName: String, calleeAvatarUrl: String?) {
-        if (setup?.isActive == true) return
-        setup = appScope.launch {
-            val created = withTimeoutOrNull(CREATE_TIMEOUT_MS) { callRepository.createCall(calleeId) }
-                ?: Result.failure(IllegalStateException("Creating the call took too long"))
-            created
-                .onSuccess { callId ->
-                    // The screen closed, or Cancel was pressed, while the document was created.
-                    if (closed.get() || !callStateHolder.placingCreated(callId)) {
-                        callRepository.endCall(callId, EndReason.HANGUP)
-                        return@onSuccess
-                    }
-                    try {
-                        CallService.startOutgoing(context, callId, chatId, calleeId, calleeName, calleeAvatarUrl)
-                    } catch (e: IllegalStateException) {
-                        // Android 12+ will not start a foreground service once the app is in the
-                        // background, and a slow setup can outlast the user leaving the app.
-                        Log.w(TAG, "Could not start the call service", e)
-                        callRepository.endCall(callId, EndReason.ERROR)
-                        callStateHolder.failPlacing(callId)
-                        return@onSuccess
-                    }
-                    // The service takes the call over on the main thread a moment later. If it
-                    // never does, the placing must not stay up. The service then finds it gone
-                    // and ends the call itself.
-                    val handedOver = withTimeoutOrNull(HANDOVER_TIMEOUT_MS) {
-                        callStateHolder.callState.first { it !is CallState.Placing || it.callId != callId }
-                    }
-                    if (handedOver == null && callStateHolder.failPlacing(callId)) {
-                        callRepository.endCall(callId, EndReason.ERROR)
-                    }
-                }
-                .onFailure { e ->
-                    Log.w(TAG, "Could not create the call", e)
-                    // A closed screen cancelled its placing as it closed. The placing now up may
-                    // be the next screen's.
-                    if (closed.get()) return@onFailure
-                    _setupFailed.trySend(Unit)
-                    callStateHolder.failPlacing(callId = null)
-                }
+        if (closed) return
+        val placing = callStateHolder.startPlacing(calleeId, calleeName, calleeAvatarUrl) ?: return
+        placed = PlacedCall(placing.placingId, chatId)
+        appScope.launch { setUp(placing.placingId, calleeId, chatId, calleeName, calleeAvatarUrl) }
+    }
+
+    private suspend fun setUp(placingId: Long, calleeId: String, chatId: String, calleeName: String, calleeAvatarUrl: String?) {
+        // The create goes on after a timeout, so a call it creates late is ended, not left ringing.
+        val creating = appScope.async { callRepository.createCall(calleeId) }
+        val created = withTimeoutOrNull(CREATE_TIMEOUT_MS) { creating.await() }
+        if (created == null) {
+            Log.w(TAG, "Creating the call took too long")
+            if (callStateHolder.failPlacing(placingId)) _setupFailed.trySend(Unit)
+            creating.await().onSuccess { callId -> endUnheldCall(callId, chatId, EndReason.ERROR) }
+            return
+        }
+        val callId = created.getOrElse { e ->
+            Log.w(TAG, "Could not create the call", e)
+            if (callStateHolder.failPlacing(placingId)) _setupFailed.trySend(Unit)
+            return
+        }
+        // Cancel, or a closed screen, ended the placing while the document was created.
+        if (!callStateHolder.placingCreated(placingId, callId)) {
+            endUnheldCall(callId, chatId, EndReason.HANGUP)
+            return
+        }
+        try {
+            CallService.startOutgoing(context, callId, chatId, calleeId, calleeName, calleeAvatarUrl)
+        } catch (e: IllegalStateException) {
+            // Android 12+ will not start a foreground service once the app is in the background,
+            // and a slow setup can outlast the user leaving the app.
+            Log.w(TAG, "Could not start the call service", e)
+            if (callStateHolder.failPlacing(placingId)) endUnheldCall(callId, chatId, EndReason.ERROR)
+            return
+        }
+        // The service takes the call over on the main thread a moment later. If it never does, the
+        // placing ends here, and the service, if it starts at all, finds it gone and ends the call.
+        val handedOver = withTimeoutOrNull(HANDOVER_TIMEOUT_MS) {
+            callStateHolder.callState.first { it !is CallState.Placing || it.placingId != placingId }
+        }
+        if (handedOver == null && callStateHolder.failPlacing(placingId)) {
+            endUnheldCall(callId, chatId, EndReason.ERROR)
         }
     }
 
+    /**
+     * End a call whose document exists but which no service holds, and record it in the chat. Its
+     * push has already rung the callee, so they see a missed call and the caller sees no answer.
+     */
+    private suspend fun endUnheldCall(callId: String, chatId: String, reason: EndReason) {
+        callRepository.endCall(callId, reason)
+        callRepository.logCallMessage(chatId, reason, durationSeconds = 0)
+    }
+
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
-    /** Hang up. A call still being placed is cancelled here: the service does not hold it yet. */
+    /** Hang up. A call still being placed is cancelled here, because the service does not hold it yet. */
     fun hangup() {
-        if (callStateHolder.cancelPlacing()) return
+        if (cancelPlacing()) return
         CallService.sendAction(context, CallService.ACTION_HANGUP)
     }
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
@@ -126,8 +141,22 @@ class CallViewModel @Inject constructor(
      * comes only with its onDestroy, which the system can hold back for seconds after Back.
      */
     fun onScreenClosed() {
-        if (closed.getAndSet(true)) return
-        callStateHolder.cancelPlacing()
+        closed = true
+        cancelPlacing()
+    }
+
+    /**
+     * Cancel the call this screen is placing. Returns false when its placing is no longer up. A
+     * placing whose document exists has rung the callee already, so its call is ended and
+     * recorded here.
+     */
+    private fun cancelPlacing(): Boolean {
+        val placed = placed ?: return false
+        val cancelled = callStateHolder.cancelPlacing(placed.placingId) ?: return false
+        cancelled.callId?.let { callId ->
+            appScope.launch { endUnheldCall(callId, placed.chatId, EndReason.HANGUP) }
+        }
+        return true
     }
 
     override fun onCleared() {
