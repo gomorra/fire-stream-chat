@@ -201,10 +201,15 @@ class CallSessionTest {
     }
 
     @Test
-    fun `an answered call does not time out`() = runTest {
-        answeredOutgoing()
+    fun `the ring timeout stops once the call is answered`() = runTest {
+        newSession(isCaller = true).startOutgoing()
+        runCurrent()
+        advanceTimeBy(10_000)
+        callDocument.tryEmit(doc("answered", answer = ANSWER))
+        runCurrent()
 
-        advanceTimeBy(CallSession.RING_TIMEOUT_MS * 2)
+        // Past the ring's deadline, before the connection's.
+        advanceTimeBy(CallSession.RING_TIMEOUT_MS - 10_000)
         runCurrent()
 
         assertTrue(state is CallState.Connecting)
@@ -298,6 +303,84 @@ class CallSessionTest {
         coVerify(exactly = 1) { repository.logCallMessage(any(), any(), any()) }
         coVerify(exactly = 0) { repository.sendIceCandidate(any(), any(), CANDIDATE_2) }
         assertEquals(listOf(session), host.finished)
+    }
+
+    @Test
+    fun `a call that never connects after the answer ends as an error`() = runTest {
+        answeredOutgoing()
+
+        advanceTimeBy(CallSession.CONNECT_TIMEOUT_MS)
+        runCurrent()
+
+        assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
+        coVerify { repository.endCall(CALL, "error") }
+        coVerify { repository.logCallMessage(CHAT, "error", 0) }
+    }
+
+    @Test
+    fun `a call answered here that never connects ends as an error`() = runTest {
+        val session = newSession(isCaller = false)
+        session.startIncoming()
+        runCurrent()
+        session.answer()
+        runCurrent()
+
+        advanceTimeBy(CallSession.CONNECT_TIMEOUT_MS)
+        runCurrent()
+
+        assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
+        coVerify { repository.endCall(CALL, "error") }
+    }
+
+    @Test
+    fun `a connection lost for too long ends the call as an error`() = runTest {
+        val (_, media) = connectedOutgoing()
+        advanceTimeBy(40_000)
+
+        media.listener.onConnectionChange(ConnectionChange.DISCONNECTED)
+        advanceTimeBy(CallSession.RECONNECT_TIMEOUT_MS)
+        runCurrent()
+
+        assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
+        coVerify { repository.endCall(CALL, "error") }
+        coVerify { repository.logCallMessage(CHAT, "error", 70) }
+    }
+
+    @Test
+    fun `a connection that comes back in time goes on`() = runTest {
+        val (_, media) = connectedOutgoing()
+
+        media.listener.onConnectionChange(ConnectionChange.DISCONNECTED)
+        advanceTimeBy(CallSession.RECONNECT_TIMEOUT_MS - 1)
+        media.listener.onConnectionChange(ConnectionChange.CONNECTED)
+        advanceTimeBy(CallSession.RECONNECT_TIMEOUT_MS * 10)
+        runCurrent()
+
+        assertTrue(state is CallState.Connected)
+        coVerify(exactly = 0) { repository.endCall(any(), any()) }
+    }
+
+    @Test
+    fun `the callee's ring timeout reads as a timeout for the caller`() = runTest {
+        newSession(isCaller = true).startOutgoing()
+        runCurrent()
+
+        callDocument.tryEmit(doc("ended", endReason = "timeout"))
+        runCurrent()
+
+        assertEquals(CallState.Ended(CALL, EndReason.TIMEOUT), state)
+        coVerify { repository.logCallMessage(CHAT, "timeout", 0) }
+    }
+
+    @Test
+    fun `a repeated answer is applied once`() = runTest {
+        val (_, media) = connectedOutgoing()
+
+        callDocument.tryEmit(doc("answered", answer = ANSWER))
+        runCurrent()
+
+        assertEquals(1, media.remoteDescriptions.size)
+        assertTrue(state is CallState.Connected)
     }
 
     @Test

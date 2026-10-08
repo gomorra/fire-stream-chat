@@ -34,8 +34,8 @@ seen on a phone.
    once in each case. Silent mode: no ring. Vibrate mode: vibration only.
 2. Fresh install on Android 14+, microphone never granted: answer with the green button on the
    full-screen call screen. The permission prompt appears, and the call connects once allowed.
-3. Connected call, then Wi-Fi off on one phone: the call ends with an error and neither app
-   crashes. Then a call where both people hang up at the same moment.
+3. Connected call, then Wi-Fi and mobile data off on one phone: within about 30 s both phones
+   end the call, and neither app crashes. Then a call where both people hang up at the same moment.
 4. Ten calls in a row: memory does not climb from call to call (Android Studio memory profiler).
 5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
 6. After a call, both phones' chat lists show the call as the chat's last message.

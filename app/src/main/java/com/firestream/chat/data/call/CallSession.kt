@@ -51,7 +51,11 @@ internal class CallSession(
     private var connectedAt: Long? = null
     private val processedIceCandidates = mutableSetOf<String>()
 
-    private var ringTimeout: Job? = null
+    /** Whether the callee's answer has been applied. A later snapshot that still says "answered" changes nothing. */
+    private var answerApplied = false
+
+    /** Ends the call if its current phase lasts too long: ringing, connecting, or a lost connection. */
+    private var timer: Job? = null
     private var signaling: Job? = null
     private var iceCandidates: Job? = null
 
@@ -76,11 +80,12 @@ internal class CallSession(
             }
         )
         observeCallDocument()
-        startRingTimeout()
+        startTimer(RING_TIMEOUT_MS, EndReason.TIMEOUT)
     }
 
     private fun onAnswered(data: CallSignalingData) {
-        ringTimeout?.cancel()
+        if (answerApplied) return
+        startTimer(CONNECT_TIMEOUT_MS, EndReason.ERROR)
         stateHolder.updateState(connecting())
         host.showOngoing(remoteName)
 
@@ -89,6 +94,7 @@ internal class CallSession(
             Log.e(TAG, "Call answered but no answer SDP found — waiting for next snapshot")
             return
         }
+        answerApplied = true
         media?.setRemoteDescription(
             answer,
             onSet = { observeIceCandidates(CALLEE_CANDIDATES) },
@@ -110,7 +116,7 @@ internal class CallSession(
         )
         host.foregroundIncoming(remoteName)
         observeCallDocument()
-        startRingTimeout()
+        startTimer(RING_TIMEOUT_MS, EndReason.TIMEOUT)
     }
 
     /**
@@ -126,7 +132,7 @@ internal class CallSession(
             return
         }
 
-        ringTimeout?.cancel()
+        startTimer(CONNECT_TIMEOUT_MS, EndReason.ERROR)
         stateHolder.updateState(connecting())
         host.foregroundOngoing(remoteName)
         val media = startMedia()
@@ -221,8 +227,11 @@ internal class CallSession(
                 finish()
             }
             "ended" -> {
-                writeCallMessage(EndReason.REMOTE_HANGUP)
-                stateHolder.updateState(CallState.Ended(callId, EndReason.REMOTE_HANGUP))
+                // The other phone ends a call nobody answered with "timeout" when its own ring
+                // timeout fires first. The call then went unanswered, not hung up.
+                val reason = if (data.endReason == TIMEOUT_REASON) EndReason.TIMEOUT else EndReason.REMOTE_HANGUP
+                writeCallMessage(reason)
+                stateHolder.updateState(CallState.Ended(callId, reason))
                 finish()
             }
         }
@@ -264,7 +273,12 @@ internal class CallSession(
             if (isFinished) return
             when (change) {
                 ConnectionChange.CONNECTED -> onConnected()
-                ConnectionChange.DISCONNECTED -> Log.w(TAG, "ICE disconnected — may reconnect")
+                ConnectionChange.DISCONNECTED -> {
+                    // With continual gathering ICE may never report FAILED, so a connection that
+                    // stays lost would hold the call open for good.
+                    Log.w(TAG, "ICE disconnected — may reconnect")
+                    startTimer(RECONNECT_TIMEOUT_MS, EndReason.ERROR)
+                }
                 ConnectionChange.FAILED -> {
                     Log.e(TAG, "ICE connection failed")
                     end(EndReason.ERROR)
@@ -274,7 +288,7 @@ internal class CallSession(
     }
 
     private fun onConnected() {
-        ringTimeout?.cancel()
+        timer?.cancel()
         // ICE reports CONNECTED and then COMPLETED, and again after every reconnect. The call's
         // clock starts at the first report only, or the timer would restart at 0:00.
         val startTime = connectedAt ?: clock().also { connectedAt = it }
@@ -293,11 +307,12 @@ internal class CallSession(
     // Timer
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun startRingTimeout() {
-        ringTimeout?.cancel()
-        ringTimeout = scope.launch {
-            delay(RING_TIMEOUT_MS)
-            end(EndReason.TIMEOUT)
+    /** End the call for [reason] unless it moves on within [timeoutMs]. Replaces the previous phase's timer. */
+    private fun startTimer(timeoutMs: Long, reason: EndReason) {
+        timer?.cancel()
+        timer = scope.launch {
+            delay(timeoutMs)
+            end(reason)
         }
     }
 
@@ -342,7 +357,16 @@ internal class CallSession(
 
     companion object {
         private const val TAG = "CallSession"
+        /** How long a call rings before it ends as unanswered. */
         const val RING_TIMEOUT_MS = 30_000L
+
+        /** How long an answered call may take to connect. */
+        const val CONNECT_TIMEOUT_MS = 30_000L
+
+        /** How long a lost connection may take to come back. */
+        const val RECONNECT_TIMEOUT_MS = 30_000L
+
+        private val TIMEOUT_REASON = EndReason.TIMEOUT.name.lowercase()
         private const val CALLER_CANDIDATES = "callerCandidates"
         private const val CALLEE_CANDIDATES = "calleeCandidates"
     }
