@@ -208,12 +208,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   block itself when the cancellation was not its own. A hand-written copy of the idiom needs
   the same check. Regression:
   `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
-- **`catch (e: Exception)` around a suspend call also catches cancellation.** The
-  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }`, so a
-  coroutine cancelled while suspended in one gets a failure back and carries on. `CallService`'s
-  ring timeout kept running after the call's cleanup cancelled it, and tore the call down a
-  second time on another thread. Do not rely on `cancel()` to stop the code after a repository
-  call: check that the work is still wanted before acting on the result.
+- **`catch (e: Exception)` around a suspend call also catches cancellation.** Most
+  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }` or
+  `resultOf`, so a coroutine cancelled while suspended in one gets a failure back and carries
+  on. `CallService`'s ring timeout kept running after the call's cleanup cancelled it, and tore
+  the call down a second time on another thread. Wrap a suspend call in `cancellableResultOf`
+  instead, which lets the cancellation through. `CallRepositoryImpl` does. With any other
+  repository, do not rely on `cancel()` to stop the code after its call: check that the work is
+  still wanted before acting on the result. Regression:
+  `CallRepositoryImplTest.a caller cancelled in any repository call stops instead of getting a failure`.
 - **A Firestore listener on a parallel executor can deliver snapshots out of order.**
   `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
   `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
