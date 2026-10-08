@@ -6,6 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
+- **Incoming calls ring.** An incoming call used to arrive in silence: its notification had no sound and did not vibrate, so a phone in a pocket gave no sign of it. It now rings with your ringtone and vibrates until you answer or decline, following the ring volume, silent and vibrate mode, and Do Not Disturb. Android fixes a notification channel's sound when the channel is created, so the silent *Incoming Calls* channel is replaced by a new one, and a change you made to the old one in Android's settings does not carry over. (`pending`)
 - **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`01c0289f`)
 
 ## [1.40.1] — 2026-10-07
