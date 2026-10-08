@@ -180,4 +180,130 @@ class ViewportGeometryTest {
         assertEquals(-200f, restored.offsetX, tolerance)
         assertRect(2f / 3f, 0f, 1f, 1f, visible(restored))
     }
+
+    /**
+     * The keyboard case, in a phone's numbers: a 3000 × 4000 photo in a
+     * 1080 × 2200 box fits to 1080 × 1440 (0.36 screen px per photo px). When
+     * the keyboard slides over the caption field the box drops to 1080 × 1300,
+     * where the photo fits by its height instead: 975 × 1300 (0.325).
+     */
+    private val phoneWidth = 1080f
+    private val phoneHeight = 2200f
+    private val keyboardHeight = 1300f
+    private val photoWidth = 3000
+    private val photoHeight = 4000
+
+    private fun phoneVisible(transform: ZoomTransform) =
+        ViewportGeometry.visible(transform, phoneWidth, phoneHeight, photoWidth, photoHeight)
+
+    private fun resized(anchor: ZoomTransform, frame: CropRect, toHeight: Float, fromHeight: Float = phoneHeight) =
+        ViewportGeometry.transformAfterResize(
+            anchor = anchor,
+            anchorBoxWidth = phoneWidth,
+            anchorBoxHeight = fromHeight,
+            frame = frame,
+            boxWidth = phoneWidth,
+            boxHeight = toHeight,
+            imageWidth = photoWidth,
+            imageHeight = photoHeight,
+            maxScale = 10f,
+        )
+
+    private fun onScreen(frame: CropRect, transform: ZoomTransform, boxHeight: Float) =
+        ViewportGeometry.toScreen(frame, transform, phoneWidth, boxHeight, photoWidth, photoHeight)!!
+
+    @Test
+    fun `a square frame keeps its size and stays centred when the keyboard shortens the box`() {
+        // 2x: the box shows the middle half of the photo across and 0.118–0.882
+        // down, 1500 × 3057 photo px. The largest square in that is 1500 px, a
+        // 0.5 × 0.375 frame drawn 1080 × 1080 — the whole box width.
+        //
+        // Keeping the 2x would draw it at 975 × 975, because the fit shrank;
+        // keeping the old offset would also slide it sideways. Either way the
+        // frame the user lined up no longer looks like the one they lined up.
+        // Holding the photo's on-screen size instead needs 2 × 0.36 / 0.325 =
+        // 2.215x, at which the square is 1080 × 1080 again and centred in the
+        // shorter box: 110 px of photo above and below it.
+        val anchor = ZoomTransform(2f, 0f, 0f)
+        val frame = CropGeometry.fitInside(CropAspect.SQUARE, phoneVisible(anchor), photoWidth, photoHeight)
+        assertRect(0.25f, 0.3125f, 0.75f, 0.6875f, frame)
+
+        val rect = onScreen(frame, resized(anchor, frame, keyboardHeight), keyboardHeight)
+
+        assertEquals("left", 0f, rect.left, 0.5f)
+        assertEquals("right", phoneWidth, rect.right, 0.5f)
+        assertEquals("top", 110f, rect.top, 0.5f)
+        assertEquals("bottom", 1190f, rect.bottom, 0.5f)
+    }
+
+    @Test
+    fun `a frame panned off centre comes back to the middle of the shorter box, whole`() {
+        // Panned 300 px right at 2x, the photo's 0.11–0.61 strip is on screen.
+        // The square is still that strip's full width, and in the shorter box
+        // it has to be all there: centred, 1080 wide, not shifted against an edge.
+        val anchor = ZoomTransform(2f, 300f, 0f)
+        val frame = CropGeometry.fitInside(CropAspect.SQUARE, phoneVisible(anchor), photoWidth, photoHeight)
+
+        val rect = onScreen(frame, resized(anchor, frame, keyboardHeight), keyboardHeight)
+
+        assertEquals("left", 0f, rect.left, 0.5f)
+        assertEquals("right", phoneWidth, rect.right, 0.5f)
+        assertEquals("width = height", rect.width, rect.height, 0.5f)
+    }
+
+    @Test
+    fun `a frame too tall for the shorter box is zoomed out to fit, never cut`() {
+        // A free crop is the whole viewport, 1080 × 2200 on screen: at the
+        // photo's old on-screen size it would not fit 1300 px. It is contained
+        // instead, so everything that will be sent stays in view.
+        val anchor = ZoomTransform(2f, 0f, 0f)
+        val frame = phoneVisible(anchor)
+
+        val transform = resized(anchor, frame, keyboardHeight)
+        val rect = onScreen(frame, transform, keyboardHeight)
+
+        assertTrue("top ${rect.top}", rect.top >= -0.5f)
+        assertTrue("bottom ${rect.bottom}", rect.bottom <= keyboardHeight + 0.5f)
+        assertEquals("height", keyboardHeight, rect.height, 0.5f)
+        assertEquals("centred", phoneWidth / 2f, (rect.left + rect.right) / 2f, 0.5f)
+    }
+
+    @Test
+    fun `the keyboard going away puts back exactly the zoom the user made`() {
+        // Every frame of the keyboard's slide is worked out from the zoom the
+        // user made, not from the frame before, so the trip down and back up
+        // cannot drift.
+        val anchor = ZoomTransform(2f, 300f, -100f)
+        val frame = CropGeometry.fitInside(CropAspect.SQUARE, phoneVisible(anchor), photoWidth, photoHeight)
+
+        val back = resized(anchor, frame, toHeight = phoneHeight)
+
+        assertEquals(anchor.scale, back.scale, tolerance)
+        assertEquals(anchor.offsetX, back.offsetX, 0.5f)
+        assertEquals(anchor.offsetY, back.offsetY, 0.5f)
+    }
+
+    @Test
+    fun `an unzoomed photo stays unzoomed when the box changes`() {
+        // At 1x the photo simply fits the new box; zooming in to keep it the
+        // same size would make a single-finger swipe pan instead of page.
+        val frame = CropGeometry.fitInside(CropAspect.SQUARE, CropRect.Full, photoWidth, photoHeight)
+        assertEquals(ZoomTransform.Identity, resized(ZoomTransform.Identity, frame, keyboardHeight))
+    }
+
+    @Test
+    fun `a frame off the view's centre is still pulled wholly into the shorter box`() {
+        // A restore against the photo's top edge leaves the frame below the
+        // box centre: here a square on the photo's top strip, while the view
+        // is centred lower down. Centring the view alone would cut the frame's
+        // top off in the 1300 px box.
+        val anchor = ZoomTransform(2f, 0f, 340f)
+        val frame = CropRect(0.25f, 0f, 0.75f, 0.375f)
+
+        val rect = onScreen(frame, resized(anchor, frame, keyboardHeight), keyboardHeight)
+
+        assertTrue("top ${rect.top}", rect.top >= -0.5f)
+        assertTrue("bottom ${rect.bottom}", rect.bottom <= keyboardHeight + 0.5f)
+        assertEquals("width", phoneWidth, rect.width, 0.5f)
+    }
 }

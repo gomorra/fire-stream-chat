@@ -21,6 +21,15 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Crop frame above the keyboard (2026-10-08)
+
+`ZoomCropSurface` resizes with `ViewportGeometry.transformAfterResize`. JVM tests cover the
+arithmetic. No test runs a real keyboard, so the slide itself has not been seen.
+1. Open a received photo fullscreen, zoom in, set the pill to 1:1, tap Edit, tap the caption:
+   the square keeps its width, stays centred and whole, and does not jitter while the keyboard slides.
+2. Close the keyboard: the zoom is the one you made. Send: the crop is the square you framed.
+3. Repeat from the send preview on a picked photo, at 1x and zoomed, with Free and a portrait shape.
+
 ### Picker search above the keyboard (2026-10-07)
 
 `ComposerPickerPanel` search layouts. Robolectric covers the strip, the hoisted state and the
