@@ -55,12 +55,18 @@ seen on a phone.
 
 ### Crop frame above the keyboard (2026-10-08)
 
-`ZoomCropSurface` resizes with `ViewportGeometry.transformAfterResize`. JVM tests cover the
-arithmetic. No test runs a real keyboard, so the slide itself has not been seen.
+`ZoomCropSurface` carries the zoom with `ViewportGeometry.transformAfterResize` on a resize and
+on a new shape. JVM tests cover the arithmetic, and `ZoomCropSurfaceTest` covers when it runs
+under Robolectric. No test runs a real keyboard, so the slide itself has not been seen.
 1. Open a received photo fullscreen, zoom in, set the pill to 1:1, tap Edit, tap the caption:
    the square keeps its width, stays centred and whole, and does not jitter while the keyboard slides.
 2. Close the keyboard: the zoom is the one you made. Send: the crop is the square you framed.
 3. Repeat from the send preview on a picked photo, at 1x and zoomed, with Free and a portrait shape.
+4. With the keyboard up, tap the pill through every shape: each frame stays whole above the
+   keyboard, and 16:9 comes back to the size you zoomed to. Close the keyboard: your zoom is back.
+   Send: the crop is the last shape, cut from what you framed.
+5. In the fullscreen viewer, zoom in, set the pill to 1:1, swipe to the next photo and back:
+   nothing jumps during the swipe, each photo shows at 1x, and the pill does not zoom it.
 
 ### Picker search above the keyboard (2026-10-07)
 

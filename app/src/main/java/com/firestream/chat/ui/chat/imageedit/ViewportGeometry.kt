@@ -22,7 +22,7 @@ internal data class ZoomTransform(val scale: Float, val offsetX: Float, val offs
  * where the bugs would be, and a JVM test can pin every edge case a finger on
  * glass would take an afternoon to reach.
  *
- * All three functions describe an image drawn `ContentScale.Fit` in a
+ * Every function here describes an image drawn `ContentScale.Fit` in a
  * `boxWidth × boxHeight` box, then scaled about the box centre and translated,
  * which is exactly how `ZoomableBox` composes its content. `ImageFitMapper`
  * supplies the 1x fit; everything here is that fit times [ZoomTransform.scale].
@@ -124,18 +124,20 @@ internal object ViewportGeometry {
 
     /**
      * [anchor], a zoom made in an `anchorBoxWidth × anchorBoxHeight` box, carried
-     * into a box of another size so that [frame] — the crop it stands for —
-     * looks the same: the same size on screen, centred, and wholly in view.
+     * into a `boxWidth × boxHeight` box so that [frame] — the crop it stands
+     * for — looks the same: the same size on screen, centred, and wholly in view.
      *
      * The box changes size whenever the keyboard slides over the caption field,
      * and with it the 1x fit. Keeping the anchor's own scale and offset would
      * then draw the photo smaller and slide the frame sideways. So the scale is
      * the one that keeps the photo's screen pixels per photo pixel, reduced
-     * only as far as [frame] needs to fit the box. The point of the photo at
-     * the anchor's box centre stays at the box centre, which keeps the frame
-     * centred, since a frame is centred on the view it was cut from.
+     * only as far as [frame] needs to fit the box. [frame] changes when the crop
+     * pill picks another shape, and a taller shape may need a smaller scale.
+     * The point of the photo at the anchor's box centre stays at the box
+     * centre, which keeps the frame centred, since a frame is centred on the
+     * view it was cut from.
      *
-     * The answer depends only on the anchor, never on an earlier resize, so a
+     * The answer depends only on the anchor, never on an earlier carry, so a
      * keyboard sliding down and back up returns to exactly the anchor. An
      * unzoomed anchor stays unzoomed: a photo at 1x simply fits the new box.
      */
