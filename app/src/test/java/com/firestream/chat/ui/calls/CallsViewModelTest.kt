@@ -1,6 +1,6 @@
 package com.firestream.chat.ui.calls
 
-import com.firestream.chat.domain.model.CallDirection
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.Chat
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.Contact
@@ -116,7 +116,7 @@ class CallsViewModelTest {
         advanceUntilIdle()
 
         val entry = vm.uiState.value.entries.single()
-        assertEquals(CallDirection.OUTGOING, entry.direction)
+        assertEquals(CallLogType.OUTGOING, entry.type)
         assertEquals(otherUserId, entry.otherPartyId)
         assertEquals(120, entry.durationSeconds)
     }
@@ -133,7 +133,7 @@ class CallsViewModelTest {
         val vm = buildViewModel()
         advanceUntilIdle()
 
-        assertEquals(CallDirection.INCOMING, vm.uiState.value.entries.single().direction)
+        assertEquals(CallLogType.INCOMING, vm.uiState.value.entries.single().type)
     }
 
     @Test
@@ -149,7 +149,7 @@ class CallsViewModelTest {
         val vm = buildViewModel()
         advanceUntilIdle()
 
-        assertEquals(CallDirection.MISSED, vm.uiState.value.entries.single().direction)
+        assertEquals(CallLogType.MISSED, vm.uiState.value.entries.single().type)
     }
 
     @Test
@@ -164,11 +164,11 @@ class CallsViewModelTest {
         val vm = buildViewModel()
         advanceUntilIdle()
 
-        assertEquals(CallDirection.INCOMING, vm.uiState.value.entries.single().direction)
+        assertEquals(CallLogType.INCOMING, vm.uiState.value.entries.single().type)
     }
 
     @Test
-    fun `missed call entry derived correctly for declined`() = runTest {
+    fun `a call I declined is declined`() = runTest {
         val message = Message(
             id = "m1", chatId = chatId, senderId = otherUserId,
             type = MessageType.CALL, content = "declined", duration = null
@@ -179,7 +179,7 @@ class CallsViewModelTest {
         val vm = buildViewModel()
         advanceUntilIdle()
 
-        assertEquals(CallDirection.MISSED, vm.uiState.value.entries.single().direction)
+        assertEquals(CallLogType.DECLINED, vm.uiState.value.entries.single().type)
     }
 
     @Test
@@ -194,7 +194,7 @@ class CallsViewModelTest {
         val vm = buildViewModel()
         advanceUntilIdle()
 
-        assertEquals(CallDirection.MISSED, vm.uiState.value.entries.single().direction)
+        assertEquals(CallLogType.MISSED, vm.uiState.value.entries.single().type)
     }
 
     @Test

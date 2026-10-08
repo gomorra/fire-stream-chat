@@ -14,7 +14,8 @@ import org.robolectric.annotation.Config
 
 /**
  * The label a call message shows. Only the caller writes the message, so these bubbles are the
- * callee's view whenever `isOwnMessage` is false.
+ * callee's view whenever `isOwnMessage` is false. `CallsScreenUiTest` checks that the Calls tab
+ * labels the same calls the same way.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [31], application = android.app.Application::class)
@@ -32,7 +33,13 @@ class CallMessageBubbleUiTest {
         onInfo = null,
     )
 
-    private fun showReceivedCall(endReason: String, durationSeconds: Int) {
+    private fun showReceivedCall(endReason: String, durationSeconds: Int) =
+        showCall(isOwnMessage = false, endReason = endReason, durationSeconds = durationSeconds)
+
+    private fun showOwnCall(endReason: String, durationSeconds: Int) =
+        showCall(isOwnMessage = true, endReason = endReason, durationSeconds = durationSeconds)
+
+    private fun showCall(isOwnMessage: Boolean, endReason: String, durationSeconds: Int) {
         val message = TestData.message(
             id = "m1",
             senderId = "caller",
@@ -43,10 +50,10 @@ class CallMessageBubbleUiTest {
             MaterialTheme {
                 MessageBubble(
                     message = message,
-                    isOwnMessage = false,
+                    isOwnMessage = isOwnMessage,
                     replyToMessage = null,
                     linkPreview = null,
-                    currentUserId = "callee",
+                    currentUserId = if (isOwnMessage) "caller" else "callee",
                     callbacks = callbacks,
                 )
             }
@@ -71,6 +78,35 @@ class CallMessageBubbleUiTest {
     @Test
     fun `a declined call still reads as declined`() {
         showReceivedCall(endReason = "declined", durationSeconds = 0)
+
+        composeTestRule.onNodeWithText("Declined").assertIsDisplayed()
+    }
+
+    @Test
+    fun `my connected call reads as outgoing with its duration`() {
+        showOwnCall(endReason = "hangup", durationSeconds = 65)
+
+        composeTestRule.onNodeWithText("Outgoing call").assertIsDisplayed()
+        composeTestRule.onNodeWithText("1m 5s").assertIsDisplayed()
+    }
+
+    @Test
+    fun `my call that I cancelled while it rang reads as outgoing`() {
+        showOwnCall(endReason = "hangup", durationSeconds = 0)
+
+        composeTestRule.onNodeWithText("Outgoing call").assertIsDisplayed()
+    }
+
+    @Test
+    fun `my call nobody answered reads as no answer`() {
+        showOwnCall(endReason = "timeout", durationSeconds = 0)
+
+        composeTestRule.onNodeWithText("No answer").assertIsDisplayed()
+    }
+
+    @Test
+    fun `my call that the other person declined reads as declined`() {
+        showOwnCall(endReason = "declined", durationSeconds = 0)
 
         composeTestRule.onNodeWithText("Declined").assertIsDisplayed()
     }

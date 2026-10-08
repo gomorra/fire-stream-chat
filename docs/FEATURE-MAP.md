@@ -19,7 +19,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams, and the audio session (router + proximity lock); all on the main thread; stops with the latest start id |
 | `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallState.kt` | Call states, `isOngoing` (the one "am I in a call" rule), `CallUiControls` |
-| `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row; `CallDirection.of` — the one outgoing / incoming / missed rule, also used by `MessageBubble`'s call row |
+| `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row; `CallLogType.of` — the one rule for how a call reads (outgoing, no answer, incoming, missed, declined), used by the Calls tab and `MessageBubble`'s call row |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | `AudioManager.setCommunicationDevice()` wrapper — device callbacks, live `RouteState` |
 | `app/src/main/java/com/firestream/chat/data/call/ProximityLock.kt` | Proximity wake lock — held only while the playing route is the earpiece |
@@ -39,11 +39,12 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
-| `app/src/test/java/com/firestream/chat/domain/model/CallDirectionTest.kt` | The direction rule — a received call that never connected is missed |
+| `app/src/test/java/com/firestream/chat/domain/model/CallLogTypeTest.kt` | The call-log rule — a received call that never connected is missed, a declined call is declined on both sides |
 | `app/src/test/java/com/firestream/chat/ui/call/CallLaunchTest.kt` | Recents never places or answers a call again |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenAnswerUiTest.kt` | Answer goes to the host's permission check, not straight to the service |
 | `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, ended if the screen closed, a failure leaves a call that rang meanwhile alone (Robolectric) |
 | `app/src/test/java/com/firestream/chat/ui/chat/CallMessageBubbleUiTest.kt` | The call row's label in a chat |
+| `app/src/test/java/com/firestream/chat/ui/calls/CallsScreenUiTest.kt` | The Calls tab's labels match the chat's, in the row and the details sheet (Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |

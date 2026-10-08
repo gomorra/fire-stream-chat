@@ -200,16 +200,19 @@ data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes:
 ### CallLogEntry
 
 ```kotlin
-enum class CallDirection { OUTGOING, INCOMING, MISSED }
+// How a call message reads for the viewer. CallLogType.of(isOwnMessage, endReason, durationSeconds)
+// decides it for the Calls tab and the chat bubble alike.
+enum class CallLogType { OUTGOING, NO_ANSWER, OUTGOING_DECLINED, INCOMING, MISSED, DECLINED }
 
 data class CallLogEntry(
-    val callId: String,
-    val remoteUserId: String,
-    val remoteName: String,
-    val remoteAvatarUrl: String?,
-    val direction: CallDirection,
-    val timestamp: Long,
-    val durationSeconds: Int?
+    val messageId: String,
+    val chatId: String,
+    val otherPartyId: String,
+    val displayName: String,
+    val avatarUrl: String?,
+    val type: CallLogType,
+    val durationSeconds: Int?,
+    val timestamp: Long
 )
 ```
 
