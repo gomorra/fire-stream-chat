@@ -188,10 +188,11 @@ sequenceDiagram
 
 ### Call Architecture Details
 
-- **`CallService`** (foreground service): Owns the `PeerConnection` lifecycle, ICE negotiation, and audio stream management.
+- **`CallService`** (foreground service): The Android side of a call: the foreground type and its notification, the audio session, and the WebRTC objects through `WebRtcCallMedia`. It holds one `CallSession` at a time and stops with the latest start id.
+- **`CallSession`**: One call, without Android or WebRTC: its signalling, its timer (ringing, connecting, a lost connection), the states it publishes, and the end-of-call writes. It reaches Android through `CallHost` and the connection through `CallMedia`, so `CallSessionTest` drives it on the JVM.
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
-- **`CallState`** (sealed interface): `Idle | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`.
+- **`CallState`** (sealed interface): `Idle | Placing | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`. `Placing` covers an outgoing call from the tap until the service takes it over, and counts as ongoing.
 - **Audio session** (`startAudioSession()` / `stopAudioSession()` in `CallService`, idempotent and
   mutually exclusive): sets `MODE_IN_COMMUNICATION`, then `CallAudioRouter` picks the route through
   `AudioManager.setCommunicationDevice()`. `CallAudioRoutePolicy` is the pure decision (a headset
@@ -382,7 +383,11 @@ graph TD
 com.firestream.chat/
 ├── data/
 │   ├── call/                    # WebRTC infrastructure
-│   │   ├── CallService.kt       # Foreground service — owns PeerConnection
+│   │   ├── CallService.kt       # Foreground service — Android side of a call, one CallSession at a time
+│   │   ├── CallSession.kt       # One call's transitions, timer and end-of-call writes (JVM-testable)
+│   │   ├── CallHost.kt          # What a CallSession needs from Android
+│   │   ├── CallMedia.kt         # One call's connection as the session sees it
+│   │   ├── WebRtcCallMedia.kt   # CallMedia over a WebRTC PeerConnection
 │   │   ├── CallStateHolder.kt   # @Singleton state bridge (service ↔ UI)
 │   │   ├── CallNotificationManager.kt
 │   │   ├── CallAudioRoutePolicy.kt  # Pure — which route wins, TYPE_* → CallAudioRoute
