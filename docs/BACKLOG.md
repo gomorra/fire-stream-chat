@@ -57,6 +57,9 @@ seen on a phone.
     Do the same when answering with the green button: the call connects.
 11. Hang up, then have the other phone call straight back, twice. Each call rings: the service
     stops and starts cleanly between calls.
+12. Set the app's battery use to Restricted, lock the phone, and call it. If Android will not let
+    the app start ringing, a ringing notification appears instead. Opening it shows the call
+    screen, which rings, and the call can be answered.
 
 ### Crop frame above the keyboard (2026-10-08)
 

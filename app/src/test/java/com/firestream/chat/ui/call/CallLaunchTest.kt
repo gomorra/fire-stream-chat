@@ -17,6 +17,17 @@ class CallLaunchTest {
     }
 
     @Test
+    fun `a ring launch rings the call it names`() {
+        // The fallback notification opens the screen this way, when the push could not start the service.
+        assertEquals(CallLaunch.RING, callLaunchFor("ring", launchedFromHistory = false, callOngoing = false))
+    }
+
+    @Test
+    fun `Recents never rings a call again`() {
+        assertEquals(CallLaunch.CLOSE, callLaunchFor("ring", launchedFromHistory = true, callOngoing = false))
+    }
+
+    @Test
     fun `a launch without an action shows the call`() {
         // The full-screen intent and the ongoing-call notification open the screen this way.
         assertEquals(CallLaunch.SHOW, callLaunchFor(null, launchedFromHistory = false, callOngoing = true))

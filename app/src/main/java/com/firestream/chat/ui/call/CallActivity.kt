@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -46,6 +47,18 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CHAT_ID = "chat_id"
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
+
+        /**
+         * Ring for an incoming call whose push could not start the call service. The fallback
+         * notification opens the screen with it, and the extras below name the call.
+         */
+        const val ACTION_RING = "ring"
+        const val EXTRA_CALL_ID = "call_id"
+        const val EXTRA_CALLER_ID = "caller_id"
+        const val EXTRA_CALLER_NAME = "caller_name"
+        const val EXTRA_CALLER_AVATAR_URL = "caller_avatar_url"
+
+        private const val TAG = "CallActivity"
     }
 
     private val requestAudioPermission = registerForActivityResult(
@@ -129,8 +142,33 @@ class CallActivity : ComponentActivity() {
         when (launch) {
             CallLaunch.PLACE_CALL -> placeOutgoingCall()
             CallLaunch.ANSWER -> withAudioPermission(MicAction.ANSWER)
+            CallLaunch.RING -> ringIncomingCall()
             CallLaunch.SHOW -> Unit
             CallLaunch.CLOSE -> finishAndRemoveTask()
+        }
+    }
+
+    /**
+     * Ring for the call the intent names. Android would not let its push start the call service,
+     * so FCMService rang with a notification that opens this screen. From the foreground the
+     * service may start, and it then rings as usual, in place of the notification.
+     */
+    private fun ringIncomingCall() {
+        // A call that is already going is shown instead.
+        if (callStateHolder.callState.value.isOngoing) return
+        val callId = intent.getStringExtra(EXTRA_CALL_ID)
+        val callerId = intent.getStringExtra(EXTRA_CALLER_ID)
+        if (callId == null || callerId == null) {
+            finishAndRemoveTask()
+            return
+        }
+        val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: "Unknown"
+        val callerAvatarUrl = intent.getStringExtra(EXTRA_CALLER_AVATAR_URL)
+        try {
+            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not start the call service for call $callId", e)
+            finishAndRemoveTask()
         }
     }
 

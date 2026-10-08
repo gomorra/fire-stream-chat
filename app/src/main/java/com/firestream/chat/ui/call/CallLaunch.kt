@@ -4,7 +4,7 @@ import androidx.lifecycle.Lifecycle
 import com.firestream.chat.domain.model.CallState
 
 /** What [CallActivity] does with the intent that opened it. */
-internal enum class CallLaunch { PLACE_CALL, ANSWER, SHOW, CLOSE }
+internal enum class CallLaunch { PLACE_CALL, ANSWER, RING, SHOW, CLOSE }
 
 /** What [CallActivity] runs once it may use the microphone. */
 internal enum class MicAction { PLACE_CALL, ANSWER }
@@ -25,6 +25,7 @@ internal fun callLaunchFor(action: String?, launchedFromHistory: Boolean, callOn
         launchedFromHistory -> if (callOngoing) CallLaunch.SHOW else CallLaunch.CLOSE
         action == CallActivity.ACTION_OUTGOING -> CallLaunch.PLACE_CALL
         action == CallActivity.ACTION_ANSWER -> CallLaunch.ANSWER
+        action == CallActivity.ACTION_RING -> CallLaunch.RING
         else -> CallLaunch.SHOW
     }
 

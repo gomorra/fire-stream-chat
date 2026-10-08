@@ -13,6 +13,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Only a missed call notifies.** After every call, the person called got a *New message* notification and an unread badge on the chat, even for a call they had just answered or declined. Now only a missed call notifies, as *Missed call*, and only a missed call counts as unread. A phone that comes online long after a call is also no longer woken to ring for it. The unread count and the ring's expiry change once the updated Cloud Functions are deployed.
 - **A call placed offline no longer rings later.** A call placed with no connection waited on the phone and rang the other person whenever yours next came online, possibly long after you had given up. It now fails within seconds, and the call screen says the call could not start.
 - **A call that ends while you are in another app leaves Recents.** Its call screen stayed in the recent apps until you opened it, only to show *Call Ended* and close. It now closes as the call ends.
+- **A call still rings when Android holds the app back.** When Android would not let the app start ringing from the background, for example after it lowered the app's priority, an incoming call was missed without any sign. It now rings with a notification. Opening it brings up the call screen, where the call can be answered.
 
 ## [1.40.2] — 2026-10-08
 

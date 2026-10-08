@@ -25,6 +25,7 @@ class CallNotificationManager(private val context: Context) {
 
         const val NOTIFICATION_ID_ONGOING = 9001
         const val NOTIFICATION_ID_INCOMING = 9002
+        const val NOTIFICATION_ID_RING_FALLBACK = 9003
 
         private val RING_VIBRATION_PATTERN = longArrayOf(0, 1000, 1000)
     }
@@ -163,6 +164,44 @@ class CallNotificationManager(private val context: Context) {
             // the system stops the ring with it. Its ring timeout ends an unanswered call after
             // 30 s, which bounds the ring. setTimeoutAfter would not: the system never times out
             // a foreground service's notification.
+            .apply { flags = flags or Notification.FLAG_INSISTENT }
+    }
+
+    /**
+     * The ring for an incoming call whose push Android would not let start the call service.
+     * Tapping it, or its full-screen intent, opens the call screen, which starts the service from
+     * the foreground and rings as usual. It rings like the service's own notification, and the
+     * system removes it when the call would have stopped ringing, because no service holds it.
+     */
+    fun buildIncomingCallFallbackNotification(
+        callId: String,
+        callerId: String,
+        callerName: String,
+        callerAvatarUrl: String?
+    ): Notification {
+        val ringIntent = buildCallActivityIntent().apply {
+            putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_RING)
+            putExtra(CallActivity.EXTRA_CALL_ID, callId)
+            putExtra(CallActivity.EXTRA_CALLER_ID, callerId)
+            putExtra(CallActivity.EXTRA_CALLER_NAME, callerName)
+            putExtra(CallActivity.EXTRA_CALLER_AVATAR_URL, callerAvatarUrl)
+        }
+        val ringPending = PendingIntent.getActivity(
+            context, 4, ringIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setContentTitle("Incoming Voice Call")
+            .setContentText(callerName)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setFullScreenIntent(ringPending, true)
+            .setContentIntent(ringPending)
+            .setAutoCancel(true)
+            .setTimeoutAfter(CallSession.RING_TIMEOUT_MS)
+            .build()
             .apply { flags = flags or Notification.FLAG_INSISTENT }
     }
 

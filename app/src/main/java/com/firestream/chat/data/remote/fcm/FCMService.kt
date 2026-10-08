@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat.MessagingStyle
 import androidx.core.app.Person
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.call.CallNotificationManager
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
@@ -203,8 +204,14 @@ class FCMService : FirebaseMessagingService() {
             CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
         } catch (e: IllegalStateException) {
             // Android 12+ lets a push start a foreground service only if it arrived at high
-            // priority, and FCM can lower an app's priority. Missing the call beats crashing.
-            Log.w(TAG, "Could not ring for call $callId", e)
+            // priority, and FCM can lower an app's priority. Ring with a notification instead:
+            // opening it starts the service from the foreground.
+            Log.w(TAG, "Could not start the call service for call $callId; ringing with a notification", e)
+            val notifications = CallNotificationManager(this)
+            notifications.updateNotification(
+                notifications.buildIncomingCallFallbackNotification(callId, callerId, callerName, callerAvatarUrl),
+                CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK
+            )
         }
     }
 

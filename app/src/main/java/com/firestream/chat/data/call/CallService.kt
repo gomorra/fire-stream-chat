@@ -265,6 +265,8 @@ class CallService : Service() {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             }
             startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification, serviceType)
+            // This ring replaces the one FCMService posts when it cannot start the service.
+            notificationManager!!.cancelNotification(CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK)
         }
 
         override fun foregroundOngoing(remoteName: String) {

@@ -12,7 +12,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.firestream.chat.ui.call.CallActivity
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
@@ -62,4 +64,31 @@ class CallNotificationManagerTest {
         assertEquals(NotificationManager.IMPORTANCE_LOW, channel.importance)
         assertEquals(0, notification.flags and Notification.FLAG_INSISTENT)
     }
+
+    @Test
+    fun `the fallback ring rings until the call would have timed out`() {
+        val notification = fallbackRing()
+
+        val channel = systemNotifications.getNotificationChannel(notification.channelId)
+        assertNotNull("fallback ring has a sound", channel.sound)
+        assertTrue(notification.flags and Notification.FLAG_INSISTENT != 0)
+        assertEquals(CallSession.RING_TIMEOUT_MS, notification.timeoutAfter)
+    }
+
+    @Test
+    fun `the fallback ring opens the call screen to ring the call it names`() {
+        val notification = fallbackRing()
+
+        for (pending in listOf(notification.contentIntent, notification.fullScreenIntent)) {
+            val intent = shadowOf(pending).savedIntent
+            assertEquals(CallActivity::class.java.name, intent.component?.className)
+            assertEquals(CallActivity.ACTION_RING, intent.getStringExtra(CallActivity.EXTRA_ACTION))
+            assertEquals("call1", intent.getStringExtra(CallActivity.EXTRA_CALL_ID))
+            assertEquals("u2", intent.getStringExtra(CallActivity.EXTRA_CALLER_ID))
+            assertEquals("Alice", intent.getStringExtra(CallActivity.EXTRA_CALLER_NAME))
+        }
+    }
+
+    private fun fallbackRing(): Notification =
+        CallNotificationManager(context).buildIncomingCallFallbackNotification("call1", "u2", "Alice", null)
 }

@@ -303,7 +303,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **The smell.** These call problems are known and not fixed:
 - `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service stops, and how WebRTC's callbacks reach the main thread, are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
-- `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
 - The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
 
 **Why we haven't fixed it.** None of these is a crash or a privacy leak on the firebase flavor today. The ring-timeout race needs unusual timing and changes only the logged reason. The rules and the Cloud Functions need an emulator run and a deploy, which a cloud session cannot do. The `CallSession` extraction is a refactor of a class this sweep just rewrote for threading, and it deserves its own reviewed change.
