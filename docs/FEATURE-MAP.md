@@ -40,6 +40,8 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
 | `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
+| `firestore.rules` | `calls/{callId}`: only the caller and the callee read and write it; the status only moves forward; each side writes its own SDP and its own ICE candidate list |
+| `firestore-rules-tests/calls.test.js` | Every call write the app makes passes the rules, and the abuses fail (Firestore emulator; `npm test` in that folder) |
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
