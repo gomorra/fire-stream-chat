@@ -46,7 +46,8 @@ seen on a phone.
    Calls tab, and only the phone that declined shows it in red.
 8. During a call, open another chat and tap call: "You're already in a call", and the call goes
    on. Rotate right after tapping call: the call still starts. Open a finished call's card from
-   Recents: no new call is placed.
+   Recents: no new call is placed. During a call press Home, and let the other person hang up:
+   the call's card leaves Recents at once.
 9. With mobile data slowed or briefly off, tap call: the screen shows the name and
    "Calling..." at once. Press Back before it rings, once straight away and once after turning
    the phone, and once press Cancel instead: the other phone does not ring, or stops at once.

@@ -33,7 +33,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSourceTest.kt` | A call is created in a transaction that only writes |
 | `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source; lets cancellation through (`cancellableResultOf`) |
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route; owns the microphone permission and the launch decision |
-| `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); `MicAction`, what waits on the microphone prompt |
+| `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); `MicAction`, what waits on the microphone prompt; `closesUnseen`, which closes a screen whose call ended while it was not shown |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
 | `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents; outgoing-call setup on the application scope, bounded at both steps, ended instead if the screen closed or Cancel was pressed; the action waiting on the microphone prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | Mute / hang up / route control |

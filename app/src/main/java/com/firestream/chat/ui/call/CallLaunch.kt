@@ -1,5 +1,8 @@
 package com.firestream.chat.ui.call
 
+import androidx.lifecycle.Lifecycle
+import com.firestream.chat.domain.model.CallState
+
 /** What [CallActivity] does with the intent that opened it. */
 internal enum class CallLaunch { PLACE_CALL, ANSWER, SHOW, CLOSE }
 
@@ -24,3 +27,12 @@ internal fun callLaunchFor(action: String?, launchedFromHistory: Boolean, callOn
         action == CallActivity.ACTION_ANSWER -> CallLaunch.ANSWER
         else -> CallLaunch.SHOW
     }
+
+/**
+ * Whether the call screen closes at once on [state], given the [screen]'s lifecycle state: the call
+ * ended while the screen is not shown. A shown screen shows "Call Ended" first, and CallScreen
+ * closes it 1.5 s later. A screen that is not shown would otherwise stay in Recents until it is
+ * next opened.
+ */
+internal fun closesUnseen(state: CallState, screen: Lifecycle.State): Boolean =
+    state is CallState.Ended && !screen.isAtLeast(Lifecycle.State.STARTED)

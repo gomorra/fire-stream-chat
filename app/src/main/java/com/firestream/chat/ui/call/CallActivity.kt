@@ -25,6 +25,7 @@ import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -76,6 +77,14 @@ class CallActivity : ComponentActivity() {
                 viewModel.setupFailed.collect {
                     Toast.makeText(this@CallActivity, "Couldn't start the call", Toast.LENGTH_LONG).show()
                 }
+            }
+        }
+
+        // Collected while the screen is stopped too: CallScreen only closes a screen it shows.
+        // The first value is the state the screen opened on, which handleIntent has dealt with.
+        lifecycleScope.launch {
+            callStateHolder.callState.drop(1).collect { state ->
+                if (closesUnseen(state, lifecycle.currentState)) finishAndRemoveTask()
             }
         }
 

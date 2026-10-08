@@ -12,6 +12,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 - **Placing a call shows who you are calling at once.** The call screen stayed blank while the call was being set up, which can take a few seconds on a slow network, and Cancel did nothing until the other phone rang. It now shows the name and *Calling...* straight away, Cancel works from the first moment, and a call that cannot be set up within 20 seconds says so. An incoming call no longer rings over a call you are placing.
 - **Only a missed call notifies.** After every call, the person called got a *New message* notification and an unread badge on the chat, even for a call they had just answered or declined. Now only a missed call notifies, as *Missed call*, and only a missed call counts as unread. A phone that comes online long after a call is also no longer woken to ring for it. The unread count and the ring's expiry change once the updated Cloud Functions are deployed.
 - **A call placed offline no longer rings later.** A call placed with no connection waited on the phone and rang the other person whenever yours next came online, possibly long after you had given up. It now fails within seconds, and the call screen says the call could not start.
+- **A call that ends while you are in another app leaves Recents.** Its call screen stayed in the recent apps until you opened it, only to show *Call Ended* and close. It now closes as the call ends.
 
 ## [1.40.2] — 2026-10-08
 

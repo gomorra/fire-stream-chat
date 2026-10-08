@@ -1,6 +1,11 @@
 package com.firestream.chat.ui.call
 
+import androidx.lifecycle.Lifecycle
+import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.EndReason
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CallLaunchTest {
@@ -30,5 +35,25 @@ class CallLaunchTest {
     @Test
     fun `Recents returns to a call that is still going`() {
         assertEquals(CallLaunch.SHOW, callLaunchFor("outgoing", launchedFromHistory = true, callOngoing = true))
+    }
+
+    @Test
+    fun `a call that ends while its screen is in the background closes the screen at once`() {
+        val ended = CallState.Ended("c1", EndReason.REMOTE_HANGUP)
+
+        assertTrue(closesUnseen(ended, Lifecycle.State.CREATED))
+    }
+
+    @Test
+    fun `a shown screen shows the end before it closes`() {
+        val ended = CallState.Ended("c1", EndReason.REMOTE_HANGUP)
+
+        assertFalse(closesUnseen(ended, Lifecycle.State.STARTED))
+        assertFalse(closesUnseen(ended, Lifecycle.State.RESUMED))
+    }
+
+    @Test
+    fun `only the end of the call closes a screen in the background`() {
+        assertFalse(closesUnseen(CallState.Connected("c1", "u2", "Alice", null, startTime = 1_000L), Lifecycle.State.CREATED))
     }
 }
