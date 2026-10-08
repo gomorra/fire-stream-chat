@@ -169,7 +169,7 @@ class CallService : Service() {
                 startIncomingCall(callId, userId, name, avatar)
             }
             ACTION_ANSWER -> session?.answer()
-            ACTION_DECLINE -> session?.decline()
+            ACTION_DECLINE -> decline(intent.getStringExtra(EXTRA_CALL_ID))
             ACTION_HANGUP -> session?.hangup()
             ACTION_TOGGLE_MUTE -> session?.toggleMute()
             ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
@@ -225,6 +225,22 @@ class CallService : Service() {
         parentScope = serviceScope,
         appScope = appScope,
     )
+
+    /**
+     * Decline [callId], or the ringing call this service holds when it is null. The fallback ring
+     * names a call that no session holds, because Android would not start this service for it.
+     * That call is declined directly, and its ring goes.
+     */
+    private fun decline(callId: String?) {
+        val current = session
+        if (current != null && (callId == null || callId == current.callId)) {
+            current.decline()
+            return
+        }
+        if (callId == null) return
+        notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK)
+        appScope.launch { callRepository.declineCall(callId) }
+    }
 
     private fun selectAudioRoute(routeName: String?) {
         val route = CallAudioRoute.entries.firstOrNull { it.name == routeName }

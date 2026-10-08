@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.media.AudioAttributes
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -87,6 +88,29 @@ class CallNotificationManagerTest {
             assertEquals("u2", intent.getStringExtra(CallActivity.EXTRA_CALLER_ID))
             assertEquals("Alice", intent.getStringExtra(CallActivity.EXTRA_CALLER_NAME))
         }
+    }
+
+    @Test
+    fun `the fallback ring declines the call it names`() {
+        val decline = fallbackRing().actions.single { it.title == "Decline" }
+
+        val intent = shadowOf(decline.actionIntent).savedIntent
+        assertEquals(CallService::class.java.name, intent.component?.className)
+        assertEquals(CallService.ACTION_DECLINE, intent.action)
+        assertEquals("call1", intent.getStringExtra(CallService.EXTRA_CALL_ID))
+    }
+
+    @Test
+    fun `the service's own ring declines the call the service holds`() {
+        val notification = CallNotificationManager(context).buildIncomingCallNotification("Alice")
+        val decline = notification.actions.single { it.title == "Decline" }
+
+        val intent = shadowOf(decline.actionIntent).savedIntent
+        assertEquals(CallService.ACTION_DECLINE, intent.action)
+        assertNull(intent.getStringExtra(CallService.EXTRA_CALL_ID))
+        // The two Declines are separate PendingIntents: the fallback's call id must not reach it.
+        val fallbackDecline = fallbackRing().actions.single { it.title == "Decline" }
+        assertNotEquals(fallbackDecline.actionIntent, decline.actionIntent)
     }
 
     private fun fallbackRing(): Notification =

@@ -62,7 +62,8 @@ seen on a phone.
     stops and starts cleanly between calls.
 12. Set the app's battery use to Restricted, lock the phone, and call it. If Android will not let
     the app start ringing, a ringing notification appears instead. Opening it shows the call
-    screen, which rings, and the call can be answered.
+    screen, which rings, and the call can be answered. Call again and press Decline on the
+    notification: the ring stops, and both phones show "Declined".
 
 ### Crop frame above the keyboard (2026-10-08)
 

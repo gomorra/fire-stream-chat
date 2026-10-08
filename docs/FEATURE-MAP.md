@@ -16,7 +16,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — Android side of a call: foreground type and notifications, the audio session (router + proximity lock), one `CallSession` at a time; all on the main thread; stops with the latest start id |
+| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — Android side of a call: foreground type and notifications, the audio session (router + proximity lock), one `CallSession` at a time; all on the main thread; stops with the latest start id; a Decline that names a call no session holds declines it directly |
 | `app/src/main/java/com/firestream/chat/data/call/CallSession.kt` | One call's transitions, signalling, ring timeout and end-of-call writes, without Android or WebRTC |
 | `app/src/main/java/com/firestream/chat/data/call/CallHost.kt` | What a `CallSession` needs from Android; `CallService` implements it |
 | `app/src/main/java/com/firestream/chat/data/call/CallMedia.kt` | One call's connection as the session sees it, and the `ConnectionChange`s it reports |
@@ -27,7 +27,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | `AudioManager.setCommunicationDevice()` wrapper — device callbacks, live `RouteState` |
 | `app/src/main/java/com/firestream/chat/data/call/ProximityLock.kt` | Proximity wake lock — held only while the playing route is the earpiece |
-| `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications; the incoming channel rings until answered (`FLAG_INSISTENT`); the fallback ring, which opens the call screen when a push may not start the service |
+| `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications; the incoming channel rings until answered (`FLAG_INSISTENT`); the fallback ring, which opens the call screen when a push may not start the service, and whose Decline names its call |
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory + ICE server config |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections; creates a call in a transaction, which fails offline instead of ringing later |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSourceTest.kt` | A call is created in a transaction that only writes |
@@ -48,7 +48,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `firestore.rules` | `calls/{callId}`: only the caller and the callee read and write it; the status only moves forward; each side writes its own SDP and its own ICE candidate list |
 | `firestore-rules-tests/calls.test.js` | Every call write the app makes passes the rules, and the abuses fail (Firestore emulator; `npm test` in that folder) |
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, the placing transitions by placing id, and the service racing a Cancel for a placing |
-| `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed; the fallback ring times out with the ring and opens the call screen to ring (Robolectric) |
+| `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed; the fallback ring times out with the ring, opens the call screen to ring, and declines the call it names (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
 | `app/src/test/java/com/firestream/chat/data/call/CallSessionTest.kt` | A call's transitions on fakes of `CallHost` and `CallMedia`: offer and answer, candidates once each, the clock, the ring timeout, how each end is recorded, late events after the end |
 | `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | A cancelled caller stops instead of getting a failure |

@@ -139,39 +139,26 @@ class CallNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val declineIntent = Intent(context, CallService::class.java).apply {
-            action = CallService.ACTION_DECLINE
-        }
-        val declinePending = PendingIntent.getService(
-            context, 3, declineIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        return NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
-            .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Incoming Voice Call")
-            .setContentText(callerName)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setFullScreenIntent(fullScreenPending, true)
+        // Rings until the call is answered, declined or over. CallService then replaces this
+        // notification with a silent one, or removes it, and the system stops the ring with it.
+        // Its ring timeout ends an unanswered call after 30 s, which bounds the ring.
+        // setTimeoutAfter would not: the system never times out a foreground service's
+        // notification.
+        return ringing(callerName, fullScreenPending)
             .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Decline", declinePending)
+            .addAction(declineAction(requestCode = 3, callId = null))
             .setOngoing(true)
             .setAutoCancel(false)
             .build()
-            // Repeat the ringtone and the vibration until the call is answered, declined or over.
-            // CallService then replaces this notification with a silent one, or removes it, and
-            // the system stops the ring with it. Its ring timeout ends an unanswered call after
-            // 30 s, which bounds the ring. setTimeoutAfter would not: the system never times out
-            // a foreground service's notification.
-            .apply { flags = flags or Notification.FLAG_INSISTENT }
+            .insistent()
     }
 
     /**
      * The ring for an incoming call whose push Android would not let start the call service.
      * Tapping it, or its full-screen intent, opens the call screen, which starts the service from
-     * the foreground and rings as usual. It rings like the service's own notification, and the
-     * system removes it when the call would have stopped ringing, because no service holds it.
+     * the foreground and rings as usual. Its Decline declines the call it names. It rings like the
+     * service's own notification, and the system removes it when the call would have stopped
+     * ringing, because no service holds it.
      */
     fun buildIncomingCallFallbackNotification(
         callId: String,
@@ -191,19 +178,46 @@ class CallNotificationManager(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
+        return ringing(callerName, ringPending)
+            .setContentIntent(ringPending)
+            .addAction(declineAction(requestCode = 5, callId = callId))
+            .setAutoCancel(true)
+            .setTimeoutAfter(CallSession.RING_TIMEOUT_MS)
+            .build()
+            .insistent()
+    }
+
+    /**
+     * What both incoming-call notifications share: the ringing channel, and the call screen at
+     * full screen.
+     */
+    private fun ringing(callerName: String, fullScreen: PendingIntent): NotificationCompat.Builder =
+        NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Incoming Voice Call")
             .setContentText(callerName)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setFullScreenIntent(ringPending, true)
-            .setContentIntent(ringPending)
-            .setAutoCancel(true)
-            .setTimeoutAfter(CallSession.RING_TIMEOUT_MS)
-            .build()
-            .apply { flags = flags or Notification.FLAG_INSISTENT }
+            .setFullScreenIntent(fullScreen, true)
+
+    /**
+     * Decline, sent to [CallService]. A null [callId] declines the call the service holds. A call
+     * id also reaches a call the service does not hold.
+     */
+    private fun declineAction(requestCode: Int, callId: String?): NotificationCompat.Action {
+        val intent = Intent(context, CallService::class.java).apply {
+            action = CallService.ACTION_DECLINE
+            callId?.let { putExtra(CallService.EXTRA_CALL_ID, it) }
+        }
+        val pending = PendingIntent.getService(
+            context, requestCode, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        return NotificationCompat.Action(android.R.drawable.ic_menu_close_clear_cancel, "Decline", pending)
     }
+
+    /** Repeat the ringtone and the vibration until the notification goes. */
+    private fun Notification.insistent(): Notification = apply { flags = flags or Notification.FLAG_INSISTENT }
 
     fun updateNotification(notification: Notification, id: Int = NOTIFICATION_ID_ONGOING) {
         notifManager.notify(id, notification)
