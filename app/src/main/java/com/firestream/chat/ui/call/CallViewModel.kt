@@ -76,7 +76,7 @@ class CallViewModel @Inject constructor(
                 .onSuccess { callId ->
                     // The screen closed, or Cancel was pressed, while the document was created.
                     if (closed.get() || !callStateHolder.placingCreated(callId)) {
-                        callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
+                        callRepository.endCall(callId, EndReason.HANGUP)
                         return@onSuccess
                     }
                     try {
@@ -85,7 +85,7 @@ class CallViewModel @Inject constructor(
                         // Android 12+ will not start a foreground service once the app is in the
                         // background, and a slow setup can outlast the user leaving the app.
                         Log.w(TAG, "Could not start the call service", e)
-                        callRepository.endCall(callId, EndReason.ERROR.name.lowercase())
+                        callRepository.endCall(callId, EndReason.ERROR)
                         callStateHolder.failPlacing(callId)
                         return@onSuccess
                     }
@@ -96,7 +96,7 @@ class CallViewModel @Inject constructor(
                         callStateHolder.callState.first { it !is CallState.Placing || it.callId != callId }
                     }
                     if (handedOver == null && callStateHolder.failPlacing(callId)) {
-                        callRepository.endCall(callId, EndReason.ERROR.name.lowercase())
+                        callRepository.endCall(callId, EndReason.ERROR)
                     }
                 }
                 .onFailure { e ->

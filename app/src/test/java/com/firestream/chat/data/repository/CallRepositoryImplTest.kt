@@ -5,6 +5,7 @@ import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.MessageSource
+import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
 import io.mockk.coEvery
@@ -66,13 +67,13 @@ class CallRepositoryImplTest {
             "createCall" to { repository.createCall("callee") },
             "answerCall" to { repository.answerCall("c1") },
             "declineCall" to { repository.declineCall("c1") },
-            "endCall" to { repository.endCall("c1", "hangup") },
+            "endCall" to { repository.endCall("c1", EndReason.HANGUP) },
             "sendOffer" to { repository.sendOffer("c1", sdp) },
             "sendAnswer" to { repository.sendAnswer("c1", sdp) },
             "sendAnswerAndAccept" to { repository.sendAnswerAndAccept("c1", sdp) },
             "sendIceCandidate" to { repository.sendIceCandidate("c1", isCaller = true, candidate) },
             "getCallById" to { repository.getCallById("c1") },
-            "logCallMessage" to { repository.logCallMessage("chat1", "hangup", 0) },
+            "logCallMessage" to { repository.logCallMessage("chat1", EndReason.HANGUP, 0) },
         )
 
         val resumed = calls.filter { (_, call) -> resumesAfterCancellation(call) }.keys
@@ -83,7 +84,7 @@ class CallRepositoryImplTest {
     fun `a failing source still comes back as a failure`() = runTest {
         coEvery { callSource.updateCallStatus(any(), any(), any()) } throws IllegalStateException("offline")
 
-        val result = repository.endCall("c1", "hangup")
+        val result = repository.endCall("c1", EndReason.HANGUP)
 
         assertTrue(result.isFailure)
         assertFalse(result.exceptionOrNull() is kotlinx.coroutines.CancellationException)

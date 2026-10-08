@@ -94,7 +94,7 @@ class CallViewModelTest {
         advanceUntilIdle()
 
         assertNull(shadowOf(app).nextStartedService)
-        coVerify { callRepository.endCall("call1", "hangup") }
+        coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
     }
 
     @Test
@@ -110,7 +110,7 @@ class CallViewModelTest {
         advanceUntilIdle()
 
         assertNull(shadowOf(app).nextStartedService)
-        coVerify { callRepository.endCall("call1", "hangup") }
+        coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
     }
 
     @Test
@@ -192,7 +192,7 @@ class CallViewModelTest {
 
         assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
         assertNull(shadowOf(app).nextStartedService)
-        coVerify { callRepository.endCall("call1", "hangup") }
+        coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
     }
 
     @Test
@@ -221,7 +221,7 @@ class CallViewModelTest {
         runCurrent()
 
         assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
-        coVerify { callRepository.endCall("call1", "error") }
+        coVerify { callRepository.endCall("call1", EndReason.ERROR) }
     }
 
     @Test

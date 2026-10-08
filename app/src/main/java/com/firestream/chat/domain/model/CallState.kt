@@ -69,7 +69,15 @@ enum class EndReason {
     REMOTE_HANGUP,
     DECLINED,
     TIMEOUT,
-    ERROR
+    ERROR;
+
+    /** How the reason is written to the call document and to the call's chat message. */
+    val wireName: String get() = name.lowercase()
+
+    companion object {
+        /** The reason [wireName] names, or null for one this version does not know. */
+        fun fromWireName(wireName: String?): EndReason? = entries.firstOrNull { it.wireName.equals(wireName, ignoreCase = true) }
+    }
 }
 
 /**

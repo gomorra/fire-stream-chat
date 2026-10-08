@@ -1,6 +1,7 @@
 package com.firestream.chat.domain.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 class CallStateTest {
@@ -21,5 +22,21 @@ class CallStateTest {
         expected.forEach { (state, ongoing) ->
             assertEquals("isOngoing of $state", ongoing, state.isOngoing)
         }
+    }
+
+    @Test
+    fun `an end reason reads back from its wire name, whatever its case`() {
+        EndReason.entries.forEach { reason ->
+            assertEquals(reason, EndReason.fromWireName(reason.wireName))
+            assertEquals(reason, EndReason.fromWireName(reason.name))
+        }
+        assertEquals("remote_hangup", EndReason.REMOTE_HANGUP.wireName)
+    }
+
+    @Test
+    fun `an end reason this version does not know reads as null`() {
+        assertNull(EndReason.fromWireName("busy"))
+        assertNull(EndReason.fromWireName(""))
+        assertNull(EndReason.fromWireName(null))
     }
 }

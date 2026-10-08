@@ -185,7 +185,7 @@ class CallService : Service() {
             // The new call's document already exists and has rung the callee, so end it rather
             // than leave their phone ringing.
             Log.w(TAG, "Ending outgoing call $callId: call ${current.callId} is in progress")
-            appScope.launch { callRepository.endCall(callId, EndReason.HANGUP.name.lowercase()) }
+            appScope.launch { callRepository.endCall(callId, EndReason.HANGUP) }
             return
         }
         // Held before it starts: a session that ends while starting must find itself here to let go.

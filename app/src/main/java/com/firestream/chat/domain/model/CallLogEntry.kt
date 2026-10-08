@@ -41,15 +41,17 @@ enum class CallLogType {
     companion object {
         /**
          * Only the caller writes the call message, so [isOwnMessage] means "I placed this call".
-         * [endReason] is the message's content: the [EndReason] name in lower case.
+         * [endReason] is the message's content, an [EndReason.wireName].
          *
          * A call counts as answered only if it connected, and only a connected call has a
          * duration. The end reason cannot tell: a call the caller cancelled while it rang is
          * logged as "hangup" with 0 s, the same reason a finished call gets.
+         *
+         * `isMissedCall` in `functions/callPush.js` applies the same rule on the server.
          */
         fun of(isOwnMessage: Boolean, endReason: String, durationSeconds: Int?): CallLogType {
             val connected = (durationSeconds ?: 0) > 0
-            val reason = EndReason.entries.firstOrNull { it.name.equals(endReason, ignoreCase = true) }
+            val reason = EndReason.fromWireName(endReason)
             return when {
                 connected -> if (isOwnMessage) OUTGOING else INCOMING
                 reason == EndReason.DECLINED -> if (isOwnMessage) OUTGOING_DECLINED else DECLINED

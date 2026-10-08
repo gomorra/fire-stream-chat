@@ -78,7 +78,7 @@ internal class CallSession(
         val ringing = CallState.OutgoingRinging(callId, remoteUserId, remoteName, remoteAvatarUrl, host.localAvatarPath(remoteUserId))
         if (!stateHolder.takeOverPlacing(ringing)) {
             Log.w(TAG, "Ending outgoing call $callId: it is no longer being placed")
-            appScope.launch { repository.endCall(callId, EndReason.HANGUP.name.lowercase()) }
+            appScope.launch { repository.endCall(callId, EndReason.HANGUP) }
             finish()
             return
         }
@@ -231,18 +231,12 @@ internal class CallSession(
         if (isFinished) return
         when (data.status) {
             "answered" -> if (isCaller) onAnswered(data)
-            "declined" -> if (isCaller) {
-                writeCallMessage(EndReason.DECLINED)
-                stateHolder.updateState(CallState.Ended(callId, EndReason.DECLINED))
-                finish()
-            }
+            "declined" -> if (isCaller) close(EndReason.DECLINED)
             "ended" -> {
                 // The other phone ends a call nobody answered with "timeout" when its own ring
                 // timeout fires first. The call then went unanswered, not hung up.
-                val reason = if (data.endReason == TIMEOUT_REASON) EndReason.TIMEOUT else EndReason.REMOTE_HANGUP
-                writeCallMessage(reason)
-                stateHolder.updateState(CallState.Ended(callId, reason))
-                finish()
+                val timedOut = EndReason.fromWireName(data.endReason) == EndReason.TIMEOUT
+                close(if (timedOut) EndReason.TIMEOUT else EndReason.REMOTE_HANGUP)
             }
         }
     }
@@ -330,10 +324,15 @@ internal class CallSession(
     // End
     // ──────────────────────────────────────────────────────────────────────────
 
-    /** End the call for [reason]: tell the other phone, record the call in the chat, publish the end, finish. */
+    /** End the call for [reason]: tell the other phone, then [close] it. */
     fun end(reason: EndReason) {
         if (isFinished) return
-        appScope.launch { repository.endCall(callId, reason.name.lowercase()) }
+        appScope.launch { repository.endCall(callId, reason) }
+        close(reason)
+    }
+
+    /** Record the call in the chat, publish its end for [reason], and finish. */
+    private fun close(reason: EndReason) {
         writeCallMessage(reason)
         stateHolder.updateState(CallState.Ended(callId, reason))
         finish()
@@ -347,7 +346,7 @@ internal class CallSession(
         if (!isCaller) return
         val chatId = chatId ?: return
         val durationSeconds = connectedAt?.let { ((clock() - it) / 1000).toInt() } ?: 0
-        appScope.launch { repository.logCallMessage(chatId, reason.name.lowercase(), durationSeconds) }
+        appScope.launch { repository.logCallMessage(chatId, reason, durationSeconds) }
     }
 
     /**
@@ -367,7 +366,7 @@ internal class CallSession(
 
     companion object {
         private const val TAG = "CallSession"
-        /** How long a call rings before it ends as unanswered. */
+        /** How long a call rings before it ends as unanswered. `functions/callPush.js` keeps the incoming-call push as long (`RING_TTL_MS`). */
         const val RING_TIMEOUT_MS = 30_000L
 
         /** How long an answered call may take to connect. */
@@ -376,7 +375,6 @@ internal class CallSession(
         /** How long a lost connection may take to come back. */
         const val RECONNECT_TIMEOUT_MS = 30_000L
 
-        private val TIMEOUT_REASON = EndReason.TIMEOUT.name.lowercase()
         private const val CALLER_CANDIDATES = "callerCandidates"
         private const val CALLEE_CANDIDATES = "calleeCandidates"
     }

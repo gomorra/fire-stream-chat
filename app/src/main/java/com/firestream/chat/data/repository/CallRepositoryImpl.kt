@@ -21,6 +21,7 @@ import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.util.cancellableResultOf
 import com.firestream.chat.domain.model.CallSignalingData
+import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.SdpData
@@ -49,11 +50,11 @@ class CallRepositoryImpl @Inject constructor(
     }
 
     override suspend fun declineCall(callId: String): Result<Unit> = cancellableResultOf {
-        callSource.updateCallStatus(callId, "declined", "declined")
+        callSource.updateCallStatus(callId, "declined", EndReason.DECLINED.wireName)
     }
 
-    override suspend fun endCall(callId: String, reason: String): Result<Unit> = cancellableResultOf {
-        callSource.updateCallStatus(callId, "ended", reason)
+    override suspend fun endCall(callId: String, reason: EndReason): Result<Unit> = cancellableResultOf {
+        callSource.updateCallStatus(callId, "ended", reason.wireName)
     }
 
     override suspend fun sendOffer(callId: String, sdp: SdpData): Result<Unit> = cancellableResultOf {
@@ -89,12 +90,12 @@ class CallRepositoryImpl @Inject constructor(
         callSource.getCallById(callId) ?: return Result.failure(Exception("Call not found"))
     }
 
-    override suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int): Result<Unit> =
+    override suspend fun logCallMessage(chatId: String, endReason: EndReason, durationSeconds: Int): Result<Unit> =
         cancellableResultOf {
             val callerId = authSource.currentUserId
                 ?: return Result.failure(Exception("Not authenticated"))
             val timestamp = sendClock.next()
-            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason, durationSeconds, timestamp)
+            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason.wireName, durationSeconds, timestamp)
             chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
         }
 }

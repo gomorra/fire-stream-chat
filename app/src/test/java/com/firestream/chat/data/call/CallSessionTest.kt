@@ -159,7 +159,7 @@ class CallSessionTest {
         // Started with startForegroundService(), the service enters the foreground all the same.
         assertEquals(listOf("outgoing"), host.foreground)
         assertTrue(host.media.isEmpty())
-        coVerify { repository.endCall(CALL, "hangup") }
+        coVerify { repository.endCall(CALL, EndReason.HANGUP) }
         coVerify(exactly = 0) { repository.logCallMessage(any(), any(), any()) }
         assertEquals(listOf(session), host.finished)
     }
@@ -220,8 +220,8 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.TIMEOUT), state)
-        coVerify { repository.endCall(CALL, "timeout") }
-        coVerify { repository.logCallMessage(CHAT, "timeout", 0) }
+        coVerify { repository.endCall(CALL, EndReason.TIMEOUT) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.TIMEOUT, 0) }
         assertTrue(host.media.single().disposed)
         assertEquals(listOf(session), host.finished)
         assertTrue(host.audioSessionStops > 0)
@@ -252,8 +252,8 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.HANGUP), state)
-        coVerify { repository.endCall(CALL, "hangup") }
-        coVerify { repository.logCallMessage(CHAT, "hangup", 65) }
+        coVerify { repository.endCall(CALL, EndReason.HANGUP) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.HANGUP, 65) }
     }
 
     @Test
@@ -267,7 +267,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.DECLINED), state)
-        coVerify(exactly = 1) { repository.logCallMessage(CHAT, "declined", 0) }
+        coVerify(exactly = 1) { repository.logCallMessage(CHAT, EndReason.DECLINED, 0) }
         coVerify(exactly = 0) { repository.endCall(any(), any()) }
     }
 
@@ -280,7 +280,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.REMOTE_HANGUP), state)
-        coVerify { repository.logCallMessage(CHAT, "remote_hangup", 12) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.REMOTE_HANGUP, 12) }
         coVerify(exactly = 0) { repository.endCall(any(), any()) }
     }
 
@@ -292,7 +292,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
-        coVerify { repository.endCall(CALL, "error") }
+        coVerify { repository.endCall(CALL, EndReason.ERROR) }
     }
 
     @Test
@@ -304,8 +304,8 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
-        coVerify { repository.endCall(CALL, "error") }
-        coVerify { repository.logCallMessage(CHAT, "error", 0) }
+        coVerify { repository.endCall(CALL, EndReason.ERROR) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.ERROR, 0) }
     }
 
     @Test
@@ -340,8 +340,8 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
-        coVerify { repository.endCall(CALL, "error") }
-        coVerify { repository.logCallMessage(CHAT, "error", 0) }
+        coVerify { repository.endCall(CALL, EndReason.ERROR) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.ERROR, 0) }
     }
 
     @Test
@@ -356,7 +356,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
-        coVerify { repository.endCall(CALL, "error") }
+        coVerify { repository.endCall(CALL, EndReason.ERROR) }
     }
 
     @Test
@@ -369,8 +369,8 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.ERROR), state)
-        coVerify { repository.endCall(CALL, "error") }
-        coVerify { repository.logCallMessage(CHAT, "error", 70) }
+        coVerify { repository.endCall(CALL, EndReason.ERROR) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.ERROR, 70) }
     }
 
     @Test
@@ -396,7 +396,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.TIMEOUT), state)
-        coVerify { repository.logCallMessage(CHAT, "timeout", 0) }
+        coVerify { repository.logCallMessage(CHAT, EndReason.TIMEOUT, 0) }
     }
 
     @Test
@@ -531,7 +531,7 @@ class CallSessionTest {
         runCurrent()
 
         assertEquals(CallState.Ended(CALL, EndReason.TIMEOUT), state)
-        coVerify { repository.endCall(CALL, "timeout") }
+        coVerify { repository.endCall(CALL, EndReason.TIMEOUT) }
         coVerify(exactly = 0) { repository.logCallMessage(any(), any(), any()) }
     }
 
