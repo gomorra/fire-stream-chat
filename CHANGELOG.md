@@ -7,6 +7,8 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **Incoming calls ring.** An incoming call used to arrive in silence: its notification had no sound and did not vibrate, so a phone in a pocket gave no sign of it. It now rings with your ringtone and vibrates until you answer or decline, following the ring volume, silent and vibrate mode, and Do Not Disturb. Android fixes a notification channel's sound when the channel is created, so the silent *Incoming Calls* channel is replaced by a new one, and a change you made to the old one in Android's settings does not carry over. (`pending`)
+- **Calls you never picked up show as missed.** When the caller gave up before you answered, the call showed as an answered *Incoming call*, in the chat and in the Calls tab alike. A received call now counts as answered only if it connected, and the chat and the Calls tab agree on every call, including the ones already in your history. (`pending`)
+- **The Calls tab shows names instead of "Unknown".** A caller who is not in your contacts, and anyone listed before your contacts had finished loading, stayed "Unknown" until something else in the list changed. Names now appear as soon as they are known. (`pending`)
 - **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`01c0289f`)
 
 ## [1.40.1] — 2026-10-07

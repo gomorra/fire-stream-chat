@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -83,7 +84,7 @@ class CallsViewModel @Inject constructor(
                 otherPartyId = otherPartyId,
                 displayName = displayName,
                 avatarUrl = contact?.avatarUrl,
-                direction = deriveDirection(message.senderId, message.content),
+                direction = CallDirection.of(message.senderId == currentUserId, message.duration),
                 durationSeconds = message.duration,
                 timestamp = message.timestamp
             )
@@ -92,8 +93,14 @@ class CallsViewModel @Inject constructor(
 
     private fun loadCallLog() {
         viewModelScope.launch {
-            combine(messageRepository.getCallLog(), chatRepository.getChats()) { messages, chats ->
-                buildEntries(messages, chats, _uiState.value.contacts)
+            combine(
+                messageRepository.getCallLog(),
+                chatRepository.getChats(),
+                // Names arrive after the log does: contacts load on their own, and
+                // observeOtherPartyUsers fills in callers who are not contacts.
+                _uiState.map { it.contacts }.distinctUntilChanged()
+            ) { messages, chats, contacts ->
+                buildEntries(messages, chats, contacts)
             }
                 .catch { e ->
                     _uiState.value = _uiState.value.copy(isLoading = false, error = AppError.from(e))
@@ -159,17 +166,4 @@ class CallsViewModel @Inject constructor(
     fun clearError() {
         _uiState.value = _uiState.value.copy(error = null)
     }
-
-    companion object {
-        fun deriveDirection(senderId: String, content: String, currentUserId: String): CallDirection {
-            if (senderId == currentUserId) return CallDirection.OUTGOING
-            return when (content) {
-                "hangup", "remote_hangup" -> CallDirection.INCOMING
-                else -> CallDirection.MISSED
-            }
-        }
-    }
-
-    private fun deriveDirection(senderId: String, content: String): CallDirection =
-        deriveDirection(senderId, content, currentUserId)
 }
