@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.firestream.chat.ui.chat.imageedit.CropAspect
 import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import com.firestream.chat.ui.chat.imageedit.ViewportGeometry
+import com.firestream.chat.ui.chat.imageedit.ZoomTransform
 import kotlinx.coroutines.flow.drop
 
 /**
@@ -41,11 +42,13 @@ import kotlinx.coroutines.flow.drop
  * Only a gesture writes the viewport. The restore never does, and it happens
  * once per surface rather than on every size change: a restore into a box of
  * another shape is contained rather than exact (`ViewportGeometry.transformFor`),
- * and the box changes shape every time the keyboard slides over a caption
- * field, so re-deriving the zoom from the frame on each of those frames would
- * pulse the photo's scale and, if written back, widen the framing on every
- * keystroke. A later size change only clamps the transform the user already
- * has, so the photo never shows past its edge and never jumps in scale.
+ * and if written back it would widen the framing on every slide of the
+ * keyboard. A later size change carries the zoom of the last restore or
+ * gesture into the new box (`ViewportGeometry.transformAfterResize`): the crop
+ * frame keeps its size on screen and stays centred and whole. The keyboard
+ * shortens the box, and so shrinks the 1x fit. Keeping the raw scale and
+ * offset there drew the frame smaller and slid it sideways. Nothing a resize
+ * sets is written back, so the crop that is sent does not move.
  *
  * The frame of a non-free shape is drawn over the photo — scrim outside, a
  * hairline and corner brackets on it, the look of the adjust screen's crop tool
@@ -71,7 +74,9 @@ internal fun ZoomCropSurface(
     val zoom = remember { ZoomableState() }
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
     var contentSize by remember { mutableStateOf<IntSize?>(null) }
-    var restored by remember { mutableStateOf(false) }
+    // The zoom the last restore or gesture made, and the box it was made in.
+    // Every resize is worked out from this, never from the resize before it.
+    var anchor by remember { mutableStateOf<ZoomAnchor?>(null) }
     // The latest crop and callback, read from inside the collector below, which
     // outlives many recompositions: the pill can change the aspect while a
     // pan is in progress, and the pan must write over that aspect, not over
@@ -87,8 +92,21 @@ internal fun ZoomCropSurface(
         if (currentCrop.imageWidth != content.width || currentCrop.imageHeight != content.height) {
             currentOnCropChange(currentCrop.copy(imageWidth = content.width, imageHeight = content.height))
         }
-        if (restored) {
-            zoom.set(ViewportGeometry.clamp(zoom.transform, boxWidth, boxHeight, content.width, content.height))
+        val made = anchor
+        if (made != null) {
+            zoom.set(
+                ViewportGeometry.transformAfterResize(
+                    anchor = made.transform,
+                    anchorBoxWidth = made.boxWidth,
+                    anchorBoxHeight = made.boxHeight,
+                    frame = currentCrop.frame,
+                    boxWidth = boxWidth,
+                    boxHeight = boxHeight,
+                    imageWidth = content.width,
+                    imageHeight = content.height,
+                    maxScale = ZoomableState.MAX_SCALE,
+                )
+            )
         } else {
             zoom.set(
                 ViewportGeometry.transformFor(
@@ -100,11 +118,12 @@ internal fun ZoomCropSurface(
                     maxScale = ZoomableState.MAX_SCALE,
                 )
             )
-            restored = true
+            anchor = ZoomAnchor(zoom.transform, boxWidth, boxHeight)
         }
         // The first emission is the set just made; everything after it is a
         // gesture, or the surface resetting itself on paging away.
         snapshotFlow { zoom.transform }.drop(1).collect { transform ->
+            anchor = ZoomAnchor(transform, boxWidth, boxHeight)
             val visible = ViewportGeometry.visible(transform, boxWidth, boxHeight, content.width, content.height)
             // The size is stamped on every write, not only the one above: a
             // read of the crop between that write and the recomposition that
@@ -185,3 +204,6 @@ private fun CropFrameOverlay(crop: PendingCrop, zoom: ZoomableState, content: In
 /** The corner brackets' arm length and stroke, the adjust screen's own numbers. */
 private const val FRAME_ARM_DP = 22
 private const val FRAME_STROKE_DP = 3
+
+/** A zoom and the box it was made in, for [ViewportGeometry.transformAfterResize]. */
+private data class ZoomAnchor(val transform: ZoomTransform, val boxWidth: Float, val boxHeight: Float)

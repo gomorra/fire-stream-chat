@@ -2,6 +2,12 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.40.2] — 2026-10-08
+
+### Fixed
+
+- **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`pending`)
+
 ## [1.40.1] — 2026-10-07
 
 ### Fixed
