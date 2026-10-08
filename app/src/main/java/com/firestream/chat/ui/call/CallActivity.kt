@@ -1,8 +1,10 @@
 package com.firestream.chat.ui.call
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,15 +18,17 @@ import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.EndReason
+import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.domain.repository.CallRepository
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -34,7 +38,11 @@ class CallActivity : ComponentActivity() {
     @Inject lateinit var callRepository: CallRepository
     @Inject lateinit var preferencesDataStore: PreferencesDataStore
 
-    private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * Sets up outgoing calls. Not tied to this activity: a rotation recreates it mid-setup, and
+     * cancelling the setup would leave a call document ringing the callee with no call behind it.
+     */
+    @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     companion object {
         const val EXTRA_ACTION = "call_action"
@@ -44,6 +52,7 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CHAT_ID = "chat_id"
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
+        private const val TAG = "CallActivity"
     }
 
     // Deferred action to run after permission is granted
@@ -57,7 +66,7 @@ class CallActivity : ComponentActivity() {
         } else {
             Toast.makeText(this, "Microphone permission is required for calls", Toast.LENGTH_LONG).show()
             if (callStateHolder.callState.value is CallState.Idle) {
-                finish()
+                finishAndRemoveTask()
             }
         }
         pendingAction = null
@@ -79,21 +88,34 @@ class CallActivity : ComponentActivity() {
                 AppTheme.SYSTEM -> isSystemInDarkTheme()
             }
             FireStreamTheme(darkTheme = useDark) {
-                CallScreen(onFinish = { finish() })
+                CallScreen(
+                    // Out of Recents too: relaunching a finished call screen from there must not
+                    // bring back the intent that placed or answered its call.
+                    onFinish = { finishAndRemoveTask() },
+                    onAnswer = { withAudioPermission { answerCall() } }
+                )
             }
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         handleIntent()
     }
 
     private fun handleIntent() {
-        when (intent?.getStringExtra(EXTRA_ACTION)) {
-            ACTION_OUTGOING -> withAudioPermission { startOutgoingCall() }
-            ACTION_ANSWER -> withAudioPermission { answerCall() }
+        val launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        val launch = callLaunchFor(
+            action = intent.getStringExtra(EXTRA_ACTION),
+            launchedFromHistory = launchedFromHistory,
+            callOngoing = callStateHolder.callState.value.isOngoing
+        )
+        when (launch) {
+            CallLaunch.PLACE_CALL -> placeOutgoingCall()
+            CallLaunch.ANSWER -> withAudioPermission { answerCall() }
+            CallLaunch.SHOW -> Unit
+            CallLaunch.CLOSE -> finishAndRemoveTask()
         }
     }
 
@@ -108,27 +130,56 @@ class CallActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * Runs before the permission prompt. The call screen composes behind the prompt, and the
+     * previous call's Ended state would finish this activity underneath it.
+     */
+    private fun placeOutgoingCall() {
+        if (!callStateHolder.prepareOutgoingCall()) {
+            // A call is already running. This screen shows it instead of placing a second one.
+            Toast.makeText(this, "You're already in a call", Toast.LENGTH_SHORT).show()
+            return
+        }
+        withAudioPermission { startOutgoingCall() }
+    }
+
     private fun startOutgoingCall() {
         val calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return
         val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return
         val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
         val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
+        val appContext = applicationContext
 
-        activityScope.launch {
-            callRepository.createCall(calleeId).onSuccess { callId ->
-                CallService.startOutgoing(
-                    this@CallActivity, callId, chatId, calleeId, calleeName, calleeAvatarUrl
-                )
-            }
+        appScope.launch {
+            callRepository.createCall(calleeId)
+                .onSuccess { callId ->
+                    if (isFinishing) {
+                        // The user left during setup, but the new document has already rung the callee.
+                        callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
+                        return@onSuccess
+                    }
+                    try {
+                        CallService.startOutgoing(appContext, callId, chatId, calleeId, calleeName, calleeAvatarUrl)
+                    } catch (e: IllegalStateException) {
+                        // Android 12+ will not start a foreground service once the app is in the
+                        // background, and a slow setup can outlast the user leaving the app.
+                        Log.w(TAG, "Could not start the call service", e)
+                        callRepository.endCall(callId, EndReason.ERROR.name.lowercase())
+                        callStateHolder.updateState(CallState.Ended(callId, EndReason.ERROR))
+                    }
+                }
+                .onFailure { e ->
+                    Log.w(TAG, "Could not create the call", e)
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(appContext, "Couldn't start the call", Toast.LENGTH_LONG).show()
+                    }
+                    // Ended closes whichever instance of this screen is showing, even after a rotation.
+                    callStateHolder.updateState(CallState.Ended(callId = "", reason = EndReason.ERROR))
+                }
         }
     }
 
     private fun answerCall() {
         CallService.sendAction(this, CallService.ACTION_ANSWER)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        activityScope.cancel()
     }
 }

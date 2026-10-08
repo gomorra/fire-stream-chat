@@ -21,7 +21,6 @@ class CallViewModel @Inject constructor(
     val callState: StateFlow<CallState> = callStateHolder.callState
     val uiControls: StateFlow<CallUiControls> = callStateHolder.uiControls
 
-    fun answer() = CallService.sendAction(context, CallService.ACTION_ANSWER)
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
     fun hangup() = CallService.sendAction(context, CallService.ACTION_HANGUP)
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)

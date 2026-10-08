@@ -42,6 +42,16 @@ sealed interface CallState {
     ) : CallState
 }
 
+/**
+ * True while a call is ringing, connecting or connected.
+ *
+ * [CallState.Ended] is not ongoing. It is the last frame of a call that is over, kept so the call
+ * screen can show "Call Ended", and it stays published until the next call replaces it. Ask this,
+ * not `!is CallState.Idle`, to find out whether the user is in a call.
+ */
+val CallState.isOngoing: Boolean
+    get() = this !is CallState.Idle && this !is CallState.Ended
+
 enum class EndReason {
     HANGUP,
     REMOTE_HANGUP,
