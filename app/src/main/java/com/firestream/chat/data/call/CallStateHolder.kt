@@ -3,6 +3,7 @@ package com.firestream.chat.data.call
 import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallUiControls
+import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.isOngoing
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,8 +40,8 @@ class CallStateHolder @Inject constructor() {
 
     /**
      * Flip mute and return the new value, so the caller applies to the audio track exactly what the
-     * UI shows. Atomic: route updates arrive from another thread and must not write back a stale
-     * mute flag.
+     * UI shows. Atomic, like [updateAudioRoutes], so neither writes back a stale copy of the other's
+     * field.
      */
     fun toggleMute(): Boolean = _uiControls.updateAndGet { it.copy(isMuted = !it.isMuted) }.isMuted
 
@@ -66,6 +67,15 @@ class CallStateHolder @Inject constructor() {
         if (_callState.value.isOngoing) return false
         reset()
         return true
+    }
+
+    /**
+     * End an outgoing call that failed before [CallService] took it over, so the call screen shows
+     * the end and closes. Replaces only the Idle that [prepareOutgoingCall] left. An incoming call
+     * can start ringing during the setup, and its state must stay.
+     */
+    fun failOutgoingCall(callId: String) {
+        _callState.compareAndSet(CallState.Idle, CallState.Ended(callId, EndReason.ERROR))
     }
 
     fun reset() {

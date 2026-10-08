@@ -8,6 +8,8 @@ import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.domain.model.CallState
+import io.mockk.mockk
+import kotlinx.coroutines.test.TestScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -42,7 +44,7 @@ class CallScreenAnswerUiTest {
                 CallScreen(
                     onFinish = {},
                     onAnswer = { answers++ },
-                    viewModel = CallViewModel(holder, app),
+                    viewModel = CallViewModel(holder, mockk(), TestScope(), app),
                 )
             }
         }

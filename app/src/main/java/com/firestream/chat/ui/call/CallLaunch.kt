@@ -3,6 +3,9 @@ package com.firestream.chat.ui.call
 /** What [CallActivity] does with the intent that opened it. */
 internal enum class CallLaunch { PLACE_CALL, ANSWER, SHOW, CLOSE }
 
+/** What [CallActivity] runs once it may use the microphone. */
+internal enum class MicAction { PLACE_CALL, ANSWER }
+
 /**
  * Decide what an intent that opened [CallActivity] asks for.
  *

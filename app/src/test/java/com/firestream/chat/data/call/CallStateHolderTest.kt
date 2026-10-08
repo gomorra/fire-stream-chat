@@ -141,8 +141,8 @@ class CallStateHolderTest {
         holder.updateState(CallState.Connected("call1", "user2", "Alice", null, 1000L))
         val routes = listOf(CallAudioRoute.EARPIECE, CallAudioRoute.SPEAKER)
 
-        // The service toggles mute on the main thread while the route collector publishes from
-        // another; an even number of toggles must always land back on unmuted.
+        // The holder is a singleton with no threading contract. With toggles and route updates on
+        // two threads, an even number of toggles must always land back on unmuted.
         repeat(ROUNDS) { round ->
             val start = CyclicBarrier(2)
             val routeWriter = thread {
@@ -177,6 +177,26 @@ class CallStateHolderTest {
 
         assertEquals(ongoing, holder.callState.value)
         assertTrue(holder.uiControls.value.isMuted)
+    }
+
+    @Test
+    fun `a failed outgoing call ends the screen that waits for it`() {
+        holder.prepareOutgoingCall()
+
+        holder.failOutgoingCall("call1")
+
+        assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
+    }
+
+    @Test
+    fun `a failed outgoing call leaves alone a call that started during its setup`() {
+        holder.prepareOutgoingCall()
+        val ringing = CallState.IncomingRinging("call9", "user3", "Bob", null)
+        holder.updateState(ringing)
+
+        holder.failOutgoingCall("call1")
+
+        assertEquals(ringing, holder.callState.value)
     }
 
     @Test
