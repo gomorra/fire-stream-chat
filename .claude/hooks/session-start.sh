@@ -17,9 +17,13 @@
 # Only runs in remote sessions; local dev boxes and CI have none of these problems.
 set -euo pipefail
 
-# Kill switch: set SKIP_GRADLE_PREWARM=1 in your Claude Code env to bypass.
+# Kill switch: SKIP_GRADLE_PREWARM=1 in your Claude Code env skips this whole
+# hook, not just the cache warm-up. Nothing below runs: no Android SDK install,
+# no placeholder google-services.json, and no Maven Central mirror script. A
+# mirror script that an earlier start wrote stays in ~/.gradle/init.d/ and is
+# still used.
 if [ "${SKIP_GRADLE_PREWARM:-}" = "1" ]; then
-    echo "[session-start] SKIP_GRADLE_PREWARM=1 — skipping."
+    echo "[session-start] SKIP_GRADLE_PREWARM=1 — skipping the whole hook, Maven Central mirror included."
     exit 0
 fi
 
