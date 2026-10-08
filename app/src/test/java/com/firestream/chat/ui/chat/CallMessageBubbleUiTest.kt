@@ -91,10 +91,10 @@ class CallMessageBubbleUiTest {
     }
 
     @Test
-    fun `my call that I cancelled while it rang reads as outgoing`() {
+    fun `my call that I cancelled while it rang reads as no answer`() {
         showOwnCall(endReason = "hangup", durationSeconds = 0)
 
-        composeTestRule.onNodeWithText("Outgoing call").assertIsDisplayed()
+        composeTestRule.onNodeWithText("No answer").assertIsDisplayed()
     }
 
     @Test

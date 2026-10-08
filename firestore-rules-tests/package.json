@@ -1,0 +1,14 @@
+{
+  "name": "firestore-rules-tests",
+  "private": true,
+  "description": "Runs firestore.rules in the Firestore emulator and checks who may read and write what.",
+  "type": "module",
+  "scripts": {
+    "test": "firebase emulators:exec --only firestore --project demo-firestream \"node --test\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "5.0.2",
+    "firebase": "12.19.0",
+    "firebase-tools": "15.31.0"
+  }
+}

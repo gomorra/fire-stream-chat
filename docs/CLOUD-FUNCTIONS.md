@@ -7,8 +7,9 @@ Four functions in `functions/index.js` (Node.js 20 runtime):
 - **Trigger**: Firestore document creation at `chats/{chatId}/messages/{messageId}`
 - Gets all chat participants, filters out the sender
 - Sends concurrent FCM data messages to all recipients
-- Increments per-user `unreadCounts.{userId}` on the chat document
-- **FCM Payload**: `chatId`, `senderId`, `senderName`, `messageId`, `chatType`, `chatName`, `mentions` (comma-separated user IDs)
+- Increments per-user `unreadCounts.{userId}` on the chat document. A `CALL` message counts only when the recipient missed the call: it never connected (no `duration`) and was not declined.
+- Pushes every `CALL` message, so the callee's app stores it and its Calls tab lists the call. The app shows a notification only for a missed call.
+- **FCM Payload**: `chatId`, `senderId`, `senderName`, `messageId`, `chatType`, `chatName`, `mentions` (comma-separated user IDs), `messageType`, `messageContent`; a `CALL` message adds `callDurationSeconds`
 
 ### `sendReactionPushNotification`
 
@@ -22,8 +23,8 @@ Four functions in `functions/index.js` (Node.js 20 runtime):
 
 - **Trigger**: Firestore document creation at `calls/{callId}` where `status == "ringing"`
 - Fetches caller and callee user documents
-- Sends a high-priority FCM data message to the callee
-- **FCM Payload**: `type: "call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`
+- Sends a high-priority FCM data message to the callee. FCM keeps it for 30 s (`android.ttl`), as long as the call rings, so a phone that comes online later is not woken for a call that is over.
+- **FCM Payload**: `type: "incoming_call"`, `callId`, `callerId`, `callerName`, `callerAvatarUrl`
 
 ### `syncPresenceToFirestore`
 
@@ -31,6 +32,10 @@ Four functions in `functions/index.js` (Node.js 20 runtime):
 - Mirrors `isOnline` and `lastSeen` fields to the matching Firestore `users/{userId}` document
 - Uses a `lastSeen` transaction guard to reject out-of-order invocations (Cloud Functions can be delivered out of sequence)
 - Handles abrupt disconnects that RTDB `onDisconnect()` catches but the app never explicitly wrote back to Firestore
+
+### Tests
+
+`functions/callPush.js` holds what the call pushes decide: which call is missed, which unread counts rise, the call push's Android options. `cd functions && npm test` runs `functions/test/` with Node's built-in test runner, and `.github/workflows/functions.yml` runs it when `functions/` changes.
 
 ---
 

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,6 +22,9 @@ class CallStateHolder @Inject constructor() {
 
     private val _uiControls = MutableStateFlow(CallUiControls())
     val uiControls: StateFlow<CallUiControls> = _uiControls.asStateFlow()
+
+    /** Numbers each placing, so a setup only ever touches its own. */
+    private val placingIds = AtomicLong()
 
     /**
      * Publish [state]. A state that starts a call also resets the controls first. A call starts
@@ -57,29 +61,73 @@ class CallStateHolder @Inject constructor() {
     }
 
     /**
-     * Clear the way for an outgoing call. Returns false while another call is ongoing; the caller
-     * must not place a second call over it.
+     * Clear the way for an outgoing call, before the microphone prompt. Returns false while another
+     * call is ongoing. The caller must not place a second call over it.
      *
-     * Otherwise forgets the finished call. The call screen finishes itself 1.5 s after it sees
-     * Ended, so a stale Ended would close the new call's screen while the call is still being set up.
+     * Otherwise forgets a finished call. The call screen finishes itself 1.5 s after it sees Ended,
+     * so a stale Ended would close the new call's screen underneath the prompt. The state stays Idle
+     * until [startPlacing], so a call that comes in while the prompt is up still rings.
      */
-    fun prepareOutgoingCall(): Boolean {
-        if (_callState.value.isOngoing) return false
-        reset()
-        return true
+    fun prepareOutgoingCall(): Boolean = replaceIf { if (it.isOngoing) null else CallState.Idle } != null
+
+    /**
+     * Publish a call being placed to [calleeId], with fresh controls, and return it. Returns null
+     * while a call is ongoing, a placing included.
+     */
+    fun startPlacing(calleeId: String, calleeName: String, calleeAvatarUrl: String?): CallState.Placing? {
+        val placing = CallState.Placing(placingIds.incrementAndGet(), calleeId, calleeName, calleeAvatarUrl)
+        replaceIf { if (it.isOngoing) null else placing } ?: return null
+        _uiControls.value = CallUiControls()
+        return placing
     }
 
     /**
-     * End an outgoing call that failed before [CallService] took it over, so the call screen shows
-     * the end and closes. Replaces only the Idle that [prepareOutgoingCall] left. An incoming call
-     * can start ringing during the setup, and its state must stay.
+     * Record that placing [placingId] now has the document [callId]. Returns false when that
+     * placing ended meanwhile, or already has a document.
      */
-    fun failOutgoingCall(callId: String) {
-        _callState.compareAndSet(CallState.Idle, CallState.Ended(callId, EndReason.ERROR))
+    fun placingCreated(placingId: Long, callId: String): Boolean = replaceIf {
+        if (it is CallState.Placing && it.placingId == placingId && it.callId == null) it.copy(callId = callId) else null
+    } != null
+
+    /**
+     * Let the call service take over the placed call as [ringing]. Returns false unless the call
+     * being placed is the one [ringing] names: its placing was cancelled or timed out first, and the
+     * service must end that call instead of ringing.
+     */
+    fun takeOverPlacing(ringing: CallState.OutgoingRinging): Boolean = replaceIf {
+        if (it is CallState.Placing && it.callId == ringing.callId) ringing else null
+    } != null
+
+    /**
+     * End placing [placingId] with an error, so the call screen shows the end and closes. Returns
+     * false, and changes nothing, unless that placing is still up. A call that came in meanwhile, or
+     * a newer placing, keeps its state.
+     */
+    fun failPlacing(placingId: Long): Boolean = endPlacing(placingId, EndReason.ERROR) != null
+
+    /**
+     * Cancel placing [placingId], at whatever stage, and return it as it was when it ended. Its
+     * [CallState.Placing.callId] tells whether its document exists. Returns null unless that placing
+     * is still up.
+     */
+    fun cancelPlacing(placingId: Long): CallState.Placing? = endPlacing(placingId, EndReason.HANGUP)
+
+    private fun endPlacing(placingId: Long, reason: EndReason): CallState.Placing? = replaceIf {
+        if (it is CallState.Placing && it.placingId == placingId) CallState.Ended(it.callId ?: "", reason) else null
+    } as CallState.Placing?
+
+    /**
+     * Replace the state with what [next] makes of it, and return the state it replaced. Changes
+     * nothing, and returns null, when [next] returns null. Atomic: the setup on the application
+     * scope and the service on the main thread race for the same placing, and exactly one of them
+     * wins it.
+     */
+    private inline fun replaceIf(next: (CallState) -> CallState?): CallState? {
+        while (true) {
+            val current = _callState.value
+            val replacement = next(current) ?: return null
+            if (_callState.compareAndSet(current, replacement)) return current
+        }
     }
 
-    fun reset() {
-        _callState.value = CallState.Idle
-        _uiControls.value = CallUiControls()
-    }
 }

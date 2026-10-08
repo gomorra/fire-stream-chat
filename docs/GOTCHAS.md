@@ -208,12 +208,15 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   block itself when the cancellation was not its own. A hand-written copy of the idiom needs
   the same check. Regression:
   `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
-- **`catch (e: Exception)` around a suspend call also catches cancellation.** The
-  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }`, so a
-  coroutine cancelled while suspended in one gets a failure back and carries on. `CallService`'s
-  ring timeout kept running after the call's cleanup cancelled it, and tore the call down a
-  second time on another thread. Do not rely on `cancel()` to stop the code after a repository
-  call: check that the work is still wanted before acting on the result.
+- **`catch (e: Exception)` around a suspend call also catches cancellation.** Most
+  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }` or
+  `resultOf`, so a coroutine cancelled while suspended in one gets a failure back and carries
+  on. `CallService`'s ring timeout kept running after the call's cleanup cancelled it, and tore
+  the call down a second time on another thread. Wrap a suspend call in `cancellableResultOf`
+  instead, which lets the cancellation through. `CallRepositoryImpl` does. With any other
+  repository, do not rely on `cancel()` to stop the code after its call: check that the work is
+  still wanted before acting on the result. Regression:
+  `CallRepositoryImplTest.a caller cancelled in any repository call stops instead of getting a failure`.
 - **A Firestore listener on a parallel executor can deliver snapshots out of order.**
   `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
   `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
@@ -323,12 +326,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **`advanceUntilIdle()` stops once only `backgroundScope` work is left.** It leaves that
   work unrun. A component given `backgroundScope` as its scope then never gets going: a
   collector misses every emission, and a one-shot `launch` never starts. Both read exactly
-  like a broken production diff. A coroutine that finishes can take the `runTest` scope
-  itself (`CallViewModelTest`). A never-completing collector (`Chat*Manager`,
-  `ChatMessageLoader`) would hang the test there (`UncompletedCoroutinesError`). Give it a
-  root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
+  like a broken production diff. A coroutine that always finishes can take the `runTest`
+  scope itself. One that may not finish would hang the test there
+  (`UncompletedCoroutinesError`): a never-completing collector (`Chat*Manager`,
+  `ChatMessageLoader`), or a call create the test never completes (`CallViewModelTest`).
+  Give it a root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
   SupervisorJob())`, and cancel that scope in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
+- **`advanceUntilIdle()` runs every pending timeout.** It moves virtual time forward until
+  nothing is scheduled, so a `withTimeoutOrNull` around a call the test has not completed yet
+  times out before the test completes it. The code under test then takes its timeout path, and
+  later assertions can still pass by accident. Use `runCurrent()` until the test has completed
+  what the code waits on (`CallViewModelTest`).
 - **A paused `mainClock` never sees a bare state write.** With
   `composeTestRule.mainClock.autoAdvance = false`, setting a `mutableStateOf` from the
   test thread and then calling `advanceTimeBy` / `advanceTimeByFrame` runs frames the
@@ -410,7 +419,7 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **WebRTC calls back on its signaling thread, and the factory owns that thread.**
   `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
   frees the factory's threads. Tearing a call down from one of those callbacks destroys the
-  thread the callback is running on. Hop to the main thread first (`CallService.onMain`).
+  thread the callback is running on. Hop to the main thread first (`WebRtcCallMedia.onMain`).
   `PeerConnection.close()` frees nothing: only `dispose()` releases the native connection and
   the observer it holds. `PeerConnectionFactory.builder()` makes an audio device module that
   nothing releases unless you pass your own and call `release()` after `dispose()`.

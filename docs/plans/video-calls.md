@@ -2,6 +2,8 @@
 
 Status: approved. The prototype verdict is in and written into steps 4, 4a and 9.
 
+> **The code has moved past parts of this plan.** `CallService` runs each call in a `CallSession` (`CallHost`, `CallMedia`, `WebRtcCallMedia`), so step 1's `PeerSession` starts from there. `CallState` has `Placing`. `firestore.rules` lists the fields a call may hold and limits the ICE candidate lists to the caller and the callee, with tests in `firestore-rules-tests/`. Re-read steps 1, 2 and 6 against the code before running them.
+
 ## Context
 
 The app has 1:1 voice calls: WebRTC, signalled through Firestore, woken by a push. `CallService` owns
@@ -40,14 +42,15 @@ picture-in-picture from the docked card, a call card outside the call's chat.
 
 ## What exists today (verified 2026-10-03)
 
-- `data/call/CallService.kt` (735 lines) holds one `PeerConnection`. Offer and answer both set
+- `data/call/CallService.kt` holds one `CallSession` at a time, and its `WebRtcCallMedia` one
+  `PeerConnection`. Offer and answer both set
   `OfferToReceiveVideo = false`. `onTrack` is empty.
 - `data/call/WebRtcPeerConnectionFactory.kt` builds the factory with no video codecs and no `EglBase`.
   Its ICE servers are Google STUN and the public relay `openrelay.metered.ca` with fixed credentials.
 - `FirestoreCallSource` writes `calls/{callId}`: `callerId`, `calleeId`, `status`, `offer`, `answer`,
   and the subcollections `callerCandidates` and `calleeCandidates`.
-- `firestore.rules` lets the caller and callee read and update a call. Any signed-in user can read
-  and create ICE candidates of any call.
+- `firestore.rules` lets only the caller and the callee read and write a call, and lists the
+  fields a call may hold. Each side adds ICE candidates to its own list only.
 - `CallState` names one remote user per state. `CallUiControls` holds mute and the audio route.
 - `ChatScreen.kt:1042` shows the phone icon for 1:1 chats only. The same intent is built again at
   `ChatScreen.kt:1460` and `CallsScreen.kt:451`.
@@ -255,6 +258,9 @@ The message sync path and a Room column change here.
   Firestore field `video`, and `sendCallMessage` / `logCallMessage` take it. Bump `AppDatabase` by one.
 - `CallLogEntry.video`, filled in `CallsViewModel.buildEntries`.
 - Tests: `CallsViewModelTest`, the entity mapper, `FirestoreMessageSourceTest` for the field.
+- `firestore.rules`: the create rule lists a call's fields, so `video` joins that list, with a test
+  in `firestore-rules-tests/`. The owner deploys the rules before an app version that writes
+  `video` ships, or every call from it is refused.
 - Docs: `SCHEMA-FIRESTORE.md`, `SCHEMA-ROOM.md`, `DOMAIN-MODELS.md`, `CLOUD-FUNCTIONS.md`.
 
 ### Step 3 — Camera and the video line — skills: code-review; model: max
@@ -423,8 +429,8 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   offer, an answer or a candidate made for another pair of session ids.
 - `firestore.rules`: a group call is created by its `createdBy`, who is in `invited`, with at most
   four entries. Only the invited read it. A member row is written by its own uid. A link and its
-  candidates are read and written by the two uids in its id. The 1:1 candidate subcollections are
-  narrowed to the caller and the callee.
+  candidates are read and written by the two uids in its id. The 1:1 rules check `callerId` and
+  `calleeId`, so they must branch on the call's kind.
 - `firestore.indexes.json` (new, referenced from `firebase.json`) for the live-call query.
 - Tests: `MeshPlanTest` as a table (join order, both joining at once, rejoin with a new session id,
   the cap, leave, a stale row), `GroupLinkSignalingTest`, a repository test.

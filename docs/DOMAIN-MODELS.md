@@ -221,6 +221,9 @@ data class CallLogEntry(
 ```kotlin
 sealed interface CallState {
     data object Idle : CallState
+    // An outgoing call from the moment its setup starts until CallService takes it over.
+    // placingId tells one placing from the next; callId is null until the document exists.
+    data class Placing(placingId, calleeId, calleeName, calleeAvatarUrl, callId: String?) : CallState
     data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl) : CallState
     data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl) : CallState
     data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl) : CallState
@@ -228,7 +231,11 @@ sealed interface CallState {
     data class Ended(callId, reason: EndReason) : CallState
 }
 
+// isOngoing: every state but Idle and Ended. The one "am I in a call" rule.
+
 enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
+// wireName is the lower-case name written to the call document and the call message;
+// EndReason.fromWireName(...) reads one back, or null for a reason this version does not know.
 
 // In-call UI controls (exposed by CallStateHolder)
 // Where call audio plays. The router (data/call/CallAudioRouter) publishes what the OS reports.
@@ -248,7 +255,13 @@ Defined in `domain/model/CallSignalingData.kt`:
 ```kotlin
 data class SdpData(val sdp: String, val type: String)
 data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp: String)
-data class CallSignalingData(val callId: String, val callerId: String, val calleeId: String, val status: String)
+data class CallSignalingData(
+    val callId: String, val callerId: String, val calleeId: String,
+    val status: String,          // "ringing" | "answered" | "declined" | "ended"
+    val offer: SdpData?, val answer: SdpData?,
+    val createdAt: Long, val endedAt: Long?,
+    val endReason: String?       // an EndReason.wireName
+)
 ```
 
 ---
