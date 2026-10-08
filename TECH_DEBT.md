@@ -302,8 +302,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 ### Calls — known problems left unfixed
 
 **The smell.** These call problems are known and not fixed:
-- `CallService` has no JVM seam. Its threading, its teardown order, how it stops and its end-of-call writes are guarded by review and the on-device checklist in `docs/BACKLOG.md`, not by tests. Extracting the per-call fields and transitions into a plain `CallSession` class would make them testable.
-- `CallRepositoryImpl` wraps every call in `catch (e: Exception)`, which also catches `CancellationException`. A cancelled caller gets `Result.failure` and runs on. `CallService` no longer depends on cancelling a repository call, but the trap stays for the next caller. See `docs/GOTCHAS.md`.
+- `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service stops, and how WebRTC's callbacks reach the main thread, are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - A call can wait forever in two places. Nothing times out `Connecting` if ICE never reaches `FAILED`, which continual gathering makes possible. And `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
 - `firestore.rules`: any signed-in user can read and add ICE candidates to any call whose id they know, and either party can rewrite `callerId`, `calleeId` and `status`. Candidates carry IP addresses.
 - `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.

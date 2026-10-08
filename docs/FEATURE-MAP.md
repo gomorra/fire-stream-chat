@@ -16,7 +16,11 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams, and the audio session (router + proximity lock); all on the main thread; stops with the latest start id |
+| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — Android side of a call: foreground type and notifications, the audio session (router + proximity lock), one `CallSession` at a time; all on the main thread; stops with the latest start id |
+| `app/src/main/java/com/firestream/chat/data/call/CallSession.kt` | One call's transitions, signalling, ring timeout and end-of-call writes, without Android or WebRTC |
+| `app/src/main/java/com/firestream/chat/data/call/CallHost.kt` | What a `CallSession` needs from Android; `CallService` implements it |
+| `app/src/main/java/com/firestream/chat/data/call/CallMedia.kt` | One call's connection as the session sees it, and the `ConnectionChange`s it reports |
+| `app/src/main/java/com/firestream/chat/data/call/WebRtcCallMedia.kt` | `CallMedia` over a WebRTC `PeerConnection`; posts WebRTC callbacks to the main thread and drops them after dispose |
 | `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallState.kt` | Call states, `isOngoing` (the one "am I in a call" rule), `CallUiControls` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row; `CallLogType.of` — the one rule for how a call reads (outgoing, no answer, incoming, missed, declined), used by the Calls tab and `MessageBubble`'s call row |
@@ -26,7 +30,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications; the incoming channel rings until answered (`FLAG_INSISTENT`) |
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory + ICE server config |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections |
-| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source |
+| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source; lets cancellation through (`cancellableResultOf`) |
 | `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route; owns the microphone permission and the launch decision |
 | `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); `MicAction`, what waits on the microphone prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
@@ -39,6 +43,8 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
+| `app/src/test/java/com/firestream/chat/data/call/CallSessionTest.kt` | A call's transitions on fakes of `CallHost` and `CallMedia`: offer and answer, candidates once each, the clock, the ring timeout, how each end is recorded, late events after the end |
+| `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | A cancelled caller stops instead of getting a failure |
 | `app/src/test/java/com/firestream/chat/domain/model/CallLogTypeTest.kt` | The call-log rule — a received call that never connected is missed, a declined call is declined on both sides |
 | `app/src/test/java/com/firestream/chat/ui/call/CallLaunchTest.kt` | Recents never places or answers a call again |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenAnswerUiTest.kt` | Answer goes to the host's permission check, not straight to the service |
