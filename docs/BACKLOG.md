@@ -45,9 +45,11 @@ seen on a phone.
 8. During a call, open another chat and tap call: "You're already in a call", and the call goes
    on. Rotate right after tapping call: the call still starts. Open a finished call's card from
    Recents: no new call is placed.
-9. With mobile data slowed or briefly off, tap call and press Back before it rings, once
-   straight away and once after turning the phone: the other phone does not ring, or stops at
-   once. Tap call twice quickly: it rings once.
+9. With mobile data slowed or briefly off, tap call: the screen shows the name and
+   "Calling..." at once. Press Back before it rings, once straight away and once after turning
+   the phone, and once press Cancel instead: the other phone does not ring, or stops at once.
+   Tap call twice quickly: it rings once. With no network at all, the screen says the call
+   could not start within about 20 s.
 10. Fresh install: rotate while the microphone prompt is up, then allow. The call starts.
     Do the same when answering with the green button: the call connects.
 11. Hang up, then have the other phone call straight back, twice. Each call rings: the service

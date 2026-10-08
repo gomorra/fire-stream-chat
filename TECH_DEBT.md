@@ -308,7 +308,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 - `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
 - The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
 - A call that ends while its call screen is in the background leaves the screen in Recents until it is next shown. It then shows "Call Ended" and closes itself.
-- `CallStateHolder` has no state for a call being placed. From `prepareOutgoingCall()` until the service publishes `OutgoingRinging`, the state reads `Idle`. So `CallViewModel` holds its setup open until the service publishes, `failOutgoingCall` replaces only `Idle`, and an incoming call can still ring during the setup, which the service then ends. A `CallState.Placing` that counts as ongoing would replace all three, and would let the screen show "Calling…" instead of a blank screen. A `Placing` that is never cleared would block every call, so it needs a timeout of its own.
 
 **Why we haven't fixed it.** None of these is a crash or a privacy leak on the firebase flavor today. The ring-timeout race needs unusual timing and changes only the logged reason. The rules and the Cloud Functions need an emulator run and a deploy, which a cloud session cannot do. The `CallSession` extraction is a refactor of a class this sweep just rewrote for threading, and it deserves its own reviewed change.
 

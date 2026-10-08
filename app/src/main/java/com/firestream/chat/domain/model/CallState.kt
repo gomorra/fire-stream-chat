@@ -3,6 +3,18 @@ package com.firestream.chat.domain.model
 sealed interface CallState {
     data object Idle : CallState
 
+    /**
+     * This phone is placing a call to [calleeId]: the call document is being created, or the call
+     * is on its way to the call service. [callId] is null until the document exists. The service
+     * replaces this with [OutgoingRinging]. Counts as ongoing, so no other call starts meanwhile.
+     */
+    data class Placing(
+        val calleeId: String,
+        val calleeName: String,
+        val calleeAvatarUrl: String?,
+        val callId: String? = null
+    ) : CallState
+
     data class OutgoingRinging(
         val callId: String,
         val calleeId: String,
@@ -43,7 +55,7 @@ sealed interface CallState {
 }
 
 /**
- * True while a call is ringing, connecting or connected.
+ * True while a call is being placed, ringing, connecting or connected.
  *
  * [CallState.Ended] is not ongoing. It is the last frame of a call that is over, kept so the call
  * screen can show "Call Ended", and it stays published until the next call replaces it. Ask this,

@@ -68,7 +68,17 @@ class CallSessionTest {
 
     private fun TestScope.rootScope() = CoroutineScope(coroutineContext + SupervisorJob()).also { scopes += it }
 
-    private fun TestScope.newSession(isCaller: Boolean) = CallSession(
+    private fun TestScope.newSession(isCaller: Boolean): CallSession {
+        if (isCaller) {
+            // The call screen publishes the placing, and records its document, before the service
+            // starts the call.
+            stateHolder.prepareOutgoingCall("u2", "Alice", null)
+            stateHolder.placingCreated(CALL)
+        }
+        return session(isCaller)
+    }
+
+    private fun TestScope.session(isCaller: Boolean) = CallSession(
         callId = CALL,
         isCaller = isCaller,
         chatId = if (isCaller) CHAT else null,
@@ -135,6 +145,23 @@ class CallSessionTest {
         runCurrent()
 
         coVerify { repository.sendOffer(CALL, OFFER) }
+    }
+
+    @Test
+    fun `a call whose placing was cancelled is ended instead of rung`() = runTest {
+        val session = newSession(isCaller = true)
+        stateHolder.cancelPlacing()
+
+        session.startOutgoing()
+        runCurrent()
+
+        assertEquals(CallState.Ended(CALL, EndReason.HANGUP), state)
+        // Started with startForegroundService(), the service enters the foreground all the same.
+        assertEquals(listOf("outgoing"), host.foreground)
+        assertTrue(host.media.isEmpty())
+        coVerify { repository.endCall(CALL, "hangup") }
+        coVerify(exactly = 0) { repository.logCallMessage(any(), any(), any()) }
+        assertEquals(listOf(session), host.finished)
     }
 
     @Test

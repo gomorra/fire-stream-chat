@@ -332,6 +332,11 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
   SupervisorJob())`, and cancel that scope in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
+- **`advanceUntilIdle()` runs every pending timeout.** It moves virtual time forward until
+  nothing is scheduled, so a `withTimeoutOrNull` around a call the test has not completed yet
+  times out before the test completes it. The code under test then takes its timeout path, and
+  later assertions can still pass by accident. Use `runCurrent()` until the test has completed
+  what the code waits on (`CallViewModelTest`).
 - **A paused `mainClock` never sees a bare state write.** With
   `composeTestRule.mainClock.autoAdvance = false`, setting a `mutableStateOf` from the
   test thread and then calling `advanceTimeBy` / `advanceTimeByFrame` runs frames the

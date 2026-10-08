@@ -74,6 +74,13 @@ internal fun CallScreen(
         contentAlignment = Alignment.Center
     ) {
         when (val state = callState) {
+            // Looks like the ringing that follows it, so the screen does not change at the handover.
+            is CallState.Placing -> OutgoingRingingContent(
+                calleeName = state.calleeName,
+                calleeAvatarUrl = state.calleeAvatarUrl,
+                calleeLocalAvatarPath = null,
+                onCancel = viewModel::hangup
+            )
             is CallState.IncomingRinging -> IncomingRingingContent(
                 callerName = state.callerName,
                 callerAvatarUrl = state.callerAvatarUrl,

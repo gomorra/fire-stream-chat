@@ -6,9 +6,11 @@ import org.junit.Test
 class CallStateTest {
 
     @Test
-    fun `only ringing, connecting and connected calls are ongoing`() {
+    fun `only placing, ringing, connecting and connected calls are ongoing`() {
         val expected = mapOf(
             CallState.Idle to false,
+            CallState.Placing("u2", "Alice", null) to true,
+            CallState.Placing("u2", "Alice", null, callId = "c1") to true,
             CallState.OutgoingRinging("c1", "u2", "Alice", null) to true,
             CallState.IncomingRinging("c1", "u2", "Alice", null) to true,
             CallState.Connecting("c1", "u2", "Alice", null) to true,

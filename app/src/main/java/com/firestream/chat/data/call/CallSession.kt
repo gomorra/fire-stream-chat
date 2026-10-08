@@ -66,12 +66,22 @@ internal class CallSession(
     // Outgoing
     // ──────────────────────────────────────────────────────────────────────────
 
-    /** Publish the call, take the foreground and send the offer. The callee's phone is ringing. */
+    /**
+     * Take the call over from its placing, take the foreground and send the offer. The callee's
+     * phone is already ringing.
+     *
+     * A call whose placing was cancelled or timed out first is ended instead. The foreground comes
+     * first all the same: once started with startForegroundService(), the service must enter it.
+     */
     fun startOutgoing() {
-        stateHolder.updateState(
-            CallState.OutgoingRinging(callId, remoteUserId, remoteName, remoteAvatarUrl, host.localAvatarPath(remoteUserId))
-        )
         host.foregroundOutgoing(remoteName)
+        val ringing = CallState.OutgoingRinging(callId, remoteUserId, remoteName, remoteAvatarUrl, host.localAvatarPath(remoteUserId))
+        if (!stateHolder.takeOverPlacing(ringing)) {
+            Log.w(TAG, "Ending outgoing call $callId: it is no longer being placed")
+            appScope.launch { repository.endCall(callId, EndReason.HANGUP.name.lowercase()) }
+            finish()
+            return
+        }
         startMedia().createLocalOffer(
             onCreated = { sdp -> scope.launch { repository.sendOffer(callId, sdp) } },
             onFailure = { error ->

@@ -57,29 +57,65 @@ class CallStateHolder @Inject constructor() {
     }
 
     /**
-     * Clear the way for an outgoing call. Returns false while another call is ongoing; the caller
-     * must not place a second call over it.
+     * Start placing a call to [calleeId]: publish [CallState.Placing], with fresh controls. Returns
+     * false while another call is ongoing, a placing included. The caller must not place a second
+     * call over it.
      *
-     * Otherwise forgets the finished call. The call screen finishes itself 1.5 s after it sees
-     * Ended, so a stale Ended would close the new call's screen while the call is still being set up.
+     * Replaces a finished call. The call screen finishes itself 1.5 s after it sees Ended, so a
+     * stale Ended would close the new call's screen while the call is being set up.
      */
-    fun prepareOutgoingCall(): Boolean {
-        if (_callState.value.isOngoing) return false
-        reset()
-        return true
+    fun prepareOutgoingCall(calleeId: String, calleeName: String, calleeAvatarUrl: String?): Boolean {
+        val placing = CallState.Placing(calleeId, calleeName, calleeAvatarUrl)
+        while (true) {
+            val current = _callState.value
+            if (current.isOngoing) return false
+            if (_callState.compareAndSet(current, placing)) {
+                _uiControls.value = CallUiControls()
+                return true
+            }
+        }
     }
 
     /**
-     * End an outgoing call that failed before [CallService] took it over, so the call screen shows
-     * the end and closes. Replaces only the Idle that [prepareOutgoingCall] left. An incoming call
-     * can start ringing during the setup, and its state must stay.
+     * Record that the call being placed now has the document [callId]. Returns false when the
+     * placing was cancelled or failed meanwhile, or already has a document.
      */
-    fun failOutgoingCall(callId: String) {
-        _callState.compareAndSet(CallState.Idle, CallState.Ended(callId, EndReason.ERROR))
+    fun placingCreated(callId: String): Boolean = replacePlacing(callId = null) { it.copy(callId = callId) }
+
+    /**
+     * Let the call service take over the placed call as [ringing]. Returns false unless the call
+     * being placed is the one [ringing] names: its placing was cancelled or timed out first, and the
+     * service must end that call instead of ringing.
+     */
+    fun takeOverPlacing(ringing: CallState.OutgoingRinging): Boolean =
+        replacePlacing(ringing.callId) { ringing }
+
+    /**
+     * End the placing of [callId] with an error, so the call screen shows the end and closes. Pass
+     * null before the call's document exists. Returns false, and changes nothing, unless that call
+     * is being placed: an incoming call that rang meanwhile keeps its state.
+     */
+    fun failPlacing(callId: String?): Boolean =
+        replacePlacing(callId) { CallState.Ended(callId ?: "", EndReason.ERROR) }
+
+    /** Cancel the call being placed, at whatever stage. Returns false when no call is being placed. */
+    fun cancelPlacing(): Boolean {
+        while (true) {
+            val current = _callState.value as? CallState.Placing ?: return false
+            val ended = CallState.Ended(current.callId ?: "", EndReason.HANGUP)
+            if (_callState.compareAndSet(current, ended)) return true
+        }
     }
 
-    fun reset() {
-        _callState.value = CallState.Idle
-        _uiControls.value = CallUiControls()
+    /**
+     * Replace the placing of [callId] with [next]. Atomic: the setup on the application scope and
+     * the service on the main thread race for the same placing, and exactly one of them wins it.
+     */
+    private inline fun replacePlacing(callId: String?, next: (CallState.Placing) -> CallState): Boolean {
+        while (true) {
+            val current = _callState.value
+            if (current !is CallState.Placing || current.callId != callId) return false
+            if (_callState.compareAndSet(current, next(current))) return true
+        }
     }
 }

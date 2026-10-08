@@ -56,7 +56,8 @@ class CallActivity : ComponentActivity() {
             action?.let(::runMicAction)
         } else {
             Toast.makeText(this, "Microphone permission is required for calls", Toast.LENGTH_LONG).show()
-            if (callStateHolder.callState.value is CallState.Idle) {
+            // A call being placed is cancelled. A ringing call stays, so it can still be declined.
+            if (callStateHolder.cancelPlacing() || callStateHolder.callState.value is CallState.Idle) {
                 finishAndRemoveTask()
             }
         }
@@ -144,11 +145,14 @@ class CallActivity : ComponentActivity() {
     }
 
     /**
-     * Runs before the permission prompt. The call screen composes behind the prompt, and the
-     * previous call's Ended state would finish this activity underneath it.
+     * Runs before the permission prompt. The call screen composes behind the prompt and shows the
+     * call being placed. The previous call's Ended state would finish this activity underneath it.
      */
     private fun placeOutgoingCall() {
-        if (!callStateHolder.prepareOutgoingCall()) {
+        val calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return
+        val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
+        val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
+        if (!callStateHolder.prepareOutgoingCall(calleeId, calleeName, calleeAvatarUrl)) {
             // A call is already running. This screen shows it instead of placing a second one.
             Toast.makeText(this, "You're already in a call", Toast.LENGTH_SHORT).show()
             return

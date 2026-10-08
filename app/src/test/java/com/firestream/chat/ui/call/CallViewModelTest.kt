@@ -18,6 +18,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -65,7 +66,10 @@ class CallViewModelTest {
         return ViewModelProvider(store, factory)[CallViewModel::class.java]
     }
 
-    private fun CallViewModel.placeTestCall() = placeCall(CALLEE, "chat1", "Alice", null)
+    /** Place a call as the call screen does: publish the placing, and set the call up only if that worked. */
+    private fun CallViewModel.placeTestCall() {
+        if (holder.prepareOutgoingCall(CALLEE, "Alice", null)) placeCall(CALLEE, "chat1", "Alice", null)
+    }
 
     @Test
     fun `a created call is handed to the call service`() = runTest {
@@ -83,7 +87,7 @@ class CallViewModelTest {
     fun `closing the screen during setup ends the call instead of starting it`() = runTest {
         val store = ViewModelStore()
         viewModelIn(store).placeTestCall()
-        advanceUntilIdle()
+        runCurrent()
 
         store.clear()
         created.complete(Result.success("call1"))
@@ -99,7 +103,7 @@ class CallViewModelTest {
         // with it onCleared, for seconds.
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()
-        advanceUntilIdle()
+        runCurrent()
 
         viewModel.onScreenClosed()
         created.complete(Result.success("call1"))
@@ -123,8 +127,8 @@ class CallViewModelTest {
 
     @Test
     fun `a second request before the service has taken the call places one call`() = runTest {
-        // The service publishes the call on the main thread a moment after it is handed over,
-        // and the state is Idle until then.
+        // The service takes the call over on the main thread a moment after it is handed over,
+        // and the call is still being placed until then.
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()
         created.complete(Result.success("call1"))
@@ -138,7 +142,6 @@ class CallViewModelTest {
 
     @Test
     fun `a failed create ends the call screen and says so`() = runTest {
-        holder.prepareOutgoingCall()
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()
 
@@ -151,9 +154,8 @@ class CallViewModelTest {
 
     @Test
     fun `a failed create leaves alone a call that started ringing during the setup`() = runTest {
-        holder.prepareOutgoingCall()
         viewModelIn(ViewModelStore()).placeTestCall()
-        advanceUntilIdle()
+        runCurrent()
         val ringing = CallState.IncomingRinging("call9", "u3", "Bob", null)
         holder.updateState(ringing)
 
@@ -165,17 +167,73 @@ class CallViewModelTest {
 
     @Test
     fun `a create that fails after the screen closed leaves the next screen alone`() = runTest {
-        holder.prepareOutgoingCall()
         val store = ViewModelStore()
         viewModelIn(store).placeTestCall()
-        advanceUntilIdle()
+        runCurrent()
 
         store.clear()
-        holder.prepareOutgoingCall()
+        val next = CallState.Placing("u3", "Bob", null)
+        holder.prepareOutgoingCall("u3", "Bob", null)
         created.complete(Result.failure(Exception("offline")))
         advanceUntilIdle()
 
-        assertEquals(CallState.Idle, holder.callState.value)
+        assertEquals(next, holder.callState.value)
+    }
+
+    @Test
+    fun `cancelling while the call is created ends it instead of starting it`() = runTest {
+        val viewModel = viewModelIn(ViewModelStore())
+        viewModel.placeTestCall()
+        runCurrent()
+
+        viewModel.hangup()
+        created.complete(Result.success("call1"))
+        advanceUntilIdle()
+
+        assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
+        assertNull(shadowOf(app).nextStartedService)
+        coVerify { callRepository.endCall("call1", "hangup") }
+    }
+
+    @Test
+    fun `a call the service takes over is left to the service`() = runTest {
+        viewModelIn(ViewModelStore()).placeTestCall()
+        created.complete(Result.success("call1"))
+        runCurrent()
+        val ringing = CallState.OutgoingRinging("call1", CALLEE, "Alice", null)
+        holder.takeOverPlacing(ringing)
+
+        advanceTimeBy(CallViewModel.HANDOVER_TIMEOUT_MS * 2)
+        runCurrent()
+
+        assertEquals(ringing, holder.callState.value)
+        coVerify(exactly = 0) { callRepository.endCall(any(), any()) }
+    }
+
+    @Test
+    fun `a call the service never takes over is ended`() = runTest {
+        viewModelIn(ViewModelStore()).placeTestCall()
+        created.complete(Result.success("call1"))
+        runCurrent()
+        assertEquals(CallState.Placing(CALLEE, "Alice", null, callId = "call1"), holder.callState.value)
+
+        advanceTimeBy(CallViewModel.HANDOVER_TIMEOUT_MS)
+        runCurrent()
+
+        assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
+        coVerify { callRepository.endCall("call1", "error") }
+    }
+
+    @Test
+    fun `a create that takes too long fails the placing`() = runTest {
+        val viewModel = viewModelIn(ViewModelStore())
+        viewModel.placeTestCall()
+
+        advanceTimeBy(CallViewModel.CREATE_TIMEOUT_MS)
+        runCurrent()
+
+        assertEquals(CallState.Ended("", EndReason.ERROR), holder.callState.value)
+        assertEquals(Unit, viewModel.setupFailed.first())
     }
 
     private companion object {

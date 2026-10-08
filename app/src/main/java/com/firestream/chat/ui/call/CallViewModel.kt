@@ -57,19 +57,25 @@ class CallViewModel @Inject constructor(
     private val closed = AtomicBoolean(false)
 
     /**
-     * Create the call and hand it to [CallService]. Does nothing while an earlier call is still
-     * being set up.
+     * Create the call and hand it to [CallService]. The screen has published [CallState.Placing]
+     * for it first, with [CallStateHolder.prepareOutgoingCall]. Does nothing while an earlier call
+     * is still being set up.
      *
      * The setup runs on the application scope. The call document rings the callee as soon as it
      * exists, so a setup cancelled halfway would leave them ringing. A setup that finishes after
      * the screen closed ends its call instead, and touches no state the next screen may own.
+     *
+     * Both steps are bounded, so a stuck setup cannot leave the placing up and block every call.
      */
     fun placeCall(calleeId: String, chatId: String, calleeName: String, calleeAvatarUrl: String?) {
         if (setup?.isActive == true) return
         setup = appScope.launch {
-            callRepository.createCall(calleeId)
+            val created = withTimeoutOrNull(CREATE_TIMEOUT_MS) { callRepository.createCall(calleeId) }
+                ?: Result.failure(IllegalStateException("Creating the call took too long"))
+            created
                 .onSuccess { callId ->
-                    if (closed.get()) {
+                    // The screen closed, or Cancel was pressed, while the document was created.
+                    if (closed.get() || !callStateHolder.placingCreated(callId)) {
                         callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
                         return@onSuccess
                     }
@@ -80,27 +86,36 @@ class CallViewModel @Inject constructor(
                         // background, and a slow setup can outlast the user leaving the app.
                         Log.w(TAG, "Could not start the call service", e)
                         callRepository.endCall(callId, EndReason.ERROR.name.lowercase())
-                        callStateHolder.failOutgoingCall(callId)
+                        callStateHolder.failPlacing(callId)
                         return@onSuccess
                     }
-                    // The setup stays running until the service publishes the call, which it does
-                    // on the main thread a moment later. Until then the state is still Idle, and a
-                    // second tap would place a second call.
-                    withTimeoutOrNull(HANDOVER_TIMEOUT_MS) {
-                        callStateHolder.callState.first { it != CallState.Idle }
+                    // The service takes the call over on the main thread a moment later. If it
+                    // never does, the placing must not stay up. The service then finds it gone
+                    // and ends the call itself.
+                    val handedOver = withTimeoutOrNull(HANDOVER_TIMEOUT_MS) {
+                        callStateHolder.callState.first { it !is CallState.Placing || it.callId != callId }
+                    }
+                    if (handedOver == null && callStateHolder.failPlacing(callId)) {
+                        callRepository.endCall(callId, EndReason.ERROR.name.lowercase())
                     }
                 }
                 .onFailure { e ->
                     Log.w(TAG, "Could not create the call", e)
+                    // A closed screen cancelled its placing as it closed. The placing now up may
+                    // be the next screen's.
                     if (closed.get()) return@onFailure
                     _setupFailed.trySend(Unit)
-                    callStateHolder.failOutgoingCall(callId = "")
+                    callStateHolder.failPlacing(callId = null)
                 }
         }
     }
 
     fun decline() = CallService.sendAction(context, CallService.ACTION_DECLINE)
-    fun hangup() = CallService.sendAction(context, CallService.ACTION_HANGUP)
+    /** Hang up. A call still being placed is cancelled here: the service does not hold it yet. */
+    fun hangup() {
+        if (callStateHolder.cancelPlacing()) return
+        CallService.sendAction(context, CallService.ACTION_HANGUP)
+    }
     fun toggleMute() = CallService.sendAction(context, CallService.ACTION_TOGGLE_MUTE)
 
     /** Move the call's audio to [route]. The OS decides when it actually lands; [uiControls] follows. */
@@ -111,15 +126,21 @@ class CallViewModel @Inject constructor(
      * comes only with its onDestroy, which the system can hold back for seconds after Back.
      */
     fun onScreenClosed() {
-        closed.set(true)
+        if (closed.getAndSet(true)) return
+        callStateHolder.cancelPlacing()
     }
 
     override fun onCleared() {
         onScreenClosed()
     }
 
-    private companion object {
-        const val TAG = "CallViewModel"
-        const val HANDOVER_TIMEOUT_MS = 5_000L
+    internal companion object {
+        private const val TAG = "CallViewModel"
+
+        /** How long creating the call document may take before the placing fails. */
+        const val CREATE_TIMEOUT_MS = 20_000L
+
+        /** How long the call service may take to take over a created call. */
+        const val HANDOVER_TIMEOUT_MS = 10_000L
     }
 }
