@@ -8,7 +8,7 @@
 //   through (cancellableResultOf): a cancelled caller stops instead of
 //   carrying on with a failure.
 // Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService.
-// Don't put here: PeerConnection lifecycle (CallService), in-call UI state
+// Don't put here: PeerConnection lifecycle (WebRtcCallMedia), in-call UI state
 //   (CallStateHolder), call-log derivation (CallsViewModel).
 // endregion
 

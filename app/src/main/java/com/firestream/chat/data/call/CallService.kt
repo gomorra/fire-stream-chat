@@ -118,8 +118,8 @@ class CallService : Service() {
     @Inject lateinit var profileImageManager: ProfileImageManager
 
     /**
-     * For the writes that record how a call ended. They must outlive the service: [cleanup] stops
-     * it right after launching them, and [onDestroy] cancels [serviceScope].
+     * For the writes that record how a call ended. They must outlive the service: a call that
+     * ends stops the service right after launching them, and [onDestroy] cancels [serviceScope].
      */
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 

@@ -6,7 +6,7 @@
 // Collaborators: CallRepositoryImpl (only caller); the Cloud Function
 //   `sendCallPushNotification` triggers off `calls/*` document creates with
 //   status == ringing.
-// Don't put here: PeerConnection itself (CallService), call-log derivation
+// Don't put here: PeerConnection itself (WebRtcCallMedia), call-log derivation
 //   (call-type messages live in FirestoreMessageSource).
 // endregion
 

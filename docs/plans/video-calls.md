@@ -2,7 +2,7 @@
 
 Status: approved. The prototype verdict is in and written into steps 4, 4a and 9.
 
-> **Changed since this plan was written (2026-10-08).** `CallService` now runs each call in a `CallSession` (`CallHost`, `CallMedia`, `WebRtcCallMedia`), so step 1's `PeerSession` starts from there. `CallState` has `Placing`. `firestore.rules` lists the fields a call may hold and limits the ICE candidate lists to the caller and the callee, with tests in `firestore-rules-tests/`. Re-read steps 1, 2 and 6 against the code before running them.
+> **The code has moved past parts of this plan.** `CallService` runs each call in a `CallSession` (`CallHost`, `CallMedia`, `WebRtcCallMedia`), so step 1's `PeerSession` starts from there. `CallState` has `Placing`. `firestore.rules` lists the fields a call may hold and limits the ICE candidate lists to the caller and the callee, with tests in `firestore-rules-tests/`. Re-read steps 1, 2 and 6 against the code before running them.
 
 ## Context
 
@@ -42,7 +42,8 @@ picture-in-picture from the docked card, a call card outside the call's chat.
 
 ## What exists today (verified 2026-10-03)
 
-- `data/call/CallService.kt` (735 lines) holds one `PeerConnection`. Offer and answer both set
+- `data/call/CallService.kt` holds one `CallSession` at a time, and its `WebRtcCallMedia` one
+  `PeerConnection`. Offer and answer both set
   `OfferToReceiveVideo = false`. `onTrack` is empty.
 - `data/call/WebRtcPeerConnectionFactory.kt` builds the factory with no video codecs and no `EglBase`.
   Its ICE servers are Google STUN and the public relay `openrelay.metered.ca` with fixed credentials.

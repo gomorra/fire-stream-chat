@@ -23,8 +23,8 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * The call screen while a call is being placed, before the call service holds it. The screen used
- * to stay blank until the service took the call over.
+ * The call screen while a call is being placed, before the call service holds it: it shows the
+ * callee, and Cancel ends the placing.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [31], application = Application::class)

@@ -304,10 +304,21 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.**
 - `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service enters and leaves the foreground, how it stops by start id, and how WebRTC's callbacks reach the main thread are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - The fallback ring that `FCMService` posts when Android will not start the call service does not know when the caller hangs up. It rings until it times out with the ring, 30 s at most. Opening it after the call ended shows "Call Ended".
+- An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification.
 
 **Why we haven't fixed it.** Both adapters are thin layers over Android and WebRTC, which Robolectric cannot run: WebRTC needs its native library, and the foreground-service checks are the platform's. A test there would mostly check its own mocks. The fallback ring is the rare path, and listening to the call document from a push needs a running service, the very thing Android refused.
 
 **When to revisit.** When a bug is traced to either adapter, or when the fallback ring turns out to fire often.
+
+---
+
+### Repositories other than `CallRepositoryImpl` turn cancellation into a failure
+
+**The smell.** `resultOf` and the hand-written `try { … } catch (e: Exception)` in the other repositories catch `CancellationException`. A coroutine cancelled while suspended in one gets `Result.failure` back and runs on. `cancellableResultOf` (`ResultExt.kt`) lets the cancellation through, and only `CallRepositoryImpl` uses it. `docs/GOTCHAS.md` describes the trap.
+
+**Why we haven't fixed it.** Each call site needs checking that no caller relies on getting a failure when it is cancelled, across about a hundred catch sites in eight repositories. No known bug comes from it today: the callers that cancel check that the work is still wanted.
+
+**When to revisit.** When a bug is traced to a cancelled repository call, or when a repository is next reworked. Move that repository to `cancellableResultOf` then.
 
 ---
 

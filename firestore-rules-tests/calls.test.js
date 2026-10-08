@@ -42,7 +42,7 @@ const CANDIDATE = {
   sdpMLineIndex: 0,
   sdp: 'candidate:1 1 udp 2122260223 192.0.2.10 49152 typ host',
 };
-// CallService ends a call with EndReason.name.lowercase().
+// The app writes an end reason as its EndReason name in lower case.
 const END_REASONS = ['hangup', 'remote_hangup', 'timeout', 'error'];
 const LISTS = ['callerCandidates', 'calleeCandidates'];
 

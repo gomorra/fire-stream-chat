@@ -418,7 +418,7 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **WebRTC calls back on its signaling thread, and the factory owns that thread.**
   `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
   frees the factory's threads. Tearing a call down from one of those callbacks destroys the
-  thread the callback is running on. Hop to the main thread first (`CallService.onMain`).
+  thread the callback is running on. Hop to the main thread first (`WebRtcCallMedia.onMain`).
   `PeerConnection.close()` frees nothing: only `dispose()` releases the native connection and
   the observer it holds. `PeerConnectionFactory.builder()` makes an audio device module that
   nothing releases unless you pass your own and call `release()` after `dispose()`.
