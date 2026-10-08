@@ -35,8 +35,8 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 > **Cloud sessions (Claude Code on the web): run the gate. Gradle works there.**
 > The full suite runs in a cloud container, and all dependency hosts resolve.
 >
-> A fresh container lacks three things. `.claude/hooks/session-start.sh` supplies all
-> three. If you hit one, the hook did not run: check `CLAUDE_CODE_REMOTE` and run the
+> A fresh container lacks four things. `.claude/hooks/session-start.sh` supplies all
+> four. If you hit one, the hook did not run: check `CLAUDE_CODE_REMOTE` and run the
 > hook by hand. Don't work around it.
 > 1. **No Android SDK.** Every Android task fails with `SDK location not found`.
 >    `scripts/install-android-sdk.sh` installs it and writes `sdk.dir` to `local.properties`.
@@ -47,6 +47,11 @@ cd pocketbase && ./pocketbase serve --http=0.0.0.0:8090
 >    `.claude/settings.json` sets `LANG`/`LC_ALL`. The Gradle daemon inherits them from
 >    the shell that started it, so exporting them in a hook or a single command is not
 >    enough. If you do, run `./gradlew --stop` first.
+> 4. **No way past Maven Central's rate limit.** Through the session's proxy, Maven
+>    Central sometimes answers `429 Too Many Requests`. Gradle stops at a 429 instead of
+>    trying the next repository, and Robolectric fails a test with "Failed to fetch maven
+>    artifact". The hook writes `~/.gradle/init.d/maven-central-mirror.gradle`, which puts
+>    Google's mirror of Maven Central first for both.
 >
 > Use the firebase flavor (`:app:testFirebaseDebugUnitTest`, `assembleFirebaseDebug`).
 > Bare `test` also builds pocketbase, which is not maintained yet.

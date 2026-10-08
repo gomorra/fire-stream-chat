@@ -77,8 +77,7 @@ Out of scope: everything in the TECH_DEBT entry named above.
 
 ## Environment notes for a cloud session
 
-- **Maven Central rate limit.** Maven Central answered 429 through the proxy for most of an hour, and Gradle stops at a 429 instead of trying the next repository. This session put Google's mirror first with an init script outside the repo, `~/.gradle/init.d/maven-central-mirror.gradle`. It adds `https://maven-central.storage-download.googleapis.com/maven2/` to both `pluginManagement` and `dependencyResolutionManagement` in `beforeSettings`. A fresh container does not have it.
-- **Robolectric downloads.** Robolectric fetches its `android-all-instrumented` jars from Maven Central at runtime. A 429 there fails the first Robolectric test of a run with "Failed to fetch maven artifact", which is not a code failure.
+- **Maven Central rate limit.** Through the proxy, Maven Central answers 429 at times; the sweep's session and the review's session both hit it. `.claude/hooks/session-start.sh` writes `~/.gradle/init.d/maven-central-mirror.gradle`, which puts Google's mirror of Maven Central first for Gradle and for the `android-all-instrumented` jars Robolectric downloads while tests run. If a 429 still appears, check that file exists.
 - **Signal's Maven repo.** The environment's network policy denies `build-artifacts.signal.org` (403). It only matters if a jar from it is missing from the Gradle cache. Allow it under the environment's Network access settings if one is.
 - **Gradle daemon heap.** The daemon (`-Xmx4g`) filled its old generation after about eight builds and slowed to a crawl. Run `./gradlew --stop` and start again.
 - **Issue tracker.** `docs/agents/issue-tracker.md` does not exist. The `code-review` skill mentions it; this work has no issue.
