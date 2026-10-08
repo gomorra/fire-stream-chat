@@ -171,6 +171,9 @@ class CallService : Service() {
     // Track ICE candidates we've already processed to avoid duplicates
     private val processedIceCandidates = mutableSetOf<String>()
 
+    /** The id of the latest start this service has seen, for [stopSelf]. */
+    private var lastStartId = 0
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -180,18 +183,19 @@ class CallService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START_OUTGOING -> {
-                val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopAndReturn()
-                val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return stopAndReturn()
-                val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopAndReturn()
+                val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopIfIdle()
+                val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return stopIfIdle()
+                val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopIfIdle()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
                 startOutgoingCall(callId, chatId, userId, name, avatar)
             }
             ACTION_START_INCOMING -> {
-                val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopAndReturn()
-                val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopAndReturn()
+                val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopIfIdle()
+                val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopIfIdle()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
                 startIncomingCall(callId, userId, name, avatar)
@@ -202,7 +206,9 @@ class CallService : Service() {
             ACTION_TOGGLE_MUTE -> toggleMute()
             ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
         }
-        return START_NOT_STICKY
+        // An action that finds no call, such as a second tap on Hang Up, must not leave the
+        // service running.
+        return stopIfIdle()
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -743,7 +749,10 @@ class CallService : Service() {
         notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_INCOMING)
 
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        // The id, not stopSelf(): that stops the service even with the next call's start still
+        // queued. The start would then run on a dying service that cannot ring, and its call
+        // state would stay ongoing until the process died.
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {
@@ -753,8 +762,9 @@ class CallService : Service() {
         mainHandler.removeCallbacksAndMessages(null)
     }
 
-    private fun stopAndReturn(): Int {
-        stopSelf()
+    /** Stop the service unless it holds a call. A start that is still queued keeps it running. */
+    private fun stopIfIdle(): Int {
+        if (currentCallId == null) stopSelf(lastStartId)
         return START_NOT_STICKY
     }
 }
