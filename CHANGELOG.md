@@ -6,7 +6,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`pending`)
+- **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`01c0289f`)
 
 ## [1.40.1] — 2026-10-07
 
