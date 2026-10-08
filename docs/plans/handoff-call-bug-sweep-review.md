@@ -1,28 +1,30 @@
-# Handover: review the call bug sweep
+# Handover: the call bug sweep, reviewed
 
-Status: the fixes are committed and pushed on branch `ccr-80d563e8-ahtbkb`, on top of `66eee5d` (main). No review of the fixes has finished. Written 2026-10-08.
+Status: the sweep's fixes and the fixes from its review are on branch `ccr-1f47c45a-cg4lbj`, on top of `66eee5d` (main). The review is finished. No pull request is open, and nothing has run on a phone. Updated 2026-10-08.
 
-## What the next session does
+## What is left
 
-1. Run the `code-review` skill. The fixed point is `66eee5d`, so the diff is `git diff 66eee5d...HEAD` on this branch. The spec is the "Spec" section below; there is no issue.
-2. Add an adversarial correctness pass on `CallService` at the strong tier. CLAUDE.md asks for one on any diff that touches coroutine scoping, and the `code-review` skill only checks standards and spec.
-3. Fix each confirmed finding test-first (CLAUDE.md, Change Safety), run the gate, and push to the same branch.
+1. The owner settles the open decisions at the end of this file.
+2. Open a pull request from `ccr-1f47c45a-cg4lbj` to `main`. CI runs only on pull requests and on pushes to `main`.
+3. Run the phone checks in `docs/BACKLOG.md`, "Calls — teardown, ringing, answering and the call log (2026-10-08)".
 
 ## Where everything is
 
 Each of these is the source of truth. This handover does not repeat them.
 
-- Commits: `git log --oneline 66eee5d..ccr-80d563e8-ahtbkb`. There is one commit per area, and each message says what it fixes and why:
+- Commits: `git log --oneline 66eee5d..ccr-1f47c45a-cg4lbj`. There is one commit per area, and each message says what it fixes and why:
   - `aec1caa` ringing
   - `6646712` the call log and Calls-tab names
   - `53a2958` call state and the call screen
   - `eeb706a` `CallService` threading and WebRTC releases
-  - `c9da7f2` docs
-  - `20b304f` CHANGELOG hashes
-- User-visible summary: the nine call entries under `[UNRELEASED] [1.40.2]` in `CHANGELOG.md`.
-- Findings left unfixed, with reasons: `TECH_DEBT.md`, "Calls — leftovers from the 2026-10-08 bug sweep".
+  - `12d14a3` Calls-tab names that survive a contacts reload (from the review)
+  - `9cdf267` outgoing-call setup in `CallViewModel` (from the review)
+  - `219499e` `CallService` stops only when no newer start is queued (from the review)
+  - The other commits are docs and CHANGELOG hashes.
+- User-visible summary: the call entries under `[UNRELEASED] [1.40.2]` in `CHANGELOG.md`.
+- Problems left unfixed, with reasons: `TECH_DEBT.md`, "Calls — known problems left unfixed".
 - Checks only a phone can do: `docs/BACKLOG.md`, "Calls — teardown, ringing, answering and the call log (2026-10-08)".
-- Traps found on the way: `docs/GOTCHAS.md`. They cover the Firestore own-write echo, `catch (e: Exception)` catching cancellation, and WebRTC's factory owning its signaling thread.
+- Traps found on the way: `docs/GOTCHAS.md`. They cover the Firestore own-write echo, `catch (e: Exception)` catching cancellation, WebRTC's factory owning its signaling thread, `stopSelf()` without a start id, and `advanceUntilIdle()` leaving `backgroundScope` work unrun.
 - Files: `docs/FEATURE-MAP.md`, "Voice Call".
 
 ## Spec
@@ -56,27 +58,22 @@ Out of scope: everything in the TECH_DEBT entry named above.
 
 ## How the work was verified
 
-- Every fix in `aec1caa`, `6646712` and `53a2958` has a regression test, written first and seen failing against the old code.
-- The full gate passed on the final tree: `:app:testFirebaseDebugUnitTest` (2233 tests, 0 failures) and `assembleFirebaseDebug`.
-- Those three commits were each checked on their own tree, running the call, chat and architecture test packages.
-- `eeb706a` has no JVM seam. No test covers `CallService`'s threading, its dispose order or its end-of-call writes, so the review matters most there.
+- Every fix outside `CallService` has a regression test, written first and seen failing against the old code.
+- `CallService` has no JVM seam. No test covers its threading, its dispose order, its end-of-call writes or how it stops; review and the phone checks cover them.
+- The full gate passed on the final tree: `:app:testFirebaseDebugUnitTest` (2245 tests, 0 failures) and `assembleFirebaseDebug`.
+- Each code commit from the review was checked on its own tree with the call, calls and architecture test packages.
 - Nothing has run on a phone.
 
-## Where to look hardest
+## Review
 
-1. **Threading.** `CallService` runs everything on the main thread: `serviceScope` is `Dispatchers.Main.immediate`, and WebRTC callbacks hop over through `onMain(callId)`. Check that nothing touches its fields or the `PeerConnection` off the main thread. `onIceCandidate` still launches from the signaling thread, with the `callId` and `isCaller` it was created with.
-2. **Busy guards.** They return without `startForeground()` after a `startForegroundService()`. This relies on the platform skipping the start-foreground timeout for a service that is already in the foreground ("Service already foreground; no new timeout" in `ActiveServices`).
-3. **Dispose order.** `localAudioTrack.dispose()` runs before `peerConnection.dispose()`. Each `RtpSender` holds its own track wrapper; this was checked in the bytecode of `stream-webrtc-android` 1.3.0.
-4. **The audio device module.** `WebRtcPeerConnectionFactory` releases it after `factory.dispose()`. That is safe whether or not the native factory keeps its own reference.
-5. **Setup in `CallActivity`.** It runs on `@ApplicationScope` and reads `isFinishing` of the activity that started it. A failed create publishes `Ended(callId = "", ERROR)`, and nothing reads `Ended.callId`.
-6. **Resetting controls.** `CallStateHolder.updateState` resets the controls on a not-ongoing to ongoing change. It reads `_callState.value` non-atomically, which is safe only while every caller is on the main thread.
-7. **Ringing.** It uses `FLAG_INSISTENT` on a foreground service's notification. The ring is expected to stop when that notification is replaced by the low-importance ongoing one, or removed.
-8. **The call-log rule.** `CallDirection.of` also changes how calls already in the history read. Every received 0-second call now shows as missed.
-
-## Review history
-
-- Before the fixes, an independent strong-tier review found 13 issues. The fixed ones are in the commits; the rest are in the TECH_DEBT entry.
-- After the commits, three reviews were started: the `code-review` skill's Standards and Spec agents, and a second correctness pass. All three were stopped before they reported, at the owner's request, so none of their findings exist.
+- Four reviewers read the sweep: the `code-review` skill's Standards and Spec axes, and two adversarial correctness passes, one on `CallService` and one on call setup, call state and the call log. All but Standards ran at the strong tier.
+- They confirmed these defects, now fixed:
+  - Callers who are not contacts went back to "Unknown" in the Calls tab on any contacts reload or pull to refresh (`12d14a3`).
+  - Call setup: Back after a rotation still rang the callee, the setup held the destroyed activity, a double tap placed two calls, a failed setup replaced a call that was ringing meanwhile, and a rotation at the microphone prompt lost the call (`9cdf267`).
+  - `stopSelf()` without a start id let the next call's start run on a dying service, which never rang and left the app "in a call" (`219499e`).
+- They checked these and found them sound: `CallService`'s main-thread confinement and its filter for stale callbacks, the busy guards, the dispose order (in the `stream-webrtc-android` 1.3.0 bytecode), the audio device module's release, the end-of-call writes on the application scope, every exit that stops the ring, and that nothing reads `Ended.callId`.
+- The review's own fixes went through `code-review` and `simplify`. Their Spec pass caught a regression in the first version: Back without a rotation could still ring the callee, because `onCleared` comes only with `onDestroy`. `9cdf267` includes the fix.
+- Findings not fixed are in the TECH_DEBT entry, each with its reason. The largest is that call state has no `Placing` value.
 
 ## Environment notes for a cloud session
 
@@ -84,17 +81,10 @@ Out of scope: everything in the TECH_DEBT entry named above.
 - **Robolectric downloads.** Robolectric fetches its `android-all-instrumented` jars from Maven Central at runtime. A 429 there fails the first Robolectric test of a run with "Failed to fetch maven artifact", which is not a code failure.
 - **Signal's Maven repo.** The environment's network policy denies `build-artifacts.signal.org` (403). It only matters if a jar from it is missing from the Gradle cache. Allow it under the environment's Network access settings if one is.
 - **Gradle daemon heap.** The daemon (`-Xmx4g`) filled its old generation after about eight builds and slowed to a crawl. Run `./gradlew --stop` and start again.
-- **Issue tracker.** `docs/agents/issue-tracker.md` does not exist. The `code-review` skill mentions it, but this review has no issue.
-
-## Suggested skills
-
-- `code-review`: the review itself.
-- `tdd`: any fix the review turns up.
-- `diagnosing-bugs`: a finding that needs reproducing first.
-- `changelog-release`: a follow-up fix that adds a CHANGELOG entry. It goes in the same `[UNRELEASED] [1.40.2]` section.
-- `simplify`: an optional quality pass. The `CallService` diff is concurrency-heavy, which is one of CLAUDE.md's triggers for it.
+- **Issue tracker.** `docs/agents/issue-tracker.md` does not exist. The `code-review` skill mentions it; this work has no issue.
 
 ## Open decisions for the owner
 
 - Incoming calls now ring with the default ringtone, which changes behaviour. If silent calls were deliberate, revert `aec1caa`.
-- A pull request from `ccr-80d563e8-ahtbkb` to `main` is not open yet. CI runs only on pull requests and pushes to `main`.
+- A declined call reads "Declined" in the chat and "Missed" in the Calls tab. Should the Calls tab say "Declined" too?
+- A pull request from `ccr-1f47c45a-cg4lbj` to `main` is not open yet.

@@ -16,8 +16,8 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams, and the audio session (router + proximity lock); all on the main thread |
-| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call, `prepareOutgoingCall` |
+| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns `PeerConnection` lifecycle, ICE, media streams, and the audio session (router + proximity lock); all on the main thread; stops with the latest start id |
+| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow<CallState>`; fresh controls per call, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallState.kt` | Call states, `isOngoing` (the one "am I in a call" rule), `CallUiControls` |
 | `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row; `CallDirection.of` — the one outgoing / incoming / missed rule, also used by `MessageBubble`'s call row |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
@@ -27,29 +27,30 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory + ICE server config |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc + ICE subcollections |
 | `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source |
-| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route; owns the microphone permission and outgoing-call setup |
-| `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch) |
+| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route; owns the microphone permission and the launch decision |
+| `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); `MicAction`, what waits on the microphone prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | In-call UI |
-| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents |
+| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` + control intents; outgoing-call setup on the application scope, ended instead if the screen closed; the action waiting on the microphone prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | Mute / hang up / route control |
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
 | `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
-| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, `prepareOutgoingCall` |
+| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, `prepareOutgoingCall`, `failOutgoingCall` |
 | `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The incoming channel rings and vibrates on the ringtone stream, insistently; the old silent channel is removed (Robolectric) |
 | `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
 | `app/src/test/java/com/firestream/chat/domain/model/CallDirectionTest.kt` | The direction rule — a received call that never connected is missed |
 | `app/src/test/java/com/firestream/chat/ui/call/CallLaunchTest.kt` | Recents never places or answers a call again |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenAnswerUiTest.kt` | Answer goes to the host's permission check, not straight to the service |
+| `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, ended if the screen closed, a failure leaves a call that rang meanwhile alone (Robolectric) |
 | `app/src/test/java/com/firestream/chat/ui/chat/CallMessageBubbleUiTest.kt` | The call row's label in a chat |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |
 | `app/src/test/java/com/firestream/chat/ui/call/CallAudioRouteUiTest.kt` | Route button branch (≤2 toggles, 3 opens the sheet) + sheet rows |
-| `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation; names that arrive after the log |
+| `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation; names that arrive after the log, and profile names that outlive a contacts reload |
 
-**Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallActivity` (`ACTION_OUTGOING`) → `CallStateHolder.prepareOutgoingCall()` → `CallRepository.createCall()` → `CallService.startOutgoing()` foregrounds. Incoming: the `incoming_call` push → `FCMService.handleIncomingCall` → `CallService.startIncoming()`.
+**Entry point:** outgoing tap → `ChatScreen.kt` phone icon → `CallActivity` (`ACTION_OUTGOING`) → `CallStateHolder.prepareOutgoingCall()` → `CallViewModel.placeCall()` → `CallRepository.createCall()` → `CallService.startOutgoing()` foregrounds. Incoming: the `incoming_call` push → `FCMService.handleIncomingCall` → `CallService.startIncoming()`.
 
 ---
 

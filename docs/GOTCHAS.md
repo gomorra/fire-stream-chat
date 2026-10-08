@@ -320,14 +320,14 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **MockK `relaxed = true` returns a mock, not `null`, for nullable types.** A
   `Foo?`-returning stub silently defeats `?: return` guards; stub explicitly with
   `coEvery { fn(any()) } returns null` when the null path is the one under test.
-- **`backgroundScope` + `advanceUntilIdle()` does not deliver flow emissions.** When
-  testing a component that owns a never-completing collector (`Chat*Manager`,
-  `ChatMessageLoader`), passing `backgroundScope` as its scope makes every emission
-  vanish — the collector appears to run but the state under test stays at its initial
-  value, which reads exactly like a broken production diff. Passing the `runTest`
-  scope itself instead hangs the test on the collector (`UncompletedCoroutinesError`).
-  Use a root scope sharing the test dispatcher —
-  `CoroutineScope(coroutineContext + SupervisorJob())` — and cancel it in `@After`.
+- **`advanceUntilIdle()` stops once only `backgroundScope` work is left.** It leaves that
+  work unrun. A component given `backgroundScope` as its scope then never gets going: a
+  collector misses every emission, and a one-shot `launch` never starts. Both read exactly
+  like a broken production diff. A coroutine that finishes can take the `runTest` scope
+  itself (`CallViewModelTest`). A never-completing collector (`Chat*Manager`,
+  `ChatMessageLoader`) would hang the test there (`UncompletedCoroutinesError`). Give it a
+  root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
+  SupervisorJob())`, and cancel that scope in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
 - **A paused `mainClock` never sees a bare state write.** With
   `composeTestRule.mainClock.autoAdvance = false`, setting a `mutableStateOf` from the
@@ -399,6 +399,14 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **A `com.android.test` submodule can't use a versioned `alias()`** for an
   already-loaded plugin — AGP rejects it. Use bare `id("com.android.test")` without a
   version (see `:baselineprofile`).
+- **Stop a service with `stopSelf(startId)`, not `stopSelf()`.** Pass the id of the latest
+  start the service has handled; the system ignores the call while a newer start is queued
+  (`CallService.stopIfIdle`). `stopSelf()` stops the service anyway, because the system
+  queues each start on the main thread before `onStartCommand()` runs. The queued start
+  then runs on the dying service, where `startForeground()` does nothing, so the state it
+  publishes is never undone. If that start came from `startForegroundService()` after
+  `stopForeground()`, the stop crashes the app instead: "did not then call
+  `startForeground()`". No JVM test covers `CallService`.
 - **WebRTC calls back on its signaling thread, and the factory owns that thread.**
   `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
   frees the factory's threads. Tearing a call down from one of those callbacks destroys the
