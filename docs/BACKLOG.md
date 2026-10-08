@@ -40,7 +40,9 @@ seen on a phone.
 5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
 6. After a call, both phones' chat lists show the call as the chat's last message.
 7. Cancel an outgoing call before it is answered: the other phone shows a missed call, in the
-   chat and in the Calls tab. Decline a call: both phones show "Declined", in the chat and in the
+   chat and in the Calls tab, with a "Missed call" notification and an unread badge on the chat.
+   After an answered or a declined call the other phone shows neither (needs the updated Cloud
+   Functions). Decline a call: both phones show "Declined", in the chat and in the
    Calls tab, and only the phone that declined shows it in red.
 8. During a call, open another chat and tap call: "You're already in a call", and the call goes
    on. Rotate right after tapping call: the call still starts. Open a finished call's card from

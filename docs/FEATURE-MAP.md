@@ -39,7 +39,9 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
-| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create |
+| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create, kept by FCM for 30 s; `sendPushNotification` counts a call message as unread only when it was missed |
+| `functions/callPush.js` | What the call pushes decide: a missed call, the unread updates, the call push's Android options (tested by `functions/test/callPush.test.js`, `npm test`) |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | `incoming_call` push → `CallService.startIncoming`; a call-message push notifies only a missed call (`callPushNotificationText`) |
 | `firestore.rules` | `calls/{callId}`: only the caller and the callee read and write it; the status only moves forward; each side writes its own SDP and its own ICE candidate list |
 | `firestore-rules-tests/calls.test.js` | Every call write the app makes passes the rules, and the abuses fail (Firestore emulator; `npm test` in that folder) |
 | `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, the placing transitions |
@@ -53,6 +55,7 @@ Real-time audio call via WebRTC, signalled through Firestore, woken by a high-pr
 | `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, ended if the screen closed or Cancel was pressed, both timeouts, a failure leaves a call that rang meanwhile alone (Robolectric) |
 | `app/src/test/java/com/firestream/chat/ui/call/CallScreenPlacingUiTest.kt` | A call being placed shows the callee and "Calling..."; Cancel ends it without the service |
 | `app/src/test/java/com/firestream/chat/ui/chat/CallMessageBubbleUiTest.kt` | The call row's label in a chat |
+| `app/src/test/java/com/firestream/chat/data/remote/fcm/CallPushNotificationTextTest.kt` | Only a missed call notifies; a push without the duration says "Call" |
 | `app/src/test/java/com/firestream/chat/ui/calls/CallsScreenUiTest.kt` | The Calls tab's labels match the chat's, in the row and the details sheet (Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |

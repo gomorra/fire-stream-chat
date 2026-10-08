@@ -1,0 +1,35 @@
+name: Cloud Functions
+
+# Checks functions/index.js and runs the tests in functions/test/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - '.github/workflows/functions.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'functions/**'
+      - '.github/workflows/functions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v4
+
+      # The functions run on Node 20 (firebase.json).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: node --check index.js
+      - run: npm test

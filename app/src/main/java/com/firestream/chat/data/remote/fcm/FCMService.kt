@@ -13,6 +13,7 @@ import com.firestream.chat.R
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.MessageType
 import com.firestream.chat.domain.model.isOngoing
@@ -107,6 +108,13 @@ class FCMService : FirebaseMessagingService() {
             }
         }
 
+        // A call message records a call. Only a missed one is news: the callee saw the others ring.
+        val callText = if (messageType == MessageType.CALL.name) {
+            callPushNotificationText(data) ?: return
+        } else {
+            null
+        }
+
         serviceScope.launch {
             // For group chats: if mention-only notifications are enabled,
             // suppress notification unless the current user is mentioned
@@ -129,7 +137,10 @@ class FCMService : FirebaseMessagingService() {
             }
 
             val messageContent = data["messageContent"]
-            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent, messageId = messageId)
+            showNotification(
+                chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent,
+                overrideText = callText, messageId = messageId
+            )
         }
     }
 
@@ -277,3 +288,15 @@ class FCMService : FirebaseMessagingService() {
  */
 internal fun notificationPartnerHint(isGroup: Boolean, senderId: String): String =
     if (isGroup) "" else senderId
+
+/**
+ * The notification text for a pushed call message, or null when the call needs no notification.
+ * Only the caller writes a call message, so the recipient is the callee. A call that never connected
+ * and was not declined is a missed call. The callee saw any other call ring. A push from a Cloud
+ * Function that does not send `callDurationSeconds` cannot tell the two apart, and says "Call".
+ */
+internal fun callPushNotificationText(data: Map<String, String>): String? {
+    val durationSeconds = data["callDurationSeconds"]?.toIntOrNull() ?: return "\uD83D\uDCDE Call"
+    val type = CallLogType.of(isOwnMessage = false, endReason = data["messageContent"].orEmpty(), durationSeconds = durationSeconds)
+    return if (type == CallLogType.MISSED) "\uD83D\uDCDE Missed call" else null
+}

@@ -304,7 +304,6 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.** These call problems are known and not fixed:
 - `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service stops, and how WebRTC's callbacks reach the main thread, are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
-- `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.
 - `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
 - The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
 - A call that ends while its call screen is in the background leaves the screen in Recents until it is next shown. It then shows "Call Ended" and closes itself.
