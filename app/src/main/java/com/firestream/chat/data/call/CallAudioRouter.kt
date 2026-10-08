@@ -21,10 +21,10 @@ import java.util.concurrent.Executor
  * `AudioManager.mode` is `MODE_IN_COMMUNICATION`, or the OS offers no communication devices at all;
  * [stop] must run on every call-teardown path, or the next media app inherits the 8 kHz SCO link.
  *
- * Threading: both listeners fire on [handler]'s looper (the main one), while [start] / [select] /
- * [stop] arrive from the WebRTC and service threads, so every read-modify-write of the routing
- * bookkeeping happens under [lock]. The only coroutine machinery is [state]; there is no scope to
- * cancel and no timer to stop.
+ * Threading: both listeners fire on [handler]'s looper, the main one, and [CallService] calls
+ * [start] / [select] / [stop] on the main thread too. Every read-modify-write of the routing
+ * bookkeeping happens under [lock], so a caller on another thread would be safe as well. The
+ * only coroutine machinery is [state]. There is no scope to cancel and no timer to stop.
  *
  * @param audioManager the system `AudioManager`.
  * @param handler a main-looper handler; the device callback needs one, and the communication-device

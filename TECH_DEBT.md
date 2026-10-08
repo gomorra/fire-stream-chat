@@ -248,13 +248,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `CallAudioRouter` holds its monitor across AudioService binder calls
+### `CallAudioRouter` keeps a lock that no caller needs
 
-**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run make their `AudioManager` calls — `availableCommunicationDevices`, `setCommunicationDevice`, `clearCommunicationDevice`, and both un/register calls — inside `synchronized(lock)`, while the two listeners it registers fire on the main looper and block on that same monitor. A slow AudioService round-trip, made from the WebRTC signaling thread, therefore stalls the main thread for its duration. The lock strictly only needs to guard the four routing fields (`started`, `previousAvailable`, `userPick`, `currentRoute`).
+**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run hold `synchronized(lock)` around their routing fields and their `AudioManager` calls. `CallService` calls the router on the main thread, and its two listeners fire on the main looper, so nothing can race for that lock. The binder calls run on the main thread with or without it: single round-trips, a handful per call.
 
-**Why we haven't fixed it.** Narrowing it means copying the fields out, dropping the monitor, calling into `AudioManager`, and re-taking it to publish — which re-opens exactly the read-modify-write races the lock exists for (a device-list callback landing between the query and the `setCommunicationDevice`, so the route is chosen from one device list and applied to another). The calls held under the lock are single binder round-trips on a path that runs a handful of times per call, and `docs/plans/call-audio-routes.md` §4 rules out the retry/polling logic that would make them slow.
+**Why we haven't fixed it.** An uncontended monitor costs nothing measurable, and it keeps the router correct if a caller on another thread ever comes back.
 
-**When to revisit.** If an ANR trace or a jank report ever points at `CallAudioRouter`'s monitor on the main thread — then the fix is to move the whole router onto the main looper (the listeners are already there) and drop the lock entirely, rather than to narrow it.
+**When to revisit.** The next change to `CallAudioRouter`: drop the lock and its `Guarded by [lock]` notes then. If an ANR trace ever points at the router's binder calls, move those calls off the main thread instead.
 
 ---
 
