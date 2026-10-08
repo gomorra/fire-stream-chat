@@ -1,8 +1,10 @@
 package com.firestream.chat.data.call
 
+import android.Manifest
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
@@ -14,7 +16,9 @@ import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import com.firestream.chat.data.util.ProfileImageManager
+import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.model.CallAudioRoute
+import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
@@ -42,6 +46,14 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import javax.inject.Inject
 
+/**
+ * Runs one call at a time: its `PeerConnection`, its signalling listeners and its audio session.
+ *
+ * Threading: everything runs on the main thread. Intents and lifecycle callbacks arrive there,
+ * [serviceScope] dispatches there, and WebRTC's signaling-thread callbacks hop there through
+ * [onMain]. The fields below therefore need no locks, and teardown never races itself. Teardown
+ * must never run on the signaling thread: disposing the factory frees that very thread.
+ */
 @AndroidEntryPoint
 class CallService : Service() {
 
@@ -121,7 +133,14 @@ class CallService : Service() {
     @Inject lateinit var callStateHolder: CallStateHolder
     @Inject lateinit var profileImageManager: ProfileImageManager
 
-    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * For the writes that record how a call ended. They must outlive the service: [cleanup] stops
+     * it right after launching them, and [onDestroy] cancels [serviceScope].
+     */
+    @Inject @ApplicationScope lateinit var appScope: CoroutineScope
+
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var webRtcFactory: WebRtcPeerConnectionFactory? = null
     private var peerConnection: PeerConnection? = null
@@ -144,22 +163,10 @@ class CallService : Service() {
 
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
-    // Written under audioSessionLock, but read without it by selectAudioRoute() on the main thread:
-    // taking the lock there would park the main thread behind startAudioSession()'s binder calls.
-    @Volatile private var audioRouter: CallAudioRouter? = null
+    private var audioRouter: CallAudioRouter? = null
     private var proximityLock: ProximityLock? = null
 
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
-
-    /**
-     * Guards the audio-session fields above ([audioFocusRequest], [audioRouter], [proximityLock],
-     * [routeJob], [previousAudioMode]) — they are written from the WebRTC signaling thread and from
-     * both teardown threads. [audioRouter] has one lock-free reader, [selectAudioRoute], and is
-     * volatile for it; a tap that lands on a router already stopped is a no-op inside the router.
-     * Only ever held by [startAudioSession] / [stopAudioSession], which take
-     * the router's and the proximity lock's monitors under it, never the other way round.
-     */
-    private val audioSessionLock = Any()
 
     // Track ICE candidates we've already processed to avoid duplicates
     private val processedIceCandidates = mutableSetOf<String>()
@@ -191,7 +198,7 @@ class CallService : Service() {
             }
             ACTION_ANSWER -> answerIncomingCall()
             ACTION_DECLINE -> declineIncomingCall()
-            ACTION_HANGUP -> hangup()
+            ACTION_HANGUP -> endCallWithReason(EndReason.HANGUP)
             ACTION_TOGGLE_MUTE -> toggleMute()
             ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
         }
@@ -203,6 +210,14 @@ class CallService : Service() {
     // ──────────────────────────────────────────────────────────────────────────
 
     private fun startOutgoingCall(callId: String, chatId: String, userId: String, name: String, avatar: String?) {
+        if (currentCallId != null) {
+            // Another call holds the service. Its connection must not be reused for this one.
+            // The new call's document already exists and has rung the callee, so end it rather
+            // than leave their phone ringing.
+            Log.w(TAG, "Ending outgoing call $callId: call $currentCallId is in progress")
+            appScope.launch { callRepository.endCall(callId, EndReason.HANGUP.name.lowercase()) }
+            return
+        }
         currentCallId = callId
         currentChatId = chatId
         remoteUserId = userId
@@ -222,10 +237,10 @@ class CallService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
 
-        initWebRtc()
+        initWebRtc(callId)
         createOfferAndSend(callId)
         observeCallDocument(callId)
-        startRingTimeout()
+        startRingTimeout(callId)
     }
 
     private fun createOfferAndSend(callId: String) {
@@ -237,14 +252,14 @@ class CallService : Service() {
         }
 
         pc.createOffer(object : SimpleSdpObserver() {
-            override fun onCreateSuccess(sdp: SessionDescription) {
+            override fun onCreateSuccess(sdp: SessionDescription) = onMain(callId) {
                 pc.setLocalDescription(SimpleSdpObserver(), sdp)
                 serviceScope.launch {
                     callRepository.sendOffer(callId, SdpData(sdp.description, sdp.type.canonicalForm()))
                 }
             }
 
-            override fun onCreateFailure(error: String?) {
+            override fun onCreateFailure(error: String?) = onMain(callId) {
                 Log.e(TAG, "Failed to create offer: $error")
                 endCallWithReason(EndReason.ERROR)
             }
@@ -256,6 +271,11 @@ class CallService : Service() {
     // ──────────────────────────────────────────────────────────────────────────
 
     private fun startIncomingCall(callId: String, userId: String, name: String, avatar: String?) {
+        if (currentCallId != null) {
+            // FCMService checks this too, but a call can start between its check and this intent.
+            Log.w(TAG, "Ignoring incoming call $callId: call $currentCallId is in progress")
+            return
+        }
         currentCallId = callId
         remoteUserId = userId
         remoteName = name
@@ -278,11 +298,20 @@ class CallService : Service() {
         startForeground(CallNotificationManager.NOTIFICATION_ID_ONGOING, notification, serviceType)
 
         observeCallDocument(callId)
-        startRingTimeout()
+        startRingTimeout(callId)
     }
 
     private fun answerIncomingCall() {
         val callId = currentCallId ?: return
+        // Answer once. A double tap, or the notification's Answer racing the screen's, would
+        // otherwise apply the offer twice and send a second answer for the same connection.
+        if (callStateHolder.callState.value !is CallState.IncomingRinging) return
+        // CallActivity asks for the microphone before it sends this. Without it, the switch to a
+        // microphone foreground service below throws on Android 14+ and takes the app down.
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.w(TAG, "Not answering call $callId: RECORD_AUDIO is not granted")
+            return
+        }
 
         ringTimeoutJob?.cancel()
 
@@ -302,13 +331,22 @@ class CallService : Service() {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         )
 
-        initWebRtc()
+        initWebRtc(callId)
 
         // Fetch the call document to get the offer, then set remote desc and create answer.
         // IMPORTANT: We must wait for setRemoteDescription to complete before creating the
         // answer or observing ICE candidates — WebRTC requires it.
         serviceScope.launch {
             callRepository.getCallById(callId).onSuccess { signalingData ->
+                // The call can end while its document loads.
+                if (currentCallId != callId) return@onSuccess
+                if (signalingData.status != "ringing") {
+                    // The caller hung up, or the ring timed out, before this phone heard about it.
+                    // Answering now would overwrite "ended" with "answered" and connect to no one.
+                    callStateHolder.updateState(CallState.Ended(callId, EndReason.REMOTE_HANGUP))
+                    cleanup()
+                    return@onSuccess
+                }
                 val offer = signalingData.offer ?: run {
                     Log.e(TAG, "No offer found in call document")
                     endCallWithReason(EndReason.ERROR)
@@ -321,17 +359,18 @@ class CallService : Service() {
                 )
                 val pc = peerConnection ?: return@onSuccess
                 pc.setRemoteDescription(object : SimpleSdpObserver() {
-                    override fun onSetSuccess() {
+                    override fun onSetSuccess() = onMain(callId) {
                         createAnswerAndSend(callId)
                         observeIceCandidates(callId, "callerCandidates")
                     }
 
-                    override fun onSetFailure(error: String?) {
+                    override fun onSetFailure(error: String?) = onMain(callId) {
                         Log.e(TAG, "Failed to set remote description (callee): $error")
                         endCallWithReason(EndReason.ERROR)
                     }
                 }, remoteDesc)
             }.onFailure { e ->
+                if (currentCallId != callId) return@onFailure
                 Log.e(TAG, "Failed to get call document", e)
                 endCallWithReason(EndReason.ERROR)
             }
@@ -347,7 +386,7 @@ class CallService : Service() {
         }
 
         pc.createAnswer(object : SimpleSdpObserver() {
-            override fun onCreateSuccess(sdp: SessionDescription) {
+            override fun onCreateSuccess(sdp: SessionDescription) = onMain(callId) {
                 pc.setLocalDescription(SimpleSdpObserver(), sdp)
                 serviceScope.launch {
                     // Write answer SDP + status="answered" atomically so the caller
@@ -356,7 +395,7 @@ class CallService : Service() {
                 }
             }
 
-            override fun onCreateFailure(error: String?) {
+            override fun onCreateFailure(error: String?) = onMain(callId) {
                 Log.e(TAG, "Failed to create answer: $error")
                 endCallWithReason(EndReason.ERROR)
             }
@@ -366,7 +405,7 @@ class CallService : Service() {
     private fun declineIncomingCall() {
         val callId = currentCallId ?: return
         ringTimeoutJob?.cancel()
-        serviceScope.launch {
+        appScope.launch {
             callRepository.declineCall(callId)
         }
         callStateHolder.updateState(CallState.Ended(callId, EndReason.DECLINED))
@@ -406,7 +445,7 @@ class CallService : Service() {
         }
     }
 
-    private fun onCallAnswered(data: com.firestream.chat.domain.model.CallSignalingData) {
+    private fun onCallAnswered(data: CallSignalingData) {
         val callId = data.callId
         ringTimeoutJob?.cancel()
 
@@ -429,12 +468,12 @@ class CallService : Service() {
             answer.sdp
         )
         peerConnection?.setRemoteDescription(object : SimpleSdpObserver() {
-            override fun onSetSuccess() {
+            override fun onSetSuccess() = onMain(callId) {
                 // Only start observing ICE candidates after remote description is set
                 observeIceCandidates(callId, "calleeCandidates")
             }
 
-            override fun onSetFailure(error: String?) {
+            override fun onSetFailure(error: String?) = onMain(callId) {
                 Log.e(TAG, "Failed to set remote description (caller): $error")
                 endCallWithReason(EndReason.ERROR)
             }
@@ -466,19 +505,28 @@ class CallService : Service() {
     // WebRTC Setup
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun initWebRtc() {
+    private fun initWebRtc(callId: String) {
         if (webRtcFactory != null) return
 
         webRtcFactory = WebRtcPeerConnectionFactory(applicationContext)
-        peerConnection = webRtcFactory!!.createPeerConnection(peerConnectionObserver)
+        peerConnection = webRtcFactory!!.createPeerConnection(peerConnectionObserver(callId, isCaller))
 
         localAudioTrack = webRtcFactory!!.createAudioTrack()
         peerConnection?.addTrack(localAudioTrack)
     }
 
-    private val peerConnectionObserver = object : PeerConnection.Observer {
+    /**
+     * Run [block] on the main thread, unless call [callId] has ended by the time it gets there.
+     * Every WebRTC callback that reads or changes the service's state goes through here. The check
+     * also drops callbacks from a connection that was disposed after they were posted.
+     */
+    private fun onMain(callId: String, block: () -> Unit) {
+        mainHandler.post { if (currentCallId == callId) block() }
+    }
+
+    /** Callbacks for the connection of call [callId]. WebRTC invokes them on its signaling thread. */
+    private fun peerConnectionObserver(callId: String, isCaller: Boolean) = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
-            val callId = currentCallId ?: return
             serviceScope.launch {
                 callRepository.sendIceCandidate(
                     callId,
@@ -490,35 +538,7 @@ class CallService : Service() {
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState) {
             Log.d(TAG, "ICE connection state: $state")
-            val callId = currentCallId ?: return
-            when (state) {
-                PeerConnection.IceConnectionState.CONNECTED,
-                PeerConnection.IceConnectionState.COMPLETED -> {
-                    ringTimeoutJob?.cancel()
-                    if (callConnectedAt == null) callConnectedAt = System.currentTimeMillis()
-                    // The proximity lock is not taken here: it follows the audio route, and
-                    // startAudioSession's collector applies it as soon as the OS reports one.
-                    startAudioSession()
-                    callStateHolder.updateState(
-                        CallState.Connected(
-                            callId,
-                            remoteUserId ?: "",
-                            remoteName ?: "",
-                            remoteAvatarUrl,
-                            System.currentTimeMillis(),
-                            localAvatarPathFor(remoteUserId)
-                        )
-                    )
-                }
-                PeerConnection.IceConnectionState.DISCONNECTED -> {
-                    Log.w(TAG, "ICE disconnected — may reconnect")
-                }
-                PeerConnection.IceConnectionState.FAILED -> {
-                    Log.e(TAG, "ICE connection failed")
-                    endCallWithReason(EndReason.ERROR)
-                }
-                else -> {}
-            }
+            onMain(callId) { onIceConnectionStateChanged(callId, state) }
         }
 
         override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
@@ -533,23 +553,46 @@ class CallService : Service() {
         override fun onTrack(transceiver: RtpTransceiver?) {}
     }
 
+    private fun onIceConnectionStateChanged(callId: String, state: PeerConnection.IceConnectionState) {
+        when (state) {
+            PeerConnection.IceConnectionState.CONNECTED,
+            PeerConnection.IceConnectionState.COMPLETED -> {
+                ringTimeoutJob?.cancel()
+                // ICE reports CONNECTED and then COMPLETED, and again after every reconnect. The
+                // call's clock starts at the first report only, or the timer would restart at 0:00.
+                val connectedAt = callConnectedAt ?: System.currentTimeMillis().also { callConnectedAt = it }
+                // The proximity lock is not taken here: it follows the audio route, and
+                // startAudioSession's collector applies it as soon as the OS reports one.
+                startAudioSession()
+                callStateHolder.updateState(
+                    CallState.Connected(
+                        callId,
+                        remoteUserId ?: "",
+                        remoteName ?: "",
+                        remoteAvatarUrl,
+                        connectedAt,
+                        localAvatarPathFor(remoteUserId)
+                    )
+                )
+            }
+            PeerConnection.IceConnectionState.DISCONNECTED -> {
+                Log.w(TAG, "ICE disconnected — may reconnect")
+            }
+            PeerConnection.IceConnectionState.FAILED -> {
+                Log.e(TAG, "ICE connection failed")
+                endCallWithReason(EndReason.ERROR)
+            }
+            else -> {}
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Call Controls
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun hangup() {
-        val callId = currentCallId ?: run { cleanup(); return }
-        serviceScope.launch {
-            callRepository.endCall(callId, EndReason.HANGUP.name.lowercase())
-        }
-        writeCallMessageIfCaller(EndReason.HANGUP)
-        callStateHolder.updateState(CallState.Ended(callId, EndReason.HANGUP))
-        cleanup()
-    }
-
     private fun toggleMute() {
-        callStateHolder.toggleMute()
-        localAudioTrack?.setEnabled(!callStateHolder.uiControls.value.isMuted)
+        val muted = callStateHolder.toggleMute()
+        localAudioTrack?.setEnabled(!muted)
     }
 
     private fun selectAudioRoute(routeName: String?) {
@@ -565,15 +608,11 @@ class CallService : Service() {
     // Timeout
     // ──────────────────────────────────────────────────────────────────────────
 
-    private fun startRingTimeout() {
+    private fun startRingTimeout(callId: String) {
         ringTimeoutJob?.cancel()
         ringTimeoutJob = serviceScope.launch {
             delay(RING_TIMEOUT_MS)
-            val callId = currentCallId ?: return@launch
-            callRepository.endCall(callId, EndReason.TIMEOUT.name.lowercase())
-            writeCallMessageIfCaller(EndReason.TIMEOUT)
-            callStateHolder.updateState(CallState.Ended(callId, EndReason.TIMEOUT))
-            cleanup()
+            if (currentCallId == callId) endCallWithReason(EndReason.TIMEOUT)
         }
     }
 
@@ -585,13 +624,8 @@ class CallService : Service() {
      * Take audio focus, switch the device into communication mode, and start routing. Idempotent:
      * ICE reports CONNECTED and then COMPLETED, and a second run would both overwrite
      * [previousAudioMode] with `MODE_IN_COMMUNICATION` and leak a second router and collector.
-     *
-     * Runs under [audioSessionLock] because it is called from the WebRTC signaling thread while
-     * [stopAudioSession] arrives from the main thread (`ACTION_HANGUP`) and from [serviceScope]:
-     * hanging up as ICE connects must not interleave into a half-started session that nothing
-     * then tears down.
      */
-    private fun startAudioSession() = synchronized(audioSessionLock) {
+    private fun startAudioSession() {
         val am = audioManager ?: return
         if (audioFocusRequest != null) return
 
@@ -627,9 +661,9 @@ class CallService : Service() {
     }
 
     /** Undo [startAudioSession], in the reverse order: proximity, routing, focus, mode. */
-    private fun stopAudioSession() = synchronized(audioSessionLock) {
-        // Latches before routeJob is cancelled: cancellation is cooperative, so a collector body
-        // already running could otherwise re-acquire the lock after the call is gone.
+    private fun stopAudioSession() {
+        // Latches before routeJob is cancelled, so no route report can re-acquire the lock after
+        // the call is gone.
         proximityLock?.shutdown()
         proximityLock = null
         routeJob?.cancel()
@@ -657,7 +691,7 @@ class CallService : Service() {
     private fun endCallWithReason(reason: EndReason) {
         val callId = currentCallId
         if (callId != null) {
-            serviceScope.launch {
+            appScope.launch {
                 callRepository.endCall(callId, reason.name.lowercase())
             }
             writeCallMessageIfCaller(reason)
@@ -674,7 +708,7 @@ class CallService : Service() {
         val durationSeconds = callConnectedAt?.let {
             ((System.currentTimeMillis() - it) / 1000).toInt()
         } ?: 0
-        serviceScope.launch {
+        appScope.launch {
             callRepository.logCallMessage(chatId, reason.name.lowercase(), durationSeconds)
         }
     }
@@ -687,7 +721,9 @@ class CallService : Service() {
         localAudioTrack?.dispose()
         localAudioTrack = null
 
-        peerConnection?.close()
+        // dispose(), not close(): close() leaves the native connection allocated, and with it the
+        // observer that holds this service.
+        peerConnection?.dispose()
         peerConnection = null
 
         webRtcFactory?.dispose()
@@ -714,6 +750,7 @@ class CallService : Service() {
         super.onDestroy()
         cleanup()
         serviceScope.cancel()
+        mainHandler.removeCallbacksAndMessages(null)
     }
 
     private fun stopAndReturn(): Int {
