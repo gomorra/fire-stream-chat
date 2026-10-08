@@ -1,6 +1,20 @@
 # Handover: avatars don't load on Android 17
 
-Status: open, waiting on the phone results in steps 1 to 6. Written 2026-10-07 after two fixes that did not help. Read this before touching avatar code.
+Status: worked around on the owner's phone, root cause not fixed in code. Written 2026-10-07 after two fixes that did not help. Read this before touching avatar code.
+
+## Result: clearing the app's cache fixed it
+
+On 2026-10-08 the owner cleared the app's cache (Settings → Apps → FireStream → Storage → Clear cache, not storage) on the Android 17 phone on v1.40.1. Every avatar loaded again. No logcat was captured before the clear, so the failing exception is unknown.
+
+What this establishes:
+
+- **The fault lived in `cacheDir`.** That folder holds Coil's disk cache (`image_cache`, keyed by the avatar URL) and OkHttp's `http_cache`. v1.40.1 deleted and re-downloaded the avatar files in `filesDir` and did not help, so the files there were not the fault.
+- **Hypotheses A, B, C and D are ruled out as the standing cause.** The same avatar files, the same URLs and the same request load fine once the cache is empty.
+- **The app never heals a bad cache entry by itself.** `FireStreamApp.newImageLoader` sets `respectCacheHeaders(false)`, so Coil serves a cached URL entry forever and never revalidates it. `AvatarImage` falls back from the file to the URL, and the URL load reads the same entry again. Other users with a bad entry stay stuck until they clear the cache.
+- **What wrote the bad entry is unknown.** It may date from before the Android 17 update. No phone evidence exists for it.
+- **The v1.39.1 and v1.40.1 explanations are wrong.** The CHANGELOG entries for both and the `ScaledImageDecoder` gotcha in `docs/GOTCHAS.md` blame the decoder and the `Android/media` folder. The code changes themselves are sound and stay.
+
+Proposed follow-up, not built: when an avatar's URL load fails, retry it once with the disk cache read disabled (`diskCachePolicy(CachePolicy.WRITE_ONLY)`), so a fresh download replaces the bad entry. Regression seam: `avatarSourceAfterError` in `UserAvatar.kt` and `AvatarSourceTest`.
 
 ## Symptom
 
