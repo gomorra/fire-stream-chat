@@ -173,6 +173,19 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### `ZoomCropSurface` tells its own zoom changes from gestures by timing, and the viewer's pager shares one crop
+
+**The smell.**
+- `ZoomCropSurface` sees its own `zoom.set` calls and the user's gestures alike, as changes to `ZoomableState`. It skips its own by restarting the effect whose collector drops its first value. So the restore and every carry restart that effect, and a change that lands in the same frame can be missed. Two guards cover the cases known today, and `ZoomCropSurfaceTest` pins both. A new crop shape never writes the decoded size. A page resetting itself on paging away is not carried, which holds only because the surface's effect is composed before `ZoomableBox`'s reset.
+- `FullscreenImagePager` keeps one crop for whichever page is current and clears it after a page change. For one frame, the page that becomes current can be handed the previous page's crop. The first guard exists for that frame.
+- The same pager drops the decoded size a page stamps while it is preloaded off screen. A page reached by swiping has no size until the first pinch or pan, so a shape picked from the pill before then is drawn around the whole photo. Edit hands the send preview that size-less crop, and the preview applies the shape from its own decode, so the photo that is sent is cropped right.
+
+**Why we haven't fixed it.** Each fix reaches past the crop-shape bug these turned up in. `ZoomableBox` could report gestures and resets through a callback, so a programmatic set never echoes back and effect order stops mattering. It has one caller, but every gesture path changes, and the viewer's zoom and page gestures have no UI tests. `FullscreenImagePager` could keep a crop per page. Then no page is handed another page's crop, and a preloaded page keeps its size.
+
+**When to revisit.** The per-page crop soon: it fixes the frame drawn around the whole photo in a few lines of `FullscreenImagePager`. The callback with the next change that adds a programmatic `zoom.set` or another key to the surface's effect. Found 2026-10-08, while fixing the crop shape above the keyboard.
+
+---
+
 ### A media filter chip triggers the unconditional local-copy backfill
 
 **The smell.** `ChatViewModel.ensureLocalCopiesIfBrowsingMedia` fires `messageRepository.ensureLocalCopiesForChat(chatId)` on `@ApplicationScope` the first time a Photos or Videos chip activates in a chat. That call deliberately **bypasses the auto-download preference** and downloads every not-yet-local image, video and document in the chat. Before the search merge it took navigating to a dedicated Shared Media screen; now an idle chip tap while text-searching starts it, on a metered connection, with no way to cancel — it is on the application scope precisely so it survives the user leaving.
@@ -235,13 +248,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `CallAudioRouter` holds its monitor across AudioService binder calls
+### `CallAudioRouter` keeps a lock that no caller needs
 
-**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run make their `AudioManager` calls — `availableCommunicationDevices`, `setCommunicationDevice`, `clearCommunicationDevice`, and both un/register calls — inside `synchronized(lock)`, while the two listeners it registers fire on the main looper and block on that same monitor. A slow AudioService round-trip, made from the WebRTC signaling thread, therefore stalls the main thread for its duration. The lock strictly only needs to guard the four routing fields (`started`, `previousAvailable`, `userPick`, `currentRoute`).
+**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run hold `synchronized(lock)` around their routing fields and their `AudioManager` calls. `CallService` calls the router on the main thread, and its two listeners fire on the main looper, so nothing can race for that lock. The binder calls run on the main thread with or without it: single round-trips, a handful per call.
 
-**Why we haven't fixed it.** Narrowing it means copying the fields out, dropping the monitor, calling into `AudioManager`, and re-taking it to publish — which re-opens exactly the read-modify-write races the lock exists for (a device-list callback landing between the query and the `setCommunicationDevice`, so the route is chosen from one device list and applied to another). The calls held under the lock are single binder round-trips on a path that runs a handful of times per call, and `docs/plans/call-audio-routes.md` §4 rules out the retry/polling logic that would make them slow.
+**Why we haven't fixed it.** An uncontended monitor costs nothing measurable, and it keeps the router correct if a caller on another thread ever comes back.
 
-**When to revisit.** If an ANR trace or a jank report ever points at `CallAudioRouter`'s monitor on the main thread — then the fix is to move the whole router onto the main looper (the listeners are already there) and drop the lock entirely, rather than to narrow it.
+**When to revisit.** The next change to `CallAudioRouter`: drop the lock and its `Guarded by [lock]` notes then. If an ANR trace ever points at the router's binder calls, move those calls off the main thread instead.
 
 ---
 
