@@ -1,8 +1,8 @@
 # Video calls
 
-Status: approved, steps 1 to 4a shipped. The prototype verdict is in and written into steps 4, 4a and 9.
+Status: approved, steps 1 to 5a shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
-> **Steps 1 to 5 are shipped on `plan/video-calls`, on the `CallService` from before main's call rework.** Main runs each call in a `CallSession` (`CallHost`, `CallMedia`, `WebRtcCallMedia`), `CallState` has `Placing`, and `firestore.rules` lists the fields a call may hold, with tests in `firestore-rules-tests/`. Step 5a brings the two together. Steps 6 to 9 build on its result.
+> **Steps 1 to 5a are shipped on `plan/video-calls`.** Steps 1 to 5 were built on the `CallService` from before main's call rework. Step 5a merged main and moved the video work onto main's structure: each call runs in a `CallSession` behind `CallHost`, a `PeerSession` is its connection, and `firestore.rules` lists the fields a call may hold, with tests in `firestore-rules-tests/`. Steps 6 to 9 build on that. Their notes marked `(step-5a)` say what changed under them.
 
 ## Context
 
@@ -82,9 +82,18 @@ picture-in-picture from the docked card, a call card outside the call's chat.
   reads this from the negotiated direction. The caller offers the line only to a callee whose user
   document carries `callVideoLine`, because an older app crashes on an offer with a video line. An
   older caller offers none.
-- **`PeerSession` owns one connection to one remote person.** `CallService` owns the call: the
-  foreground state, the notification, the audio session, the local media, and a map of sessions.
-  A 1:1 call has one session. A group call has up to three.
+- **`CallSession` owns one call:** its states, its ring, its timers, the status of the call
+  document, the end reason and the call's chat message. `CallService` is its Android host,
+  through `CallHost`: the foreground state, the notification, the audio session and the
+  permissions. The service holds no call logic.
+- **`PeerSession` owns one connection to one remote person.** `CallLocalMedia` holds the call's
+  local media and opens the sessions. A 1:1 call has one session. A group call has up to three.
+- **A call's state lives on the main thread.** The session, the service and the camera rule
+  (`CameraSwitch`) run there and hold no lock. `PeerSession` keeps its own locks, because WebRTC
+  calls it on the signalling thread, and reports through events that are collected on the main
+  thread. The camera's device calls run on one worker.
+- **Placing is a state.** `CallState.Placing` covers an outgoing call from the permission prompt
+  until the service takes it over, and carries how the call was started.
 - **`PeerSignaling` is what a session needs for one pair:** send and observe the offer, the answer
   and the candidates. 1:1 implements it over the existing call document, groups over a link document.
   A session does not know the Firestore layout.
@@ -828,6 +837,62 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
 Steps 1 to 5 were built on `plan/video-calls` while main rebuilt the same call code. Both replaced
 `CallService`. This step merges main into the branch and leaves one design. It adds no feature.
 
+**Approach**
+
+1. `git merge main`, 36 conflicted files. The mechanical ones first: the sticker columns beside
+   `isVideoCall`, `AppDatabase` at 32, the sources, the docs. Then the call code by the design below.
+2. `data/call/`: main's `CallSession`, `CallHost` and `CallService` are the base. `CallMedia` and
+   `WebRtcCallMedia` go. `CallLocalMedia` replaces them, implemented by `WebRtcCallLocalMedia`: the
+   factory, the microphone, the camera, the video sinks, and `openPeer`, which starts a
+   `PeerSession` and hands back its events. `CameraSwitch` is the plain class for the camera rule.
+   `CallSession` gains the call's kind, the video line, `CallMediaPublisher`, remote `media`, the
+   chat lookup and the relay's servers. `CallStateHolder` is main's placing with the branch's
+   participants, chat and surfaces.
+3. `ui/call/`: main's `CallViewModel.placeCall` and `CallLaunch` are the base, and
+   `OutgoingCallPlacer` goes. `CallState.Placing` carries `video`. The stage and the docked card
+   read the holder only. `CallActivity` is main's launch and placing with the branch's stage:
+   the camera permission, picture-in-picture and the dock.
+4. The fallback ring and its intent carry the kind. `firestore.rules`: `video` on create, the own
+   `media` entry on update, each with rows in `firestore-rules-tests/calls.test.js`.
+5. Tests: `CallSessionTest` on a `FakeCallLocalMedia`, with every case of main kept and the five
+   new ones. A new `CameraSwitchTest`. `OutgoingCallPlacerTest` becomes rows in `CallViewModelTest`.
+   `CallServiceStartIntentTest`, `CallStageUiTest` and main's two `CallScreen*UiTest` follow.
+6. The code contradicts the spec in four places. None touches a decision or the model.
+   - `PeerSession.close()` closes the connection and does not dispose it. Main's fix disposes it,
+     or the native connection and its observer leak with every call. `close()` disposes now.
+   - `LocalCamera` must not be called on the main thread. The call's state stays on the main
+     thread. The camera's device calls and the release of a finished call's media run on one
+     worker thread, and report back to the main thread.
+   - Main's update rule lets only the callee write to an answered call. The caller's `media`
+     entry needs its own clause.
+   - The rules tests need the Firestore emulator. This session may not be able to run it.
+7. Skills: `code-review` and `simplify` (tagged), `app-ui-design` because Compose code in
+   `ui/call/` is merged, and `changelog-release` for the header and the version.
+
+**Shipped** `3ca3c54c` (2026-10-09) — tier: max, tagged max. skills: code-review, simplify, app-ui-design, changelog-release. Reviewer models: simplify: sonnet, opus, sonnet, opus; code-review: opus, opus.
+Departures (for sign-off):
+- **Nothing ran on a device or an emulator, and the rules tests did not run.** `npm test` in `firestore-rules-tests/` needs the Firestore emulator and an `npm ci`, which would leave an untracked `node_modules` in the worktree. The rules and their new rows were checked by reading, by this session and by a reviewer. Run them before the rules are deployed. `docs/BACKLOG.md` § *Calls after the video work moved onto `CallSession`* lists twelve checks.
+- **Deploy `firestore.rules` before a build from this branch places a call.** The call document carries `video`, which the deployed rules refuse.
+- Main's `CallMedia` and `WebRtcCallMedia` are replaced by `CallLocalMedia` and `WebRtcCallLocalMedia`. It is one interface for the microphone, the camera, the connections and the first frames, and it is the seam `CallSessionTest` fakes. `openPeer` starts a `PeerSession` and hands back its events. `WebRtcCallLocalMedia` has no JVM test, as `WebRtcCallMedia` had none.
+- The camera rule is the new plain class `CameraSwitch`, with `CameraSwitchTest`.
+- `PeerSession.close()` disposes its connection. Before, on this branch, it only closed it, which leaks the native connection and its observer. That is main's fix, kept. Four rows of `PeerSessionTest` follow it.
+- `LocalCamera` must not be called on the main thread. `WebRtcCallLocalMedia` runs the camera's device calls on one worker for the whole process, and brings every result back to the main thread. A finished call closes its connections at once on the main thread, so the call is silent before the audio session is handed back. Its camera, tracks and factory are released on the worker.
+- The side that answers reads the call document once in `CallSession`, for the status, and hands the offer it read to `OneToOneSignaling`. The signalling no longer fetches the document itself. The read and the wait for the relay's servers run side by side.
+- `OutgoingCallPlacer` and its test are gone. `CallViewModel.placeCall` places the call as on main, with the call's kind and the video line from `createCall`, and `CallViewModelTest` has the placer's cases. A placing that fails ends as `Ended(ERROR)` and shows *Call ended* with main's toast. *Call failed* is gone from the stage.
+- The stage closes on any `Ended` it shows, as on main, because `prepareOutgoingCall` clears the end of the call before. The `sawCall` rule of step 4 is gone from `CallScreen`. `CallActivity` closes at once when it is opened to show a call and none is ongoing. The docked card keeps its own watched-end rule.
+- What waits on a permission prompt lives in `CallViewModel` as a `PermissionAction`, so a rotation under the prompt keeps it. That is main's `MicAction`, widened by the camera.
+- Answering is one intent. `CallService.sendAnswer(camera)` replaces the camera switch followed by the answer, so a refused answer leaves the ring's preview alone. /simplify asked for it.
+- `CallStateHolder.compareAndSetState` and the holder's chat lock are gone. The holder is written on the main thread only. `CallSessionTest` has the case the first one guarded: an answer that arrives after the connect does not take the call back.
+- `CallLogEntry` keeps main's `CallLogType` and gains `video`. The call bubble and the Calls tab label a call from both. A declined video call in the Calls tab's detail sheet reads *Declined video call*.
+- `firestore.rules`: a call may be created with `video`, as a boolean or not at all. Each side may write its own `media` entry, as two booleans, while the call rings, is answered or has ended. The caller could not write to an answered call before.
+- `AppDatabase` is at version 32. The upgrade wipes the local message database, and messages sync back.
+- CHANGELOG: main's top section is released (`1.40.4`), so the branch's two `Added` entries and its `Changed` entry sit under a new `[UNRELEASED] [1.41.0]`. The branch's `Fixed` entry about the mute button is dropped, because main shipped the same fix in `1.40.2`. This step adds no entry. `scripts/check-changelog-header.sh` was refused by the session's permissions. `v1.41.0` is not a tag.
+- The direct-or-relayed line is logged under the tag `PeerSession` now, not `CallService`. The backlog's `adb logcat` lines follow.
+- /code-review fixes: the connections close before the audio session is handed back, a camera start's late answer is dropped when a newer request came, and an answer that ends the call builds no media for it. Header notes that still named `CallService` as the owner were corrected.
+- Not done, from /simplify: the status and subcollection names as constants in one place, `CallRepository.answerCall` and `sendAnswer`, which have no caller, one builder for the outgoing and the ongoing notification, the first `media` write of the default state, and a cache of the callee's capability. Notes for the foreground calls of `CallHost`, the holder's per-call state and the person published twice are in steps 6, 7 and 9.
+- Not done, from /code-review: a video ring answered from the notification can open the camera for a moment before the answer reaches the service. It is check 11 in the backlog.
+- `TECH_DEBT.md`: the `mediaLock` entry is replaced by *A call's WebRTC objects are built on the main thread*.
+
 What each side holds:
 
 - **Main** runs each call in a `CallSession`. It reaches Android through `CallHost` and the
@@ -919,10 +984,16 @@ Stop with a decision when a fix of main and a behaviour of the branch cannot bot
 - **(step-4a)** `CallStateHolder.beginCall(callId, participants, chatId)` carries the call's chat,
   and `setChatId(callId, chatId)` drops a lookup that returns after the next call began. A group
   call knows its chat from the call document (`chatId`), on every side, so no lookup is needed.
-- **(step-4a /simplify)** The holder guards the chat with a lock and a shadow call id. Group
-  members and links arrive late in the same way. One `MutableStateFlow` of a value keyed by the
-  call id (chat, participants, controls), changed with `update { if (it.callId == callId) … }`,
-  replaces the lock.
+- **(step-5a /simplify)** `CallStateHolder` gives a call fresh controls in three places:
+  `startPlacing`, `beginCall` and `updateState`. It keeps a shadow call id beside the chat, and
+  `CallSession.finish()` clears the camera fields by hand. Group members and links arrive late in
+  the same way as the chat. One `MutableStateFlow` of a value keyed by the call id (chat,
+  participants, controls), replaced whole by `startPlacing` and `beginCall` and changed with
+  `update { if (it.callId == callId) … }`, replaces all of it. The holder is written on the main
+  thread only, so it needs no lock.
+- **(step-5a)** A new field on the call document needs `firestore.rules` changed first. The
+  create rule lists the fields a call may hold, and the update rule lists what may change.
+  `firestore-rules-tests/calls.test.js` holds a row for every write the app makes.
 - Tests: `MeshPlanTest` as a table (join order, both joining at once, rejoin with a new session id,
   the cap, leave, a stale row), `GroupLinkSignalingTest`, a repository test.
 - Docs: `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`.
@@ -943,57 +1014,49 @@ Stop with a decision when a fix of main and a behaviour of the branch cannot bot
 - `CallStateHolder.participants` carries everyone. The ringing states gain the group's name.
 - The creator writes the `CALL` message into the group chat when it leaves or the call ends.
 - A second incoming call during a call is ignored, as today.
-- **(step-1 /code-review)** Call-level state in `CallService` has no single owner. `currentCallId`,
-  `sessions`, `callConnectedAt`, the audio session and the `CallState` writes are touched from the
-  main thread and from `serviceScope` (`Dispatchers.IO`). With one session this leaves one known
-  race: a connect event handled while a hang-up runs can write `Connected` over `Ended`. Three
-  sessions make it worse. Confine that state to one serial dispatcher
-  (`Dispatchers.IO.limitedParallelism(1)`) that the intents post into, before the mesh is added.
-- **(step-1 /simplify)** `CallService.onSessionConnected` stops the audio session when the session
-  that connected is no longer in the map. That reads "this session is gone" as "the call is over".
-  It is true for one session and wrong for a mesh, where one session can close while others live.
-  Replace it when the audio session follows the first and the last connected session.
+- **(step-5a)** `CallService` holds no call logic. It is the Android host of a `CallSession`
+  (`CallHost`), and it only passes intents on. Everything this step gives `CallService` belongs
+  to a session beside `CallSession`: the group intents arrive in the service and go to it. The
+  mesh, `MeshCoordinator`, lives beside `CallSession` and is driven on the main thread, which is
+  the serial dispatcher the earlier notes asked for. Nothing here takes a lock.
+- **(step-5a)** A session reaches WebRTC through `CallLocalMedia`. `openPeer(remoteId,
+  signaling, offers, offerVideoLine, iceServers)` starts a `PeerSession` on the call's shared
+  microphone and camera and returns its events. It returns no handle. A mesh closes and reopens
+  one person's session while the others live, so `openPeer` must return something to close, and
+  the owner must cancel that session's collector with it. A closed session still delivers events
+  queued before the close.
+- **(step-5a)** `CallSession` starts the audio session at the first connect and stops it only
+  when the call finishes. A mesh needs it to start with the first connected session and to stop
+  with the last.
+- **(step-5a)** `CallSession.onConnected` and its timers assume one connection. A lost
+  connection starts the reconnect timeout, which ends the whole call. In a mesh a session that
+  fails is reopened once, and the call goes on.
 - **(step-1 /simplify)** `PeerSession` logs an error of the answer flow and keeps waiting, while an
   error of the offer flow fails the session. "Reopened once" needs the answer side to fail too.
-- **(step-1)** `PeerSession` takes a `logTag`. `CallService` passes its own tag today. Give each
-  session of a mesh its own, so the direct-or-relayed lines can be told apart.
-- **(step-1)** `PeerSession.events` has one collector, and a closed session still delivers events
-  queued before the close. The owner must check by identity that the session is still the current
-  one for that person, as `CallService.onSessionEvent` does.
-- **(step-2 /simplify)** The call's kind is stored twice: in `CallService.callVideo` and in
-  `CallState.Live.video`. `onCallDocumentSaysVideo` posts to the main thread, checks the call id
-  again and cancels a ring that lost a race with `cleanup()`. `onSessionConnected` calls
-  `markVideo` a second time. All of that exists only because the call's state has no single
-  thread. Delete it when the serial dispatcher lands, and keep one store.
-- **(step-4a /code-review)** `CallService.onScreenShowing` is posted to the main thread and checks
-  `currentCallId`. `cleanup()` can run on `serviceScope` between that check and `setCamera(true)`,
-  which leaves `cameraOn` set in the holder for a call that is over. The serial dispatcher closes
-  it. `cameraWanted`, `screenVisible` and `cameraDecided` are one small state machine: move it
-  into the camera-switch class named below.
-- **(step-5)** `PeerSession` takes `iceServers`, and `CallService.openSession` gets them per
-  session: `IceServerProvider.current()` for the caller of a 1:1 call, who may not wait, and
-  `settled()` or `get()` for the side that answers. A mesh opens and reopens sessions during a
-  call. Resolve the set once when the call starts or is joined, with `get()`, keep it with the
-  call's state, and give every session of the call that set. A group call has no single fetch of
-  an offer, so joining may wait.
-- **(step-5 /code-review)** The side that answers a 1:1 call opens its session through
-  `serviceScope.launch`, then `mainHandler.post` with a check of `currentCallId`, when the
-  relay's servers are not there yet. It is one more posted block with an identity check. On the
-  serial dispatcher it is a plain suspending call.
+- **(step-5a)** Every `PeerSession` logs under its default tag, `PeerSession`. Give each session
+  of a mesh its own, so the direct-or-relayed lines can be told apart.
+- **(step-5a)** The relay's servers: `CallSession` takes `IceServerProvider.current()` for the
+  caller of a 1:1 call, who may not wait, and `get()` for the side that answers. A mesh opens and
+  reopens sessions during a call. Resolve the set once when the call starts or is joined, with
+  `get()`, keep it with the call's state, and give every session of the call that set. A group
+  call has no single fetch of an offer, so joining may wait.
 - **(step-3)** `PeerSession` takes `offerVideoLine`. A mesh session passes true: only an app with
   group calls joins one, and every such app takes a video line. `CallMediaPublisher` writes the
   1:1 call document only. A group call's `camera` and `mic` go to the member row.
 - **(step-3)** `LocalCamera` captures at a constant 1280×720 and 30 fps. `CallQuality` needs it
   to take the size and the rate.
-- **(step-3 /code-review)** "The camera switch goes back off" exists in five forms in
-  `CallService`: `answerIncomingCall`, `onVideoLine`, `setCamera`, `startCamera` and the
-  camera's `onFailure`. Two are posted to the main thread with an identity check. On the serial
-  dispatcher each of them is one call of `setCamera(false)`. `mediaLock` then never runs on the
-  main thread, which closes its entry in `TECH_DEBT.md`.
-- **(step-3 /code-review)** `CallService` has no test for the camera switch (wanted, screen
-  visible, permission, `videoAvailable`, a refused foreground type), for the status handled once
-  per change in `observeCallDocument`, or for `onRemoteMedia`. Move the camera switch into a
-  plain class beside `MeshCoordinator` and test it there.
+- **(step-5a)** The camera rule is `CameraSwitch`, a plain class with `CameraSwitchTest`. A group
+  call uses it as it is, through its own `Port`. The call's kind has one store,
+  `CallSession.video`.
+- **(step-5a /code-review)** `WebRtcCallLocalMedia` has no JVM test. It holds the order a call's
+  media is released in, and the rule that a camera start's late answer is dropped when a newer
+  request came. Three connections make both matter more. Give it seams for the factory, the
+  camera and the session, and test it, before the mesh opens sessions through it.
+- **(step-5a /simplify)** Not done in step 5a, and cheaper to do with the mesh: one call of
+  `host.foreground(phase, camera)` in place of `CallHost`'s six foreground methods and the
+  notification `CallService` keeps for a change of type, the starting audio values passed to
+  `startAudioSession` in place of the two fields the service keeps, and `openPeer` returning an
+  event type without the WebRTC track.
 - Tests: `MeshCoordinatorTest` (join, leave, reopen, second failure, the cap), `CallQualityTest`.
 
 ### Step 8 — Ringing a group — skills: code-review; model: strong
@@ -1038,12 +1101,19 @@ Rewrite it properly; do not copy it in.
 - **(step-4)** The stage draws one other person: `CallStageState.remote` is the first
   participant, and the picture-in-picture scene, the top bar's name and the *muted* mark all read
   it. `CallStageState.person` takes the name from the 1:1 call states.
-- **(step-4)** `CallActivity.outgoingIntent` and `OutgoingCallPlacer` place a call to one callee
-  through `CallRepository.createCall`. A group call needs its own way in.
-- **(step-4 /simplify)** "Is there a call" has two sources: `CallStateHolder.callState` and
-  `OutgoingCallPlacer.placing`. `CallStage`, `CallScreen`, `CallActivity.finishIfNoCall` and
-  `CallViewModel.hangup()` each check both. A second way to place a call is the moment to fold
-  them: a `CallState.Placing` on the holder, with a failure as `Ended(ERROR)`.
+- **(step-5a)** A 1:1 call is placed by `CallViewModel.placeCall`, which publishes
+  `CallState.Placing` on `CallStateHolder`, creates the call through `CallRepository.createCall`
+  and starts `CallService`. A failure ends the placing as `Ended(ERROR)`, and `CallActivity`
+  says so in a toast. "Is there a call" has one source, `CallStateHolder.callState`, and
+  `isOngoing` is the rule. A group call needs its own way in, and its own placing state or a
+  `Placing` that names a group. `CallLaunch.kt` decides what an intent that opens `CallActivity`
+  asks for, and `PermissionAction` what waits on the permission prompt.
+- **(step-5a /simplify)** The other person is published twice: in every `CallState.Live` state
+  under three names, and in `CallStateHolder.participants`. `CallStageState.person` reads the
+  first and falls back to the second. Let the live states carry `callId`, `video` and
+  `startTime` only, put the callee into `participants` when the placing starts, and read the
+  person from `participants` everywhere. The stage's and the card's camera-permission flow is
+  also written twice. One `rememberCameraSwitch(viewModel)` in `ui/call/` would hold it.
 - **(step-4a)** The docked call is `DockedCallCard(state, callbacks, onFullScreen, videoTile)` in
   `ui/call/DockedCallCard.kt`. Its card draws one other person through `RemoteTile` and takes the
   name from `CallStageState.person`. The strip draws one avatar. `docksIn` and `CallState.dockable`
