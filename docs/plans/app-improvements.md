@@ -29,6 +29,7 @@ Steps implement the recommendation in each row. Once Step 1 ships, the rows are 
 | D-14 | How does work reach `main`? | Cloud sessions open a PR, and CI on the PR is the gate. Local sessions may push to `main` and fix a red run forward. `plan/*` branches merge after their last checkpoint. | 1 |
 | D-15 | When does verification come before new work? | When more than 10 entries in `docs/VERIFY.md` are older than 30 days, the next session starts with verification triage. | 38 |
 | D-16 | What is the release signing certificate's SHA-256? | The owner fills this in (`keytool -list -v -keystore <release.jks>`) before Step 8 runs. | 8 |
+| D-17 | Is there a bug check beyond per-step `/code-review`? | Yes: a phase check right before each code phase's checkpoint (Steps 8c, 13c, 22c, 25c), run by the `phase-check` skill that Step 1 creates. It reviews only the seams between the phase's steps plus a short checklist, in one budget-capped session. It fixes confirmed high-severity findings with a test that pins them and logs the rest. The plan ends with a script (Step 38), not a model review. Decided by the owner, 2026-10-09. | 1, 8c, 13c, 22c, 25c, 38 |
 
 Not reopened here: no dynamic color, no Gradle modules, no repository split, E2E stays opt-in (only its copy changes), and the `Chat*Manager` slice convention waits for F-3.
 
@@ -47,18 +48,20 @@ These add to CLAUDE.md and the runner's step prompt.
 
 ## 2. Order
 
-**Order: 1 → 2 ‖ 3 ‖ 4 → 5 → 6 ‖ 7 → 8 → 9 ‖ 10 → 11 → 12 → 13 ‖ 14 → 15 → 16 → 17 → 18 → 19 → 20 → 21 → 22 ‖ 23 → 24 → 25 ‖ 26 → 27 ‖ 28 → 29 → 30 → 31 → 32 → 33 ‖ 34 → 35 → 36 ‖ 37 → 38**
+**Order: 1 → 2 ‖ 3 ‖ 4 → 5 → 6 ‖ 7 → 8 → 8c → 9 ‖ 10 → 11 → 12 → 13 → 13c ‖ 14 → 15 → 16 → 17 → 18 → 19 → 20 → 21 → 22 → 22c ‖ 23 → 24 → 25 → 25c ‖ 26 → 27 ‖ 28 → 29 → 30 → 31 → 32 → 33 ‖ 34 → 35 → 36 ‖ 37 → 38**
 
 | Phase | Steps | Outcome |
 |---|---|---|
 | 0 · Gates tell the truth | 1–2 | `/code-review` hunts bugs again; the gate commands run as written; the repo stops tracking 6,860 junk files |
-| 1 · Security | 3–8 | The open rules close; pushes carry no message text; push tokens leave the readable profile; the updater checks the APK's signer |
-| 2 · Foundations | 9–13 | Schema changes stop wiping data; the gate runs one flavor; cancellation works; the APK shrinks from 107 MB to about 40 MB; string resources become the rule |
-| 3 · Broken flows | 14–22 | Every Settings control works or is gone; destructive actions confirm or undo; group members can be added; permissions recover; notification taps keep the app; sign-in completes; the partner and title rules live in one place |
-| 4 · Performance | 23–25 | Typing and startup stop fanning out; snapshots leave the main thread; bubbles skip recomposition |
+| 1 · Security | 3–8c | The open rules close; pushes carry no message text; push tokens leave the readable profile; the updater checks the APK's signer |
+| 2 · Foundations | 9–13c | Schema changes stop wiping data; the gate runs one flavor; cancellation works; the APK shrinks from 107 MB to about 40 MB; string resources become the rule |
+| 3 · Broken flows | 14–22c | Every Settings control works or is gone; destructive actions confirm or undo; group members can be added; permissions recover; notification taps keep the app; sign-in completes; the partner and title rules live in one place |
+| 4 · Performance | 23–25c | Typing and startup stop fanning out; snapshots leave the main thread; bubbles skip recomposition |
 | 5 · Design system | 26–31 | A screenshot gate; a complete theme; system bars that follow it; shared components; consistent avatars and tabs; Settings as a hub |
 | 6 · Accessibility and i18n | 32–33 | Locale-aware dates; a chat that TalkBack reads well |
 | 7 · CI and process | 34–38 | Hardened CI; dead code gone; a lean CLAUDE.md; release tooling that does the bookkeeping; a verification loop |
+
+Each code phase ends with a phase check (D-17). Steps 8c, 13c, 22c and 25c look for the bugs between that phase's steps, which no per-step review can see, just before the owner's checkpoint. Phases 0, 5, 6 and 7 have none: the owner's checkpoint review is the check there.
 
 Why this order: Step 1 comes first because every later step relies on `/code-review`. Security comes next because SEC-1 exposes user data now. Step 9 must precede every schema change (Step 15 adds one). Step 11 precedes the data steps so they build on the corrected helper. Step 13 precedes the UI phases so new text starts in resources. Step 26 records the screenshot baselines just before the theme changes them.
 
@@ -70,14 +73,21 @@ Findings: MD-1, MD-2, MD-3, MD-4, MD-7, MD-10, DOC-7, PROC-8 (hook). Decisions D
 
 - Replace the symlink `.claude/skills/code-review` with a project-owned `.claude/skills/code-review/SKILL.md`. It reviews the diff from a base it computes itself: the step's start commit when given, else `git merge-base main HEAD`. It never asks for a base. It runs parallel reviewers for logic and edge cases, coroutine scoping and cancellation, security and privacy (crypto included), and data and sync invariants (outbox, Room migrations, Firestore rules). Each finding needs a concrete failure path and a verification pass before it is reported. The caller fixes what it can and stops on what needs the owner. Remove the imported skill from `skills-lock.json`.
 - `scripts/plan-runner/selfcheck.sh` asserts that `.claude/skills/code-review` is a real directory in this repo, not a symlink.
-- CLAUDE.md: name one local gate, `./gradlew :app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug`, and say CI runs `./gradlew test assembleDebug`. Use the gate in the post-step items. Correct the `assembleDebug` comment. Replace the missing `ArchiveChatUseCaseTest` example with `CheckGroupPermissionUseCaseTest`. Mark `lint` as outside the gate (it crashes; GOTCHAS). Describe `/code-review` as the new skill does. Say `/simplify` runs four reviewers.
+- Create `.claude/skills/phase-check/SKILL.md` (D-17): one session that reviews a finished phase for what per-step `/code-review` cannot see, the bugs between steps. A check step lists its phase's steps and 3–6 checklist items; the skill does the rest, cheaply:
+  1. **Scope from git.** The base is the parent of the commit named in the first listed step's Shipped line. Each step's files come from `git show --name-only --format= <its Shipped commit>`. Seam files are the files two or more listed steps changed, plus files that call a function another listed step changed.
+  2. **Read little.** Read the listed steps' Approach and Shipped blocks, `git diff --stat <base>..HEAD`, and the diff of the seam files only. Open a whole file only to confirm a finding. Never re-review what per-step `/code-review` covered.
+  3. **Check** the step's checklist plus a standing list: state across rotation and process death, offline behaviour, cancellation in new suspend code, listener ordering, new strings in resources, dark mode and font scale 2.0 for new UI.
+  4. **Report confirmed findings only**, each with a concrete failure path. Fix a high-severity finding in the same session when it fits one small commit, with a test that pins the cross-step behaviour. A bigger fix, or one that needs the owner, stops with `needs_decision`. Each medium or low finding becomes one line in BACKLOG or TECH_DEBT.
+  5. **No sub-agents.** Stop early when there are no seam files and the checklist holds.
+  6. **Record** a `**Phase check**` block above the Shipped line: the seams examined, each finding and its outcome, or "clean". With no fix, the Shipped line names the HEAD the check reviewed; the runner accepts any commit on the branch there.
+- CLAUDE.md: name one local gate, `./gradlew :app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug`, and say CI runs `./gradlew test assembleDebug`. Use the gate in the post-step items. Correct the `assembleDebug` comment. Replace the missing `ArchiveChatUseCaseTest` example with `CheckGroupPermissionUseCaseTest`. Mark `lint` as outside the gate (it crashes; GOTCHAS). Describe `/code-review` as the new skill does. Say `/simplify` runs four reviewers. Review tools then name three tools: `/simplify` (quality), `/code-review` (correctness of one step's diff) and the phase check (bugs between steps; a plan puts one before each code phase's checkpoint).
 - CLAUDE.md: add a "Branches and PRs" rule per D-14. Replace post-step item 6 with routing to tracked docs, because cloud sessions have no memory store. Add under Change Safety: "A bug you cannot reproduce in a test or an emulator needs evidence first: logcat, a recording or a diagnostic build (`diagnosing-bugs` skill). Until the owner confirms, the CHANGELOG describes the change, not the symptom as gone."
 - Register `ask-simplify.sh` as a `PreToolUse` hook on Bash in `.claude/settings.json`. Check its headless guard first; if the guard is missing, delete the CLAUDE.md claim instead and say so in the Shipped block.
 - `block-heredoc-commit.sh`: point its message at a new CLAUDE.md commit rule ("commit with chained `-m` flags; no HEREDOC, no pipe"), and drop the local memory path and the model name in its example trailer.
 - `.github/workflows/ci.yml:3-5`: the comment matches D-14.
 
 Tests: `scripts/plan-runner/selfcheck.sh` passes; `bash -n` on each edited hook. Run the new gate command once.
-Done when: `/code-review` describes a bug hunt and every command in CLAUDE.md runs as written. Keep this step to accuracy; Step 36 restructures CLAUDE.md.
+Done when: `/code-review` describes a bug hunt, `phase-check` exists, and every command in CLAUDE.md runs as written. Keep this step to accuracy; Step 36 restructures CLAUDE.md.
 
 ### Step 2 — Repo hygiene and stale records — model: mid; effort: low
 
@@ -173,6 +183,18 @@ Tests: the digest comparison as a pure function; a seam test of the refusal path
 Done when: an APK signed with another key is refused before the system installer opens.
 Trap: if D-16 is still empty, stop with `needs_decision`. Never ship a placeholder digest; it would block every update.
 
+### Step 8c — Phase check: security — skills: phase-check; model: strong; budget: 8
+
+Checks Steps 3, 4, 5, 6, 7 and 8. Decision D-17.
+
+- Every client write path in Step 3's audit table passes the rules suite. That includes the receipts and unread counters recipients write, and the `fcmTokens` write from Step 6.
+- No function payload carries message text, and `FCMService` still posts a notification when its fetch fails.
+- The functions read `fcmTokens/{uid}` first and fall back to `users/{uid}.fcmToken`.
+- Release log stripping (Step 7) removes only `Log.d` and `Log.v`.
+- The updater's signer check (Step 8) refuses a foreign APK and still lets the debug-signed test flow through.
+
+Done when: the **Phase check** block is committed, and every fix carries its test.
+
 ### Step 9 — Room migrations stop wiping data — skills: code-review; model: strong
 
 Findings: L-1, PERF-7, PROC-8 (schema export).
@@ -237,6 +259,18 @@ Findings: I18N-1 (guardrails), I18N-4, A11Y-12.
 
 Tests: `UiText` resolution; the ratchet; plural cases for 0, 1 and 2.
 Done when: the ratchet runs in the gate with today's count as its baseline.
+
+### Step 13c — Phase check: foundations — skills: phase-check; model: strong; budget: 8
+
+Checks Steps 9, 10, 11, 12 and 13. Decision D-17.
+
+- The migration test holds a queued SENDING row, a star and a `localUri`. For both databases, the destructive fallback covers only versions below the current one.
+- If Step 10 ran: CI's main job runs the whole firebase test suite, and the manual pocketbase job still compiles.
+- After Step 11, no ViewModel shows an error for a call cancelled by leaving its screen, and no loop or worker ignores cancellation.
+- The release APK check runs in both `ci.yml` and `release-apk.yml`, and debug builds still exclude `libsignal_jni.so`.
+- The ratchet's baseline equals the literal count at HEAD.
+
+Done when: the **Phase check** block is committed, and every fix carries its test.
 
 ### Step 14 — Settings say what they do — skills: app-ui-design; model: mid
 
@@ -349,6 +383,18 @@ Findings: the 2026-09-20 review's #2 (the live blank-name bug), TECH_DEBT "Who i
 Tests: one pure table test on `Chat` (group, self-chat, unsynced participants, blank name); the blank-name case added to `ChatListItemUiTest`.
 Done when: `grep` finds no partner or title logic outside `Chat`.
 
+### Step 22c — Phase check: broken flows — skills: phase-check; model: mid; budget: 8
+
+Checks Steps 14 to 22. Decision D-17.
+
+- Every new dialog, sheet and screen state survives rotation and process death: the delete dialog, the discard prompt, the permission rationale, the OTP countdown, the archived row.
+- The new `BackHandler`s, predictive back and `onNewIntent` agree. A notification tap while a dialog is open lands in the chat.
+- Messages hidden with "Delete for me" stay hidden in search, the chat-list preview, starred and reminders.
+- The ratchet count did not rise, and the new UI works in dark mode and at font scale 2.0.
+- No hand-rolled partner or title logic remains, including any that Steps 15–21 added before Step 22 moved it onto `Chat`.
+
+Done when: the **Phase check** block is committed, and every fix carries its test.
+
 ### Step 23 — Typing and startup sync stop fanning out — skills: code-review; model: strong
 
 Findings: PERF-2, PERF-3 (guard), ARCH-4.
@@ -383,6 +429,17 @@ Findings: PERF-5, PERF-15, PERF-17.
 
 Tests: the repository returns identical instances for unchanged rows; the mapping cache's eviction.
 Done when: a read-receipt burst recomposes only the bubbles it changes (owner checks with Layout Inspector at checkpoint G).
+
+### Step 25c — Phase check: performance — skills: phase-check; model: strong; budget: 8
+
+Checks Steps 23, 24 and 25. Decision D-17.
+
+- Each listener still emits in order after Step 24's executor change, and GOTCHAS' listener-ordering cases still hold.
+- The shared chat sync stops when its last collector leaves, restarts when one returns, and survives `goOffline` and `goOnline`.
+- The `Message` instance cache drops an entry whenever a column a bubble shows changes: status, reactions, edits, `localUri`, `hiddenForMe`.
+- The typing throttle still sends the stop write, and Step 5's rules accept both typing writes.
+
+Done when: the **Phase check** block is committed, and every fix carries its test.
 
 ### Step 26 — The screenshot catalogue gates CI — model: mid
 
@@ -509,6 +566,7 @@ Done when: nothing references a deleted member.
 Findings: MD-5, MD-6, MD-8, MD-9, PROC-7, PROC-9. Decision D-13.
 
 - Restructure CLAUDE.md to the outline in §6. Move the plan-runner options to `scripts/plan-runner/README.md`, the plan format to a new `docs/plans/README.md`, the cloud setup detail to the session-start hook's comments and GOTCHAS, and the changelog detail to the `changelog-release` skill.
+- The plan format in `docs/plans/README.md` includes the phase check (D-17): before each code phase's checkpoint, a `### Step Nc — Phase check: <phase>` step with `skills: phase-check`, a `budget:` tag, the steps it checks and 3–6 checklist items. A phase made only of docs or owner-reviewed visuals needs none.
 - Key Conventions: one clause and a link each.
 - Route GOTCHAS by area: Compose → `app-ui-design`; coroutines, Firestore and Room → their GOTCHAS sections; a Service, notification, WebRTC or FCM change → GOTCHAS § Platform; tests → § Testing.
 - Add: "Search the long docs (CHANGELOG, FEATURE-MAP, TECH_DEBT, BACKLOG, GOTCHAS) with Grep; don't read them whole."
@@ -538,8 +596,9 @@ Findings: PROC-3, PROC-9, PROC-8 (link checks), ARCH-9 (trigger reminder). Decis
 - CLAUDE.md states the D-15 cap.
 - A CI script fails on a FEATURE-MAP path that doesn't exist or a CHANGELOG hash that doesn't resolve; both pass today.
 - A non-blocking pre-commit hook lists the TECH_DEBT entries whose backticked paths appear in the staged diff.
+- `scripts/plan-runner/plan-done-check.sh` (D-17) runs before a plan branch merges and costs no model tokens: the gate, `check-release-apk.sh`, the changelog header check, the FEATURE-MAP and CHANGELOG link check, and a list of the VERIFY entries the branch added. `scripts/plan-runner/README.md` names it as the last step before a merge.
 
-Done when: BACKLOG holds only unshipped work, and the release notes carry a device checklist.
+Done when: BACKLOG holds only unshipped work, the release notes carry a device checklist, and `plan-done-check.sh` passes on this plan's branch.
 
 ## 4. Owner actions at checkpoints
 
@@ -548,14 +607,14 @@ Done when: BACKLOG holds only unshipped work, and the release notes carry a devi
 | Step 2 | Read the new `/code-review` skill and the CLAUDE.md edits. Fill in D-16. |
 | Step 3 | `firebase deploy --only firestore:rules`. Smoke test: sign in, send text and a photo, react, check receipts both ways, place a call, create and revoke an invite link. Export the Storage and Realtime Database rules from the console into `storage.rules` and `database.rules.json` and commit them (SEC-10). |
 | Step 6 | `firebase deploy --only firestore:rules,functions`. Check notifications with the app in the foreground, the background and killed, for text, a photo, an encrypted message and a reaction. |
-| Step 9 | Install the build over the previous release while holding a queued unsent message, a starred message and a downloaded photo. All three survive. |
-| Step 13 | Optionally run `/code-review ultra` on Step 11. Install the CI-built release APK (about 40 MB) and send an encrypted message. |
-| Step 22 | Device pass over Steps 14–22, using the checks in their Shipped blocks. |
-| Step 25 | In the Firebase console, compare reads per cold start and writes per typed sentence with the numbers before Step 23. Optionally take a Perfetto trace of opening a large chat. |
+| Step 9 | Read Step 8c's **Phase check** block. Install the build over the previous release while holding a queued unsent message, a starred message and a downloaded photo. All three survive. |
+| Step 13c | Read the **Phase check** block. Optionally run `/code-review ultra` on Step 11. Install the CI-built release APK (about 40 MB) and send an encrypted message. |
+| Step 22c | Read the **Phase check** block. Device pass over Steps 14–22, using the checks in their Shipped blocks. |
+| Step 25c | Read the **Phase check** block. In the Firebase console, compare reads per cold start and writes per typed sentence with the numbers before Step 23. Optionally take a Perfetto trace of opening a large chat. |
 | Step 27 | Review the screenshot diffs in light, dark and large font. |
 | Step 33 | TalkBack pass through the chat list, a chat and Settings. Switch the phone to German and check dates and times. Check the Lists FAB while swiping between tabs. |
 | Step 36 | Read the new CLAUDE.md. |
-| Step 38 | Merge `plan/app-improvements`. |
+| Step 38 | Run `scripts/plan-runner/plan-done-check.sh`, then merge `plan/app-improvements`. If the phase checks found nothing in two phases running, consider dropping them from future plans; `report.sh` shows what each one cost. |
 
 ## 5. Follow-up plans
 
@@ -580,9 +639,9 @@ Each becomes its own plan file when the owner picks it up. They are listed in th
 3. Cloud sessions — the symptoms of a session-start hook that didn't run, and that the checkout is shallow.
 4. Branches, commits and PRs — D-14, chained `-m` commits, fixing `main` forward.
 5. After each step — tests, the gate, review skills, commit, where learnings go.
-6. Review tools — `/code-review` (correctness) and `/simplify` (quality, four reviewers).
+6. Review tools — `/code-review` (correctness of one step), `/simplify` (quality, four reviewers) and the phase check (bugs between steps).
 7. Model tiers — without "currently…"; the per-sub-agent model report rule moves to `step-prompt.md`.
-8. Plans — the format lives in `docs/plans/README.md`; never assume steps run in parallel; archive after the last step; handoffs.
+8. Plans — the format lives in `docs/plans/README.md`, including a phase check before each code phase's checkpoint; never assume steps run in parallel; archive after the last step; handoffs.
 9. Architecture — the Room migration rule stated once; presence reduced to a pointer to its KDoc.
 10. Key conventions — one clause and a link each, including the cancellation and string-resource rules.
 11. Before editing — which skill or GOTCHAS section to read per area; Grep the long docs.
