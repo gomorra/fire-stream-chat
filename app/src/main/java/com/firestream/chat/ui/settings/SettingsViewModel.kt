@@ -12,6 +12,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import android.content.Intent
+import com.firestream.chat.data.call.FullScreenIntentAccess
 import com.firestream.chat.data.util.ApkInstaller
 import com.firestream.chat.data.worker.MediaBackfillWorker
 import com.firestream.chat.data.local.AppTheme
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
@@ -67,6 +69,8 @@ data class SettingsUiState(
     val mentionOnlyNotifications: Boolean = false,
     val notificationSound: NotificationSound = NotificationSound.DEFAULT,
     val vibration: Boolean = true,
+    /** The access *Full screen notifications*. Null below Android 14, where the row is hidden. */
+    val fullScreenAlerts: Boolean? = null,
     // Storage
     val cacheSize: Long = 0L,
     val autoDownload: AutoDownloadOption = AutoDownloadOption.WIFI_ONLY,
@@ -94,10 +98,11 @@ class SettingsViewModel @Inject constructor(
     private val preferencesDataStore: PreferencesDataStore,
     private val appUpdateRepository: AppUpdateRepository,
     private val apkInstaller: ApkInstaller,
+    private val fullScreenIntentAccess: FullScreenIntentAccess,
     @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(SettingsUiState())
+    private val _uiState = MutableStateFlow(SettingsUiState(fullScreenAlerts = readFullScreenAlerts()))
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()
 
     private var backfillObserver: Observer<List<WorkInfo>>? = null
@@ -476,6 +481,19 @@ class SettingsViewModel @Inject constructor(
             )
         }
     }
+
+    private fun readFullScreenAlerts(): Boolean? =
+        if (fullScreenIntentAccess.isSupported) fullScreenIntentAccess.isGranted() else null
+
+    /**
+     * Called from the same ON_RESUME observer. The access changes only on its page in the
+     * system settings, so the row is read again when the user comes back.
+     */
+    fun recheckFullScreenAccess() {
+        _uiState.update { it.copy(fullScreenAlerts = readFullScreenAlerts()) }
+    }
+
+    fun openFullScreenAccessSettings() = fullScreenIntentAccess.openSettings()
 
     /**
      * On Settings re-entry during an in-flight download, snap the dialog back

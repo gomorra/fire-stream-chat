@@ -1560,6 +1560,7 @@ class MessageRepositoryImpl @Inject constructor(
         fileName = fileName,
         fileSize = fileSize,
         mimeType = mimeType,
+        isVideoCall = isVideoCall,
         stickerId = stickerId,
         stickerPackId = stickerPackId,
     )

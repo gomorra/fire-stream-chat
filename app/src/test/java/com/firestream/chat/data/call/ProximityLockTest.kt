@@ -67,6 +67,65 @@ class ProximityLockTest {
         verify(exactly = 2) { wakeLock.acquire(any()) }
     }
 
+    // ── Video: the phone is in front of the face, not at the ear ─────────────
+
+    @Test
+    fun `no lock is taken on the earpiece while video shows`() {
+        proximityLock.setVideoShowing(true)
+
+        proximityLock.follow(CallAudioRoute.EARPIECE)
+
+        verify(exactly = 0) { powerManager.newWakeLock(any(), any()) }
+    }
+
+    @Test
+    fun `video that starts on the earpiece releases the lock`() {
+        proximityLock.follow(CallAudioRoute.EARPIECE)
+
+        proximityLock.setVideoShowing(true)
+
+        verify(exactly = 1) { wakeLock.release() }
+    }
+
+    @Test
+    fun `video that stops on the earpiece takes the lock again`() {
+        proximityLock.follow(CallAudioRoute.EARPIECE)
+        proximityLock.setVideoShowing(true)
+
+        proximityLock.setVideoShowing(false)
+
+        verify(exactly = 2) { wakeLock.acquire(any()) }
+    }
+
+    @Test
+    fun `video that stops on the speaker takes no lock`() {
+        proximityLock.follow(CallAudioRoute.SPEAKER)
+        proximityLock.setVideoShowing(true)
+
+        proximityLock.setVideoShowing(false)
+
+        verify(exactly = 0) { powerManager.newWakeLock(any(), any()) }
+    }
+
+    @Test
+    fun `video that stops before any route is known takes no lock`() {
+        proximityLock.setVideoShowing(true)
+        proximityLock.setVideoShowing(false)
+
+        verify(exactly = 0) { powerManager.newWakeLock(any(), any()) }
+    }
+
+    @Test
+    fun `video that stops after shutdown takes no lock`() {
+        proximityLock.follow(CallAudioRoute.EARPIECE)
+        proximityLock.setVideoShowing(true)
+        proximityLock.shutdown()
+
+        proximityLock.setVideoShowing(false)
+
+        verify(exactly = 1) { wakeLock.acquire(any()) }
+    }
+
     @Test
     fun `shutdown releases and latches`() {
         proximityLock.follow(CallAudioRoute.EARPIECE)

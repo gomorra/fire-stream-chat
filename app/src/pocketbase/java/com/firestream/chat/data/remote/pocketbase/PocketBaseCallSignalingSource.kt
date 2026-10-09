@@ -17,7 +17,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class PocketBaseCallSignalingSource @Inject constructor() : CallSignalingSource {
-    override suspend fun createCallDocument(callerId: String, calleeId: String): String =
+    override suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String =
         throw unsupported()
 
     override suspend fun updateCallStatus(callId: String, status: String, endReason: String?): Unit =
@@ -37,6 +37,9 @@ class PocketBaseCallSignalingSource @Inject constructor() : CallSignalingSource 
         subcollection: String,
         candidate: IceCandidateData
     ): Unit = throw unsupported()
+
+    override suspend fun setMedia(callId: String, uid: String, camera: Boolean, mic: Boolean): Unit =
+        throw unsupported()
 
     override fun observeCallDocument(callId: String): Flow<CallSignalingData> = emptyFlow()
 

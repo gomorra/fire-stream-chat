@@ -14,6 +14,7 @@ import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.EndReason
+import com.firestream.chat.domain.model.OutgoingCall
 import com.firestream.chat.domain.repository.CallRepository
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -54,13 +55,13 @@ class CallViewModelTest {
     private val app = ApplicationProvider.getApplicationContext<Application>()
     private val holder = CallStateHolder()
     private val callRepository = mockk<CallRepository>()
-    private val created = CompletableDeferred<Result<String>>()
+    private val created = CompletableDeferred<Result<OutgoingCall>>()
 
     @Before
     fun setUp() {
-        coEvery { callRepository.createCall(CALLEE) } coAnswers { created.await() }
+        coEvery { callRepository.createCall(CALLEE, any()) } coAnswers { created.await() }
         coEvery { callRepository.endCall(any(), any()) } returns Result.success(Unit)
-        coEvery { callRepository.logCallMessage(any(), any(), any()) } returns Result.success(Unit)
+        coEvery { callRepository.logCallMessage(any(), any(), any(), any()) } returns Result.success(Unit)
     }
 
     /** The application scopes of the test's ViewModels, cancelled after each test. */
@@ -83,26 +84,100 @@ class CallViewModelTest {
     private fun TestScope.viewModelIn(store: ViewModelStore, context: Context = app): CallViewModel {
         val appScope = CoroutineScope(coroutineContext + SupervisorJob()).also { scopes += it }
         val factory = viewModelFactory {
-            initializer { CallViewModel(holder, callRepository, appScope, context) }
+            initializer { CallViewModel(holder, callRepository, mockk(relaxed = true), appScope, context) }
         }
         return ViewModelProvider(store, factory)[CallViewModel::class.java]
     }
 
     /** Place a call as the call screen does: prepare before the microphone prompt, then place. */
-    private fun CallViewModel.placeTestCall(callee: String = CALLEE) {
-        if (holder.prepareOutgoingCall()) placeCall(callee, "chat1", "Alice", null)
+    private fun CallViewModel.placeTestCall(callee: String = CALLEE, video: Boolean = false) {
+        if (holder.prepareOutgoingCall()) placeCall(callee, "chat1", "Alice", null, video)
     }
 
     @Test
     fun `a created call is handed to the call service`() = runTest {
         viewModelIn(ViewModelStore()).placeTestCall()
+        runCurrent()
+        // The call shows as being placed until the service has it.
+        assertEquals(CALLEE, (holder.callState.value as CallState.Placing).calleeId)
+        assertNull(shadowOf(app).nextStartedService)
 
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         advanceUntilIdle()
 
         val started = shadowOf(app).nextStartedService
         assertEquals(CallService.ACTION_START_OUTGOING, started?.action)
         assertEquals("call1", started?.getStringExtra(CallService.EXTRA_CALL_ID))
+    }
+
+    @Test
+    fun `a video call is created as one and handed over with the video line createCall found`() = runTest {
+        viewModelIn(ViewModelStore()).placeTestCall(video = true)
+        runCurrent()
+        assertEquals(true, (holder.callState.value as CallState.Placing).video)
+
+        created.complete(Result.success(OutgoingCall("call1", videoLine = true)))
+        advanceUntilIdle()
+
+        coVerify { callRepository.createCall(CALLEE, true) }
+        val started = shadowOf(app).nextStartedService
+        assertEquals(true, started?.getBooleanExtra(CallService.EXTRA_VIDEO, false))
+        assertEquals(true, started?.getBooleanExtra(CallService.EXTRA_VIDEO_LINE, false))
+    }
+
+    // An app without video crashes on an offer with a video line, so how the call was started
+    // must never stand in for what the callee's app takes.
+    @Test
+    fun `a video call to an app without video is handed over without a video line`() = runTest {
+        viewModelIn(ViewModelStore()).placeTestCall(video = true)
+
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
+        advanceUntilIdle()
+
+        val started = shadowOf(app).nextStartedService
+        assertEquals(true, started?.getBooleanExtra(CallService.EXTRA_VIDEO, false))
+        assertEquals(false, started?.getBooleanExtra(CallService.EXTRA_VIDEO_LINE, true))
+    }
+
+    @Test
+    fun `a voice call to an app with video carries the video line`() = runTest {
+        viewModelIn(ViewModelStore()).placeTestCall(video = false)
+
+        created.complete(Result.success(OutgoingCall("call1", videoLine = true)))
+        advanceUntilIdle()
+
+        coVerify { callRepository.createCall(CALLEE, false) }
+        val started = shadowOf(app).nextStartedService
+        assertEquals(false, started?.getBooleanExtra(CallService.EXTRA_VIDEO, true))
+        assertEquals(true, started?.getBooleanExtra(CallService.EXTRA_VIDEO_LINE, false))
+    }
+
+    @Test
+    fun `a cancelled video call is recorded as a video call`() = runTest {
+        val viewModel = viewModelIn(ViewModelStore())
+        viewModel.placeTestCall(video = true)
+        created.complete(Result.success(OutgoingCall("call1", videoLine = true)))
+        runCurrent()
+
+        viewModel.hangup()
+        runCurrent()
+
+        coVerify { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0, true) }
+    }
+
+    @Test
+    fun `a new call can be placed after one that could not be created`() = runTest {
+        val viewModel = viewModelIn(ViewModelStore())
+        coEvery { callRepository.createCall(CALLEE, any()) } returns Result.failure(Exception("offline"))
+        viewModel.placeTestCall()
+        advanceUntilIdle()
+        assertNull(shadowOf(app).nextStartedService)
+
+        coEvery { callRepository.createCall(CALLEE, any()) } returns Result.success(OutgoingCall("call2", videoLine = false))
+        viewModel.placeTestCall()
+        runCurrent()
+
+        assertEquals("call2", shadowOf(app).nextStartedService?.getStringExtra(CallService.EXTRA_CALL_ID))
     }
 
     @Test
@@ -112,7 +187,7 @@ class CallViewModelTest {
         runCurrent()
 
         store.clear()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         advanceUntilIdle()
 
         assertNull(shadowOf(app).nextStartedService)
@@ -128,7 +203,7 @@ class CallViewModelTest {
         runCurrent()
 
         viewModel.onScreenClosed()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         advanceUntilIdle()
 
         assertNull(shadowOf(app).nextStartedService)
@@ -141,10 +216,10 @@ class CallViewModelTest {
         viewModel.placeTestCall()
         viewModel.placeTestCall()
 
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         advanceUntilIdle()
 
-        coVerify(exactly = 1) { callRepository.createCall(CALLEE) }
+        coVerify(exactly = 1) { callRepository.createCall(CALLEE, any()) }
     }
 
     @Test
@@ -153,13 +228,13 @@ class CallViewModelTest {
         // and the call is still being placed until then.
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
 
         viewModel.placeTestCall()
         runCurrent()
 
-        coVerify(exactly = 1) { callRepository.createCall(CALLEE) }
+        coVerify(exactly = 1) { callRepository.createCall(CALLEE, any()) }
     }
 
     @Test
@@ -209,20 +284,20 @@ class CallViewModelTest {
         runCurrent()
 
         viewModel.hangup()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         advanceUntilIdle()
 
         assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
         assertNull(shadowOf(app).nextStartedService)
         coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
         // Its push has rung the callee, so the chat records the call.
-        coVerify { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0) }
+        coVerify { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0, false) }
     }
 
     @Test
     fun `a call the service takes over is left to the service`() = runTest {
         viewModelIn(ViewModelStore()).placeTestCall()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
         val ringing = CallState.OutgoingRinging("call1", CALLEE, "Alice", null)
         holder.takeOverPlacing(ringing)
@@ -232,13 +307,13 @@ class CallViewModelTest {
 
         assertEquals(ringing, holder.callState.value)
         coVerify(exactly = 0) { callRepository.endCall(any(), any()) }
-        coVerify(exactly = 0) { callRepository.logCallMessage(any(), any(), any()) }
+        coVerify(exactly = 0) { callRepository.logCallMessage(any(), any(), any(), any()) }
     }
 
     @Test
     fun `a call the service never takes over is ended`() = runTest {
         viewModelIn(ViewModelStore()).placeTestCall()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
         assertEquals("call1", (holder.callState.value as CallState.Placing).callId)
 
@@ -247,7 +322,7 @@ class CallViewModelTest {
 
         assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
         coVerify { callRepository.endCall("call1", EndReason.ERROR) }
-        coVerify { callRepository.logCallMessage("chat1", EndReason.ERROR, 0) }
+        coVerify { callRepository.logCallMessage("chat1", EndReason.ERROR, 0, false) }
     }
 
     @Test
@@ -267,7 +342,7 @@ class CallViewModelTest {
         // The document exists and its push has rung the callee, but no service holds the call yet.
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall()
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
 
         viewModel.hangup()
@@ -276,8 +351,8 @@ class CallViewModelTest {
 
         assertEquals(CallState.Ended("call1", EndReason.HANGUP), holder.callState.value)
         coVerify(exactly = 1) { callRepository.endCall("call1", any()) }
-        coVerify(exactly = 1) { callRepository.logCallMessage(any(), any(), any()) }
-        coVerify { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0) }
+        coVerify(exactly = 1) { callRepository.logCallMessage(any(), any(), any(), any()) }
+        coVerify { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0, false) }
     }
 
     @Test
@@ -288,12 +363,12 @@ class CallViewModelTest {
         runCurrent()
         assertEquals(CallState.Ended("", EndReason.ERROR), holder.callState.value)
 
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
 
         assertNull(shadowOf(app).nextStartedService)
         coVerify { callRepository.endCall("call1", EndReason.ERROR) }
-        coVerify { callRepository.logCallMessage("chat1", EndReason.ERROR, 0) }
+        coVerify { callRepository.logCallMessage("chat1", EndReason.ERROR, 0, false) }
     }
 
     @Test
@@ -305,12 +380,12 @@ class CallViewModelTest {
         advanceTimeBy(CallViewModel.CREATE_TIMEOUT_MS)
         runCurrent()
 
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
 
         assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
         coVerify { callRepository.endCall("call1", EndReason.HANGUP) }
-        coVerify(exactly = 1) { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0) }
+        coVerify(exactly = 1) { callRepository.logCallMessage("chat1", EndReason.HANGUP, 0, false) }
         assertNull(withTimeoutOrNull(1_000) { viewModel.setupFailed.first() })
     }
 
@@ -340,7 +415,7 @@ class CallViewModelTest {
         val viewModel = viewModelIn(ViewModelStore(), context = background)
         viewModel.placeTestCall()
 
-        created.complete(Result.success("call1"))
+        created.complete(Result.success(OutgoingCall("call1", videoLine = false)))
         runCurrent()
 
         assertEquals(CallState.Ended("call1", EndReason.ERROR), holder.callState.value)
@@ -348,9 +423,9 @@ class CallViewModelTest {
 
     @Test
     fun `a cancelled call's late create leaves the next call alone`() = runTest {
-        val toAlice = CompletableDeferred<Result<String>>()
-        coEvery { callRepository.createCall("alice") } coAnswers { toAlice.await() }
-        coEvery { callRepository.createCall("bob") } coAnswers { awaitCancellation() }
+        val toAlice = CompletableDeferred<Result<OutgoingCall>>()
+        coEvery { callRepository.createCall("alice", any()) } coAnswers { toAlice.await() }
+        coEvery { callRepository.createCall("bob", any()) } coAnswers { awaitCancellation() }
         val viewModel = viewModelIn(ViewModelStore())
         viewModel.placeTestCall(callee = "alice")
         runCurrent()
@@ -359,7 +434,7 @@ class CallViewModelTest {
         viewModel.placeTestCall(callee = "bob")
         runCurrent()
         val toBob = holder.callState.value
-        toAlice.complete(Result.success("callAlice"))
+        toAlice.complete(Result.success(OutgoingCall("callAlice", videoLine = false)))
         runCurrent()
 
         assertEquals("bob", (toBob as CallState.Placing).calleeId)

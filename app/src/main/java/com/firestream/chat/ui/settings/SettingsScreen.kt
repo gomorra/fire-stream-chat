@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.ScreenLockPortrait
 import androidx.compose.material.icons.outlined.Notifications as OutlinedNotifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -161,6 +162,7 @@ fun SettingsScreen(
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 viewModel.recheckInstallPermission()
+                viewModel.recheckFullScreenAccess()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -360,6 +362,13 @@ fun SettingsScreen(
                 checked = uiState.vibration,
                 onCheckedChange = { viewModel.setVibration(it) }
             )
+
+            uiState.fullScreenAlerts?.let { granted ->
+                FullScreenAlertsRow(
+                    granted = granted,
+                    onClick = { viewModel.openFullScreenAccessSettings() }
+                )
+            }
 
             // Chat section
             Spacer(Modifier.height(8.dp))
@@ -908,6 +917,24 @@ private fun SettingsItem(
         supportingContent = { Text(subtitle, style = MaterialTheme.typography.bodySmall) },
         leadingContent = { Icon(icon, contentDescription = null, tint = tint) },
         modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
+    )
+}
+
+/**
+ * The access *Full screen notifications*, which only the system settings can change. The row
+ * says where it stands and opens its page.
+ */
+@Composable
+internal fun FullScreenAlertsRow(granted: Boolean, onClick: () -> Unit) {
+    SettingsItem(
+        icon = Icons.Default.ScreenLockPortrait,
+        title = "Full-screen call alerts",
+        subtitle = if (granted) {
+            "On"
+        } else {
+            "Off. Incoming calls and timer alarms show only as a notification"
+        },
+        onClick = onClick
     )
 }
 

@@ -1,19 +1,33 @@
 package com.firestream.chat.data.call
 
 import com.firestream.chat.domain.model.CallAudioRoute
+import com.firestream.chat.domain.model.CallParticipant
 import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.CallSurface
 import com.firestream.chat.domain.model.CallUiControls
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.isOngoing
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.updateAndGet
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * What the screens read of the current call, and what a [CallSession] and the call screens write.
+ *
+ * A call's own state is written on the main thread: by its session, and by the screen that places
+ * it. Only the placing is raced for from another thread, and [replaceIf] settles that.
+ */
 @Singleton
 class CallStateHolder @Inject constructor() {
 
@@ -23,8 +37,64 @@ class CallStateHolder @Inject constructor() {
     private val _uiControls = MutableStateFlow(CallUiControls())
     val uiControls: StateFlow<CallUiControls> = _uiControls.asStateFlow()
 
+    private val _participants = MutableStateFlow<List<CallParticipant>>(emptyList())
+
+    /** The other people in the call: one in a 1:1 call. The own side is in [uiControls]. */
+    val participants: StateFlow<List<CallParticipant>> = _participants.asStateFlow()
+
+    /** The call [_chatId] belongs to. */
+    private var chatCallId: String? = null
+    private val _chatId = MutableStateFlow<String?>(null)
+
+    /**
+     * The chat of the current call, where it can dock. Null while it is not known: the side that
+     * answers looks it up after the answer. Like the controls, it stays set after the call ended.
+     */
+    val chatId: StateFlow<String?> = _chatId.asStateFlow()
+
+    private val _surfaces = MutableStateFlow<Set<CallSurface>>(emptySet())
+
+    /** The surfaces that are on screen right now. They outlive a call: a surface reports itself, not a call. */
+    val surfaces: StateFlow<Set<CallSurface>> = _surfaces.asStateFlow()
+
+    /**
+     * The call is on screen: true while any surface shows it, and false only after
+     * [OFF_SCREEN_GRACE_MILLIS] with none. The stage hands over to the docked card and back
+     * within that time, so the camera does not blink.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val onScreen: Flow<Boolean> = _surfaces
+        .map { it.isNotEmpty() }
+        .transformLatest { showing ->
+            if (!showing) delay(OFF_SCREEN_GRACE_MILLIS)
+            emit(showing)
+        }
+        .distinctUntilChanged()
+
     /** Numbers each placing, so a setup only ever touches its own. */
     private val placingIds = AtomicLong()
+
+    /**
+     * The call [callId] starts with [participants] and with fresh controls, in the chat [chatId]
+     * if it is known. A [CallSession] runs this when it takes a call: an outgoing one after its
+     * placing, an incoming one when it rings.
+     */
+    fun beginCall(callId: String, participants: List<CallParticipant>, chatId: String? = null) {
+        chatCallId = callId
+        _chatId.value = chatId
+        _uiControls.value = CallUiControls()
+        _participants.value = participants
+    }
+
+    /** The chat of the call [callId] is [chatId]. Does nothing when another call has begun since. */
+    fun setChatId(callId: String, chatId: String) {
+        if (chatCallId == callId) _chatId.value = chatId
+    }
+
+    /** [surface] came on screen, or left it. */
+    fun setSurfaceShowing(surface: CallSurface, showing: Boolean) {
+        _surfaces.update { if (showing) it + surface else it - surface }
+    }
 
     /**
      * Publish [state]. A state that starts a call also resets the controls first. A call starts
@@ -38,26 +108,46 @@ class CallStateHolder @Inject constructor() {
         _callState.value = state
     }
 
-    fun updateControls(controls: CallUiControls) {
-        _uiControls.value = controls
+    /**
+     * Record that the call [callId] was started as a video call, as one step, whatever live state
+     * it is in. Does nothing when another call is current, when the call has ended, or with none.
+     *
+     * @return the state after the write.
+     */
+    fun markVideo(callId: String): CallState = _callState.updateAndGet { state ->
+        if (state is CallState.Live && state.callId == callId && !state.video) state.withVideo() else state
+    }
+
+    /** Change the controls as one step, so a change never writes back a stale copy of another field. */
+    fun updateControls(change: (CallUiControls) -> CallUiControls) {
+        _uiControls.update(change)
     }
 
     /**
      * Flip mute and return the new value, so the caller applies to the audio track exactly what the
-     * UI shows. Atomic, like [updateAudioRoutes], so neither writes back a stale copy of the other's
-     * field.
+     * UI shows.
+     *
+     * @return true when the call is muted after the flip.
      */
     fun toggleMute(): Boolean = _uiControls.updateAndGet { it.copy(isMuted = !it.isMuted) }.isMuted
 
     /**
      * Publish the routes the OS offers and the one it is actually playing through. A null [current]
      * means the OS has not reported a route yet, and leaves the displayed one alone rather than
-     * guessing. Leaves mute alone either way.
+     * guessing. Leaves everything else alone either way.
      */
     fun updateAudioRoutes(available: List<CallAudioRoute>, current: CallAudioRoute?) {
-        _uiControls.update {
-            it.copy(audioRoute = current ?: it.audioRoute, availableRoutes = available)
-        }
+        _uiControls.update { it.copy(audioRoute = current ?: it.audioRoute, availableRoutes = available) }
+    }
+
+    /** Change the participant [id] as one step. Does nothing when they are not in the call. */
+    fun updateParticipant(id: String, change: (CallParticipant) -> CallParticipant) {
+        _participants.update { list -> list.map { if (it.id == id) change(it) else it } }
+    }
+
+    /** [ids] are the participants whose video has delivered a frame. Everyone else has none. */
+    fun setFramed(ids: Set<String>) {
+        _participants.update { list -> list.map { it.copy(hasFrame = it.id in ids) } }
     }
 
     /**
@@ -71,13 +161,23 @@ class CallStateHolder @Inject constructor() {
     fun prepareOutgoingCall(): Boolean = replaceIf { if (it.isOngoing) null else CallState.Idle } != null
 
     /**
-     * Publish a call being placed to [calleeId], with fresh controls, and return it. Returns null
-     * while a call is ongoing, a placing included.
+     * Publish a call being placed to [calleeId], with fresh controls and nobody in it yet, and
+     * return it. [video] is how the call is started. Returns null while a call is ongoing, a
+     * placing included.
      */
-    fun startPlacing(calleeId: String, calleeName: String, calleeAvatarUrl: String?): CallState.Placing? {
-        val placing = CallState.Placing(placingIds.incrementAndGet(), calleeId, calleeName, calleeAvatarUrl)
+    fun startPlacing(
+        calleeId: String,
+        calleeName: String,
+        calleeAvatarUrl: String?,
+        video: Boolean = false,
+    ): CallState.Placing? {
+        val placing = CallState.Placing(placingIds.incrementAndGet(), calleeId, calleeName, calleeAvatarUrl, video = video)
         replaceIf { if (it.isOngoing) null else placing } ?: return null
         _uiControls.value = CallUiControls()
+        // The people and the chat of the call before must not show under this one.
+        _participants.value = emptyList()
+        chatCallId = null
+        _chatId.value = null
         return placing
     }
 
@@ -130,4 +230,8 @@ class CallStateHolder @Inject constructor() {
         }
     }
 
+    companion object {
+        /** How long the call may be on no surface before the camera pauses. */
+        const val OFF_SCREEN_GRACE_MILLIS = 1_000L
+    }
 }

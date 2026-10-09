@@ -238,7 +238,7 @@ Do **not** construct route strings manually.
 
 ## Firebase Cloud Functions
 
-Four functions in `functions/index.js` (Node.js 20) — push notifications for messages/reactions/calls, and RTDB→Firestore presence mirroring. Details: `docs/CLOUD-FUNCTIONS.md`.
+Five functions in `functions/index.js` (Node.js 20) — push notifications for messages/reactions/calls, RTDB→Firestore presence mirroring, and the relay login for calls. Details: `docs/CLOUD-FUNCTIONS.md`.
 
 ## Testing
 

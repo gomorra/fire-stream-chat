@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.firestream.chat.R
 import com.firestream.chat.domain.model.CallAudioRoute
@@ -57,6 +58,8 @@ internal fun CallAudioRouteButton(
     availableRoutes: List<CallAudioRoute>,
     onSelectRoute: (CallAudioRoute) -> Unit,
     modifier: Modifier = Modifier,
+    colors: CallControlColors = CallControlColors.themed(),
+    size: Dp = 64.dp,
 ) {
     var sheetOpen by remember { mutableStateOf(false) }
     val highlighted = audioRoute != CallAudioRoute.EARPIECE
@@ -80,16 +83,9 @@ internal fun CallAudioRouteButton(
                 sheetOpen = true
             }
         },
-        backgroundColor = if (highlighted) {
-            MaterialTheme.colorScheme.secondary
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
-        iconTint = if (highlighted) {
-            MaterialTheme.colorScheme.onSecondary
-        } else {
-            MaterialTheme.colorScheme.onSurface
-        },
+        backgroundColor = colors.background(highlighted),
+        iconTint = colors.icon(highlighted),
+        size = size,
         modifier = modifier,
     )
 

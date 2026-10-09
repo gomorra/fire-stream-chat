@@ -40,6 +40,7 @@ class FirestoreMessageSourceTest {
     private val messageRef = mockk<DocumentReference>(relaxed = true)
     private val chatRef = mockk<DocumentReference>(relaxed = true)
     private val setTask = mockk<Task<Void>>(relaxed = true)
+    private val messages = mockk<CollectionReference>(relaxed = true)
 
     /** Every transaction body handed to the SDK, in order. None has run yet. */
     private val transactions = mutableListOf<Transaction.Function<Any?>>()
@@ -49,7 +50,6 @@ class FirestoreMessageSourceTest {
     @Before
     fun setUp() {
         val chats = mockk<CollectionReference>(relaxed = true)
-        val messages = mockk<CollectionReference>(relaxed = true)
         every { firestore.collection("chats") } returns chats
         every { chats.document("chat1") } returns chatRef
         every { chatRef.collection("messages") } returns messages
@@ -423,6 +423,69 @@ class FirestoreMessageSourceTest {
         assertEquals("application/pdf", raw.mimeType)
     }
 
+    // ── The kind of a call, on the CALL message ──────────────────────────────
+
+    /** Sends a call message and returns the fields written for it. */
+    private suspend fun writtenCallMessage(video: Boolean): Map<String, Any?> {
+        val written = slot<Map<String, Any?>>()
+        val addTask = mockk<Task<DocumentReference>>(relaxed = true)
+        completeImmediately(addTask)
+        every { addTask.result } returns messageRef
+        every { messageRef.id } returns "msg1"
+        every { messages.add(capture(written)) } returns addTask
+
+        val id = source.sendCallMessage(
+            chatId = "chat1", senderId = "uid1", endReason = "hangup",
+            durationSeconds = 42, video = video, timestamp = 1L,
+        )
+
+        assertEquals("msg1", id)
+        return written.captured
+    }
+
+    @Test
+    fun `a video call's message is written with video true`() = runTest {
+        val written = writtenCallMessage(video = true)
+
+        assertEquals(true, written["video"])
+        assertEquals(MessageType.CALL.name, written["type"])
+        assertEquals(42, written["duration"])
+    }
+
+    @Test
+    fun `a voice call's message is written with video false`() = runTest {
+        assertEquals(false, writtenCallMessage(video = false)["video"])
+    }
+
+    /** Reads a call message whose document holds [extra] beside the fields every call message has. */
+    private suspend fun readCallMessage(vararg extra: Pair<String, Any?>): Boolean {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.id } returns "msg1"
+        every { doc.data } returns mapOf(
+            "senderId" to "peer1", "type" to "CALL", "content" to "hangup",
+            "duration" to 42L, "timestamp" to 5L, *extra,
+        )
+        every { doc.metadata.hasPendingWrites() } returns false
+        val getTask = mockk<Task<DocumentSnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns doc
+        every { messageRef.get() } returns getTask
+
+        return source.fetchMessage("chat1", "msg1")!!.isVideoCall
+    }
+
+    @Test
+    fun `a read carries a call message's kind`() = runTest {
+        assertTrue(readCallMessage("video" to true))
+        assertFalse(readCallMessage("video" to false))
+    }
+
+    // A call message written by an app from before video calls has no such field.
+    @Test
+    fun `a call message without the field reads as a voice call`() = runTest {
+        assertFalse(readCallMessage())
+    }
+
     @Test
     fun `a sticker's id and pack are written beside its media url`() = runTest {
         val written = slot<Map<String, Any?>>()
@@ -500,12 +563,5 @@ class FirestoreMessageSourceTest {
         every { messageRef.get() } returns getTask
 
         assertEquals(null, source.fetchMessage("chat1", "msg1"))
-    }
-
-    private fun <T> completeImmediately(task: Task<T>) {
-        every { task.isComplete } returns true
-        every { task.isCanceled } returns false
-        every { task.exception } returns null
-        every { task.result } returns null
     }
 }

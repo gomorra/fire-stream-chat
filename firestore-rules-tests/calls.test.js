@@ -89,6 +89,7 @@ function newCall(fields = {}) {
     callerId: CALLER,
     calleeId: CALLEE,
     status: 'ringing',
+    video: false,
     createdAt: Date.now(),
     endedAt: null,
     endReason: null,
@@ -96,6 +97,15 @@ function newCall(fields = {}) {
     answer: null,
     ...fields,
   };
+}
+
+/**
+ * One side's live camera and microphone state, exactly as
+ * FirestoreCallSource.setMedia writes it: two dotted paths under `media.<uid>`,
+ * which leave the other side's entry alone.
+ */
+function mediaOf(uid, camera, mic) {
+  return { [`media.${uid}.camera`]: camera, [`media.${uid}.mic`]: mic };
 }
 
 function ended(reason) {
@@ -158,6 +168,36 @@ describe('the app', () => {
         transaction.set(callDoc(asCaller), newCall());
       }),
     );
+  });
+
+  test('the caller creates a call started as video', async () => {
+    await assertSucceeds(setDoc(callDoc(asCaller), newCall({ video: true })));
+  });
+
+  test('an older caller creates the call without saying how it was started', async () => {
+    const { video, ...withoutVideo } = newCall();
+    await assertSucceeds(setDoc(callDoc(asCaller), withoutVideo));
+  });
+
+  test('each side writes its own camera and microphone to an answered call', async () => {
+    await seedCall(STATES.answered());
+    await assertSucceeds(updateDoc(callDoc(asCaller), mediaOf(CALLER, false, true)));
+    await assertSucceeds(updateDoc(callDoc(asCallee), mediaOf(CALLEE, true, true)));
+    // Every switch of the camera or the microphone is one more write.
+    await assertSucceeds(updateDoc(callDoc(asCaller), mediaOf(CALLER, true, false)));
+
+    const call = await assertSucceeds(getDoc(callDoc(asCallee)));
+    assert.deepEqual(call.get('media'), {
+      [CALLER]: { camera: true, mic: false },
+      [CALLEE]: { camera: true, mic: true },
+    });
+  });
+
+  test('a camera or microphone write that races the end of the call still lands', async () => {
+    for (const [uid, db] of [[CALLER, () => asCaller], [CALLEE, () => asCallee]]) {
+      await seedCall(STATES.ended());
+      await assertSucceeds(updateDoc(callDoc(db()), mediaOf(uid, false, true)));
+    }
   });
 
   test('the caller writes the offer while the call rings', async () => {
@@ -262,6 +302,10 @@ describe('the app', () => {
     const calleeHears = await assertSucceeds(listen(candidateList(asCallee, 'callerCandidates')));
     assert.equal(calleeHears.size, 1);
 
+    // Connected: each side says what its camera and microphone do.
+    await assertSucceeds(updateDoc(callDoc(asCaller), mediaOf(CALLER, true, true)));
+    await assertSucceeds(updateDoc(callDoc(asCallee), mediaOf(CALLEE, false, true)));
+
     await assertSucceeds(updateDoc(callDoc(asCaller), ended('hangup')));
     await assertSucceeds(updateDoc(callDoc(asCallee), ended('hangup')));
     const last = await assertSucceeds(getDoc(callDoc(asCaller)));
@@ -348,7 +392,59 @@ describe('the rules refuse', () => {
     }
   });
 
-  for (const [key, value] of [['callerId', STRANGER], ['calleeId', STRANGER], ['createdAt', 1]]) {
+  test('either side writing the other side\'s camera and microphone', async () => {
+    await seedCall(STATES.answered());
+    await assertFails(updateDoc(callDoc(asCaller), mediaOf(CALLEE, true, true)));
+    await assertFails(updateDoc(callDoc(asCallee), mediaOf(CALLER, true, true)));
+    // Its own entry and the other side's in one write.
+    await assertFails(
+      updateDoc(callDoc(asCaller), { ...mediaOf(CALLER, true, true), ...mediaOf(CALLEE, false, false) }),
+    );
+  });
+
+  test('either side changing or removing the entry the other side wrote', async () => {
+    for (const db of [() => asCaller, () => asCallee]) {
+      const theirs = db() === asCaller ? CALLEE : CALLER;
+      const mine = db() === asCaller ? CALLER : CALLEE;
+      await seedCall({ ...STATES.answered(), media: { [theirs]: { camera: true, mic: true } } });
+      await assertFails(updateDoc(callDoc(db()), mediaOf(theirs, false, true)));
+      // Replacing the whole map drops the other side's entry.
+      await assertFails(updateDoc(callDoc(db()), { media: { [mine]: { camera: true, mic: true } } }));
+    }
+  });
+
+  test('a third user or a signed-out user writing a camera and microphone entry', async () => {
+    await seedCall(STATES.answered());
+    await assertFails(updateDoc(callDoc(asStranger), mediaOf(STRANGER, true, true)));
+    await assertFails(updateDoc(callDoc(asStranger), mediaOf(CALLER, true, true)));
+    await assertFails(updateDoc(callDoc(signedOut), mediaOf(CALLER, true, true)));
+  });
+
+  test('a camera and microphone entry of the wrong shape', async () => {
+    const wrongShapes = [
+      { [`media.${CALLER}.camera`]: true },
+      { [`media.${CALLER}.mic`]: true },
+      mediaOf(CALLER, 'on', true),
+      mediaOf(CALLER, true, null),
+      { ...mediaOf(CALLER, true, true), [`media.${CALLER}.screen`]: true },
+      { [`media.${CALLER}`]: true },
+      { media: true },
+      { media: [] },
+    ];
+    for (const write of wrongShapes) {
+      await seedCall(STATES.answered());
+      await assertFails(updateDoc(callDoc(asCaller), write));
+    }
+  });
+
+  test('the camera and microphone written together with anything the side may not write', async () => {
+    await seedCall(STATES.answered());
+    await assertFails(updateDoc(callDoc(asCaller), { ...mediaOf(CALLER, true, true), offer: OTHER_OFFER }));
+    await assertFails(updateDoc(callDoc(asCaller), { ...mediaOf(CALLER, true, true), status: 'ringing' }));
+    await assertFails(updateDoc(callDoc(asCaller), { ...mediaOf(CALLER, true, true), extra: true }));
+  });
+
+  for (const [key, value] of [['callerId', STRANGER], ['calleeId', STRANGER], ['createdAt', 1], ['video', true]]) {
     test(`either side rewriting ${key}`, async () => {
       for (const db of [asCaller, asCallee]) {
         await seedCall(STATES.ringing());
@@ -488,5 +584,18 @@ describe('the rules refuse', () => {
 
   test('a create that already holds an answer', async () => {
     await assertFails(setDoc(callDoc(asCaller), newCall({ answer: ANSWER })));
+  });
+
+  test('a create whose video is not a boolean', async () => {
+    for (const value of [null, 'yes', 1, { on: true }]) {
+      await assertFails(setDoc(callDoc(asCaller), newCall({ video: value })));
+    }
+  });
+
+  test('a create that already holds camera and microphone state', async () => {
+    await assertFails(setDoc(callDoc(asCaller), newCall({ media: {} })));
+    await assertFails(
+      setDoc(callDoc(asCaller), newCall({ media: { [CALLER]: { camera: true, mic: true } } })),
+    );
   });
 });

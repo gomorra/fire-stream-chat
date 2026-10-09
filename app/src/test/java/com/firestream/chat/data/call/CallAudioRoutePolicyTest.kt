@@ -175,6 +175,120 @@ class CallAudioRoutePolicyTest {
         )
     }
 
+    // ── preferSpeaker: a call started as video, or video showing ─────────────
+
+    @Test
+    fun `a video call with no headset and no pick starts on the speaker`() {
+        assertEquals(
+            SPEAKER,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = emptySet(),
+                available = phone,
+                current = null,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `video that starts mid-call moves the earpiece to the speaker`() {
+        assertEquals(
+            SPEAKER,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone,
+                available = phone,
+                current = EARPIECE,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `a connected headset keeps the audio of a video call`() {
+        assertEquals(
+            BLUETOOTH,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone + BLUETOOTH,
+                available = phone + BLUETOOTH,
+                current = BLUETOOTH,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `a headset connected during video takes the audio`() {
+        assertEquals(
+            WIRED_HEADSET,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone,
+                available = phone + WIRED_HEADSET,
+                current = SPEAKER,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `an explicit earpiece pick survives video`() {
+        assertEquals(
+            EARPIECE,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone,
+                available = phone,
+                current = EARPIECE,
+                userPick = EARPIECE,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `a headset that disconnects during video falls back to the speaker`() {
+        assertEquals(
+            SPEAKER,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone + BLUETOOTH,
+                available = phone,
+                current = BLUETOOTH,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
+    @Test
+    fun `video that stops leaves the audio on the speaker`() {
+        assertEquals(
+            SPEAKER,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = phone,
+                available = phone,
+                current = SPEAKER,
+                userPick = null,
+                preferSpeaker = false
+            )
+        )
+    }
+
+    @Test
+    fun `a video call on a device without a speaker stays where it is`() {
+        assertEquals(
+            EARPIECE,
+            CallAudioRoutePolicy.resolve(
+                previousAvailable = setOf(EARPIECE),
+                available = setOf(EARPIECE),
+                current = EARPIECE,
+                userPick = null,
+                preferSpeaker = true
+            )
+        )
+    }
+
     @Test
     fun `routeOf maps every device type calls can use`() {
         val expected = mapOf(

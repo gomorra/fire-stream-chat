@@ -7,6 +7,7 @@ import android.app.NotificationManager
 import android.media.AudioAttributes
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -24,10 +25,61 @@ class CallNotificationManagerTest {
 
     private val context = ApplicationProvider.getApplicationContext<Application>()
     private val systemNotifications = context.getSystemService(NotificationManager::class.java)
+    private val manager = CallNotificationManager(context)
+
+    private fun Notification.title() = extras.getCharSequence(Notification.EXTRA_TITLE).toString()
+
+    // ── The call's kind ─────────────────────────────────────────────────────
+
+    @Test
+    fun `a video call rings as an incoming video call`() {
+        val ring = manager.buildIncomingCallNotification("Alice", video = true)
+
+        assertEquals("Incoming Video Call", ring.title())
+        assertEquals("Alice", ring.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    }
+
+    @Test
+    fun `a voice call rings as an incoming voice call`() {
+        val ring = manager.buildIncomingCallNotification("Alice", video = false)
+
+        assertEquals("Incoming Voice Call", ring.title())
+    }
+
+    @Test
+    fun `the notifications of a running call name its kind`() {
+        assertEquals("Video Call", manager.buildOutgoingCallNotification("Alice", video = true).title())
+        assertEquals("Voice Call", manager.buildOutgoingCallNotification("Alice", video = false).title())
+        assertEquals("Video Call", manager.buildOngoingCallNotification("Alice", video = true).title())
+        assertEquals("Voice Call", manager.buildOngoingCallNotification("Alice", video = false).title())
+    }
+
+    // The ring is posted again when the call document names the kind after the push did not. The
+    // second post must not start the ringtone a second time.
+    @Test
+    fun `the ring alerts only once`() {
+        val ring = manager.buildIncomingCallNotification("Alice", video = true)
+
+        assertTrue(ring.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
+    }
+
+    @Test
+    fun `the fallback ring names the call's kind and passes it on with the tap`() {
+        // One fallback ring at a time: the next one's PendingIntent replaces this one's extras.
+        val video = fallbackRing(video = true)
+        assertEquals("Incoming Video Call", video.title())
+        assertTrue(shadowOf(video.contentIntent).savedIntent.getBooleanExtra(CallActivity.EXTRA_VIDEO, false))
+
+        val voice = fallbackRing(video = false)
+        assertEquals("Incoming Voice Call", voice.title())
+        assertFalse(shadowOf(voice.contentIntent).savedIntent.getBooleanExtra(CallActivity.EXTRA_VIDEO, true))
+    }
+
+    // ── The ring ────────────────────────────────────────────────────────────
 
     @Test
     fun `an incoming call rings and vibrates on the ringtone stream`() {
-        val notification = CallNotificationManager(context).buildIncomingCallNotification("Alice")
+        val notification = manager.buildIncomingCallNotification("Alice", video = false)
 
         val channel = systemNotifications.getNotificationChannel(notification.channelId)
         assertNotNull("incoming-call channel exists", channel)
@@ -39,7 +91,7 @@ class CallNotificationManagerTest {
 
     @Test
     fun `an incoming call keeps ringing until its notification is replaced or removed`() {
-        val notification = CallNotificationManager(context).buildIncomingCallNotification("Alice")
+        val notification = manager.buildIncomingCallNotification("Alice", video = false)
 
         assertTrue(notification.flags and Notification.FLAG_INSISTENT != 0)
     }
@@ -59,7 +111,7 @@ class CallNotificationManagerTest {
 
     @Test
     fun `an ongoing call stays silent`() {
-        val notification = CallNotificationManager(context).buildOngoingCallNotification("Alice")
+        val notification = manager.buildOngoingCallNotification("Alice", video = false)
 
         val channel = systemNotifications.getNotificationChannel(notification.channelId)
         assertEquals(NotificationManager.IMPORTANCE_LOW, channel.importance)
@@ -102,7 +154,7 @@ class CallNotificationManagerTest {
 
     @Test
     fun `the service's own ring declines the call the service holds`() {
-        val notification = CallNotificationManager(context).buildIncomingCallNotification("Alice")
+        val notification = manager.buildIncomingCallNotification("Alice", video = false)
         val decline = notification.actions.single { it.title == "Decline" }
 
         val intent = shadowOf(decline.actionIntent).savedIntent
@@ -113,6 +165,6 @@ class CallNotificationManagerTest {
         assertNotEquals(fallbackDecline.actionIntent, decline.actionIntent)
     }
 
-    private fun fallbackRing(): Notification =
-        CallNotificationManager(context).buildIncomingCallFallbackNotification("call1", "u2", "Alice", null)
+    private fun fallbackRing(video: Boolean = false): Notification =
+        manager.buildIncomingCallFallbackNotification("call1", "u2", "Alice", null, video)
 }

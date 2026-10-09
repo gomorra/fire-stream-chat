@@ -6,8 +6,24 @@ import com.firestream.chat.domain.model.CallState
 /** What [CallActivity] does with the intent that opened it. */
 internal enum class CallLaunch { PLACE_CALL, ANSWER, RING, SHOW, CLOSE }
 
-/** What [CallActivity] runs once it may use the microphone. */
-internal enum class MicAction { PLACE_CALL, ANSWER }
+/**
+ * What [CallActivity] runs once the permission prompt has been answered. Placing and answering
+ * need the microphone. [camera] says whether the prompt asks for the camera too, which no action
+ * needs: a refusal leaves the call running with the camera off.
+ */
+internal enum class PermissionAction(val microphone: Boolean, val camera: Boolean) {
+    PLACE_VOICE_CALL(microphone = true, camera = false),
+    PLACE_VIDEO_CALL(microphone = true, camera = true),
+
+    /** Answer with the camera off: *Answer*, *Voice only*, the notification and the lock screen. */
+    ANSWER(microphone = true, camera = false),
+
+    /** Answer *With video*. */
+    ANSWER_WITH_VIDEO(microphone = true, camera = true),
+
+    /** The camera button of a running call. */
+    CAMERA_ON(microphone = false, camera = true),
+}
 
 /**
  * Decide what an intent that opened [CallActivity] asks for.

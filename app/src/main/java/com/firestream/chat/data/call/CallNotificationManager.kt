@@ -78,7 +78,8 @@ class CallNotificationManager(private val context: Context) {
         )
     }
 
-    fun buildOngoingCallNotification(remoteName: String): Notification {
+    /** The call past its ring. [video] is how the call was started, and only picks the title. */
+    fun buildOngoingCallNotification(remoteName: String, video: Boolean): Notification {
         val hangupIntent = Intent(context, CallService::class.java).apply {
             action = CallService.ACTION_HANGUP
         }
@@ -95,7 +96,7 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Voice Call")
+            .setContentTitle(callTitle(video))
             .setContentText("In call with $remoteName")
             .setOngoing(true)
             .setContentIntent(launchPending)
@@ -104,7 +105,8 @@ class CallNotificationManager(private val context: Context) {
             .build()
     }
 
-    fun buildOutgoingCallNotification(remoteName: String): Notification {
+    /** The outgoing ring. [video] is how the call was started, and only picks the title. */
+    fun buildOutgoingCallNotification(remoteName: String, video: Boolean): Notification {
         val hangupIntent = Intent(context, CallService::class.java).apply {
             action = CallService.ACTION_HANGUP
         }
@@ -121,7 +123,7 @@ class CallNotificationManager(private val context: Context) {
 
         return NotificationCompat.Builder(context, CHANNEL_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Voice Call")
+            .setContentTitle(callTitle(video))
             .setContentText("Calling $remoteName...")
             .setOngoing(true)
             .setContentIntent(launchPending)
@@ -130,7 +132,8 @@ class CallNotificationManager(private val context: Context) {
             .build()
     }
 
-    fun buildIncomingCallNotification(callerName: String): Notification {
+    /** The ring. [video] is how the caller started the call, and only picks the title. */
+    fun buildIncomingCallNotification(callerName: String, video: Boolean): Notification {
         val fullScreenIntent = buildCallActivityIntent()
         val fullScreenPending = PendingIntent.getActivity(
             context, 1, fullScreenIntent,
@@ -151,7 +154,7 @@ class CallNotificationManager(private val context: Context) {
         // Its ring timeout ends an unanswered call after 30 s, which bounds the ring.
         // setTimeoutAfter would not: the system never times out a foreground service's
         // notification.
-        return ringing(callerName, fullScreenPending)
+        return ringing(callerName, video, fullScreenPending)
             .addAction(android.R.drawable.ic_menu_call, "Answer", answerPending)
             .addAction(declineAction(REQUEST_DECLINE, callId = null))
             .setOngoing(true)
@@ -165,13 +168,15 @@ class CallNotificationManager(private val context: Context) {
      * Tapping it, or its full-screen intent, opens the call screen, which starts the service from
      * the foreground and rings as usual. Its Decline declines the call it names. It rings like the
      * service's own notification, and the system removes it when the call would have stopped
-     * ringing, because no service holds it.
+     * ringing, because no service holds it. [video] picks the title, and travels on to the
+     * service with the tap.
      */
     fun buildIncomingCallFallbackNotification(
         callId: String,
         callerId: String,
         callerName: String,
-        callerAvatarUrl: String?
+        callerAvatarUrl: String?,
+        video: Boolean
     ): Notification {
         val ringIntent = buildCallActivityIntent().apply {
             putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_RING)
@@ -179,13 +184,14 @@ class CallNotificationManager(private val context: Context) {
             putExtra(CallActivity.EXTRA_CALLER_ID, callerId)
             putExtra(CallActivity.EXTRA_CALLER_NAME, callerName)
             putExtra(CallActivity.EXTRA_CALLER_AVATAR_URL, callerAvatarUrl)
+            putExtra(CallActivity.EXTRA_VIDEO, video)
         }
         val ringPending = PendingIntent.getActivity(
             context, 4, ringIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return ringing(callerName, ringPending)
+        return ringing(callerName, video, ringPending)
             .setContentIntent(ringPending)
             .addAction(declineAction(REQUEST_DECLINE_FALLBACK, callId = callId))
             .setAutoCancel(true)
@@ -195,14 +201,17 @@ class CallNotificationManager(private val context: Context) {
     }
 
     /**
-     * What both incoming-call notifications share: the ringing channel, and the call screen at
-     * full screen.
+     * What both incoming-call notifications share: the ringing channel, the title for the call's
+     * kind, and the call screen at full screen.
      */
-    private fun ringing(callerName: String, fullScreen: PendingIntent): NotificationCompat.Builder =
+    private fun ringing(callerName: String, video: Boolean, fullScreen: PendingIntent): NotificationCompat.Builder =
         NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
             .setSmallIcon(android.R.drawable.ic_menu_call)
-            .setContentTitle("Incoming Voice Call")
+            .setContentTitle("Incoming ${callTitle(video)}")
             .setContentText(callerName)
+            // The ring is posted a second time when the call's kind arrives late. It must not
+            // start the ringtone again.
+            .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setFullScreenIntent(fullScreen, true)
@@ -233,6 +242,8 @@ class CallNotificationManager(private val context: Context) {
     fun cancelNotification(id: Int) {
         notifManager.cancel(id)
     }
+
+    private fun callTitle(video: Boolean) = if (video) "Video Call" else "Voice Call"
 
     private fun buildCallActivityIntent(): Intent {
         return Intent().apply {

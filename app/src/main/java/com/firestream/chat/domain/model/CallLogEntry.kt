@@ -8,7 +8,9 @@ data class CallLogEntry(
     val avatarUrl: String?,
     val type: CallLogType,
     val durationSeconds: Int?,
-    val timestamp: Long
+    val timestamp: Long,
+    /** The call was started as a video call. */
+    val video: Boolean = false
 )
 
 /**

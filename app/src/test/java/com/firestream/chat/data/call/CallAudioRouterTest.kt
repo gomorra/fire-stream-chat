@@ -187,6 +187,71 @@ class CallAudioRouterTest {
     }
 
     @Test
+    fun `a video call starts on the speaker`() {
+        router.setPreferSpeaker(true)
+        // Set before the call is routed: nothing is asked of the OS yet.
+        verify(exactly = 0) { audioManager.setCommunicationDevice(any()) }
+
+        router.start()
+
+        verify { audioManager.setCommunicationDevice(speaker) }
+        verify(exactly = 0) { audioManager.setCommunicationDevice(earpiece) }
+    }
+
+    @Test
+    fun `video that starts mid-call moves the call to the speaker, once`() {
+        router.start()
+        communicationListener.captured.onCommunicationDeviceChanged(earpiece)
+
+        router.setPreferSpeaker(true)
+        router.setPreferSpeaker(true)
+
+        verify(exactly = 1) { audioManager.setCommunicationDevice(speaker) }
+    }
+
+    @Test
+    fun `video does not take the audio from a headset`() {
+        offered = listOf(earpiece, speaker, bluetooth)
+        router.start()
+
+        router.setPreferSpeaker(true)
+
+        verify(exactly = 0) { audioManager.setCommunicationDevice(speaker) }
+    }
+
+    @Test
+    fun `video does not overrule an explicit earpiece pick`() {
+        router.start()
+        router.select(CallAudioRoute.EARPIECE)
+
+        router.setPreferSpeaker(true)
+
+        verify(exactly = 0) { audioManager.setCommunicationDevice(speaker) }
+    }
+
+    @Test
+    fun `video that stops leaves the call on the speaker`() {
+        router.setPreferSpeaker(true)
+        router.start()
+        communicationListener.captured.onCommunicationDeviceChanged(speaker)
+
+        router.setPreferSpeaker(false)
+
+        verify(exactly = 0) { audioManager.setCommunicationDevice(earpiece) }
+    }
+
+    @Test
+    fun `a stopped router forgets that the last call had video`() {
+        router.setPreferSpeaker(true)
+        router.start()
+        router.stop()
+
+        router.start()
+
+        verify(exactly = 1) { audioManager.setCommunicationDevice(earpiece) }
+    }
+
+    @Test
     fun `start twice registers one set of listeners and routes once`() {
         router.start()
         router.start()

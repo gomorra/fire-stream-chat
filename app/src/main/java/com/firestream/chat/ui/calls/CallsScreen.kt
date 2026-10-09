@@ -1,7 +1,6 @@
 package com.firestream.chat.ui.calls
 
 import android.content.Context
-import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,6 +24,7 @@ import androidx.compose.material.icons.automirrored.outlined.PhoneCallback
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import com.firestream.chat.ui.components.SkeletonCallItem
@@ -254,8 +254,8 @@ private fun CallLogRow(
 
         IconButton(onClick = onCallClick) {
             Icon(
-                imageVector = Icons.Default.Call,
-                contentDescription = "Call back",
+                imageVector = callBackIcon(entry),
+                contentDescription = if (entry.video) "Call back with video" else "Call back",
                 tint = MaterialTheme.colorScheme.primary
             )
         }
@@ -275,11 +275,18 @@ private fun typeIcon(type: CallLogType): ImageVector = when (type) {
     CallLogType.MISSED, CallLogType.DECLINED -> Icons.AutoMirrored.Filled.CallMissed
 }
 
-private fun typeLabel(type: CallLogType): String = when (type) {
-    CallLogType.OUTGOING, CallLogType.NO_ANSWER, CallLogType.OUTGOING_DECLINED -> "Outgoing call"
-    CallLogType.INCOMING -> "Incoming call"
-    CallLogType.MISSED -> "Missed call"
-    CallLogType.DECLINED -> "Declined call"
+/** A row calls back with the kind the call was, and its icon says which. */
+private fun callBackIcon(entry: CallLogEntry): ImageVector =
+    if (entry.video) Icons.Default.Videocam else Icons.Default.Call
+
+internal fun typeLabel(type: CallLogType, video: Boolean): String {
+    val call = if (video) "video call" else "call"
+    return when (type) {
+        CallLogType.OUTGOING, CallLogType.NO_ANSWER, CallLogType.OUTGOING_DECLINED -> "Outgoing $call"
+        CallLogType.INCOMING -> "Incoming $call"
+        CallLogType.MISSED -> "Missed $call"
+        CallLogType.DECLINED -> "Declined $call"
+    }
 }
 
 /** How a call that never connected ended. An OUTGOING or INCOMING call always connected. */
@@ -289,9 +296,10 @@ private fun unconnectedLabel(type: CallLogType): String = when (type) {
     CallLogType.INCOMING, CallLogType.MISSED -> "Missed"
 }
 
-private fun buildCallLabel(entry: CallLogEntry): String {
+internal fun buildCallLabel(entry: CallLogEntry): String {
     val durationSeconds = entry.durationSeconds ?: 0
-    return if (durationSeconds > 0) formatCallDuration(durationSeconds) else unconnectedLabel(entry.type)
+    val outcome = if (durationSeconds > 0) formatCallDuration(durationSeconds) else unconnectedLabel(entry.type)
+    return if (entry.video) "Video call · $outcome" else outcome
 }
 
 private fun formatRelativeTimestamp(timestamp: Long): String {
@@ -363,7 +371,7 @@ private fun CallDetailSheet(
                     iconTint = if (entry.type.isMissedOrDeclined)
                         MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.onSurfaceVariant,
-                    text = typeLabel(entry.type)
+                    text = typeLabel(entry.type, entry.video)
                 )
 
                 // Date/time
@@ -403,7 +411,7 @@ private fun CallDetailSheet(
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Call,
+                        imageVector = callBackIcon(entry),
                         contentDescription = null,
                         modifier = Modifier.size(18.dp)
                     )
@@ -447,12 +455,15 @@ private fun formatFullDateTime(timestamp: Long): String =
     fullDateTimeFormat.format(Date(timestamp))
 
 private fun startOutgoingCall(context: Context, entry: CallLogEntry) {
-    val intent = Intent(context, CallActivity::class.java).apply {
-        putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
-        putExtra(CallActivity.EXTRA_CALLEE_ID, entry.otherPartyId)
-        putExtra(CallActivity.EXTRA_CALLEE_NAME, entry.displayName)
-        putExtra(CallActivity.EXTRA_CALLEE_AVATAR_URL, entry.avatarUrl)
-        putExtra(CallActivity.EXTRA_CHAT_ID, entry.chatId)
-    }
-    context.startActivity(intent)
+    // A row calls back with the kind the call was.
+    context.startActivity(
+        CallActivity.outgoingIntent(
+            context = context,
+            calleeId = entry.otherPartyId,
+            calleeName = entry.displayName,
+            calleeAvatarUrl = entry.avatarUrl,
+            chatId = entry.chatId,
+            video = entry.video
+        )
+    )
 }

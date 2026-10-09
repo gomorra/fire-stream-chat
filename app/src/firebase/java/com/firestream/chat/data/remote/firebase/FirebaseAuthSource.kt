@@ -43,7 +43,9 @@ class FirebaseAuthSource @Inject constructor(
             "statusText" to "Hey there! I'm using FireStream",
             "lastSeen" to System.currentTimeMillis(),
             "isOnline" to true,
-            "createdAt" to System.currentTimeMillis()
+            "createdAt" to System.currentTimeMillis(),
+            // A new profile is offered video from its first call on.
+            FIELD_CALL_VIDEO_LINE to true
         )
         firestore.collection("users").document(uid).set(userData).await()
     }
@@ -59,7 +61,26 @@ class FirebaseAuthSource @Inject constructor(
             .await()
     }
 
+    override suspend fun announceCallVideoLine(uid: String) {
+        firestore.collection("users").document(uid)
+            .update(FIELD_CALL_VIDEO_LINE, true)
+            .await()
+    }
+
+    override suspend fun takesCallVideoLine(uid: String): Boolean {
+        val doc = firestore.collection("users").document(uid).get().await()
+        return doc.getBoolean(FIELD_CALL_VIDEO_LINE) == true
+    }
+
     override fun signOut() {
         auth.signOut()
+    }
+
+    private companion object {
+        /**
+         * Never write false and never remove it. An app that lacks the field is offered no video
+         * line, and an app without video crashes on an offer that has one.
+         */
+        const val FIELD_CALL_VIDEO_LINE = "callVideoLine"
     }
 }

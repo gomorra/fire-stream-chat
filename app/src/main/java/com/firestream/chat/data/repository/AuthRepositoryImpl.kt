@@ -1,5 +1,6 @@
 // region: AGENT-NOTE
-// Responsibility: Phone-OTP authentication, FCM token registration, sign-out.
+// Responsibility: Phone-OTP authentication, FCM token registration, announcing
+//   on the user document that this app takes a video line in a call, sign-out.
 // Owns: Current backend user state. Sign-out clears AppDatabase + SignalDatabase
 //   so a fresh signed-in user gets clean local state and fresh Signal keys.
 // Collaborators: AuthSource (interface — Firebase impl in firebase/, PocketBase
@@ -22,6 +23,7 @@ import com.firestream.chat.data.local.dao.UserDao
 import com.firestream.chat.data.local.entity.UserEntity
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.sticker.StickerLibrarySync
+import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.domain.model.User
 import com.firestream.chat.domain.repository.AuthRepository
 import com.google.firebase.messaging.FirebaseMessaging
@@ -71,6 +73,9 @@ class AuthRepositoryImpl @Inject constructor(
                 )
                 userDao.insertUser(UserEntity.fromDomain(user))
                 signalManager.ensureInitialized()
+                // The app started signed out, so its announcement at start wrote nothing. Not
+                // awaited: the sign-in does not depend on it.
+                CoroutineScope(SupervisorJob() + Dispatchers.IO).launch { announceCallVideoLine() }
                 Result.success(user)
             } else {
                 // New user — needs profile setup; keys will be initialised in createUserProfile
@@ -157,6 +162,23 @@ class AuthRepositoryImpl @Inject constructor(
             authSource.updateFcmToken(uid, token)
             Result.success(Unit)
         } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Runs when the app starts and after the sign-in of an existing user. A new profile carries
+     * the field from its creation. A failure is the caller's to ignore: the next start writes it
+     * again, and until then calls to this user run without video.
+     */
+    override suspend fun announceCallVideoLine(): Result<Unit> {
+        return try {
+            val uid = currentUserId ?: return Result.success(Unit)
+            authSource.announceCallVideoLine(uid)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w("AuthRepository", "Could not announce the call video line", e)
             Result.failure(e)
         }
     }

@@ -196,12 +196,15 @@ class FCMService : FirebaseMessagingService() {
         val callerId = data["callerId"] ?: return
         val callerName = data["callerName"] ?: "Unknown"
         val callerAvatarUrl = data["callerAvatarUrl"]
+        // A function deployed before the kind existed sends none. The service then takes it
+        // from the call document.
+        val video = data["video"] == "true"
 
         // Don't start if already in a call
         if (callStateHolder.callState.value.isOngoing) return
 
         try {
-            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl)
+            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl, video)
         } catch (e: IllegalStateException) {
             // Android 12+ lets a push start a foreground service only if it arrived at high
             // priority, and FCM can lower an app's priority. Ring with a notification instead:
@@ -209,7 +212,7 @@ class FCMService : FirebaseMessagingService() {
             Log.w(TAG, "Could not start the call service for call $callId; ringing with a notification", e)
             val notifications = CallNotificationManager(this)
             notifications.updateNotification(
-                notifications.buildIncomingCallFallbackNotification(callId, callerId, callerName, callerAvatarUrl),
+                notifications.buildIncomingCallFallbackNotification(callId, callerId, callerName, callerAvatarUrl, video),
                 CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK
             )
         }

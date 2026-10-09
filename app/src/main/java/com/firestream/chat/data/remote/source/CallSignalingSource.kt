@@ -10,12 +10,15 @@ import kotlinx.coroutines.flow.Flow
  * ICE candidate streams. Stub on the pocketbase flavor in v0.
  */
 interface CallSignalingSource {
-    suspend fun createCallDocument(callerId: String, calleeId: String): String
+    suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String
     suspend fun updateCallStatus(callId: String, status: String, endReason: String? = null)
     suspend fun setOffer(callId: String, sdp: SdpData)
     suspend fun setAnswer(callId: String, sdp: SdpData)
     suspend fun setAnswerAndAccept(callId: String, sdp: SdpData)
     suspend fun addIceCandidate(callId: String, subcollection: String, candidate: IceCandidateData)
+
+    /** Publish what [uid] says about their own camera and microphone. Only [uid]'s entry changes. */
+    suspend fun setMedia(callId: String, uid: String, camera: Boolean, mic: Boolean)
 
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>

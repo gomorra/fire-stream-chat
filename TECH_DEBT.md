@@ -83,13 +83,15 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `MessageEntity` delegates 33 columns through the `MessageColumns` interface
+### `MessageEntity` delegates 34 columns through the `MessageColumns` interface
 
 **The smell.** `messages` is split into the embedded `MessageRecord` (the backend's columns, Room's partial entity) and the local-only columns on `MessageEntity`, and the entity implements `MessageColumns by record` so `entity.status` keeps compiling everywhere. Every backend column is therefore declared three times — in `MessageRecord`, in the interface, and implicitly through the delegation — and a caller that changes a record field on an entity in hand writes `entity.copy(record = entity.record.copy(…))`.
 
 **Why we haven't fixed it.** The split is what makes a snapshot upsert unable to reach `localUri`, the star or the outbox columns (the trap step 6 of the offline outbox removed), and the delegation kept a 53-file diff from also touching every reader of an entity field. The `/simplify` altitude review on that step called it a source-compatibility shim and asked that it be recorded rather than left implicit.
 
 **When to revisit.** The next time a backend column is added to `messages`. Either drop the interface and let readers say `entity.record.x`, or generate the delegation; do not add a fourth declaration.
+
+**Deferred once.** `isVideoCall` was added through the same three declarations. Dropping the interface touches every reader of an entity field, which does not belong in a plan step that adds one boolean. The trigger stands for the next column. (`docs/plans/video-calls.md` step 2.)
 
 ---
 
@@ -255,6 +257,36 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### A call's WebRTC objects are built on the main thread
+
+**The smell.** `WebRtcCallLocalMedia` builds the WebRTC factory on the main thread, with its EGL context, its audio module and the video codec factories. `openPeer` creates the peer connection there, `PeerSession.setCamera` waits there for the signalling thread, and `dispose()` closes the connections there. Each is short, and together they are the wait between a tap and the first ring or answer, and at a hang-up. The camera's device calls and the release of a finished call's camera, tracks and factory already run on a worker.
+
+**Why we haven't fixed it.** A call's state is confined to the main thread, which is what removed every lock from `CallService`. Building the factory elsewhere means a call that exists before its media does, and every entry point of `CallSession` would have to wait for it.
+
+**When to revisit.** On the first ANR trace or a visible stall that points at `WebRtcCallLocalMedia`, or when step 7 of `docs/plans/video-calls.md` opens three connections at once.
+
+---
+
+### The call capability is written on every process start
+
+**The smell.** `FireStreamApp.onCreate` writes `callVideoLine: true` to the own user document on every process start, a start by a push included (`AuthRepository.announceCallVideoLine`). After the first one each write changes nothing, and Firestore still bills it.
+
+**Why we haven't fixed it.** Writing once needs a DataStore key per signed-in uid, and a wrong "already written" leaves a user without video for good. The field has to be right before it has to be cheap.
+
+**When to revisit.** When a second capability joins it: write one capabilities field per installed app version, and remember the version that wrote it.
+
+---
+
+### The relay login's lifetime is written down twice
+
+**The smell.** `getTurnCredentials` asks Cloudflare for a login that is good for 86400 seconds (`TURN_CREDENTIAL_TTL_SECONDS` in `functions/index.js`). `IceServerProvider.KEEP_MS` keeps a fetched set for twelve hours, half of that, so a call that starts on a kept set never outlives its login. Only two comments tie the numbers together. A shorter lifetime in the function leaves the app building calls on a login that has run out, and those calls have no relay.
+
+**Why we haven't fixed it.** The fix changes what the function returns and what `IceServerSource` returns: the set together with its lifetime, which the provider then halves. Both numbers are set once and nobody plans to change them.
+
+**When to revisit.** Before the lifetime in the function changes, or when the relay login becomes per call (`docs/BACKLOG.md` § *The relay hands a login to every signed-in user*).
+
+---
+
 ### The voice-message player prepares on the main thread
 
 **The smell.** `VoiceMessagePlayer` (`ui/chat/VoiceMessagePlayer.kt`) builds its `MediaPlayer` inside the Play button's `onClick` and calls the blocking `prepare()` there, on the main thread. For a voice note that is a remote `mediaUrl`, so a slow network holds the UI thread until the first bytes arrive — short recordings keep that brief, but it is the shape of an ANR. The file-handling work (2026-09-27) reused the player for audio *files*, which can be large, and worked around it by showing the inline player only once the file is on the device; it also added the try/catch that turns an unplayable source into "Can't play this file" instead of a crash.
@@ -312,7 +344,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 ### Calls — the known limits
 
 **The smell.**
-- `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service enters and leaves the foreground, how it stops by start id, and how WebRTC's callbacks reach the main thread are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
+- `CallService`, `WebRtcCallLocalMedia` and `CallActivity` have no JVM test. `CallSessionTest` covers a call's transitions, its timers, its camera and its end-of-call writes, and `PeerSessionTest`, `CameraSwitchTest` and `LocalCameraTest` the pieces under it. How the service enters and leaves the foreground, how it stops by start id, how the camera's and WebRTC's callbacks reach the main thread, and the order a finished call's media is released in are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
 - The fallback ring that `FCMService` posts when Android will not start the call service does not know when the caller hangs up. It rings until it is declined or times out with the ring, 30 s at most. Opening it after the call ended shows "Call Ended".
 - The call document's `status` and `endReason` are read as strings. `CallSignalingData` carries them raw, and `CallSession` decodes them where it reads them. Writes go through `EndReason`, so the wire names have one source.
 - An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification. If the placed call's document already existed, its callee rang and the chat records nothing. The incoming call replaces the placing with a plain state write, so neither the setup nor a Cancel owns that record.
@@ -336,9 +368,9 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ## Declined — not worth the churn
 
-### UI imports 24 `data/` utility classes directly (accepted system-boundary adapters)
+### UI imports 27 `data/` utility classes directly (accepted system-boundary adapters)
 
-**The smell.** 19 UI files import 25 classes from `data/` directly: `PreferencesDataStore` plus its preference enums (`AppTheme`, `NotificationSound`, `AutoDownloadOption`, `DictationLanguage`, `ScrollPos`, `VideoQualityOption` — added 2026-07-18 with video sharing), `MediaFileManager`, `SpeechRecognizerManager`/`DictationEvent`, `TimerAlarmScheduler`/`ScheduleResult`, `CallService`/`CallStateHolder`, `ActiveChatTracker`, `LinkPreview`/`LinkPreviewSource`, `SharedContentHolder`/`ShareContentResolver`, `ApkInstaller`, `ChangelogParser`/`ChangelogVersion`, `MediaBackfillWorker`, `FirebasePhoneAuth`/`OtpEvent`, `ImageEditRasterizer` (added 2026-09-09 with the image editor: a platform/file adapter holding the bitmap work and the edit-cache lifecycle. Its `RasterOp` and dimension arithmetic live in `domain/util/ImageEditGeometry.kt` instead, so only the hosting ViewModel needs this entry — the editor screens import their geometry from domain and reach `data/` not at all). Textbook layering says UI reaches data only through domain interfaces.
+**The smell.** UI files import 27 classes from `data/` directly: `CallVideoSinks` (the call screen asks it for a ready video `View` per participant and for the id of the own camera; no WebRTC type crosses), `FullScreenIntentAccess` (it reads the special access *Full screen notifications* and opens its page in the system settings; the rule for when to ask is `shouldPromptForFullScreenAccess` in `domain/util/`), `PreferencesDataStore` plus its preference enums (`AppTheme`, `NotificationSound`, `AutoDownloadOption`, `DictationLanguage`, `ScrollPos`, `VideoQualityOption` — added 2026-07-18 with video sharing), `MediaFileManager`, `SpeechRecognizerManager`/`DictationEvent`, `TimerAlarmScheduler`/`ScheduleResult`, `CallService`/`CallStateHolder`, `ActiveChatTracker`, `LinkPreview`/`LinkPreviewSource`, `SharedContentHolder`/`ShareContentResolver`, `ApkInstaller`, `ChangelogParser`/`ChangelogVersion`, `MediaBackfillWorker`, `FirebasePhoneAuth`/`OtpEvent`, `ImageEditRasterizer` (added 2026-09-09 with the image editor: a platform/file adapter holding the bitmap work and the edit-cache lifecycle. Its `RasterOp` and dimension arithmetic live in `domain/util/ImageEditGeometry.kt` instead, so only the hosting ViewModel needs this entry — the editor screens import their geometry from domain and reach `data/` not at all). Textbook layering says UI reaches data only through domain interfaces.
 
 **Why we're not fixing it.** 2026-06-09 review verdict (LOW/accepted): these are system-boundary adapters — platform services, preference stores, process-wide state holders — not repositories, and none of them leak Firestore/Room types into composables. Wrapping each in a one-impl domain interface would add 6–8 ceremony interfaces with no decision value. The exact set is enforced as an allowlist in `ArchitectureTest.kt` ("ui imports from data are limited to the accepted system-boundary allowlist"), so growth is a conscious decision instead of drift.
 

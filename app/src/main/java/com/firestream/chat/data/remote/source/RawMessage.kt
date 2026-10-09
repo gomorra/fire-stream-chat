@@ -63,6 +63,7 @@ data class RawMessage(
     val fileName: String? = null,
     val fileSize: Long? = null,
     val mimeType: String? = null,
+    val isVideoCall: Boolean = false,
     val stickerId: String? = null,
     val stickerPackId: String? = null,
     val hasPendingWrites: Boolean = false,

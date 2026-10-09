@@ -24,7 +24,7 @@ import org.robolectric.annotation.Config
 
 /**
  * The call screen while a call is being placed, before the call service holds it: it shows the
- * callee, and Cancel ends the placing.
+ * callee, and the hang-up button ends the placing.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [31], application = Application::class)
@@ -38,11 +38,19 @@ class CallScreenPlacingUiTest {
 
     private fun showPlacing() {
         // Nothing runs this scope, so the call is never created: it stays being placed.
-        val viewModel = CallViewModel(holder, mockk(), TestScope(), app)
-        viewModel.placeCall("u2", "chat1", "Alice", null)
+        val viewModel = CallViewModel(holder, mockk(), mockk(relaxed = true), TestScope(), app)
+        viewModel.placeCall("u2", "chat1", "Alice", null, video = false)
         composeTestRule.setContent {
             MaterialTheme {
-                CallScreen(onFinish = {}, onAnswer = {}, viewModel = viewModel)
+                CallScreen(
+                    locked = false,
+                    inPictureInPicture = false,
+                    onAnswer = {},
+                    onSetCamera = {},
+                    onMinimise = {},
+                    onFinish = {},
+                    viewModel = viewModel,
+                )
             }
         }
     }
@@ -52,14 +60,14 @@ class CallScreenPlacingUiTest {
         showPlacing()
 
         composeTestRule.onNodeWithText("Alice").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Calling...").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Calling…").assertIsDisplayed()
     }
 
     @Test
-    fun `cancelling a call being placed ends it without the call service`() {
+    fun `hanging up a call being placed ends it without the call service`() {
         showPlacing()
 
-        composeTestRule.onNodeWithContentDescription("Cancel").performClick()
+        composeTestRule.onNodeWithContentDescription("Hang up").performClick()
 
         assertEquals(CallState.Ended("", EndReason.HANGUP), holder.callState.value)
         assertNull(shadowOf(app).nextStartedService)

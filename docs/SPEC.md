@@ -44,14 +44,21 @@ This document is the product-level feature list for **FireStream**, a real-time 
 - **Broadcast Chat Type**: Implemented as a distinct `ChatType.BROADCAST`. The chat list shows a campaign icon to distinguish broadcasts from regular chats.
 - **Read Receipts Hidden**: No delivery/read tracking for broadcast messages.
 
-### Voice Calls
+### Voice and Video Calls
 
-- **1-to-1 Voice Calls**: Real-time audio calls using WebRTC.
+- **1-to-1 Calls**: Real-time calls using WebRTC. There is one kind of call. The phone icon in a 1:1 chat starts it with the camera off, the camera icon with it on, and each side switches its own camera during the call.
+- **Call Screen**: Always dark. The other person fills the screen, as video once a frame of their camera has arrived and as avatar, name and timer otherwise. The own picture is a rounded tile that follows a drag, snaps to the nearest corner, and swaps with the other picture on a tap. The controls are a floating dock: camera, flip, microphone, audio route, hang up. While any video shows, the dock and the top bar hide after four seconds and a tap brings them back.
+- **Answering**: An incoming video call offers *Decline*, *Voice only* and *With video*. A voice call offers *Decline* and *Answer*. On a locked phone and from the notification a call is answered with the camera off.
+- **Camera Permission**: Asked when a call starts as video and when the camera button is first tapped. A refusal leaves the call running with the camera off.
+- **Docked Call**: A swipe up on the call screen, its arrow or the back button docks the call over its chat. The chat opens with the call under the top bar, and the thread and the composer below stay usable. A voice call rests as a strip (name, time, camera, microphone, hang up) and a call with video as a card (the other person's picture with the own one in a corner, and every control). A tap on the strip or a drag changes the size. Pulling the card down, or its *Full screen* button, goes back to the call screen. The docked call shows only in the call's own chat, and an incoming ring cannot be docked. A call that ends while docked says *Call ended* for a moment.
+- **Picture-in-Picture**: Leaving the app from the call screen while video shows keeps the call in a small window that draws the other person. A docked call has no small window. The camera runs only while the call screen, that window or the docked call is visible, and pauses one second after the last of them left.
+- **Older Apps**: A call to an app without video calls runs as a voice call. The camera button is disabled and one line says why.
 - **Signaling**: Call state (ringing, connected, ended) is coordinated via Firestore. SDP offer/answer and ICE candidates are exchanged through dedicated call documents.
 - **FCM Wake-Up**: Incoming calls trigger a high-priority FCM push notification so the callee's device wakes up even in the background.
 - **Lock-Screen UI**: `CallActivity` is a separate Activity (not part of the NavHost) to support rendering on the lock screen.
+- **Full-Screen Notification Access**: On Android 14 and later a call shows over the lock screen only with the special access *Full screen notifications*. While it is off, the main screen shows a card above the bottom bar that says why, with *Open settings* and *Not now*. The card goes when the access is on, and *Not now* keeps it away for good. Settings → Notifications has the row *Full-screen call alerts*, which shows *On* or *Off* and opens the same system page. Below Android 14 neither is shown. Without the access a call and a timer alarm still ring as a notification.
 - **In-Call Controls**: Mute microphone, and pick the audio route — earpiece, speaker, Bluetooth headset, or wired headset. With only the earpiece and the speaker available the control is a plain speaker toggle; a connected headset adds a picker sheet. A headset connected mid-call takes the audio automatically; unplugging it falls back to the earpiece.
-- **Call Log**: Dedicated Calls tab (next to Chats in the bottom nav) shows a history of incoming, outgoing, and missed calls sourced from call-type messages in the Room database.
+- **Call Log**: Dedicated Calls tab (next to Chats in the bottom nav) shows a history of incoming, outgoing, and missed calls sourced from call-type messages in the Room database. A video call's row and its bubble in the chat show a camera icon, say *video call*, and call back with video.
 
 ### Shared Lists
 

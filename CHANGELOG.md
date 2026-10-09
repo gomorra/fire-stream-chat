@@ -2,6 +2,21 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
+## [UNRELEASED] [1.41.0] — 2026-10-09
+
+### Added
+
+- **Video calls.** A camera icon beside the phone icon in a 1:1 chat starts a call with the camera on, and any call can switch the camera on or off from its new call screen. The other person fills the screen, your own picture floats in a corner you can drag it to, and a tap on it swaps the two. An incoming video call can be answered with video or voice only. Leaving the screen while video shows keeps the call in a small picture-in-picture window. The call log and the call bubble say which calls were video calls and call back the same way. If the other person's app is older, the call runs as a voice call and says so. (`a8b69da8`)
+- **A call docks over its chat.** A swipe up on the call screen, its arrow or the back button now opens the chat with the call sitting under the top bar, so you can read and write while you talk. A voice call rests there as a slim strip with camera, microphone and hang up; a call with video as a card with both pictures and every control. Tap the strip or drag to change the size, and pull the card down or tap *Full screen* to go back to the call screen. The camera keeps running through the hand-over and pauses a second after the call is off every screen. (`d849aa6a`)
+
+### Changed
+
+- **Calls use their own relay.** When two phones cannot reach each other directly, a call now runs through a Cloudflare relay with a login that the app fetches for each signed-in user, in place of a free public relay with a fixed password. The login is fetched before the call rings and kept for twelve hours. A call that cannot get one still connects wherever a direct path exists. (`cd6a382e`)
+
+### Fixed
+
+- **The app asks for full-screen notifications.** On Android 14 and later an incoming call wakes the display and shows over the lock screen only when the app holds the special access *Full screen notifications*, and an app installed from a file starts without it. The call then rang only as a notification, and so did a timer alarm. The main screen now says so once, with a button that opens the right page in the system settings and a *Not now* that keeps the question away. Settings → Notifications has a new row, *Full-screen call alerts*, that shows whether the access is on and opens the same page. (`731d2d9c`)
+
 ## [1.40.4] — 2026-10-09
 
 ### Fixed

@@ -1,12 +1,15 @@
 package com.firestream.chat.ui.main
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -14,6 +17,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.ui.calls.CallsScreen
 import com.firestream.chat.ui.chatlist.ChatListScreen
@@ -42,6 +48,7 @@ internal fun MainScreen(
     deletedListTitle: String? = null,
     onDeletedListTitleConsumed: () -> Unit = {},
     preferencesDataStore: PreferencesDataStore? = null,
+    fullScreenAccessViewModel: FullScreenAccessViewModel = hiltViewModel(),
 ) {
     val pagerState = rememberPagerState(pageCount = { 3 })
     val scope = rememberCoroutineScope()
@@ -69,6 +76,17 @@ internal fun MainScreen(
             .collect { preferencesDataStore?.setLastTabIndex(it) }
     }
 
+    // The access changes only in the system settings, and nothing announces it. Reading it on
+    // every resume takes the prompt away as soon as the user comes back with the access on.
+    // It is also read on entering the composition, before the first frame: coming back from the
+    // app's own Settings screen resumes this screen only after the transition, and a prompt the
+    // user just answered there would show for that long.
+    val showFullScreenAccessPrompt by remember(fullScreenAccessViewModel) {
+        fullScreenAccessViewModel.refresh()
+        fullScreenAccessViewModel.showPrompt
+    }.collectAsState()
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { fullScreenAccessViewModel.refresh() }
+
     Scaffold(
         bottomBar = {
             BottomNavBar(
@@ -79,32 +97,45 @@ internal fun MainScreen(
             )
         }
     ) { padding ->
-        HorizontalPager(
-            state = pagerState,
-            userScrollEnabled = !tabOverlayOpen,
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            beyondViewportPageCount = 1,
-        ) { page ->
-            when (MainTab.entries[page]) {
-                MainTab.CHATS -> ChatListScreen(
-                    onChatClick = onChatClick,
-                    onNewChatClick = onNewChatClick,
-                    onNewGroupClick = onNewGroupClick,
-                    onNewBroadcastClick = onNewBroadcastClick,
-                    onSettingsClick = onSettingsClick,
-                    onSearchClick = onSearchClick,
-                )
-                MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
-                MainTab.LISTS -> ListsScreen(
-                    onListClick = onListClick,
-                    onListCreated = onListCreated,
-                    deletedListTitle = deletedListTitle,
-                    onDeletedListTitleConsumed = onDeletedListTitleConsumed,
-                    onOverlayVisibleChange = { tabOverlayOpen = it },
-                )
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = !tabOverlayOpen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                beyondViewportPageCount = 1,
+            ) { page ->
+                when (MainTab.entries[page]) {
+                    MainTab.CHATS -> ChatListScreen(
+                        onChatClick = onChatClick,
+                        onNewChatClick = onNewChatClick,
+                        onNewGroupClick = onNewGroupClick,
+                        onNewBroadcastClick = onNewBroadcastClick,
+                        onSettingsClick = onSettingsClick,
+                        onSearchClick = onSearchClick,
+                    )
+                    MainTab.CALLS -> CallsScreen(onMessageClick = onMessageClick)
+                    MainTab.LISTS -> ListsScreen(
+                        onListClick = onListClick,
+                        onListCreated = onListCreated,
+                        deletedListTitle = deletedListTitle,
+                        onDeletedListTitleConsumed = onDeletedListTitleConsumed,
+                        onOverlayVisibleChange = { tabOverlayOpen = it },
+                    )
+                }
             }
+            // Hidden while a tab's full-screen panel is open: the panel covers the tab, and the
+            // prompt would cut into it.
+            FullScreenAccessPrompt(
+                visible = showFullScreenAccessPrompt && !tabOverlayOpen,
+                onOpenSettings = fullScreenAccessViewModel::openSettings,
+                onNotNow = fullScreenAccessViewModel::dismiss,
+            )
         }
     }
 }

@@ -21,6 +21,233 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The prompt for full-screen notifications (2026-10-09)
+
+`docs/plans/video-calls.md` step 5b. JVM tests cover the rule, the access check against a mocked
+`NotificationManager`, the card and the settings row. Nothing ran on a device. On a phone with
+Android 14 or later:
+
+1. Switch *Full screen notifications* off for the app in the system settings and open the app.
+   The card shows above the bottom bar on all three tabs, and the tab's content and its floating
+   button sit above it.
+2. *Open settings* opens the app's *Full screen notifications* page, not the general
+   notification settings. Back returns to the app.
+3. Switch the access on there and return. The card is gone without a restart.
+4. With the access on and the display off, an incoming call wakes the display and shows the call
+   screen. A timer alarm does the same.
+5. With the access off, a call still rings as a notification.
+6. *Not now* takes the card away, and it stays away after the app is killed and reopened.
+7. Settings → Notifications → *Full-screen call alerts* says *Off*, opens the same page, and
+   says *On* after the return.
+8. Open the Lists tab's chat picker while the card shows. The card hides under the picker and
+   comes back when it closes.
+
+### Calls after the video work moved onto `CallSession` (2026-10-09)
+
+`docs/plans/video-calls.md` step 5a. The video work of steps 1 to 5 now runs in main's
+`CallSession`, with `PeerSession` as the connection, and no call has run on a device since. JVM
+tests cover the session, the camera switch and the connection against fakes. The WebRTC side,
+`WebRtcCallLocalMedia`, has no test. The lists below from steps 1 to 5 still apply, and so does
+*Calls — teardown, ringing, answering and the call log*. On top of them, with a phone and the
+emulator:
+1. **Deploy `firestore.rules` first.** Without it every call placed from this build is refused,
+   because the call document carries `video`. A camera or microphone switch must not fail
+   either: `adb logcat -s CallMediaPublisher` stays silent during a video call.
+2. A voice call and a video call in each direction connect, with sound both ways.
+3. Cancel a call while it is being placed. Let a call ring out. Both end on both phones, and the
+   next call starts normally.
+4. Hang up while the camera runs, from each side, a few times. The camera indicator goes out, the
+   app does not crash, and the next call's camera opens.
+5. Switch the camera on and off quickly, several times, and flip it. The self view follows, and
+   the other side shows the avatar while it is off.
+6. Kill the app on the phone that is called, then call it with video. The fallback ring says
+   *Incoming Video Call*, its Decline ends the ring on the caller's side, and a tap on it rings
+   in the call screen with the two answer buttons.
+7. Rotate the phone under the permission prompt of a video call. The call is still placed.
+8. Call a phone that runs the released app. The call runs as a voice call, the camera button is
+   disabled, and the released app does not crash when it answers.
+9. Open and close ten calls in a row. Memory does not climb: each call releases its connection
+   (`PeerSession.close()` now disposes it).
+10. Hang up with the camera on. The other side's sound stops at once, and a video or a voice
+    message played right after sounds normal, not in call mode.
+11. Answer a video ring from the notification's *Answer*, on an unlocked phone with the camera
+    permission. The call starts with the camera off. Watch whether the camera indicator flashes
+    first: the stage can come on screen, and start the ring's preview, a moment before the
+    answer reaches the service.
+12. The rules tests have not run: `npm test` in `firestore-rules-tests/` needs the Firestore
+    emulator. Run them before the rules are deployed.
+
+### Voice calls after the `PeerSession` move (2026-10-03)
+
+`docs/plans/video-calls.md` step 1 (`da97e8c3`). The connection handling moved from `CallService`
+into `PeerSession`, and no call has run on a device since. JVM tests cover the session against a
+mocked `PeerConnection`. These need a phone and the emulator:
+1. One voice call in each direction connects, with audio both ways, and the timer runs.
+2. `adb logcat -s PeerSession` shows `Connected: direct (…)` or `Connected: relayed (…)`, or a
+   `Path: …` line right after `Connected: path not known yet`.
+3. Hang up from each side, decline, and let a call ring out. Each ends on both phones, and the
+   next call starts normally.
+4. Hang up at the moment the call connects, a few times. Media audio afterwards (a video, a voice
+   message) plays through the speaker at normal quality, not in call mode.
+
+### The call's kind in the push, the call document and the call log (2026-10-04)
+
+`docs/plans/video-calls.md` step 2. Nothing starts a call as video until step 4, so these wait for
+it. The app upgrade wipes the local message database (`AppDatabase` 29 → 30), and messages sync
+back from Firestore.
+1. After the upgrade, chats and the call log fill again, and old call entries read as voice calls.
+2. `firebase deploy --only functions`, then a voice call still rings with *Incoming Voice Call*.
+3. With step 4: a call started as video rings with *Incoming Video Call*, and its `CALL` message
+   in Firestore has `video: true`.
+4. With step 4, before the functions are deployed: the ring starts as *Incoming Voice Call* and
+   changes to *Incoming Video Call* without a second vibration or a second full-screen launch.
+
+### The camera and the video line of a call (2026-10-04)
+
+`docs/plans/video-calls.md` step 3. A call between two phones with this build negotiates a video
+line, and `CallService` can run the camera. No screen switches the camera on until step 4, so
+items 3 to 9 wait for it. JVM tests cover the session, the camera lifecycle and the views against
+mocks. Offer and answer between this build and a released one ran on the emulator with a probe
+app, without media. Nothing else here has run on a device, and the plan's two emulator checks were
+not made.
+1. A voice call in each direction still connects with audio both ways, between two phones with
+   this build. `adb logcat -s PeerSession` shows no `Session failed` line. Both user documents
+   carry `callVideoLine: true` after the apps started once.
+2. **An older build as the partner.** A voice call between this build and a build from before
+   video calls connects in each direction, with audio both ways, and stays up for a minute. The
+   older phone's user document has no `callVideoLine`. Mute on this build during the call: the
+   older build does not hang up. An older build crashes on an offer with a video line, so this is
+   the check that it is offered none and that its call document is left alone after the answer.
+3. **Renderer (plan risk 1).** Two video tiles that overlap, with rounded corners, draw correctly
+   on the emulator and on a phone. If `VideoTextureViewRenderer` does not, only
+   `CallVideoSinks.createView` changes: it returns a plain `View`.
+4. **The emulator's camera (plan risk 3).** `LocalCamera` opens the emulator's camera and the other
+   phone shows its picture. If it does not, the emulator joins with its camera off.
+5. Camera on mid-call from each side: the other side shows the picture, and the system's camera
+   indicator is on. Camera off: the avatar comes back and the indicator goes out.
+6. Flip: the back camera shows, and the self view is no longer mirrored.
+7. Leave the call screen with the camera on: the indicator goes out, and the other side shows the
+   avatar. Come back: the picture returns without a tap.
+8. Refuse the `CAMERA` permission, then switch the camera on: the call goes on with sound.
+9. While video shows on either side, the audio is on the speaker and a hand over the proximity
+   sensor does not blank the screen. With a headset connected the audio stays on the headset.
+10. Hang up with the camera on, a few times, and start the next call at once. The indicator goes
+    out, nothing crashes, and the next call's camera opens.
+11. Mute in one call and hang up. The next call starts with the microphone button not muted.
+12. A call placed with the network switched to a slow one still rings within a few seconds. The
+    ring waits at most three seconds for the callee's `callVideoLine`, and the call then runs
+    without video.
+
+Known limit, not a check: a phone that goes back to a build from before video calls keeps
+`callVideoLine: true` on its user document. A call to it crashes it until it updates again.
+
+### The call screen with video (2026-10-04)
+
+`docs/plans/video-calls.md` step 4. The stage, the camera permission, picture-in-picture and the
+entry points are new. Robolectric tests draw the stage from plain state with a box in place of a
+video tile. No video view, no camera and no picture-in-picture window has run on a device or an
+emulator, and items 3 to 9 of the list above are checked through this screen.
+1. The camera icon in a 1:1 chat asks for the microphone and the camera, shows *Calling…* at
+   once, then the own preview behind the name. The other phone rings with *Incoming Video Call*
+   and offers *Decline*, *Voice only* and *With video*.
+2. *With video* connects with both pictures. *Voice only* connects with the caller's picture only,
+   and a preview that showed during the ring goes off.
+3. The self view drags, snaps to the nearest corner, and never rests under the dock. A tap on it
+   swaps the two pictures. Rounded corners clip the video.
+4. With video showing, the dock and the top bar hide after four seconds and a tap brings them
+   back. With both cameras off they stay.
+5. The first frame: the avatar stays until the other side's picture has arrived, with no black
+   flash in between.
+6. Start as voice, then switch the camera on: the permission is asked once. Refuse it: one toast,
+   and the call goes on.
+7. The home gesture goes into picture-in-picture while video shows, and the small window draws
+   only the other person. Closing the window pauses the camera. The *minimise* arrow and the back
+   button dock the call, see the next list.
+8. A video call to a locked phone offers only *Answer* and connects with the camera off. *Answer*
+   in the notification does the same.
+9. A call to a phone with an older build: the camera button is disabled, the line under it names
+   the reason, and the call starts on the earpiece although it was started as video.
+10. Rotate the phone or switch the system theme while *Calling…* shows: the call is still placed.
+    Hang up during *Calling…*: the other phone does not ring, or stops at once.
+11. The notification of a running video call is titled *Video Call*.
+12. The call log row and the call bubble of a video call show the camera icon and say *video
+    call*. Tapping either calls back with video.
+13. A debug build opens the stage without a `VerifyError`. `ConnectedScene` and `CallStage` are
+    the largest composables there; check their register counts with the `dexdump` recipe in
+    `docs/GOTCHAS.md`.
+
+Owed on hardware, from the plan's verification list: two phones on mobile data, a Bluetooth
+headset connected during video, and a phone with an older app version as the partner.
+
+### The call docked over its chat (2026-10-04)
+
+`docs/plans/video-calls.md` step 4a. Robolectric tests draw the card and the strip from plain
+state, and a unit test covers the one-second visibility rule. Nothing here has run on a device or
+an emulator: not the hand-over between the two activities, not the swipe, not the card with a
+real video view.
+1. During a video call, swipe up on the stage. The chat opens with the call as a card under the
+   top bar, after a short slide and fade. Neither picture blinks or freezes, and the camera
+   indicator stays on throughout.
+2. The swipe does not start from the self tile, the dock or the arrow, and a tap on the stage
+   still shows and hides the controls. A swipe from the bottom edge goes home, into
+   picture-in-picture, and does not dock.
+3. The *minimise* arrow and the back button dock the same way. From an outgoing ring too. An
+   incoming ring has neither, and its swipe does nothing.
+4. Docking never opens the small picture-in-picture window, also on the second and third time.
+5. With the card showing, type and send a message with the keyboard open. The composer stays
+   above the keyboard and at least one bubble of the thread stays visible on a small phone.
+6. A docked voice call rests as the strip. Switch the camera on there: the permission is asked
+   once from the chat, and the strip grows into the card. Switch it off: back to the strip.
+7. Push the card up: the strip. Tap the strip: the card. Pull the card down, or tap *Full
+   screen*: the stage is back, without a blink.
+8. Dock a call on the side that answered. Its chat opens, and no second `CALL` bubble appears
+   when the call ends.
+9. Dock from a locked phone: the unlock is asked first. Cancel it: the stage stays.
+10. Hang up on the other phone while docked: the card says *Call ended* and goes, and no call
+    task is left in the recents list. Open the chat again later: no *Call ended*.
+11. With a docked video call, open another chat, then leave the app: the camera indicator goes
+    out after about a second each time, and the other side sees the avatar. The notification
+    leads back to the stage.
+12. Dock while another chat is open in the main activity, and while the app's main task was
+    closed: the call's chat opens in both cases, and back from it does not land on the stage.
+13. A debug build opens a chat without a `VerifyError`. `ChatScreen` hosts `DockedCall`; check its
+    register count, and `DockedCard`'s, with the `dexdump` recipe in `docs/GOTCHAS.md`.
+14. Scroll up in the chat, start a call from it, and dock: the thread is where it was left. Open
+    the other person's profile from the docked chat, go to the stage through the notification,
+    and dock again: the chat is back, and one press of back leaves it.
+15. Dock, leave the app, and let the other side hang up. On return the strip says *Call ended*
+    for a moment, however long ago the call ended. Decide whether that is wanted.
+
+### The Cloudflare relay for calls (2026-10-04)
+
+`docs/plans/video-calls.md` step 5. A call takes its relay from the `getTurnCredentials` function,
+and the app carries no other relay. **Until that function is deployed with its two secrets, this
+build has no relay at all:** a call connects only where a direct path exists,
+so a phone and the emulator, or two phones on mobile data, may not connect. Nothing ran on a device
+and the function was never deployed or called. JVM tests cover the provider, the reading of the
+function's answer and the order of the waits.
+1. Create a TURN key in the Cloudflare dashboard. Run `firebase functions:secrets:set
+   CLOUDFLARE_TURN_KEY_ID` and `… CLOUDFLARE_TURN_API_TOKEN`, then `firebase deploy --only
+   functions`. The deploy goes through and lists `getTurnCredentials`.
+2. One call on mobile data connects, and `adb logcat -s PeerSession` shows `Connected: relayed
+   (local relay, …) through turn:turn.cloudflare.com:…` or the same as a `Path:` line. If the line
+   says *relayed* without a server, WebRTC does not report the server on this path, and the
+   candidate's address has to be compared with Cloudflare's by hand.
+3. The first call after an app start rings without a visible extra wait, on Wi-Fi and on mobile
+   data. `adb logcat -s IceServerProvider` stays silent.
+4. Answer an incoming call from the notification with the app not running. It connects, and it
+   connects through the relay when the phone is on mobile data.
+5. Before the deploy: a call still rings within three seconds, `IceServerProvider` logs one
+   warning, and a call between two phones on one Wi-Fi connects directly.
+6. Read the function's log in the Firebase console after a few calls. It shows no token, no
+   username and no credential.
+7. Cloudflare's answer lists several STUN and TURN URLs. Check that the time from the answer to
+   *connected* stays under about two seconds on Wi-Fi.
+8. Answer a call in the last three seconds of its ring, on a slow connection. The side that
+   answers waits up to three seconds for the relay's servers before it writes the answer, and the
+   caller's ring timeout keeps running meanwhile. If the caller gives up while the other side
+   says *Connecting*, the wait on the answering side needs a shorter bound.
+
 ### Picker search above the keyboard (2026-10-07)
 
 `ComposerPickerPanel` search layouts. Robolectric covers the strip, the hoisted state and the
@@ -703,8 +930,6 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 ### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
 - Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute
   auto-silence cancel stops it.
-- Unconfirmed: whether `USE_FULL_SCREEN_INTENT` is still granted on Android 14+ for this
-  sideloaded app.
 - **Test by upgrading over an existing install, never a clean one** — notification-channel
   sound/vibration is frozen at creation, so channel-freeze bugs are invisible on a fresh
   install.
@@ -792,11 +1017,24 @@ on 2026-09-11 in `docs/plans/call-audio-routes.md` §0:
   needs the `BLUETOOTH_CONNECT` runtime permission on API 31+, which was not judged worth a
   permission prompt. Nice-to-have, and cheap if the app ever asks for that permission anyway.
 
-### Video calls, 1-to-1 (4.2)
-- Extend the existing voice-call infrastructure with a video track
-- Camera switch (front/back), video toggle
-- Picture-in-picture support
-- Files: `ui/call/` package extension
+### Call signalling is not authenticated end to end
+
+Call media is encrypted between the two phones, a relay included. The key fingerprints of that
+encryption travel in the offer and the answer, through `calls/{callId}` in Firestore. Whoever can
+rewrite a call document could therefore put themselves between the two phones. `firestore.rules`
+lets only the caller and the callee update a call, so today that is Firebase itself or a stolen
+account. Closing it means signing the offer and the answer with the Signal identity keys, or
+showing a short code both sides compare. Not planned (`docs/plans/video-calls.md`, risk 7).
+
+### The relay hands a login to every signed-in user
+
+`getTurnCredentials` checks only that the caller is signed in. Any account can ask for a relay
+login as often as it likes, each good for a day, and use it for traffic that has nothing to do
+with a call. Cloudflare bills relayed traffic beyond its free allowance to the owner. The app has
+no App Check, so a script with a valid account can call the function too. Options, cheapest
+first: a per-user limit in the function (one login per hour, counted in Firestore), a shorter
+lifetime with a fetch per call, App Check on the callable, or a login only for someone who is
+caller or callee of a ringing call document. Not planned. Watch the Cloudflare usage page.
 
 ### Group voice/video calls (4.3)
 - SFU (Selective Forwarding Unit) server for multi-party calls

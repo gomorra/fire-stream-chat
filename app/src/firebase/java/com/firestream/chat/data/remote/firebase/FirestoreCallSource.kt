@@ -1,18 +1,20 @@
 // region: AGENT-NOTE
 // Responsibility: WebRTC signalling I/O — `calls/{callId}` doc + `callerCandidates`
 //   / `calleeCandidates` ICE subcollections. Status transitions
-//   (ringing → answered → ended), SDP offer/answer storage, ICE candidate streams.
+//   (ringing → answered → ended), SDP offer/answer storage, ICE candidate streams,
+//   and each side's live camera and microphone state (`media.<uid>`).
 // Owns: Listener registrations on `calls/*` for call status + ICE candidates.
 // Collaborators: CallRepositoryImpl (only caller); the Cloud Function
 //   `sendCallPushNotification` triggers off `calls/*` document creates with
 //   status == ringing.
-// Don't put here: PeerConnection itself (WebRtcCallMedia), call-log derivation
+// Don't put here: PeerConnection itself (PeerSession), call-log derivation
 //   (call-type messages live in FirestoreMessageSource).
 // endregion
 
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.data.remote.source.CallSignalingSource
+import com.firestream.chat.domain.model.CallMedia
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.SdpData
@@ -38,12 +40,13 @@ class FirestoreCallSource @Inject constructor(
      *
      * The transaction only writes: the rules refuse to read a call that does not exist yet.
      */
-    override suspend fun createCallDocument(callerId: String, calleeId: String): String {
+    override suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String {
         val callRef = callsCollection.document()
         val data = hashMapOf(
             "callerId" to callerId,
             "calleeId" to calleeId,
             "status" to "ringing",
+            "video" to video,
             "createdAt" to System.currentTimeMillis(),
             "endedAt" to null,
             "endReason" to null,
@@ -99,6 +102,16 @@ class FirestoreCallSource @Inject constructor(
             .await()
     }
 
+    /** `media.<uid>` on the call document. The dotted paths leave the other side's entry alone. */
+    override suspend fun setMedia(callId: String, uid: String, camera: Boolean, mic: Boolean) {
+        callsCollection.document(callId).update(
+            mapOf(
+                "media.$uid.camera" to camera,
+                "media.$uid.mic" to mic
+            )
+        ).await()
+    }
+
     override fun observeCallDocument(callId: String): Flow<CallSignalingData> = callbackFlow {
         val listener: ListenerRegistration = callsCollection.document(callId)
             .addSnapshotListener { snapshot, error ->
@@ -151,7 +164,29 @@ class FirestoreCallSource @Inject constructor(
             answer = answerMap?.let { SdpData(it["sdp"] as? String ?: "", it["type"] as? String ?: "") },
             createdAt = (data["createdAt"] as? Number)?.toLong() ?: 0L,
             endedAt = (data["endedAt"] as? Number)?.toLong(),
-            endReason = data["endReason"] as? String
+            endReason = data["endReason"] as? String,
+            // An older app writes no kind: its calls are voice calls.
+            video = data["video"] as? Boolean ?: false,
+            media = mapToMedia(data["media"] as? Map<*, *>)
         )
+    }
+
+    /** An entry that is not a map is skipped. A missing field reads as camera off, microphone on. */
+    private fun mapToMedia(media: Map<*, *>?): Map<String, CallMedia> {
+        if (media == null) return emptyMap()
+        val unsaid = CallMedia()
+        return buildMap {
+            media.forEach { (uid, state) ->
+                if (uid is String && state is Map<*, *>) {
+                    put(
+                        uid,
+                        CallMedia(
+                            camera = state["camera"] as? Boolean ?: unsaid.camera,
+                            mic = state["mic"] as? Boolean ?: unsaid.mic
+                        )
+                    )
+                }
+            }
+        }
     }
 }

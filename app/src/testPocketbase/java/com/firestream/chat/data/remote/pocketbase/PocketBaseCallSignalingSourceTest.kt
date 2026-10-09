@@ -1,5 +1,6 @@
 package com.firestream.chat.data.remote.pocketbase
 
+import com.firestream.chat.data.call.IceServerProvider
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
@@ -18,13 +19,15 @@ class PocketBaseCallSignalingSourceTest {
     fun `placing a call fails instead of crashing the app`() = runTest {
         val repository = CallRepositoryImpl(
             callSource = PocketBaseCallSignalingSource(),
-            authSource = mockk<AuthSource> { every { currentUserId } returns "me" },
+            authSource = mockk<AuthSource>(relaxed = true) { every { currentUserId } returns "me" },
             messageSource = mockk<MessageSource>(),
             chatDao = mockk<ChatDao>(relaxed = true),
             sendClock = SendClock(),
+            // No relay on this backend: the provider answers with STUN alone.
+            iceServerProvider = IceServerProvider(PocketBaseIceServerSource(), backgroundScope),
         )
 
-        val result = repository.createCall("u2")
+        val result = repository.createCall("u2", video = false)
 
         assertTrue(result.exceptionOrNull() is UnsupportedOperationException)
     }

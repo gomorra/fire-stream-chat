@@ -66,7 +66,8 @@ service cloud.firestore {
       //   ringing  → ringing    the caller writes the offer, the callee its answer
       //   ringing  → answered   callee only
       //   ringing  → declined   callee only
-      //   answered → answered   callee only, to write its answer
+      //   answered → answered   the callee, to write its answer, and either
+      //                         side, to write its own camera and microphone
       //   any      → ended      either side
       // A call that was declined can still end, because a hang-up can race the
       // decline. An ended call can end again, because both sides can hang up at
@@ -78,18 +79,33 @@ service cloud.firestore {
         let newStatus = request.resource.data.status;
         let byCaller = request.auth.uid == resource.data.callerId;
         let byCallee = request.auth.uid == resource.data.calleeId;
-        // callerId, calleeId and createdAt never change.
-        return changed.hasOnly(['status', 'endReason', 'endedAt', 'offer', 'answer'])
+        // callerId, calleeId, createdAt and video never change.
+        return changed.hasOnly(['status', 'endReason', 'endedAt', 'offer', 'answer', 'media'])
           && (!changed.hasAny(['offer']) || byCaller)
           && (!changed.hasAny(['answer']) || byCallee)
+          && (!changed.hasAny(['media']) || isOwnMediaEntry())
           // The offer and the answer are written only while the call is set up.
           && (!changed.hasAny(['offer', 'answer']) || newStatus in ['ringing', 'answered'])
           // The end fields are written only by the write that ends the call.
           && (!changed.hasAny(['endReason', 'endedAt']) || newStatus in ['declined', 'ended'])
           && ((oldStatus == 'ringing' && newStatus == 'ringing')
               || (oldStatus == 'ringing' && newStatus in ['answered', 'declined'] && byCallee)
-              || (oldStatus == 'answered' && newStatus == 'answered' && byCallee)
+              || (oldStatus == 'answered' && newStatus == 'answered'
+                  && (byCallee || changed.hasOnly(['media'])))
               || newStatus == 'ended');
+      }
+
+      // `media` holds each side's live camera and microphone state, keyed by
+      // uid. A write changes only the writer's own entry, and that entry is
+      // the two booleans the app writes.
+      function isOwnMediaEntry() {
+        let before = resource.data.get('media', {});
+        let after = request.resource.data.media;
+        let mine = after[request.auth.uid];
+        return after.diff(before).affectedKeys().hasOnly([request.auth.uid])
+          && mine.keys().hasOnly(['camera', 'mic'])
+          && mine.camera is bool
+          && mine.mic is bool;
       }
 
       // For the candidate lists: the parent call, as stored.
@@ -113,9 +129,11 @@ service cloud.firestore {
                     ||  request.auth.uid == resource.data.calleeId);
       // The caller creates the call, ringing, to someone else, with no answer.
       // The key list is every field the app writes. A new field needs it changed.
+      // `video` says how the call was started. An older app writes none.
       allow create: if isAuth()
                     && request.resource.data.keys().hasOnly(['callerId', 'calleeId', 'status', 'createdAt',
-                                                             'endedAt', 'endReason', 'offer', 'answer'])
+                                                             'endedAt', 'endReason', 'offer', 'answer', 'video'])
+                    && request.resource.data.get('video', false) is bool
                     && request.auth.uid == request.resource.data.callerId
                     && request.resource.data.calleeId is string
                     && request.resource.data.calleeId != request.auth.uid

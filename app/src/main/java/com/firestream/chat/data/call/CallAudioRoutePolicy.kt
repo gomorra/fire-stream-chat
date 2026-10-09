@@ -32,25 +32,33 @@ object CallAudioRoutePolicy {
      *    "plugged in mid-call" preemption, Bluetooth first if both appeared at once. The caller
      *    clears its stored user pick when the result differs from [userPick].
      * 2. Else [userPick], if it is still available.
-     * 3. Else [current], if it is still available — nothing changed, stay put. This is what makes
-     *    the policy idempotent, so re-running it on an unchanged device list is a no-op.
-     * 4. Else [AUTO_PREFERENCE].
+     * 3. Else the **speaker**, if [preferSpeaker] is set and no headset is connected. A call with
+     *    video is held in front of the face, not at the ear.
+     * 4. Else [current], if it is still available — nothing changed, stay put. This is what makes
+     *    the policy idempotent, so re-running it on an unchanged device list is a no-op. It also
+     *    keeps the speaker when [preferSpeaker] goes away again.
+     * 5. Else [AUTO_PREFERENCE].
      *
      * @param previousAvailable the device list the last call to this function saw; empty at call start.
      * @param available what the OS offers right now.
      * @param current the route the OS reports as active, null before the first pick.
      * @param userPick the last explicit tap, null if the user has not chosen.
+     * @param preferSpeaker the call was started as video, or video is showing right now.
      */
     fun resolve(
         previousAvailable: Set<CallAudioRoute>,
         available: Set<CallAudioRoute>,
         current: CallAudioRoute?,
-        userPick: CallAudioRoute?
+        userPick: CallAudioRoute?,
+        preferSpeaker: Boolean = false
     ): CallAudioRoute {
         AUTO_PREFERENCE.firstOrNull { it in HEADSET_ROUTES && it in available && it !in previousAvailable }
             ?.let { return it }
 
         if (userPick != null && userPick in available) return userPick
+        if (preferSpeaker && CallAudioRoute.SPEAKER in available && available.none { it in HEADSET_ROUTES }) {
+            return CallAudioRoute.SPEAKER
+        }
         if (current != null && current in available) return current
 
         // `available` is empty only if the OS hands us nothing at all; stay where we are rather

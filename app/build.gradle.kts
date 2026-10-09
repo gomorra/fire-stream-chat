@@ -477,6 +477,7 @@ dependencies {
 
     // WebRTC
     implementation(libs.stream.webrtc.android)
+    implementation(libs.stream.webrtc.android.ui)
 
     // Play Services Location
     implementation(libs.play.services.location)

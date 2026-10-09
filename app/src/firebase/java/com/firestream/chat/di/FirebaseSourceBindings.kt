@@ -1,6 +1,7 @@
 package com.firestream.chat.di
 
 import com.firestream.chat.data.remote.firebase.FirebaseAuthSource
+import com.firestream.chat.data.remote.firebase.FirebaseIceServerSource
 import com.firestream.chat.data.remote.firebase.FirebaseKeySource
 import com.firestream.chat.data.remote.firebase.FirebaseSendErrorClassifier
 import com.firestream.chat.data.remote.firebase.FirebaseStickerObjectSource
@@ -18,6 +19,7 @@ import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.ChatSource
 import com.firestream.chat.data.remote.source.ContactSource
+import com.firestream.chat.data.remote.source.IceServerSource
 import com.firestream.chat.data.remote.source.KeySource
 import com.firestream.chat.data.remote.source.ListHistorySource
 import com.firestream.chat.data.remote.source.ListSource
@@ -72,6 +74,9 @@ abstract class FirebaseSourceBindings {
 
     @Binds @Singleton
     abstract fun bindCallSignalingSource(impl: FirestoreCallSource): CallSignalingSource
+
+    @Binds @Singleton
+    abstract fun bindIceServerSource(impl: FirebaseIceServerSource): IceServerSource
 
     @Binds @Singleton
     abstract fun bindKeySource(impl: FirebaseKeySource): KeySource

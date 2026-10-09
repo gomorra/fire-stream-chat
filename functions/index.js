@@ -1,10 +1,67 @@
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { onValueWritten } = require("firebase-functions/v2/database");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions");
 const { callMessagePushData, incomingCallAndroidConfig, unreadUpdates } = require("./callPush");
 
 admin.initializeApp();
+
+// The Cloudflare TURN key that relays calls. Set both before the first deploy:
+//   firebase functions:secrets:set CLOUDFLARE_TURN_KEY_ID
+//   firebase functions:secrets:set CLOUDFLARE_TURN_API_TOKEN
+const cloudflareTurnKeyId = defineSecret("CLOUDFLARE_TURN_KEY_ID");
+const cloudflareTurnApiToken = defineSecret("CLOUDFLARE_TURN_API_TOKEN");
+
+// How long a relay login is good for. The app keeps a set for half of this, so a
+// call that starts on a kept set never outlives its login.
+const TURN_CREDENTIAL_TTL_SECONDS = 86400;
+
+// Hands a signed-in user the relay's servers and a short-lived login for them.
+// The API token never leaves this function. Nothing here logs the token, the
+// request or Cloudflare's answer: the answer is a credential.
+exports.getTurnCredentials = onCall(
+    { secrets: [cloudflareTurnKeyId, cloudflareTurnApiToken] },
+    async (request) => {
+        if (!request.auth) {
+            throw new HttpsError("unauthenticated", "Sign in to place a call.");
+        }
+
+        const keyId = encodeURIComponent(cloudflareTurnKeyId.value());
+        let response;
+        try {
+            response = await fetch(
+                `https://rtc.live.cloudflare.com/v1/turn/keys/${keyId}/credentials/generate-ice-servers`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Authorization": `Bearer ${cloudflareTurnApiToken.value()}`,
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ ttl: TURN_CREDENTIAL_TTL_SECONDS }),
+                    signal: AbortSignal.timeout(10000)
+                }
+            );
+        } catch (error) {
+            // Only the kind of failure. A fetch error can carry the request it failed on.
+            logger.error(`Cloudflare TURN request failed: ${error.name}`);
+            throw new HttpsError("unavailable", "The relay is not reachable.");
+        }
+
+        if (!response.ok) {
+            logger.error(`Cloudflare TURN request answered ${response.status}`);
+            throw new HttpsError("unavailable", "The relay gave no credentials.");
+        }
+
+        const body = await response.json().catch(() => null);
+        if (!body || !body.iceServers) {
+            logger.error("Cloudflare TURN answer had no iceServers");
+            throw new HttpsError("unavailable", "The relay gave no credentials.");
+        }
+        return { iceServers: body.iceServers };
+    }
+);
 
 // Mirrors RTDB presence changes to Firestore.
 // This is the fallback for abrupt disconnects (power off, crash) where the Android
@@ -86,7 +143,10 @@ exports.sendCallPushNotification = onDocumentCreated(
                     callId: callId,
                     callerId: callerId,
                     callerName: callerName,
-                    callerAvatarUrl: callerAvatarUrl
+                    callerAvatarUrl: callerAvatarUrl,
+                    // FCM data values are strings. A call document without the
+                    // field comes from an older app and is a voice call.
+                    video: callData.video === true ? "true" : "false"
                 },
                 android: incomingCallAndroidConfig()
             };

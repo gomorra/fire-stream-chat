@@ -57,7 +57,7 @@ data class Message(
     val editedAt: Long?,
     val reactions: Map<String, String>,   // userId → emoji
     val isForwarded: Boolean,
-    val duration: Int?,                   // voice message seconds
+    val duration: Int?,                   // voice message seconds; CALL: seconds connected
     val isStarred: Boolean,
     val readBy: Map<String, Long>,        // userId → timestamp (group chats)
     val deliveredTo: Map<String, Long>,   // userId → timestamp (group chats)
@@ -69,7 +69,8 @@ data class Message(
     val listDiff: ListDiff?,               // list mutation summary for LIST messages
     val isPinned: Boolean,
     val latitude: Double?,                // location sharing
-    val longitude: Double?                // location sharing
+    val longitude: Double?,               // location sharing
+    val isVideoCall: Boolean              // CALL: the call was started as video
 )
 ```
 
@@ -205,14 +206,15 @@ data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes:
 enum class CallLogType { OUTGOING, NO_ANSWER, OUTGOING_DECLINED, INCOMING, MISSED, DECLINED }
 
 data class CallLogEntry(
-    val messageId: String,
+    val messageId: String,                // the CALL message the entry is built from
     val chatId: String,
     val otherPartyId: String,
     val displayName: String,
     val avatarUrl: String?,
     val type: CallLogType,
     val durationSeconds: Int?,
-    val timestamp: Long
+    val timestamp: Long,
+    val video: Boolean                    // the call was started as video
 )
 ```
 
@@ -223,15 +225,16 @@ sealed interface CallState {
     data object Idle : CallState
     // An outgoing call from the moment its setup starts until CallService takes it over.
     // placingId tells one placing from the next; callId is null until the document exists.
-    data class Placing(placingId, calleeId, calleeName, calleeAvatarUrl, callId: String?) : CallState
-    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl) : CallState
-    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl) : CallState
-    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl) : CallState
-    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime) : CallState
+    data class Placing(placingId, calleeId, calleeName, calleeAvatarUrl, callId: String?, video) : CallState
+    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl, calleeLocalAvatarPath, video) : Live
+    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl, callerLocalAvatarPath, video) : Live
+    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl, remoteLocalAvatarPath, video) : Live
+    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime, remoteLocalAvatarPath, video) : Live
     data class Ended(callId, reason: EndReason) : CallState
 }
 
 // isOngoing: every state but Idle and Ended. The one "am I in a call" rule.
+// dockable: a Live state that is not IncomingRinging. The call can leave its stage for its chat.
 
 enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
 // wireName is the lower-case name written to the call document and the call message;
@@ -241,12 +244,33 @@ enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
 // Where call audio plays. The router (data/call/CallAudioRouter) publishes what the OS reports.
 enum class CallAudioRoute { EARPIECE, SPEAKER, BLUETOOTH, WIRED_HEADSET }
 
+// The own side of the running call. A new call starts with the defaults.
 data class CallUiControls(
     val isMuted: Boolean,
     val audioRoute: CallAudioRoute,            // the route the OS reports, not the last tap
-    val availableRoutes: List<CallAudioRoute>  // display order; two or fewer → the button toggles
+    val availableRoutes: List<CallAudioRoute>, // display order; two or fewer → the button toggles
+    val cameraOn: Boolean,                     // the user switched the camera on; stays true while paused
+    val frontCamera: Boolean,                  // the camera in use is the front one
+    val videoAvailable: Boolean,               // false when the call has no agreed video line: the other app takes none
+    val cameraPaused: Boolean                  // switched on but not running: no screen shows the call
+)
+
+// One of the other people in the running call (exposed by CallStateHolder.participants)
+data class CallParticipant(
+    val id: String,
+    val name: String,
+    val avatarUrl: String?,
+    val localAvatarPath: String?,
+    val cameraOn: Boolean,                     // they say their camera is sending (call document)
+    val micOn: Boolean,                        // they say their microphone is open (call document)
+    val connected: Boolean,                    // the connection to them is up
+    val hasFrame: Boolean                      // a frame of their video arrived since their camera came on
 )
 ```
+
+The four states the call service holds implement `CallState.Live` (`callId`, `video`, `withVideo()`). `Placing` comes before them and is not `Live`: no service holds that call yet. `video` says how the call was started. It sets the ring text and the call log entry. It is not the live camera state.
+
+A screen shows a participant's video only while `cameraOn` and `hasFrame` are both true, and the avatar otherwise.
 
 ### SdpData / IceCandidateData / CallSignalingData
 
@@ -255,14 +279,32 @@ Defined in `domain/model/CallSignalingData.kt`:
 ```kotlin
 data class SdpData(val sdp: String, val type: String)
 data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp: String)
+data class CallMedia(val camera: Boolean = false, val mic: Boolean = true)  // what one person says about their own side
+data class OutgoingCall(val callId: String, val videoLine: Boolean)        // CallRepository.createCall; videoLine = the callee's app takes a video line
 data class CallSignalingData(
     val callId: String, val callerId: String, val calleeId: String,
-    val status: String,          // "ringing" | "answered" | "declined" | "ended"
+    val status: String,                   // "ringing" | "answered" | "declined" | "ended"
     val offer: SdpData?, val answer: SdpData?,
     val createdAt: Long, val endedAt: Long?,
-    val endReason: String?       // an EndReason.wireName
+    val endReason: String?,               // an EndReason.wireName
+    val video: Boolean,                   // how the call was started; false when the document has no such field
+    val media: Map<String, CallMedia>     // live state per user id; no entry for someone who has written nothing
 )
 ```
+
+### IceServerData
+
+Defined in `domain/model/IceServerData.kt`. One entry of the server list a call's connection is built with. `IceServerProvider` hands the list out.
+
+```kotlin
+data class IceServerData(
+    val urls: List<String>,          // stun:, turn: or turns: URLs, never empty
+    val username: String? = null,    // the relay's login; null for STUN
+    val credential: String? = null
+)
+```
+
+`toString()` leaves the login out, so an entry in a log line gives nothing away.
 
 ---
 

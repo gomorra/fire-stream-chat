@@ -34,5 +34,17 @@ interface AuthSource {
 
     suspend fun updateFcmToken(uid: String, token: String)
 
+    /**
+     * Write to [uid]'s user document that their app takes a video line in a call offer. Fails
+     * when the document does not exist yet. [createUserDocument] writes the same for a new user.
+     */
+    suspend fun announceCallVideoLine(uid: String)
+
+    /**
+     * Whether [uid]'s app takes a video line in a call offer. A user document without the field
+     * is an app without video, and so is a missing document.
+     */
+    suspend fun takesCallVideoLine(uid: String): Boolean
+
     fun signOut()
 }

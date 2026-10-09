@@ -118,6 +118,7 @@ interface MessageColumns {
     val fileName: String?
     val fileSize: Long?
     val mimeType: String?
+    val isVideoCall: Boolean
     val stickerId: String?
     val stickerPackId: String?
 }
@@ -171,6 +172,7 @@ data class MessageRecord(
     override val fileName: String? = null,
     override val fileSize: Long? = null,
     override val mimeType: String? = null,
+    override val isVideoCall: Boolean = false,
     override val stickerId: String? = null,
     override val stickerPackId: String? = null,
 ) : MessageColumns {
@@ -216,6 +218,7 @@ data class MessageRecord(
         fileName = fileName,
         fileSize = fileSize,
         mimeType = mimeType,
+        isVideoCall = isVideoCall,
         stickerId = stickerId,
         stickerPackId = stickerPackId,
     )
@@ -260,6 +263,7 @@ data class MessageRecord(
             fileName = message.fileName,
             fileSize = message.fileSize,
             mimeType = message.mimeType,
+            isVideoCall = message.isVideoCall,
             stickerId = message.stickerId,
             stickerPackId = message.stickerPackId,
         )

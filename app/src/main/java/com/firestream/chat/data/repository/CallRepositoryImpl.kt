@@ -1,32 +1,42 @@
 // region: AGENT-NOTE
 // Responsibility: WebRTC call signalling — create/end calls, exchange SDP +
 //   ICE candidates via Firestore. Also writes a CALL message into the chat
-//   so the call shows up in CallsScreen's call log.
+//   so the call shows up in CallsScreen's call log. Decides, before it rings,
+//   whether the callee's app takes a video line, and has the relay's servers
+//   fetched.
 // Owns: Coordination between FirestoreCallSource (signalling docs) and the
 //   message stream (call-log entries). Stateless — call state itself lives in
-//   CallStateHolder + CallService, not here. Every call lets cancellation
+//   CallStateHolder + CallSession, not here. Every call lets cancellation
 //   through (cancellableResultOf): a cancelled caller stops instead of
 //   carrying on with a failure.
-// Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallService.
-// Don't put here: PeerConnection lifecycle (WebRtcCallMedia), in-call UI state
+// Collaborators: CallSignalingSource, FirestoreMessageSource, ChatDao, CallSession,
+//   IceServerProvider (keeps the relay's servers; this class only asks for them).
+// Don't put here: PeerConnection lifecycle (PeerSession), in-call UI state
 //   (CallStateHolder), call-log derivation (CallsViewModel).
 // endregion
 
 package com.firestream.chat.data.repository
 
+import android.util.Log
+import com.firestream.chat.data.call.IceServerProvider
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.outbox.SendClock
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.CallSignalingSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.util.cancellableResultOf
+import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.domain.model.CallSignalingData
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.OutgoingCall
 import com.firestream.chat.domain.model.SdpData
 import com.firestream.chat.domain.repository.CallRepository
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,12 +47,41 @@ class CallRepositoryImpl @Inject constructor(
     private val messageSource: MessageSource,
     private val chatDao: ChatDao,
     private val sendClock: SendClock,
+    private val iceServerProvider: IceServerProvider,
 ) : CallRepository {
 
-    override suspend fun createCall(calleeId: String): Result<String> = cancellableResultOf {
+    override fun prepareCall() = iceServerProvider.warm()
+
+    override suspend fun createCall(calleeId: String, video: Boolean): Result<OutgoingCall> = cancellableResultOf {
         val callerId = authSource.currentUserId
             ?: return Result.failure(Exception("Not authenticated"))
-        callSource.createCallDocument(callerId, calleeId)
+        // Before the call document exists. Creating it rings the callee, who answers by
+        // fetching the offer once, so nothing may wait between the document and the offer.
+        // Both waits are bounded and run side by side. The call session then takes the
+        // relay's servers from the provider without waiting.
+        val videoLine = coroutineScope {
+            val relay = async { iceServerProvider.get() }
+            calleeTakesVideoLine(calleeId).also { relay.await() }
+        }
+        OutgoingCall(callSource.createCallDocument(callerId, calleeId, video), videoLine)
+    }
+
+    /**
+     * Whether the offer to [calleeId] may carry a video line. False on any doubt: a user document
+     * without the field, a read that fails, or one that takes longer than
+     * [VIDEO_LINE_READ_TIMEOUT_MS]. An app without video crashes on an offer with a video line,
+     * and a call without one still runs as a voice call.
+     */
+    private suspend fun calleeTakesVideoLine(calleeId: String): Boolean {
+        return try {
+            val takes = withTimeoutOrNull(VIDEO_LINE_READ_TIMEOUT_MS) { authSource.takesCallVideoLine(calleeId) }
+            if (takes == null) Log.w(TAG, "No answer in time on whether the callee takes video. Offering none.")
+            takes ?: false
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+            Log.w(TAG, "Could not read whether the callee takes video. Offering none.", e)
+            false
+        }
     }
 
     override suspend fun answerCall(callId: String): Result<Unit> = cancellableResultOf {
@@ -78,6 +117,11 @@ class CallRepositoryImpl @Inject constructor(
         callSource.addIceCandidate(callId, subcollection, candidate)
     }
 
+    override suspend fun setMedia(callId: String, camera: Boolean, mic: Boolean): Result<Unit> = cancellableResultOf {
+        val uid = authSource.currentUserId ?: throw IllegalStateException("Not authenticated")
+        callSource.setMedia(callId, uid, camera, mic)
+    }
+
     override fun observeCallDocument(callId: String): Flow<CallSignalingData> {
         return callSource.observeCallDocument(callId)
     }
@@ -90,12 +134,23 @@ class CallRepositoryImpl @Inject constructor(
         callSource.getCallById(callId) ?: return Result.failure(Exception("Call not found"))
     }
 
-    override suspend fun logCallMessage(chatId: String, endReason: EndReason, durationSeconds: Int): Result<Unit> =
-        cancellableResultOf {
-            val callerId = authSource.currentUserId
-                ?: return Result.failure(Exception("Not authenticated"))
-            val timestamp = sendClock.next()
-            val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason.wireName, durationSeconds, timestamp)
-            chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
-        }
+    override suspend fun logCallMessage(
+        chatId: String,
+        endReason: EndReason,
+        durationSeconds: Int,
+        video: Boolean
+    ): Result<Unit> = cancellableResultOf {
+        val callerId = authSource.currentUserId
+            ?: return Result.failure(Exception("Not authenticated"))
+        val timestamp = sendClock.next()
+        val remoteId = messageSource.sendCallMessage(chatId, callerId, endReason.wireName, durationSeconds, video, timestamp)
+        chatDao.updateLastMessage(chatId, remoteId, messageSource.lastContentFor(MessageType.CALL), timestamp)
+    }
+
+    private companion object {
+        const val TAG = "CallRepository"
+
+        /** The ring waits for this read, so it is short. A call on a network this slow is a voice call. */
+        const val VIDEO_LINE_READ_TIMEOUT_MS = 3_000L
+    }
 }

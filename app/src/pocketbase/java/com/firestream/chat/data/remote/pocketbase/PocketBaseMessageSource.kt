@@ -237,6 +237,7 @@ class PocketBaseMessageSource @Inject constructor(
         senderId: String,
         endReason: String,
         durationSeconds: Int,
+        video: Boolean,
         timestamp: Long
     ): String = throw NotImplementedError("PB v0: calls deferred")
 

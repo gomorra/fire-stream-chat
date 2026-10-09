@@ -1,6 +1,8 @@
 package com.firestream.chat.data.call
 
 import android.Manifest
+import android.app.KeyguardManager
+import android.app.Notification
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -20,6 +22,7 @@ import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.domain.model.CallAudioRoute
 import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.repository.CallRepository
+import com.firestream.chat.domain.repository.ChatRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,13 +34,12 @@ import javax.inject.Inject
 
 /**
  * The foreground service that holds a call while it rings and runs. It owns what Android provides:
- * the foreground notification, the audio session and the WebRTC objects. Each call itself runs in
- * a [CallSession], which reaches those through [host].
+ * the foreground notification and its type, the audio session and the permissions. Each call itself
+ * runs in a [CallSession], which reaches those through [host]. The service holds no call logic.
  *
  * Threading: everything runs on the main thread. Intents and lifecycle callbacks arrive there,
- * [serviceScope] dispatches there, and [WebRtcCallMedia] posts WebRTC's signaling-thread callbacks
- * there. The fields therefore need no locks, and teardown never races itself. Teardown must never
- * run on the signaling thread: disposing the factory frees that very thread.
+ * [serviceScope] dispatches there, and [WebRtcCallLocalMedia] brings WebRTC's and the camera's
+ * callbacks there. The fields therefore need no locks, and teardown never races itself.
  */
 @AndroidEntryPoint
 class CallService : Service() {
@@ -50,6 +52,8 @@ class CallService : Service() {
         const val ACTION_HANGUP = "com.firestream.chat.call.HANGUP"
         const val ACTION_TOGGLE_MUTE = "com.firestream.chat.call.TOGGLE_MUTE"
         const val ACTION_SELECT_AUDIO_ROUTE = "com.firestream.chat.call.SELECT_AUDIO_ROUTE"
+        const val ACTION_SET_CAMERA = "com.firestream.chat.call.SET_CAMERA"
+        const val ACTION_FLIP_CAMERA = "com.firestream.chat.call.FLIP_CAMERA"
 
         const val EXTRA_CALL_ID = "call_id"
         const val EXTRA_CHAT_ID = "chat_id"
@@ -57,16 +61,28 @@ class CallService : Service() {
         const val EXTRA_REMOTE_NAME = "remote_name"
         const val EXTRA_REMOTE_AVATAR_URL = "remote_avatar_url"
         const val EXTRA_AUDIO_ROUTE = "audio_route"
+        /** How the call was started: true for a video call. Absent means a voice call. */
+        const val EXTRA_VIDEO = "video"
+        /** Outgoing only: the callee's app takes a video line. Absent means it does not. */
+        const val EXTRA_VIDEO_LINE = "video_line"
+        const val EXTRA_CAMERA_ON = "camera_on"
 
         private const val TAG = "CallService"
 
+        /**
+         * @param video how the call is started: as a video call or as a voice call.
+         * @param videoLine the callee's app takes a video line, as `CallRepository.createCall`
+         *   found out. Never true on a guess: an app without video crashes on such an offer.
+         */
         fun startOutgoing(
             context: Context,
             callId: String,
             chatId: String,
             remoteUserId: String,
             remoteName: String,
-            remoteAvatarUrl: String?
+            remoteAvatarUrl: String?,
+            video: Boolean,
+            videoLine: Boolean
         ) {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START_OUTGOING
@@ -75,6 +91,8 @@ class CallService : Service() {
                 putExtra(EXTRA_REMOTE_USER_ID, remoteUserId)
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_REMOTE_AVATAR_URL, remoteAvatarUrl)
+                putExtra(EXTRA_VIDEO, video)
+                putExtra(EXTRA_VIDEO_LINE, videoLine)
             }
             context.startForegroundService(intent)
         }
@@ -84,7 +102,8 @@ class CallService : Service() {
             callId: String,
             remoteUserId: String,
             remoteName: String,
-            remoteAvatarUrl: String?
+            remoteAvatarUrl: String?,
+            video: Boolean
         ) {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START_INCOMING
@@ -92,6 +111,7 @@ class CallService : Service() {
                 putExtra(EXTRA_REMOTE_USER_ID, remoteUserId)
                 putExtra(EXTRA_REMOTE_NAME, remoteName)
                 putExtra(EXTRA_REMOTE_AVATAR_URL, remoteAvatarUrl)
+                putExtra(EXTRA_VIDEO, video)
             }
             context.startForegroundService(intent)
         }
@@ -111,31 +131,70 @@ class CallService : Service() {
             }
             context.startService(intent)
         }
+
+        /**
+         * Answer the ringing call, with the own camera on or off. One intent for both, so a
+         * preview that ran while the call rang never outlives a "voice only" answer. The screen
+         * asks for the microphone first, and for the camera when [camera] is true.
+         */
+        fun sendAnswer(context: Context, camera: Boolean) {
+            val intent = Intent(context, CallService::class.java).apply {
+                action = ACTION_ANSWER
+                putExtra(EXTRA_CAMERA_ON, camera)
+            }
+            context.startService(intent)
+        }
+
+        /**
+         * Switch the own camera of the running call on or off. The service never asks for the
+         * `CAMERA` permission, and without it the camera stays off, so a screen asks first.
+         * Dropped when no call is running.
+         */
+        fun sendSetCamera(context: Context, on: Boolean) {
+            val intent = Intent(context, CallService::class.java).apply {
+                action = ACTION_SET_CAMERA
+                putExtra(EXTRA_CAMERA_ON, on)
+            }
+            context.startService(intent)
+        }
     }
 
     @Inject lateinit var callRepository: CallRepository
+    @Inject lateinit var chatRepository: ChatRepository
     @Inject lateinit var callStateHolder: CallStateHolder
+    @Inject lateinit var callVideoSinks: CallVideoSinks
+    @Inject lateinit var iceServerProvider: IceServerProvider
     @Inject lateinit var profileImageManager: ProfileImageManager
 
     /**
-     * For the writes that record how a call ended. They must outlive the service: a call that
-     * ends stops the service right after launching them, and [onDestroy] cancels [serviceScope].
+     * For the writes that record how a call ended, and for the release of its media. They must
+     * outlive the service: a call that ends stops the service right after launching them, and
+     * [onDestroy] cancels [serviceScope].
      */
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     private var notificationManager: CallNotificationManager? = null
 
     /** The call this service holds. One at a time. */
     private var session: CallSession? = null
 
+    /**
+     * The notification of the held call past its incoming ring, kept for a change of the
+     * foreground type: `startForeground` takes the type together with a notification.
+     */
+    private var typedNotification: Notification? = null
+
     private var routeJob: Job? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
     private var audioRouter: CallAudioRouter? = null
     private var proximityLock: ProximityLock? = null
+
+    /** What [CallHost.setAudioFollowsVideo] said last. Applied to an audio session when it starts. */
+    private var preferSpeaker = false
+    private var videoShowing = false
 
     private var previousAudioMode: Int = AudioManager.MODE_NORMAL
 
@@ -159,27 +218,40 @@ class CallService : Service() {
                 val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopIfIdle()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
-                startOutgoingCall(callId, chatId, userId, name, avatar)
+                val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+                val videoLine = intent.getBooleanExtra(EXTRA_VIDEO_LINE, false)
+                startOutgoingCall(callId, chatId, userId, name, avatar, video = video, videoLine = videoLine)
             }
             ACTION_START_INCOMING -> {
                 val callId = intent.getStringExtra(EXTRA_CALL_ID) ?: return stopIfIdle()
                 val userId = intent.getStringExtra(EXTRA_REMOTE_USER_ID) ?: return stopIfIdle()
                 val name = intent.getStringExtra(EXTRA_REMOTE_NAME) ?: "Unknown"
                 val avatar = intent.getStringExtra(EXTRA_REMOTE_AVATAR_URL)
-                startIncomingCall(callId, userId, name, avatar)
+                val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+                startIncomingCall(callId, userId, name, avatar, video)
             }
-            ACTION_ANSWER -> session?.answer()
+            ACTION_ANSWER -> session?.answer(camera = intent.getBooleanExtra(EXTRA_CAMERA_ON, false))
             ACTION_DECLINE -> decline(intent.getStringExtra(EXTRA_CALL_ID))
             ACTION_HANGUP -> session?.hangup()
             ACTION_TOGGLE_MUTE -> session?.toggleMute()
             ACTION_SELECT_AUDIO_ROUTE -> selectAudioRoute(intent.getStringExtra(EXTRA_AUDIO_ROUTE))
+            ACTION_SET_CAMERA -> session?.setCamera(intent.getBooleanExtra(EXTRA_CAMERA_ON, false))
+            ACTION_FLIP_CAMERA -> session?.flipCamera()
         }
-        // An action that finds no call, such as a second tap on Hang Up, must not leave the
-        // service running.
+        // An action that finds no call, such as a second tap on Hang Up or a camera switch sent
+        // just after the call ended, must not leave the service running.
         return stopIfIdle()
     }
 
-    private fun startOutgoingCall(callId: String, chatId: String, userId: String, name: String, avatar: String?) {
+    private fun startOutgoingCall(
+        callId: String,
+        chatId: String,
+        userId: String,
+        name: String,
+        avatar: String?,
+        video: Boolean,
+        videoLine: Boolean,
+    ) {
         session?.let { current ->
             // Another call holds the service. Its connection must not be reused for this one.
             // The new call's document already exists and has rung the callee, so end it rather
@@ -189,18 +261,19 @@ class CallService : Service() {
             return
         }
         // Held before it starts: a session that ends while starting must find itself here to let go.
-        val call = newSession(callId, isCaller = true, chatId, userId, name, avatar)
+        val call = newSession(callId, isCaller = true, chatId, userId, name, avatar, video, videoLine)
         session = call
         call.startOutgoing()
     }
 
-    private fun startIncomingCall(callId: String, userId: String, name: String, avatar: String?) {
+    private fun startIncomingCall(callId: String, userId: String, name: String, avatar: String?, video: Boolean) {
         session?.let { current ->
             // FCMService checks this too, but a call can start between its check and this intent.
             Log.w(TAG, "Ignoring incoming call $callId: call ${current.callId} is in progress")
             return
         }
-        val call = newSession(callId, isCaller = false, chatId = null, userId, name, avatar)
+        // The side that answers takes the video line the offer brings, so it offers none itself.
+        val call = newSession(callId, isCaller = false, chatId = null, userId, name, avatar, video, videoLine = false)
         session = call
         call.startIncoming()
     }
@@ -212,6 +285,8 @@ class CallService : Service() {
         userId: String,
         name: String,
         avatar: String?,
+        video: Boolean,
+        videoLine: Boolean,
     ) = CallSession(
         callId = callId,
         isCaller = isCaller,
@@ -219,7 +294,11 @@ class CallService : Service() {
         remoteUserId = userId,
         remoteName = name,
         remoteAvatarUrl = avatar,
+        video = video,
+        offerVideoLine = videoLine,
         repository = callRepository,
+        chatRepository = chatRepository,
+        iceServers = iceServerProvider,
         stateHolder = callStateHolder,
         host = host,
         parentScope = serviceScope,
@@ -253,8 +332,11 @@ class CallService : Service() {
 
     /** What a [CallSession] needs from Android. */
     private val host = object : CallHost {
-        override fun hasMicrophonePermission(): Boolean =
-            checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        override fun hasMicrophonePermission(): Boolean = isGranted(Manifest.permission.RECORD_AUDIO)
+
+        override fun hasCameraPermission(): Boolean = isGranted(Manifest.permission.CAMERA)
+
+        override fun isLocked(): Boolean = getSystemService(KeyguardManager::class.java).isKeyguardLocked
 
         override fun localAvatarPath(userId: String): String? {
             if (userId.isEmpty()) return null
@@ -262,16 +344,14 @@ class CallService : Service() {
             return if (file.exists()) file.absolutePath else null
         }
 
-        override fun foregroundOutgoing(remoteName: String) {
-            startForeground(
-                CallNotificationManager.NOTIFICATION_ID_ONGOING,
-                notificationManager!!.buildOutgoingCallNotification(remoteName),
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+        override fun foregroundOutgoing(remoteName: String, video: Boolean) {
+            val notification = notificationManager!!.buildOutgoingCallNotification(remoteName, video)
+            typedNotification = notification
+            startForegroundWithMicrophone(notification)
         }
 
-        override fun foregroundIncoming(remoteName: String) {
-            val notification = notificationManager!!.buildIncomingCallNotification(remoteName)
+        override fun foregroundIncoming(remoteName: String, video: Boolean) {
+            val notification = notificationManager!!.buildIncomingCallNotification(remoteName, video)
             // API 34+ enforces RECORD_AUDIO at startForeground() for MICROPHONE type;
             // use SHORT_SERVICE during ringing since the mic isn't needed yet.
             // Pre-34 doesn't enforce this, and SHORT_SERVICE doesn't exist, so MICROPHONE is safe.
@@ -285,37 +365,64 @@ class CallService : Service() {
             notificationManager!!.cancelNotification(CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK)
         }
 
-        override fun foregroundOngoing(remoteName: String) {
-            val notification = notificationManager!!.buildOngoingCallNotification(remoteName)
+        override fun showIncoming(remoteName: String, video: Boolean) {
+            val notifications = notificationManager!!
+            notifications.updateNotification(
+                notifications.buildIncomingCallNotification(remoteName, video),
+                CallNotificationManager.NOTIFICATION_ID_ONGOING
+            )
+        }
+
+        override fun foregroundOngoing(remoteName: String, video: Boolean, camera: Boolean): Boolean {
+            val notification = notificationManager!!.buildOngoingCallNotification(remoteName, video)
+            typedNotification = notification
             // Android 14+ prohibits changing from SHORT_SERVICE to another type directly;
             // exit foreground first, then re-enter as MICROPHONE now that RECORD_AUDIO is granted.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 stopForeground(STOP_FOREGROUND_DETACH)
             }
-            startForeground(
-                CallNotificationManager.NOTIFICATION_ID_ONGOING,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
+            if (camera && startForegroundWithCamera(notification)) return true
+            startForegroundWithMicrophone(notification)
+            return !camera
         }
 
-        override fun showOngoing(remoteName: String) {
+        override fun showOngoing(remoteName: String, video: Boolean) {
             val notifications = notificationManager!!
-            notifications.updateNotification(
-                notifications.buildOngoingCallNotification(remoteName),
-                CallNotificationManager.NOTIFICATION_ID_ONGOING
-            )
+            val notification = notifications.buildOngoingCallNotification(remoteName, video)
+            typedNotification = notification
+            notifications.updateNotification(notification, CallNotificationManager.NOTIFICATION_ID_ONGOING)
         }
 
-        override fun createMedia(callId: String, listener: CallMedia.Listener): CallMedia =
-            WebRtcCallMedia(applicationContext, mainHandler, listener)
+        override fun setForegroundCamera(camera: Boolean): Boolean {
+            // Only a call past its incoming ring has a type to change. The session asks for no other.
+            val notification = typedNotification ?: return true
+            if (camera) return startForegroundWithCamera(notification)
+            try {
+                startForegroundWithMicrophone(notification)
+            } catch (e: RuntimeException) {
+                // The service keeps the type it had. A camera type left over allows nothing: the
+                // camera is off.
+                Log.w(TAG, "Could not drop the camera foreground type", e)
+            }
+            return true
+        }
+
+        override fun createLocalMedia(listener: CallLocalMedia.Listener): CallLocalMedia =
+            WebRtcCallLocalMedia(applicationContext, callVideoSinks, listener, appScope)
 
         override fun startAudioSession() = this@CallService.startAudioSession()
+
+        override fun setAudioFollowsVideo(preferSpeaker: Boolean, videoShowing: Boolean) {
+            this@CallService.preferSpeaker = preferSpeaker
+            this@CallService.videoShowing = videoShowing
+            applyAudioFollowsVideo()
+        }
 
         override fun stopAudioSession() = this@CallService.stopAudioSession()
 
         override fun onSessionFinished(session: CallSession) {
             if (this@CallService.session === session) this@CallService.session = null
+            typedNotification = null
             notificationManager?.cancelNotification(CallNotificationManager.NOTIFICATION_ID_INCOMING)
             stopForeground(STOP_FOREGROUND_REMOVE)
             // The id, not stopSelf(): that stops the service even with the next call's start still
@@ -325,14 +432,41 @@ class CallService : Service() {
         }
     }
 
+    private fun isGranted(permission: String): Boolean =
+        checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
+
+    private fun startForegroundWithMicrophone(notification: Notification) = startForeground(
+        CallNotificationManager.NOTIFICATION_ID_ONGOING,
+        notification,
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    )
+
+    /** @return false when the system refused the type. The service then keeps the type it had. */
+    private fun startForegroundWithCamera(notification: Notification): Boolean = try {
+        startForeground(
+            CallNotificationManager.NOTIFICATION_ID_ONGOING,
+            notification,
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+        )
+        true
+    } catch (e: SecurityException) {
+        Log.w(TAG, "Camera foreground type refused", e)
+        false
+    } catch (e: IllegalStateException) {
+        // ForegroundServiceStartNotAllowedException: the app is not in a state to start one.
+        Log.w(TAG, "Camera foreground type refused", e)
+        false
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Audio Session — focus, mode, routing, proximity
     // ──────────────────────────────────────────────────────────────────────────
 
     /**
      * Take audio focus, switch the device into communication mode, and start routing. Idempotent:
-     * ICE reports CONNECTED and then COMPLETED, and a second run would both overwrite
-     * [previousAudioMode] with `MODE_IN_COMMUNICATION` and leak a second router and collector.
+     * a connection reports connected again after every reconnect, and a second run would both
+     * overwrite [previousAudioMode] with `MODE_IN_COMMUNICATION` and leak a second router and
+     * collector.
      */
     private fun startAudioSession() {
         val am = audioManager ?: return
@@ -356,6 +490,8 @@ class CallService : Service() {
         val proximity = ProximityLock(getSystemService(PowerManager::class.java))
         audioRouter = router
         proximityLock = proximity
+        // Before the first routing, so a call with video starts on the speaker.
+        applyAudioFollowsVideo()
         router.start()
 
         routeJob = serviceScope.launch {
@@ -369,8 +505,17 @@ class CallService : Service() {
         }
     }
 
+    /** Does nothing before the audio session has started. [startAudioSession] applies it then. */
+    private fun applyAudioFollowsVideo() {
+        audioRouter?.setPreferSpeaker(preferSpeaker)
+        proximityLock?.setVideoShowing(videoShowing)
+    }
+
     /** Undo [startAudioSession], in the reverse order: proximity, routing, focus, mode. */
     private fun stopAudioSession() {
+        // The next call starts as a voice call until its session says otherwise.
+        preferSpeaker = false
+        videoShowing = false
         // Latches before routeJob is cancelled, so no route report can re-acquire the lock after
         // the call is gone.
         proximityLock?.shutdown()
@@ -391,7 +536,6 @@ class CallService : Service() {
         super.onDestroy()
         session?.finish()
         serviceScope.cancel()
-        mainHandler.removeCallbacksAndMessages(null)
     }
 
     /** Stop the service unless it holds a call. A start that is still queued keeps it running. */

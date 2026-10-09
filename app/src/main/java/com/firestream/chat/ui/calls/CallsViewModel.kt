@@ -111,7 +111,8 @@ class CallsViewModel @Inject constructor(
                 avatarUrl = contact?.avatarUrl,
                 type = CallLogType.of(message.senderId == currentUserId, message.content, message.duration),
                 durationSeconds = message.duration,
-                timestamp = message.timestamp
+                timestamp = message.timestamp,
+                video = message.isVideoCall
             )
         }
     }

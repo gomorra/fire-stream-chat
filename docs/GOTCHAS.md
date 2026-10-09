@@ -419,7 +419,8 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **WebRTC calls back on its signaling thread, and the factory owns that thread.**
   `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
   frees the factory's threads. Tearing a call down from one of those callbacks destroys the
-  thread the callback is running on. Hop to the main thread first (`WebRtcCallMedia.onMain`).
+  thread the callback is running on. Hop to the main thread first: `PeerSession` reports
+  through an event channel, which `CallSession` collects there.
   `PeerConnection.close()` frees nothing: only `dispose()` releases the native connection and
   the observer it holds. `PeerConnectionFactory.builder()` makes an audio device module that
   nothing releases unless you pass your own and call `release()` after `dispose()`.
@@ -442,9 +443,83 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   platform timeout.** Nothing stops it on its own — unattended, it rings until the battery
   dies. Always pair it with `setTimeoutAfter(...)` as a backstop plus an explicit dismiss
   affordance; a Dismiss action alone only helps when somebody is present.
+- **A sideloaded app starts without the access *Full screen notifications* on Android 14 and
+  later.** The manifest's `USE_FULL_SCREEN_INTENT` does not grant it, and the installer cannot.
+  It was off on a phone with Android 17 and on an emulator with Android 16. Without the access
+  the system drops
+  `setFullScreenIntent` without an error and shows only the notification, so a call does not
+  wake the display. `FullScreenIntentAccess` reads the access and opens its settings page.
+  On a test device, grant it with
+  `adb shell appops set --uid com.firestream.chat USE_FULL_SCREEN_INTENT allow`.
+- **Robolectric 4.14's `ShadowNotificationManager` has no switch for
+  `canUseFullScreenIntent()`.** Put a mocked `NotificationManager` behind a `ContextWrapper`
+  that overrides `getSystemService(String)`. Do not name the method in a MockK `verify` under
+  an SDK below 34, where it does not exist: recording the call throws `NoSuchMethodError`.
+
+## WebRTC / calls
+
+Read from the classes of `stream-webrtc-android` 1.3.10 and its `-ui` artifact, and from the
+Android 14 foreground-service rules. Only the first entry has run on a device, as a probe app on
+the emulator. The checks for the rest are in [BACKLOG.md](BACKLOG.md) § *Pending on-device
+verification*.
+
+- **A `PeerConnectionFactory` without video codecs aborts the process on an offer with a video
+  line.** WebRTC logs *No video codecs in common*, accepts the line, builds a receive stream from
+  an empty codec list, and dies with `front() called on an empty vector`: a SIGABRT in
+  `libjingle_peerconnection_so.so`, inside `setRemoteDescription`. No error comes back, so the app
+  cannot end the call. Every FireStream build before video calls has such a factory, voice calls
+  included. Never offer a video line on a guess. A caller offers one only to a callee whose user
+  document carries `callVideoLine: true` (`CallRepository.createCall`), and that field is never
+  written as `false` or removed. Libraries 1.3.0 and 1.3.10 behave the same.
+- **A build before video calls applies the answer again on every snapshot of an answered call
+  document, and ends the call when that fails.** Any write to `calls/{callId}` after the answer
+  therefore hangs up a call such a build placed. `CallMediaPublisher` writes `media` only once
+  both sides agreed on the video line, which such a build never does. Keep every new write to an
+  answered call document behind the same rule.
+
+- **Call `PeerConnection.getTransceivers()` once and keep what it returned.** Every call disposes
+  the Java objects the call before handed out, and the one `addTransceiver` returned is among
+  them. A transceiver kept from earlier then throws on its next use. `PeerSession` reads the list
+  once, on the side that answers.
+- **Pass no video constraint to `createOffer` when the video line is a transceiver.** A legacy
+  `OfferToReceiveVideo = false` takes the receiving half off every video transceiver of the offer.
+- **`RtpSender.setTrack(track, takeOwnership = true)` hands the track to the sender.** The sender
+  then disposes it on the next `setTrack`. A track that several sessions share goes on with `false`.
+- **A disposed track throws on every call, `removeSink` included.** Take every sink off a track,
+  and the track off every sender, before its owner disposes it. `CallVideoSinks.close()` and
+  `PeerSession.setCamera(null)` run before `WebRtcCallLocalMedia.dispose()` releases anything.
+- **`VideoTextureViewRenderer` is single-use.** `onDetachedFromWindow` releases its EGL renderer,
+  so a view that left its window draws nothing when it comes back. Make a new one.
+- **A surface that arrives before `VideoTextureViewRenderer.init()` is dropped without a word.**
+  Hand it over again after `init()`, through `onSurfaceTextureAvailable`. `CallVideoSinks` does,
+  for a view made before the call has an EGL context.
+- **`VideoTextureViewRenderer` sizes itself by the picture unless told to fill.** Offered a size
+  that is not fixed, its default scaling type measures the view smaller than that size.
+  `SCALE_ASPECT_FILL` takes the bounds and crops the picture.
+- **A video view keeps the last picture it drew, and a track outlives the camera going off.**
+  "Has video" is therefore not "has a track". `CallVideoSinks` counts a first frame per track and
+  counts again after `awaitFrame`.
+- **`CameraCapturer.stopCapture()` waits while the camera is still opening, and closes the device
+  later, on the capture thread.** Never stop or dispose a camera on the main thread. Let the
+  capture thread work its queue off before `SurfaceTextureHelper.dispose()`: that call quits the
+  thread ahead of whatever is still queued, the close included (`LocalCamera.awaitCaptureThread`).
+- **`startForeground` with the camera type throws on Android 14 and later.** It needs the `CAMERA`
+  runtime permission and a visible app, on top of `FOREGROUND_SERVICE_CAMERA` and the type on the
+  `<service>`. Without them it throws a `SecurityException`, or an `IllegalStateException` when no
+  foreground start is allowed. `CallService` catches both, leaves the camera off and keeps the call.
 
 ## Build tooling
 
+- **`Could not read workspace metadata from ~/.gradle/caches/<version>/transforms/<hash>/metadata.bin`
+  is a truncated cache entry, not the diff.** A crash, or a disk that goes read-only, in the middle
+  of a build leaves zero-byte `metadata.bin` files in Gradle's transform cache. Gradle 8.11 then
+  fails on them in every later build and never rebuilds them. Unit tests can still pass while
+  `assembleDebug` fails at `check…DuplicateClasses`. List them with
+  `find ~/.gradle/caches/8.11.1/transforms -maxdepth 2 -name metadata.bin -size 0` and delete the
+  directories they sit in. A session that must not touch the shared Gradle home builds with a
+  private one instead: put `org.gradle.java.home` into `<dir>/gradle.properties` and run
+  `./gradlew -g <dir> --no-daemon assembleDebug`, with `<dir>` under the ignored `build/`. It
+  downloads everything once. Delete `<dir>` afterwards.
 - **A `VirtualMachineError: Out of space in CodeCache` in a long Gradle run is the daemon, not the diff.**
   Running the full unit suite and `assembleFirebaseDebug` in *one* invocation on a cloud
   container (2026-09-18, ~12 min) ended with D8 failing on a third-party AAR and, on an

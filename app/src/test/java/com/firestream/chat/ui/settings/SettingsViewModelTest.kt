@@ -1,6 +1,7 @@
 package com.firestream.chat.ui.settings
 
 import android.content.Context
+import com.firestream.chat.data.call.FullScreenIntentAccess
 import com.firestream.chat.data.local.AppTheme
 import com.firestream.chat.data.local.AutoDownloadOption
 import com.firestream.chat.domain.model.ChatFontSize
@@ -51,6 +52,7 @@ class SettingsViewModelTest {
     private lateinit var appUpdateRepository: AppUpdateRepository
     private lateinit var apkInstaller: ApkInstaller
     private lateinit var appContext: Context
+    private lateinit var fullScreenIntentAccess: FullScreenIntentAccess
     private lateinit var viewModel: SettingsViewModel
 
     private val testUser = User(
@@ -69,6 +71,9 @@ class SettingsViewModelTest {
         appUpdateRepository = mockk(relaxed = true)
         apkInstaller = mockk(relaxed = true)
         appContext = mockk(relaxed = true)
+        fullScreenIntentAccess = mockk(relaxed = true)
+        every { fullScreenIntentAccess.isSupported } returns true
+        every { fullScreenIntentAccess.isGranted() } returns false
 
         stubDefaultPreferences()
 
@@ -81,6 +86,7 @@ class SettingsViewModelTest {
             preferencesDataStore = preferencesDataStore,
             appUpdateRepository = appUpdateRepository,
             apkInstaller = apkInstaller,
+            fullScreenIntentAccess = fullScreenIntentAccess,
             appContext = appContext
         )
     }
@@ -108,6 +114,35 @@ class SettingsViewModelTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.GERMAN)
         every { preferencesDataStore.chatFontSizeFlow } returns flowOf(ChatFontSize.DEFAULT_SP)
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(false)
+    }
+
+    // ── Full-screen call alerts ──────────────────────────────────────────────
+
+    @Test
+    fun `the full-screen alerts row follows the access on every resume`() = runTest {
+        assertEquals(false, viewModel.uiState.value.fullScreenAlerts)
+
+        every { fullScreenIntentAccess.isGranted() } returns true
+        viewModel.recheckFullScreenAccess()
+
+        assertEquals(true, viewModel.uiState.value.fullScreenAlerts)
+    }
+
+    @Test
+    fun `the full-screen alerts row is hidden below Android 14`() = runTest {
+        every { fullScreenIntentAccess.isSupported } returns false
+        every { fullScreenIntentAccess.isGranted() } returns true
+
+        viewModel.recheckFullScreenAccess()
+
+        assertNull(viewModel.uiState.value.fullScreenAlerts)
+    }
+
+    @Test
+    fun `the full-screen alerts row opens the settings page`() = runTest {
+        viewModel.openFullScreenAccessSettings()
+
+        verify { fullScreenIntentAccess.openSettings() }
     }
 
     // ── Init ─────────────────────────────────────────────────────────────────
@@ -143,7 +178,7 @@ class SettingsViewModelTest {
     @Test
     fun `init with no current user id skips user load`() = runTest {
         every { authRepository.currentUserId } returns null
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 
@@ -153,7 +188,7 @@ class SettingsViewModelTest {
     @Test
     fun `init sets error state when user flow throws`() = runTest {
         every { userRepository.observeUser("user1") } returns flow { throw RuntimeException("network error") }
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 
@@ -170,7 +205,7 @@ class SettingsViewModelTest {
         every { preferencesDataStore.notificationSoundFlow } returns flowOf(NotificationSound.SILENT)
         every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
         every { preferencesDataStore.videoQualityFlow } returns flowOf(VideoQualityOption.HIGH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 
@@ -407,7 +442,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted dictation language`() = runTest {
         every { preferencesDataStore.dictationLanguageFlow } returns flowOf(DictationLanguage.ENGLISH)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 
@@ -534,7 +569,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted keepOriginalImages`() = runTest {
         every { preferencesDataStore.keepOriginalImagesFlow } returns flowOf(true)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 
@@ -564,7 +599,7 @@ class SettingsViewModelTest {
     @Test
     fun `init reflects persisted autoDownloadUpdates`() = runTest {
         every { preferencesDataStore.autoDownloadUpdatesFlow } returns flowOf(true)
-        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, appContext)
+        val vm = SettingsViewModel(authRepository, userRepository, preferencesDataStore, appUpdateRepository, apkInstaller, fullScreenIntentAccess, appContext)
 
         advanceUntilIdle()
 

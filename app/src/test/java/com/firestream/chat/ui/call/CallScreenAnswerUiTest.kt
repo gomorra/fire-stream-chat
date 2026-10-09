@@ -20,7 +20,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * The call screen's Answer button. Answering moves the call service to a microphone foreground
+ * The call screen's answer buttons. Answering moves the call service to a microphone foreground
  * service, which Android 14+ refuses without RECORD_AUDIO, so the tap must reach the host
  * activity's permission check rather than the service.
  */
@@ -33,25 +33,46 @@ class CallScreenAnswerUiTest {
 
     private val app = ApplicationProvider.getApplicationContext<Application>()
 
-    @Test
-    fun `answering hands the tap to the host instead of starting the service`() {
+    /** Every answer the host was handed: true for *With video*. */
+    private val answers = mutableListOf<Boolean>()
+
+    private fun showRing(video: Boolean) {
         val holder = CallStateHolder().apply {
-            updateState(CallState.IncomingRinging("c1", "u2", "Alice", null))
+            updateState(CallState.IncomingRinging("c1", "u2", "Alice", null, video = video))
         }
-        var answers = 0
         composeTestRule.setContent {
             MaterialTheme {
                 CallScreen(
+                    locked = false,
+                    inPictureInPicture = false,
+                    onAnswer = { withVideo -> answers += withVideo },
+                    onSetCamera = {},
+                    onMinimise = {},
                     onFinish = {},
-                    onAnswer = { answers++ },
-                    viewModel = CallViewModel(holder, mockk(), TestScope(), app),
+                    viewModel = CallViewModel(holder, mockk(), mockk(relaxed = true), TestScope(), app),
                 )
             }
         }
+    }
+
+    @Test
+    fun `answering hands the tap to the host instead of starting the service`() {
+        showRing(video = false)
 
         composeTestRule.onNodeWithContentDescription("Answer").performClick()
 
-        assertEquals(1, answers)
+        assertEquals(listOf(false), answers)
+        assertNull(shadowOf(app).nextStartedService)
+    }
+
+    @Test
+    fun `both answers of a video ring go to the host too, with the camera the user chose`() {
+        showRing(video = true)
+
+        composeTestRule.onNodeWithContentDescription("With video").performClick()
+        composeTestRule.onNodeWithContentDescription("Voice only").performClick()
+
+        assertEquals(listOf(true, false), answers)
         assertNull(shadowOf(app).nextStartedService)
     }
 }

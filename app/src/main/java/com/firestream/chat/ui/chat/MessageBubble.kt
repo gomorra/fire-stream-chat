@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.automirrored.filled.CallMissed
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
@@ -224,6 +225,20 @@ internal data class MessageBubbleCallbacks(
     // Cancel the pending reminder. Null when no reminder is pending.
     val onCancelReminder: (() -> Unit)? = null,
 )
+
+/**
+ * What a `CALL` bubble says. A call that was started as video says so, whatever became of it.
+ */
+internal fun callBubbleLabel(type: CallLogType, video: Boolean): String {
+    val call = if (video) "video call" else "call"
+    return when (type) {
+        CallLogType.OUTGOING -> "Outgoing $call"
+        CallLogType.NO_ANSWER -> if (video) "Video call · No answer" else "No answer"
+        CallLogType.OUTGOING_DECLINED, CallLogType.DECLINED -> if (video) "Video call · Declined" else "Declined"
+        CallLogType.INCOMING -> "Incoming $call"
+        CallLogType.MISSED -> "Missed $call"
+    }
+}
 
 /**
  * Animated border colour for the ~1.5s "jump target" frame — the pink flash shown
@@ -1264,18 +1279,12 @@ private fun MessageBubbleBody(
                 // A call message's content is how the call ended, e.g. "declined".
                 val callType = CallLogType.of(isOwnMessage, message.content, message.duration)
                 val callColor = if (callType.isMissedOrDeclined) MaterialTheme.colorScheme.error else textColor
-                val callIcon = if (callType.isMissedOrDeclined) {
-                    Icons.AutoMirrored.Filled.CallMissed
-                } else {
-                    Icons.Default.Call
+                val callIcon = when {
+                    message.isVideoCall -> Icons.Default.Videocam
+                    callType.isMissedOrDeclined -> Icons.AutoMirrored.Filled.CallMissed
+                    else -> Icons.Default.Call
                 }
-                val callLabel = when (callType) {
-                    CallLogType.OUTGOING -> "Outgoing call"
-                    CallLogType.NO_ANSWER -> "No answer"
-                    CallLogType.OUTGOING_DECLINED, CallLogType.DECLINED -> "Declined"
-                    CallLogType.INCOMING -> "Incoming call"
-                    CallLogType.MISSED -> "Missed call"
-                }
+                val callLabel = callBubbleLabel(callType, message.isVideoCall)
                 val durationSeconds = message.duration ?: 0
                 val callDetail = when {
                     durationSeconds > 0 -> {
