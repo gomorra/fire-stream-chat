@@ -98,7 +98,11 @@ Step headings may carry tags after the title: `skills: code-review, simplify` (m
 Two tools, non-overlapping scopes — pick by what you are looking for:
 
 - **`/simplify`** — quality only: reuse, simplification, efficiency, altitude. It applies its own fixes. Trigger-gated inside the post-step workflow below, and offered by the pre-commit `ask-simplify.sh` hook.
-- **`/code-review`** — correctness bugs, which `/simplify` explicitly does not hunt. Judgment-gated in post-step item 4 like `/simplify` and mandatory where a plan's `skills:` tag names it; always before cutting a release, and on any diff touching Signal/crypto, coroutine scoping, or the sync path. `/code-review ultra` is user-triggered and billed — Claude cannot launch it, so never write it into an auto-run step.
+- **`/code-review`** — correctness bugs, which `/simplify` explicitly does not hunt.
+  - It is judgment-gated in post-step item 4, like `/simplify`.
+  - It is mandatory where a plan's `skills:` tag names it, and on any diff touching Signal/crypto, coroutine scoping, or the sync path.
+  - Before cutting a release, run it on the commits since the last tag that have had none. A release ships everything since that tag, and a small fix pushed straight to main may never have been reviewed. Do not review the whole range again when every commit in it was reviewed: a plan branch records each step's review in its `**Shipped**` line.
+  - `/code-review ultra` is user-triggered and billed. Claude cannot launch it, so never write it into an auto-run step.
 
 Do not reimplement either with a custom review prompt.
 
