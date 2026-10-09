@@ -16,7 +16,12 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — owns the call: intents, notification and foreground type, ring timeout, call status, the local audio track and the camera, each side's live camera and microphone state, the audio session (router + proximity lock), and a map of `PeerSession`s |
+| `app/src/main/java/com/firestream/chat/data/call/CallService.kt` | Foreground service — Android side of a call: foreground type and notifications, the permissions, the audio session (router + proximity lock), one `CallSession` at a time; all on the main thread; stops with the latest start id; a Decline that names a call no session holds declines it directly |
+| `app/src/main/java/com/firestream/chat/data/call/CallSession.kt` | One call, without Android or WebRTC: its states, ring and timers, the status of the call document, the end-of-call writes, the call's kind, the other side's camera and microphone, the chat lookup for the dock |
+| `app/src/main/java/com/firestream/chat/data/call/CallHost.kt` | What a `CallSession` needs from Android; `CallService` implements it |
+| `app/src/main/java/com/firestream/chat/data/call/CallLocalMedia.kt` | One call's microphone, camera and connections as the session sees them |
+| `app/src/main/java/com/firestream/chat/data/call/WebRtcCallLocalMedia.kt` | `CallLocalMedia` over WebRTC: the factory, the tracks, one `PeerSession` per remote person, the tracks given to `CallVideoSinks`; camera calls and the release of a finished call run on one worker, and every callback comes back to the main thread |
+| `app/src/main/java/com/firestream/chat/data/call/CameraSwitch.kt` | Pure — whether the own camera runs: the user's switch, the `CAMERA` permission, the video line, the screens, a refused foreground type, the preview of a ring |
 | `app/src/main/java/com/firestream/chat/data/call/PeerSession.kt` | One `PeerConnection` to one remote person — offer/answer, the video line and whether both sides agreed to it, ICE candidates held until the remote description is set, duplicate filter, events through a channel |
 | `app/src/main/java/com/firestream/chat/data/call/PeerSignaling.kt` | What a session needs for one pair, and `OneToOneSignaling` over the call document |
 | `app/src/main/java/com/firestream/chat/data/call/IcePath.kt` | Pure — direct or relayed, from the selected candidate pair, and the server behind this side's relay candidate; logged on connect |
@@ -28,41 +33,62 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 | `app/src/main/java/com/firestream/chat/data/call/LocalCamera.kt` | The call's own camera — front first, 1280×720 at 30 fps, start, stop, flip, and the release order |
 | `app/src/main/java/com/firestream/chat/data/call/CallVideoSinks.kt` | `@Singleton` — hands a screen one video `View` per participant, keeps it on that participant's track, reports first frames |
 | `app/src/main/java/com/firestream/chat/data/call/CallMediaPublisher.kt` | Writes the own camera and microphone state to the call document — only once the call is connected and both sides agreed on the video line |
-| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow`s of `CallState`, `CallUiControls` and the `CallParticipant`s. Also holds the call's chat, the `CallSurface`s on screen, and `onScreen` |
+| `app/src/main/java/com/firestream/chat/data/call/CallStateHolder.kt` | `@Singleton` — bridges service ↔ UI via `StateFlow`s of `CallState`, `CallUiControls` and the `CallParticipant`s. Also holds the call's chat, the `CallSurface`s on screen, and `onScreen`. The placing of an outgoing call: `prepareOutgoingCall` before the permission prompt, then `startPlacing`, `placingCreated`, `takeOverPlacing`, `failPlacing`, `cancelPlacing`, each keyed by the placing's id (compare-and-set, so the setup and the service never both win) |
+| `app/src/main/java/com/firestream/chat/domain/model/CallState.kt` | Call states, `Placing` included, `CallState.Live`, `isOngoing` (the one "am I in a call" rule), `dockable`, `CallUiControls`, `CallParticipant`, `CallSurface` |
+| `app/src/main/java/com/firestream/chat/domain/model/CallLogEntry.kt` | Call-log row with the call's kind; `CallLogType.of` — the one rule for how a call reads (outgoing, no answer, incoming, missed, declined), used by the Calls tab and `MessageBubble`'s call row |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRoutePolicy.kt` | Pure policy — which route wins, and `AudioDeviceInfo.TYPE_*` → `CallAudioRoute` |
 | `app/src/main/java/com/firestream/chat/data/call/CallAudioRouter.kt` | `AudioManager.setCommunicationDevice()` wrapper — device callbacks, live `RouteState` |
 | `app/src/main/java/com/firestream/chat/data/call/ProximityLock.kt` | Proximity wake lock — held only while the playing route is the earpiece and no video shows |
-| `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications |
-| `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory with the call's EGL context and video codecs. `createPeerConnection` takes the ICE servers |
-| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc (status, offer, answer, `media.<uid>`) + ICE subcollections |
-| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source. `createCall` reads the callee's `callVideoLine` and has the relay's servers fetched before it rings. `prepareCall` starts that fetch early |
+| `app/src/main/java/com/firestream/chat/data/call/CallNotificationManager.kt` | Ongoing-call + incoming-call notifications, titled for the call's kind; the incoming channel rings until answered (`FLAG_INSISTENT`); the fallback ring, which opens the call screen when a push may not start the service, and whose Decline names its call |
+| `app/src/main/java/com/firestream/chat/data/call/WebRtcPeerConnectionFactory.kt` | WebRTC factory with its own audio module, the call's EGL context and video codecs. `createPeerConnection` takes the ICE servers |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSource.kt` | Signalling — `calls/{callId}` doc (status, offer, answer, `video`, `media.<uid>`) + ICE subcollections; creates a call in a transaction, which fails offline instead of ringing later |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseCallSignalingSource.kt` | No calls on the PocketBase backend: every call fails with `UnsupportedOperationException`, and `BuildConfig.SUPPORTS_CALLS` hides the call buttons |
+| `app/src/testPocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseCallSignalingSourceTest.kt` | A call placed on PocketBase fails instead of crashing |
+| `app/src/main/java/com/firestream/chat/data/repository/CallRepositoryImpl.kt` | Domain wrapper around the call source; lets cancellation through (`cancellableResultOf`). `createCall` reads the callee's `callVideoLine` and has the relay's servers fetched before it rings. `prepareCall` starts that fetch early |
 | `app/src/main/java/com/firestream/chat/data/repository/AuthRepositoryImpl.kt` | `announceCallVideoLine()` — writes `callVideoLine: true` to the own user document at app start (`FireStreamApp`) and when an existing user signs in |
 | `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseAuthSource.kt` | Writes and reads `users/{uid}.callVideoLine`; a new user document carries it from its creation |
-| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route. Owns the microphone and camera requests, the lock state, picture-in-picture, docking the call over its chat, and `outgoingIntent` / `stageIntent`. Reports itself as `CallSurface.STAGE` |
-| `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | The stateful `CallScreen`, and the stateless `CallStage` with its scenes: ring, connected, ended, picture-in-picture. Video tiles come in through the `videoTile` slot. A swipe up minimises |
+| `app/src/main/java/com/firestream/chat/ui/call/CallActivity.kt` | Separate Android Activity (lock-screen support) — *not* a NavHost route. Owns the launch decision, the microphone and camera requests, the lock state, picture-in-picture, docking the call over its chat, and `outgoingIntent` / `stageIntent`. Reports itself as `CallSurface.STAGE` |
+| `app/src/main/java/com/firestream/chat/ui/call/CallLaunch.kt` | What an intent that opens `CallActivity` asks for — place, answer, show, or close (a Recents relaunch); a ring from the fallback notification; `PermissionAction`, what waits on the permission prompt; `closesUnseen`, which closes a screen whose call ended while it was not shown |
+| `app/src/main/java/com/firestream/chat/ui/call/CallScreen.kt` | The stateful `CallScreen`, and the stateless `CallStage` with its scenes: placing and ring, connected, ended, picture-in-picture. Video tiles come in through the `videoTile` slot. A swipe up minimises |
 | `app/src/main/java/com/firestream/chat/ui/call/DockedCallCard.kt` | The call docked over its chat: the stateful `DockedCall(chatId)` that `ChatScreen` hosts, the stateless card and strip, and `docksIn`, the rule for where it shows. Reports itself as `CallSurface.DOCK` |
 | `app/src/main/java/com/firestream/chat/ui/call/CallStageTiles.kt` | The stage's colours, avatar, glow and name block, the floating self tile and its corner arithmetic (`SelfTileCorners`) |
 | `app/src/main/java/com/firestream/chat/ui/call/CallStageControls.kt` | The dock, the top bar and the answer row of an incoming ring |
-| `app/src/main/java/com/firestream/chat/ui/call/OutgoingCallPlacer.kt` | `@Singleton` — holds the wait for `createCall` on the application scope and hands the created call to `CallService` |
-| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder` and `OutgoingCallPlacer`, control intents, video views from `CallVideoSinks` |
+| `app/src/main/java/com/firestream/chat/ui/call/CallViewModel.kt` | UI state from `CallStateHolder`, control intents, video views from `CallVideoSinks`; outgoing-call setup on the application scope, bounded at every step, ended instead if the screen closed or Cancel was pressed; a created call that no service holds is ended and recorded in the chat; the action waiting on the permission prompt |
 | `app/src/main/java/com/firestream/chat/ui/call/CallControlButton.kt` | The round control button and `CallControlColors` |
 | `app/src/main/java/com/firestream/chat/ui/call/CallAudioRouteSheet.kt` | Route button + `ModalBottomSheet` of available routes; shared icon/label mapping |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsScreen.kt` | Call-log tab in MainScreen pager |
 | `app/src/main/java/com/firestream/chat/ui/calls/CallsViewModel.kt` | Call-log derived from message store |
-| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create. `getTurnCredentials` — callable, hands a signed-in user the relay's servers and a one-day login |
+| `functions/index.js` | `sendCallPushNotification` Cloud Function — high-priority FCM on `calls/{id}` create, kept by FCM for 30 s, with the call's kind; `sendPushNotification` counts a call message as unread only when it was missed. `getTurnCredentials` — callable, hands a signed-in user the relay's servers and a one-day login |
+| `functions/callPush.js` | What the call pushes decide: a missed call, the unread updates, the call push's Android options (tested by `functions/test/callPush.test.js`, `npm test`) |
+| `app/src/main/java/com/firestream/chat/data/remote/fcm/FCMService.kt` | `incoming_call` push → `CallService.startIncoming` with the call's kind, or the fallback ring when Android refuses the start; a call-message push notifies only a missed call (`callPushNotificationText`) |
+| `firestore.rules` | `calls/{callId}`: only the caller and the callee read and write it; the status only moves forward; each side writes its own SDP, its own ICE candidate list and its own entry under `media`; `video` is set at creation and never changes |
+| `firestore-rules-tests/calls.test.js` | Every call write the app makes passes the rules, and the abuses fail (Firestore emulator; `npm test` in that folder) |
+| `app/src/test/java/com/firestream/chat/data/call/CallSessionTest.kt` | A call's transitions on fakes of `CallHost` and `CallLocalMedia`: which side offers and with what, the clock, the timeouts, how each end is recorded, late events after the end; a call started as video, the video line offered only with the capability, the camera switch, the other side's `media`, the end of a call while the camera runs |
+| `app/src/test/java/com/firestream/chat/data/call/CameraSwitchTest.kt` | The camera rule: on only with the permission and a video line, a refused foreground type, paused off screen, a failed camera, the preview offered once |
 | `app/src/test/java/com/firestream/chat/data/call/IceServerProviderTest.kt` | A kept set, expiry, the three-second wait, a late answer kept, a failure and the minute after it, one fetch for two callers |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseIceServerSourceTest.kt` | The function's answer read: a list, a single entry, URLs that are not STUN or TURN, other shapes |
-| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, participants, the call's chat, and the visibility rule: stage to card without a pause, off screen after a second with neither |
+| `app/src/test/java/com/firestream/chat/data/call/CallStateHolderTest.kt` | State-flow transitions, fresh controls per call, mute toggles racing route updates, the placing transitions by placing id, the service racing a Cancel for a placing, participants, the call's chat, and the visibility rule: stage to card without a pause, off screen after a second with neither |
+| `app/src/test/java/com/firestream/chat/data/call/CallNotificationManagerTest.kt` | The titles for the call's kind; the incoming channel rings and vibrates on the ringtone stream, insistently, and alerts once; the old silent channel is removed; the fallback ring times out with the ring, opens the call screen to ring, names the kind, and declines the call it names (Robolectric) |
+| `app/src/test/java/com/firestream/chat/data/call/CallServiceStartIntentTest.kt` | The start intents carry the call's kind and the video line apart |
+| `app/src/test/java/com/firestream/chat/domain/model/CallStateTest.kt` | `isOngoing` per state |
 | `app/src/test/java/com/firestream/chat/data/call/PeerSessionTest.kt` | Offer and answer flow, the offer with and without a video line, an app without video on either side, `setCamera`, held and duplicate candidates, events, failures, `close()` twice (MockK `PeerConnection`, fake `PeerSignaling`) |
 | `app/src/test/java/com/firestream/chat/data/call/CallMediaPublisherTest.kt` | No write without an agreed video line or before connect, every change written in order, the end of a call and the next one |
-| `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | `createCall`: the callee's `callVideoLine` read true, missing, failed and too slow, and read before the call document exists. The relay's servers fetched before it too, side by side with that read |
+| `app/src/test/java/com/firestream/chat/data/repository/CallRepositoryImplTest.kt` | `createCall`: the callee's `callVideoLine` read true, missing, failed and too slow, and read before the call document exists. The relay's servers fetched before it too, side by side with that read. A cancelled caller stops instead of getting a failure. An end is written as its wire name |
 | `app/src/test/java/com/firestream/chat/data/repository/AuthRepositoryImplCallVideoLineTest.kt` | The announcement at the sign-in of an existing user, none for a new one, signed out, a failed write |
 | `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseAuthSourceTest.kt` | `callVideoLine` written as an update and with a new user document, and read as false unless stored `true` |
 | `app/src/test/java/com/firestream/chat/data/call/LocalCameraTest.kt` | Which camera opens, start/stop/flip, failures, the release order (MockK capturer) |
 | `app/src/test/java/com/firestream/chat/data/call/CallVideoSinksTest.kt` | Bind and rebind of views, first frames, mirroring, a late EGL context, sinks off before anything is disposed (MockK views and tracks) |
-| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSourceTest.kt` | The call document's `video` and `media` fields, written and read |
-| `app/src/test/java/com/firestream/chat/data/call/OneToOneSignalingTest.kt` | Caller/callee → candidate subcollection, answer written with the status, offer fetch failures |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreCallSourceTest.kt` | A call is created in a transaction that only writes; the call document's `video` and `media` fields, written and read |
+| `app/src/test/java/com/firestream/chat/data/call/OneToOneSignalingTest.kt` | Caller/callee → candidate subcollection, answer written with the status, the offer handed over by the session |
 | `app/src/test/java/com/firestream/chat/data/call/IcePathTest.kt` | Direct, relayed and unknown pairs, and the relay's server named only for this side's relay candidate |
+| `app/src/test/java/com/firestream/chat/domain/model/CallLogTypeTest.kt` | The call-log rule — a received call that never connected is missed, a declined call is declined on both sides |
+| `app/src/test/java/com/firestream/chat/ui/call/CallLaunchTest.kt` | Recents never places, answers or rings a call again; a call screen closes when its call ends unseen |
+| `app/src/test/java/com/firestream/chat/ui/call/CallScreenAnswerUiTest.kt` | Every answer button goes to the host's permission check, not straight to the service |
+| `app/src/test/java/com/firestream/chat/ui/call/CallViewModelTest.kt` | Outgoing setup — handed to the service once, with the call's kind and the video line `createCall` found; ended if the screen closed or Cancel was pressed, every timeout, a late create ended and recorded, a cancelled call's late create leaves the next call alone, a failure leaves a call that rang meanwhile alone (Robolectric) |
+| `app/src/test/java/com/firestream/chat/ui/call/CallScreenPlacingUiTest.kt` | A call being placed shows the callee and *Calling…*; hanging up ends it without the service |
+| `app/src/test/java/com/firestream/chat/ui/chat/CallMessageBubbleUiTest.kt` | The call row's label in a chat |
+| `app/src/test/java/com/firestream/chat/data/remote/fcm/CallPushNotificationTextTest.kt` | Only a missed call notifies; a push without the duration says "Call" |
+| `app/src/test/java/com/firestream/chat/ui/calls/CallsScreenUiTest.kt` | The Calls tab's labels match the chat's, in the row and the details sheet (Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRoutePolicyTest.kt` | Route-resolution table + device-type mapping |
 | `app/src/test/java/com/firestream/chat/data/call/CallAudioRouterTest.kt` | Which device is selected, pick clearing, start/stop idempotency (MockK, no Robolectric) |
 | `app/src/test/java/com/firestream/chat/data/call/ProximityLockTest.kt` | Acquire/release per route, re-acquire after a timed-out lock, shutdown latch |
@@ -70,11 +96,10 @@ Real-time call via WebRTC, signalled through Firestore, woken by a high-priority
 | `app/src/test/java/com/firestream/chat/ui/call/CallStageUiTest.kt` | The stage from plain state: the camera button's states, avatar or tile, the voice call, the answer rows, the dock hiding only while video shows, the swipe up, a call being placed, the small window |
 | `app/src/test/java/com/firestream/chat/ui/call/DockedCallCardUiTest.kt` | The docked call from plain state: which size a call rests in, what the strip and the card show, the tap and the drags, *Call ended* |
 | `app/src/test/java/com/firestream/chat/ui/call/DockedCallRuleTest.kt` | `docksIn`: only the call's own chat, not while the stage shows, not an incoming ring |
-| `app/src/test/java/com/firestream/chat/ui/call/OutgoingCallPlacerTest.kt` | Placing, a failed creation, a hang-up during the wait, a service that cannot start |
 | `app/src/test/java/com/firestream/chat/ui/call/CallKindLabelsTest.kt` | What the call log and the call bubble say for a video call, the self tile's corners, whether any video shows |
-| `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation |
+| `app/src/test/java/com/firestream/chat/ui/calls/CallsViewModelTest.kt` | Call-log derivation; names that arrive after the log, and profile names that outlive a contacts reload |
 
-**Entry point:** the phone or camera icon in `ChatScreen.kt`, a call-log row or a call bubble → `CallActivity.outgoingIntent` → `CallActivity` asks for the permissions → `OutgoingCallPlacer.place` → `CallService.startOutgoing`.
+**Entry point:** the phone or camera icon in `ChatScreen.kt`, a call-log row or a call bubble → `CallActivity.outgoingIntent` (`ACTION_OUTGOING`) → `CallStateHolder.prepareOutgoingCall()` → the permission prompt → `CallViewModel.placeCall()` → `CallStateHolder.startPlacing()` → `CallRepository.createCall()` → `CallService.startOutgoing()` → `CallSession.startOutgoing()`. Incoming: the `incoming_call` push → `FCMService.handleIncomingCall` → `CallService.startIncoming()` → `CallSession.startIncoming()`.
 
 ---
 
@@ -140,10 +165,10 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/OverlayStack.kt` | The overlay screen's history — whole-state snapshots (so delete is undoable) with a cursor, and its rotation-safe saver |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/EditorChrome.kt` | The shell every editor screen wears — top bar, tool button, failure banner, flatten scrim, and the colour strip shared by draw, text and shapes |
 | `app/src/main/java/com/firestream/chat/ui/chat/ZoomableBox.kt` | Shared pinch-zoom/pan surface with hoistable `ZoomableState` and an optional content-size clamp; `detectZoomAndPan` splits zoom/pan from an enclosing pager's swipe |
-| `app/src/main/java/com/firestream/chat/ui/chat/ZoomCropSurface.kt` | `ZoomableBox` whose zoom means a crop: keeps a host-owned `PendingCrop` in step with the gestures (restore once, clamp on resize, gestures write back) and draws the chosen shape's frame over the photo |
+| `app/src/main/java/com/firestream/chat/ui/chat/ZoomCropSurface.kt` | `ZoomableBox` whose zoom means a crop: keeps a host-owned `PendingCrop` in step with the gestures (restore once; a resize or a new shape carries the zoom into the box without writing it back; gestures write back) and draws the chosen shape's frame over the photo |
 | `app/src/main/java/com/firestream/chat/ui/chat/imageedit/PendingCrop.kt` | The crop a fullscreen photo would get — zoom viewport + crop-shape preset + decoded size — with its frame arithmetic and saver; carried from the viewer into the preview on Edit |
-| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ViewportGeometry.kt` | Pure arithmetic between a zoom surface's `(scale, offset)` and the normalized frame of the photo it shows — the crop a zoomed preview page sends, the pan clamp, and the restore after a rotation |
-| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomCropSurface`, pans clamped to the decoded photo, crop-shape pill bottom-left; Edit hands the pending crop to `ChatViewModel.editFromViewer`) |
+| `app/src/main/java/com/firestream/chat/ui/chat/imageedit/ViewportGeometry.kt` | Pure arithmetic between a zoom surface's `(scale, offset)` and the normalized frame of the photo it shows — the crop a zoomed preview page sends, the pan clamp, the restore after a rotation, and the zoom kept when the keyboard resizes the box |
+| `app/src/main/java/com/firestream/chat/ui/chat/FullscreenImageViewer.kt` | Tap-to-open viewer + `FullscreenImagePager` (swipeable gallery, zoom/pan via `ZoomCropSurface`, pans clamped to the decoded photo, crop-shape pill bottom-left; a crop per page, where a page that isn't current keeps only its decoded size; Edit hands the current page's pending crop to `ChatViewModel.editFromViewer`) |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatMediaGallery.kt` | `chatImageGallery()` — chat messages → gallery pages for the in-chat swipeable viewer |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchResults.kt` | Per-type search-result rendering, shared by in-chat and global search — the media grid the three-dot "Shared Media" item lands in |
 | `app/src/main/java/com/firestream/chat/ui/search/SearchFilterBar.kt` | Search prefilter chips, date-range picker, active-filter summary — shared by both scopes |
@@ -158,8 +183,10 @@ Editing sits *before* that pipeline and leaves it untouched: each editor screen 
 | `app/src/test/java/com/firestream/chat/domain/util/ImageEditGeometryTest.kt` | JVM dimension arithmetic — ceiling, quarter turns, crop rects, resize, op composition, size estimates |
 | `app/src/test/java/com/firestream/chat/data/util/ImageEditRasterizerTest.kt` | Robolectric bitmap round-trips, edit-cache discard/sweep, size estimates |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ImageFitMapperTest.kt` | Fit-rect mapping round-trips, letterbox and pillarbox |
-| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ViewportGeometryTest.kt` | Zoom ⇄ frame arithmetic on the JVM — the visible crop at each zoom and pan, the clamp on both axes, the frame's place on screen, and the restore round-trip into a box of the same and another shape |
+| `app/src/test/java/com/firestream/chat/ui/chat/imageedit/ViewportGeometryTest.kt` | Zoom ⇄ frame arithmetic on the JVM — the visible crop at each zoom and pan, the clamp on both axes, the frame's place on screen, the restore round-trip into a box of the same and another shape, and the zoom kept when the keyboard shortens the box |
+| `app/src/test/java/com/firestream/chat/ui/chat/ZoomCropSurfaceTest.kt` | When the zoom is worked out again and what that writes — a new shape with the keyboard up fits above it, the keyboard closing puts the user's zoom back, and only a gesture writes the crop, even when a host hands over another photo's crop or the viewer's pager resets a page |
 | `app/src/test/java/com/firestream/chat/ui/chat/imageedit/PendingCropTest.kt` | The pending crop on the JVM — a shape cut from the zoomed viewport, Original and an unsized photo, the pill's cycle, the saver |
+| `app/src/test/java/com/firestream/chat/ui/chat/FullscreenImagePagerCropTest.kt` | The crop each gallery page hands Edit — through Coil on two real JPEGs: a shape picked on a page just swiped to is cut from that photo, and a swipe starts a page over at Free and 1x without carrying another page's shape |
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenZoomTest.kt` | A zoom and the crop-shape pill are the crop that is sent — through Coil on a real JPEG: the flatten on Send and before Draw opens, the transfer into Adjust, a crop arriving from the viewer, the failure line, and the frame surviving a recreation |
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenHistoryTest.kt` | Undo/redo/original⇄edited through the screen, and the vanished-step fallback |
 | `app/src/test/java/com/firestream/chat/ui/chat/ImagePreviewScreenAdjustTest.kt` | The adjust → `landEdit` → `discard` join: what lands, what is orphaned, and which steps are named live |
@@ -202,23 +229,27 @@ shell existed.
 
 | Host | Tabs | Where |
 |---|---|---|
-| Composer | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)`, with a backspace key |
+| Composer | Emoji · Stickers (the library) | `ChatScreen.kt` — `ComposerPickerPanel`, with a backspace key on both tabs |
 | Reaction sheet | Emoji | `ChatScreen.kt` — `EmojiHandlerPanel(mode = REACTION)`, with the quick-reactions strip |
 | Caption bar | Emoji | `ImagePreviewScreen.kt` — `EmojiHandlerPanel(mode = TEXT_INPUT)` |
-| Editor overlay | Emoji · Sticker · Text · Shapes | `imageedit/OverlayImageScreen.kt` — the one host with a selection to delete, and the only one with an island |
+| Editor overlay | Emoji · Sticker (the bundled pack) · Text · Shapes | `imageedit/OverlayImageScreen.kt` — the one host with a selection to delete |
 
 | File | Role |
 |---|---|
-| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the per-tab query, and the slots a host fills |
-| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`GIF` enumerated, declared by nobody) and the `PickerSelection` a tab hands back |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanel.kt` | The shell — search button ⇄ expanded field, the tab island, the delete button, the compact layout (results above the search row), and the slots a host fills |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerPanelState.kt` | The active tab, the open search and the per-tab query, hoistable so a host can move the panel while a search runs |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/PickerTab.kt` | Which tabs exist (`STICKER` is the editor's bundled pack, `STICKER_LIBRARY` the user's library, `GIF` is declared by nobody) and the `PickerSelection` a tab hands back |
+| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's two-tab picker, its callbacks bundle, `composerSearchLayout` (where the picker goes while a search runs), and `StickerSuggestionStrip` above the composer |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The library as a tab: the pack row (Recents, favourites, packs), the active pack's grid, search by emoji, the empty state's import button |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiTab.kt` | The emoji grid, the category rail, the frozen recents order, the long-press size drag, and the quick-reactions strip a host mounts as a header |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiGridLayout.kt` | Pure layout arithmetic for the emoji grid — which row and column each item lands on once headers span a row, and which side of the held cell the size panel fits on |
 | `app/src/test/java/com/firestream/chat/ui/chat/picker/EmojiGridLayoutTest.kt` | That the last cell of a row is the last column, whatever headers sit above it, and that the size panel flips left rather than leave the grid |
-| `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the composer, reaction sheet and caption bar call — `EmojiMode` and the two controls that differ by host |
+| `app/src/main/java/com/firestream/chat/ui/chat/EmojiHandlerPanel.kt` | The one-tab alias the reaction sheet and the caption bar call — `EmojiMode`, the two controls that differ by host, and the shared `PickerBackspaceKey` |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/EmojiSearchData.kt` | Bundled emoji → keyword table for in-panel search; no network |
 | `app/src/main/java/com/firestream/chat/ui/chat/SwipeReactionPanel.kt` | The compact swipe-to-react strip; shares `QUICK_REACTION_EMOJIS` with the picker |
 | `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Owns `recentEmojis` in `OverlaysState` and the DataStore write behind it |
 | `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelTest.kt` | That the one-tab hosts are unchanged by the extraction, and the chrome only a multi-tab host sees |
+| `app/src/test/java/com/firestream/chat/ui/chat/picker/PickerPanelStateTest.kt` | The state's query and tab rules, and `composerSearchLayout`: emoji search is a strip on the keyboard, sticker and GIF search fill the screen |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerTab.kt` | The bundled pack as a grid, drawn by the same code that paints a placed sticker |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/TextTab.kt` | A single-line draft, its solid/outline style and the shared colour strip; places on an explicit Add |
 | `app/src/main/java/com/firestream/chat/ui/chat/picker/ShapeTab.kt` | Rectangle / rounded / ellipse / line / arrow, each previewed in the colour and fill it will be placed with |
@@ -640,6 +671,162 @@ system *Open with* chooser. Design, decisions and the remaining steps (previews,
 | `app/src/test/java/com/firestream/chat/ui/chat/FileMessageBubbleUiTest.kt` | Preview above the card; Show more / Show less; where the preview ends |
 
 **Entry point:** `MessageBubble` DOCUMENT branch → `FileMessageBubble` → `MessageBubbleCallbacks.onOpenFile` → `ChatViewModel.openFile` → `ChatFileActions.request` → `MessageRepository.ensureLocalFile` → `ChatViewModel.fileLaunches` → `ChatScreen` → `FileIntents.open`.
+
+---
+
+## Stickers & GIFs
+
+A sticker is an immutable file named by the SHA-256 of its bytes, kept in `filesDir/stickers/`.
+A pack is an ordered list of sticker ids. Room holds the library, and `StickerRepository` is the
+only way into it. Stickers arrive by import: from WhatsApp's sticker folder through a folder grant,
+or from picked `.webp`, `.was` and `.tgs` files and `.wastickers` archives. Every imported byte is
+untrusted, so the parsers check sizes against the buffer and the archive reader works under caps.
+
+A sticker file is a WebP or a Lottie animation. A Lottie sticker is stored as gzip-compressed JSON
+(`<id>.tgs`), whichever container it came in, with its first frame beside it as `<id>.tgs.png`.
+Lottie plays it in the bubble, and grids and previews draw the PNG.
+
+A `STICKER` message points at a sticker by that hash and carries no bytes of its own. The file is
+one shared Storage object, `stickers/<id>.<ext>`, uploaded the first time anyone sends the sticker.
+A receiver hashes what it downloads before storing it. A `GIF` message is plain media sent as it
+is: one upload per message, and the file is kept in `filesDir/documents/`, not in the gallery.
+A sticker bubble has no fill and no tail, and a GIF bubble is the photo layout with a badge.
+Both animate through a decoder attached per request. Previews show the first frame.
+
+A sticker is sent from the composer's picker, whose second tab is the library, or from the
+suggestion strip that appears while the composer holds one emoji.
+
+The keyboard can insert a picture into the composer. `KeyboardContentReceiver` wraps the composer's
+input connection, names the picture types to the keyboard and takes its `commitContent`. A GIF goes
+out as a `GIF` message. Any other picture is put into the `SAVED` pack by
+`StickerRepository.saveSticker`, converted to WebP by `StickerMaker.convert` when it is no sticker
+file, and sent as a sticker. A GIF picked from the gallery or shared into the app is a `GIF` message
+too: `MessageRepositoryImpl.sendMediaMessage` hands an `image/gif` to `sendGifMessage`.
+
+A sticker can be made from a photo. `StickerMaker` prepares a draft in `cacheDir/sticker-maker/`:
+the photo, its subject cut out by ML Kit, and the subject with a white outline. The maker's
+screen picks one of the three and a crop. `StickerGeometry` places the picture in the square for
+the preview and for the saved file alike. The result is a 512 × 512 WebP of at most 100 KB,
+stored like an imported sticker.
+
+The library is backed up under the account. Each pack is one Firestore document,
+`stickerPacks/{packId}`, a manifest that names its stickers by hash. `StickerSyncWorker` uploads
+every pack that changed, and a listener on the user's own manifests restores them into Room while
+a sticker surface is open. A restored row comes before its file, which is fetched when the sticker
+is first shown. The same document is what **View pack** reads for the pack a received sticker
+names, and **Add pack** copies it into the library as an `INSTALLED` pack.
+Design and the remaining steps: `docs/plans/stickers-and-gifs.md`.
+
+The editor's bundled vector pack (`domain/util/StickerPack.kt`) is a different thing. It is listed
+under *Image / Media Pipeline*.
+
+| File | Role |
+|---|---|
+| `app/src/main/java/com/firestream/chat/domain/model/Sticker.kt` | `Sticker` and `StickerFormat` (extension, mime type, and where a format's first frame is: `stillPathOf`) |
+| `app/src/main/java/com/firestream/chat/domain/model/StickerPack.kt` | `StickerPack`, `StickerPackKind`, `StickerPackPreview`, `WhatsAppStickerFile`, `StickerImportResult` |
+| `app/src/main/java/com/firestream/chat/domain/repository/StickerRepository.kt` | Observe packs and recents, list the WhatsApp folder, import, `toggleFavourite`, pack and sticker edits, `markUsed`, `ensureFile`, `viewPack`, `installPack`, `prepareStickerDraft`, `createSticker` |
+| `app/src/main/java/com/firestream/chat/domain/util/WebpContainer.kt` | Pure RIFF chunk walk: dimensions, the animation flag, the raw EXIF chunk |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerFiles.kt` | The content-addressed directory: the 1 MB and 2048 px limits, `isValidId`, `fileFor`, `stillFor`, `open` for a uri, and `rowLock`, which keeps a file and its `stickers` row together. `store` tells a WebP, a `.tgs` and bare Lottie JSON apart by their first bytes. `storeReceived` keeps a downloaded file unchanged or not at all |
+| `app/src/main/java/com/firestream/chat/data/sticker/LottieContainer.kt` | A Lottie sticker out of its container: a `.tgs` (gzip) or the JSON a `.was` holds. The inflate cap, the nesting cap, no key twice in one object, what makes JSON an animation, no image assets, the layer count with precompositions laid out |
+| `app/src/main/java/com/firestream/chat/data/sticker/LottieThumbnails.kt` | The first frame of a Lottie sticker as a PNG, which `StickerFiles` writes beside the file for grids and previews. Also the last gate: an animation Lottie cannot parse, build and draw is not stored |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerDownloads.kt` | A received sticker's local copy: fetched once, hashed against the id the message claims, stored with its row. A mismatch stores nothing |
+| `app/src/main/java/com/firestream/chat/data/remote/source/StickerObjectSource.kt` | `ensureUploaded`: the url of a sticker's shared object, uploading only when the backend does not hold it. `urlIfPresent`: the url of a sticker known only by its id |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSource.kt` | `stickers/<id>.<ext>` in Firebase Storage: look up, then upload when missing |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseStickerObjectSource.kt` | Uploads through this flavor's `StorageSource`, which is a stub in v0 |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerUploads.kt` | One lock per sticker and the write of `stickers.remoteUrl`, shared by a send and the backup |
+| `app/src/main/java/com/firestream/chat/data/remote/source/StickerPackSource.kt` | Pack manifests on the backend: the listener on the owner's packs, fetch by id, write, delete. `RemoteStickerPack`, `StickerPackChanges` |
+| `app/src/firebase/java/com/firestream/chat/data/remote/firebase/FirestoreStickerPackSource.kt` | `stickerPacks/{packId}`: the document shape, the listener that reports removals apart from changes, the acknowledgement timeout |
+| `app/src/pocketbase/java/com/firestream/chat/data/remote/pocketbase/PocketBaseStickerPackSource.kt` | Stub. `isSupported` is false, so nothing is synced on this flavor |
+| `firestore.rules` | `stickerPacks/{packId}`: get for any signed-in user, list and write for the owner |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerManifest.kt` | Library rows to a manifest and back; what of a manifest is let into the library; the cap on stickers per manifest |
+| `app/src/main/java/com/firestream/chat/data/worker/StickerSyncWorker.kt` | The backup: uploads each pending pack's files, writes its manifest, marks it synced if it did not change meanwhile; deletes the manifest of a tombstone |
+| `app/src/main/java/com/firestream/chat/data/worker/StickerSyncScheduler.kt` | The one unique sync run, queued whenever a pack is unsynced; cancelled on sign-out |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerLibrarySync.kt` | The restore: listens while the packs are observed, merges through `StickerDao.applyRemotePack`, and fences a sign-out |
+| `app/src/main/java/com/firestream/chat/data/repository/AuthRepositoryImpl.kt` | `signOut` runs inside the restore's fence, so no restore writes into the cleared tables |
+| `app/src/main/java/com/firestream/chat/FireStreamApp.kt` | Queues the sticker sync on start, for a pack left pending |
+| `app/src/main/java/com/firestream/chat/MainActivity.kt` | Provides `LocalStickerFetcher` from `StickerRepository.ensureFile` for every screen |
+| `app/src/main/java/com/firestream/chat/data/remote/source/StickerRef.kt` | A message's sticker id and pack id, crossing the `MessageSource` boundary as one value |
+| `app/src/main/java/com/firestream/chat/data/repository/MessageRepositoryImpl.kt` | `sendStickerMessage` (the row is built from the library; which pack ids are shared) and `sendGifMessage` (the 8 MB guard) |
+| `app/src/main/java/com/firestream/chat/data/outbox/OutboxSender.kt` | `withStickerUrl` (the url from `StickerUploads`, persisted on the message) and the GIF's document route |
+| `app/src/main/java/com/firestream/chat/data/util/MediaFileManager.kt` | `downloadFor` routes a `STICKER` to `StickerDownloads` and a `GIF` to `DocumentFiles` |
+| `app/src/main/java/com/firestream/chat/ui/components/MessageTypeLabel.kt` | `placeholderLabel` and `stickerLabel`, the words a sticker or a GIF is shown as in a preview |
+| `app/src/main/java/com/firestream/chat/ui/components/StickerImage.kt` | `StickerImage`, the one sticker renderer, and `rememberAnimatedImageRequest`, which attaches the animated decoder to one request. `LibraryStickerImage` draws a library sticker and asks `LocalStickerFetcher` for a file that is not there yet. The `format` switch: a Lottie sticker is drawn by Lottie, from a local file only |
+| `app/src/main/java/com/firestream/chat/ui/chat/MessageBubble.kt` | `StickerBubbleContent`, the `GIF` branch of the photo layout, `hasStillPreview` and `rememberMessageStillModel` for the reply, forward and starred previews |
+| `app/src/main/java/com/firestream/chat/domain/util/StickerSearch.kt` | Pure: stickers by emoji tag across packs, and which composer text earns suggestions |
+| `app/src/main/java/com/firestream/chat/ui/chat/ComposerPickerPanel.kt` | The composer's picker (Emoji and Stickers tabs) and `StickerSuggestionStrip` |
+| `app/src/main/java/com/firestream/chat/ui/chat/picker/StickerLibraryTab.kt` | The Stickers tab: pack row with the **+** that opens the maker, grid, search, the import button of an empty library |
+| `app/src/main/java/com/firestream/chat/ui/chat/KeyboardContentReceiver.kt` | Takes a GIF or a sticker the keyboard inserts into the composer, and the rule for what each type is sent as |
+| `app/src/main/java/com/firestream/chat/ui/chat/StickerActionsSheet.kt` | The sheet a tap on a sticker bubble opens: add to or remove from the favourites, and *View pack* for a sticker that names one |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackSheet.kt` | The pack preview: name, stickers, *Add pack*, or that the library holds it already |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerPackPreviewViewModel.kt` | Looks a pack up each time the sheet opens, and installs it |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatInfoManager.kt` | Mirrors packs, recents and the favourite ids into `OverlaysState` in one update |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageSender.kt` | `sendSticker`: sends by id and pack, then `markUsed` |
+| `app/src/main/java/com/firestream/chat/ui/chat/ChatMessageActions.kt` | `toggleStickerFavourite`: the repository decides the direction; a received sticker the library lacks is fetched first |
+| `app/src/main/java/com/firestream/chat/data/sticker/WaStickerMetadata.kt` | Pack id, name, publisher and emojis out of a WhatsApp WebP's EXIF chunk |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerPackArchive.kt` | `.wastickers` / zip reader under caps on entry count, bytes per entry and total bytes |
+| `app/src/main/java/com/firestream/chat/data/sticker/WhatsAppStickerFolder.kt` | One child-documents query over the granted folder, newest first |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerText.kt` | Cleans a pack name or publisher read from a file |
+| `app/src/main/java/com/firestream/chat/data/local/dao/StickerDao.kt` | Pack and item queries; every multi-statement write is one transaction that marks the pack `PENDING`. The tombstone of a deleted pack, the compare-and-set `markSynced`, and `applyRemotePack`, which holds the restore's merge rules |
+| `app/src/main/java/com/firestream/chat/data/local/entity/StickerEntity.kt` | `stickers`, `sticker_packs`, `sticker_pack_items`, `StickerSyncState` |
+| `app/src/main/java/com/firestream/chat/data/repository/StickerRepositoryImpl.kt` | Which pack an imported sticker joins, the import key a re-import finds its pack by, the counts. Asks for a backup after every pack change. `ensureFile`, `viewPack`, `installPack` |
+| `app/src/main/java/com/firestream/chat/data/local/PreferencesDataStore.kt` | `recentStickerIdsFlow`, device-only |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryViewModel.kt` | The library screen's state: packs, the open pack and its selection, the WhatsApp folder view |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLabels.kt` | A pack's shown name (the unnamed kinds included), whether it can be renamed, the import summary line |
+| `app/src/main/java/com/firestream/chat/ui/stickers/StickerLibraryScreen.kt` | The pack list with *Create* above the import routes, a pack's grid, the folder and file pickers, rename / move / delete dialogs, the shared `StickerCell` and `StickerTopBar` |
+| `app/src/main/java/com/firestream/chat/ui/stickers/WhatsAppImportScreen.kt` | The granted folder as a multi-select grid with *Select all* and *Import N* |
+| `app/src/main/java/com/firestream/chat/ui/settings/SettingsScreen.kt` | The *Import stickers* row |
+| `app/src/main/java/com/firestream/chat/navigation/NavGraph.kt` | `Routes.STICKERS`, `Routes.STICKER_CREATE` |
+| `app/src/main/java/com/firestream/chat/domain/model/StickerDraft.kt` | `StickerDraft` and `StickerDraftImage` (a prepared photo's pictures), `StickerCrop` (scale and offset in the square) |
+| `app/src/main/java/com/firestream/chat/domain/util/StickerGeometry.kt` | Pure: where a picture sits in the square sticker, the crop's limits, the outline's width and the ring it is stamped along |
+| `app/src/main/java/com/firestream/chat/data/sticker/SubjectCutout.kt` | ML Kit subject segmentation behind one call. Waits for the model, and answers `null` without Play services or on any failure |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerEncoder.kt` | A bitmap to a lossy WebP, at the first quality that stays under 100 KB |
+| `app/src/main/java/com/firestream/chat/data/sticker/StickerMaker.kt` | The draft's files, the trim to the subject, the outline, and the render of one picture onto the 512 px canvas. Runs under `MediaProcessingLimiter` |
+| `app/src/main/java/com/firestream/chat/ui/stickers/create/StickerCreateViewModel.kt` | The maker's state: the draft, cutout or photo, outline, crop, emojis, the pack |
+| `app/src/main/java/com/firestream/chat/ui/stickers/create/StickerCreateScreen.kt` | The maker: the photo picker, the square preview with pinch and drag, the choices, the emoji sheet |
+| `app/src/test/java/com/firestream/chat/domain/util/WebpContainerTest.kt` | Byte fixtures, truncated and oversize chunks |
+| `app/src/test/java/com/firestream/chat/data/sticker/WaStickerMetadataTest.kt` | Metadata present, absent and malformed |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesTest.kt` | Hash naming, the limits, the `cacheDir` fence of `open` |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerPackArchiveTest.kt` | Each cap, entry names, title and author, a `.was` file's animation |
+| `app/src/test/java/com/firestream/chat/data/sticker/LottieContainerTest.kt` | Both containers, the inflate and nesting caps, JSON that is no animation, image assets, a repeated key, precompositions that loop or multiply |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerFilesLottieTest.kt` | One stored shape for both containers, the first frame really drawn, a missing one drawn again, an animation Lottie refuses, bare JSON refused on receive |
+| `app/src/test/java/com/firestream/chat/ui/chat/LottieStickerUiTest.kt` | Which renderer draws a Lottie sticker in the bubble, a grid and a preview, and the placeholder for a file not here yet |
+| `app/src/test/java/com/firestream/chat/test/LottieFixtures.kt` | `animation`, `tgs`, `was`: hand-built Lottie stickers that Lottie parses and draws |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerDownloadsTest.kt` | The hash mismatch, the refusals, a repeat receive, and a receive during a refused archive's undo |
+| `app/src/test/java/com/firestream/chat/data/repository/MessageRepositoryStickerGifSendTest.kt` | What is queued for a sticker and a GIF, the shared pack kinds, the GIF size guard |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirebaseStickerObjectSourceTest.kt` | Look up first, upload when missing, an upload refused because the object exists by now |
+| `app/src/test/java/com/firestream/chat/data/outbox/OutboxSenderTest.kt` | The second send of a sticker uploads nothing; a GIF is never compressed; both resume points |
+| `app/src/test/java/com/firestream/chat/data/sticker/WhatsAppStickerFolderTest.kt` | The folder filter and sort |
+| `app/src/test/java/com/firestream/chat/data/local/dao/StickerDaoTest.kt` | Ordering queries and the transaction methods; tombstones, the compare-and-set mark, the newer-only merge, two packs with one import key |
+| `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryImplTest.kt` | Grouping, de-duplication, a refused archive, pack edits; the tombstone, the fetch of a missing file, viewing and installing a pack; a made sticker's pack, emojis and refusals |
+| `app/src/test/java/com/firestream/chat/data/repository/StickerRepositoryTestFactory.kt` | `newStickerRepository` with mocked collaborators |
+| `app/src/test/java/com/firestream/chat/data/worker/StickerSyncWorkerTest.kt` | Pending to synced, each file uploaded once, the delete, a pack changed during its upload, the verdicts |
+| `app/src/test/java/com/firestream/chat/data/worker/StickerSyncSchedulerTest.kt` | The unique work's name, policy, constraint and backoff; nothing queued while every pack is synced |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerLibrarySyncTest.kt` | When the listener runs, whose manifests are merged, nothing written after a sign-out, a sign-out that finishes though its caller is cancelled |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerUploadsTest.kt` | One upload for two callers at once, the url kept on the row |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerManifestTest.kt` | What a manifest carries, and what of one is refused |
+| `app/src/testFirebase/java/com/firestream/chat/data/remote/firebase/FirestoreStickerPackSourceTest.kt` | The document round trip, the encoded import key, a document of any shape, the listener's changes |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerPackPreviewViewModelTest.kt` | Load, add, already in the library, a second look-up dropping the first |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerPackSheetTest.kt` | The preview's states, the *View pack* row, the fetch when a cell shows a sticker without a file |
+| `app/src/test/java/com/firestream/chat/test/WebpFixtures.kt` | Builders for WebP, EXIF and zip test bytes |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryViewModelTest.kt` | Selection, pack reorder, both import routes, the summary line |
+| `app/src/test/java/com/firestream/chat/ui/stickers/StickerLibraryScreenTest.kt` | The empty state, the loading state, the unnamed packs' labels |
+| `app/src/test/java/com/firestream/chat/domain/util/StickerGeometryTest.kt` | The fit, the zoom and the offset, the crop's limits, the outline's width and ring |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerEncoderTest.kt` | The size loop: the first quality that fits, nothing lower tried, a sticker too large at every quality |
+| `app/src/test/java/com/firestream/chat/data/sticker/StickerMakerTest.kt` | Real pixels: the trim, the outline, the draft's files, where a crop lands on the canvas, the path fence |
+| `app/src/test/java/com/firestream/chat/ui/stickers/create/StickerCreateViewModelTest.kt` | Which picture the choices amount to, the crop's reset and limits, the emoji cap, the pack choice, one save |
+| `app/src/test/java/com/firestream/chat/ui/stickers/create/StickerCreateScreenTest.kt` | What the maker offers with and without a cutout, the pack and emoji chips |
+| `app/src/test/java/com/firestream/chat/domain/util/StickerSearchTest.kt` | Tag matching, the variation selector, one result per sticker, what earns suggestions |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatStickerManagersTest.kt` | The library mirror, `sendSticker` with `markUsed`, the favourite toggle and its fetch for a sticker the library lacks |
+| `app/src/test/java/com/firestream/chat/ui/chat/KeyboardContentReceiverTest.kt` | The composer field's `EditorInfo` names the picture types, and a `commitContent` on its connection reaches the callback |
+| `app/src/test/java/com/firestream/chat/ui/chat/ChatMessageSenderKeyboardContentTest.kt` | A keyboard GIF is sent as a GIF, any other picture is saved and sent as a sticker, and the keyboard's grant is always released |
+| `app/src/test/java/com/firestream/chat/ui/chat/ComposerPickerPanelTest.kt` | The island and backspace key, the empty library, which pack id a pick carries, frozen Recents, the suggestion strip, the search field's focus, the compact emoji strip, a query surviving a move |
+| `app/src/test/java/com/firestream/chat/test/fakes/StickerRepositoryMocks.kt` | `emptyStickerRepository`, `testSticker`, `testStickerPack` |
+
+**Entry points:** Settings → Storage → *Import stickers* → `Routes.STICKERS` → `StickerLibraryScreen` → `StickerLibraryViewModel` → `StickerRepository.importFrom`. **Making one:** *Create* there, or the **+** of the Stickers tab's pack row → `Routes.STICKER_CREATE` → `StickerCreateScreen` → `StickerRepository.prepareStickerDraft` → `StickerMaker.prepare`, then *Save* → `createSticker` → `StickerMaker.render` → `StickerFiles.store`. In a chat: the emoji button → `ComposerPickerPanel` → *Stickers* → `ChatViewModel.sendSticker`. **From the keyboard:** `KeyboardContentReceiver` → `ChatViewModel.sendKeyboardContent` → `ChatMessageSender.sendKeyboardContent` → `MessageRepository.sendGifMessage`, or `StickerRepository.saveSticker` and then `sendStickerMessage`.
+
+**Sending:** `MessageRepository.sendStickerMessage` / `sendGifMessage` → the outbox (`OutboxWorker` → `OutboxSender.send`) → `MessageWriter.write`. **Receiving:** `MessageRepositoryImpl.reconcileRawMessage` → `MediaFileManager.downloadFor` → `StickerDownloads.ensureLocal` for a sticker, `DocumentFiles` for a GIF. The chat-open scan and `MediaBackfillWorker` take the same route.
+
+**Backup:** any pack change in `StickerRepositoryImpl` → `StickerSyncScheduler.syncIfPending` → `StickerSyncWorker` → `StickerUploads.ensureUploaded` per sticker → `StickerPackSource.writePack` → `StickerDao.markSynced`. **Restore:** collecting `StickerRepository.observePacks` → `StickerLibrarySync.whileObserved` → `StickerPackSource.observeOwnPacks` → `StickerDao.applyRemotePack`. A row's file: `LibraryStickerImage` → `LocalStickerFetcher` → `StickerRepository.ensureFile` → `StickerObjectSource.urlIfPresent` → `StickerDownloads.ensureLocal`. **A shared pack:** a tap on a sticker bubble → `StickerActionsSheet` → *View pack* → `StickerPackSheet` → `StickerRepository.viewPack` / `installPack`.
 
 ## Adding a feature here
 

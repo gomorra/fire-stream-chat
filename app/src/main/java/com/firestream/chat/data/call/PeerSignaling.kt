@@ -47,11 +47,16 @@ interface PeerSignaling {
  *
  * The answer is written together with `status = "answered"`, so the caller never sees the status
  * without the SDP.
+ *
+ * @param offer the offer the side that answers found in the call document. [CallSession] reads
+ *   the document once before it answers, for the call's status, and passes the offer on. Null on
+ *   the caller's side, which makes the offer.
  */
 class OneToOneSignaling(
     private val callRepository: CallRepository,
     private val callId: String,
-    private val isCaller: Boolean
+    private val isCaller: Boolean,
+    private val offer: SdpData? = null
 ) : PeerSignaling {
 
     override suspend fun sendOffer(sdp: SdpData) {
@@ -66,10 +71,9 @@ class OneToOneSignaling(
         callRepository.sendIceCandidate(callId, isCaller, candidate)
     }
 
-    /** One fetch of the call document: the callee answers after the offer was written. */
+    /** The one offer of the call: the callee answers after it was written. */
     override fun observeOffer(): Flow<SdpData> = flow {
-        val call = callRepository.getCallById(callId).getOrThrow()
-        emit(call.offer ?: throw IllegalStateException("No offer in call document $callId"))
+        emit(offer ?: throw IllegalStateException("No offer for call $callId"))
     }
 
     override fun observeAnswer(): Flow<SdpData> =

@@ -29,11 +29,22 @@ Tests are the primary feedback loop during implementation, not a step appended a
 
 ### 3. Integration tests
 
-> **Status: not implemented.** No integration-test harness exists in the repo today. Treat this section as the intended shape, not a description of current coverage — and see the sync-path coverage gap recorded in [`TECH_DEBT.md`](../TECH_DEBT.md).
+> **Status: only the calls rules are covered.** The rules for `calls/{callId}` and its ICE candidate lists run against the Firestore emulator (see *Firestore rules tests* below). The rules of every other collection, the message flow and the offline cases have no integration tests yet. The sync-path coverage gap is recorded in [`TECH_DEBT.md`](../TECH_DEBT.md).
 
 - Firestore security rules tested for each new collection/document pattern
 - End-to-end message flow: send → encrypt → store → receive → decrypt → display
 - Offline → online transitions: queued messages send correctly after reconnect
+
+#### Firestore rules tests
+
+`firestore-rules-tests/` is a small npm package. It is separate from the Gradle build, and `./gradlew test` does not run it.
+
+- Run it with `cd firestore-rules-tests && npm ci && npm test`. It needs Java 21 or later for the emulator and Node 20 or later. The first run downloads the emulator.
+- `npm test` starts the Firestore emulator for the project `demo-firestream` and runs `node --test` against it. A `demo-` project needs no Firebase login.
+- The tests load `firestore.rules` from the repo root. They check the file on disk, not the rules that are deployed.
+- `.github/workflows/firestore-rules.yml` runs them on Java 21 and Node 22. It runs for each push to main or pull request that changes `firestore.rules`, `firebase.json` or the package.
+- `calls.test.js` has two groups. "the app" holds every write `FirestoreCallSource` makes, in each state the call can be in, including the orders older app versions used. These must pass. "the rules refuse" holds the abuses, which must fail.
+- The calls rules list every field a call document may hold. A new field, or a write in a new state, needs the rule changed and a test here. Deploy the rules (`firebase deploy --only firestore:rules`) before the app version that writes it ships, or its writes are refused.
 
 ---
 

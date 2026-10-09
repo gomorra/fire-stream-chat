@@ -5,10 +5,11 @@
 //   the remote description, the duplicate-candidate filter, the direct-or-relayed log line,
 //   the one video line of the connection and whether both sides agreed to use it.
 // Collaborators: PeerSignaling (where offer, answer and candidates travel),
-//   WebRtcPeerConnectionFactory (builds the connection), CallService (owns the session,
-//   the local tracks and everything about the call as a whole).
-// Don't put here: Firestore paths or call status (PeerSignaling, CallService), the
-//   foreground service, notification, ring timeout or audio session (CallService),
+//   WebRtcPeerConnectionFactory (builds the connection), WebRtcCallLocalMedia (opens and
+//   closes the session and owns the local tracks), CallSession (reacts to its events and
+//   owns everything about the call as a whole).
+// Don't put here: Firestore paths or call status (PeerSignaling, CallSession), the
+//   foreground service, notification, timers or audio session (CallSession, CallService),
 //   creating or disposing local tracks (their owner shares them across sessions).
 // endregion
 
@@ -88,8 +89,8 @@ sealed interface PeerSessionEvent {
  * An app without video must never be offered the line: it aborts the process when it applies such
  * an offer. The owner says through [offerVideoLine] whether the other side takes one.
  *
- * [close] closes the connection but does not dispose it or the local tracks. The tracks belong to
- * the owner, which shares them between sessions.
+ * [close] disposes the connection, and not the local tracks. The tracks belong to the owner,
+ * which shares them between sessions.
  *
  * @param factory builds the connection.
  * @param signaling where this pair's offer, answer and candidates travel.
@@ -177,7 +178,7 @@ class PeerSession(
         connection.set(pc)
         if (closed.get()) {
             // close() ran between the check above and the set, and found nothing to close.
-            connection.getAndSet(null)?.close()
+            connection.getAndSet(null)?.dispose()
             return
         }
 
@@ -249,8 +250,8 @@ class PeerSession(
     }
 
     /**
-     * Stop negotiating and close the connection. A second call does nothing. Never call this from
-     * inside a callback of this connection; react to [events] instead.
+     * Stop negotiating and release the connection. A second call does nothing. Never call this
+     * from inside a callback of this connection; react to [events] instead.
      */
     fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -258,7 +259,9 @@ class PeerSession(
         eventChannel.close()
         // Waits for a setCamera that is under way. None touches the line after this.
         synchronized(cameraLock) { videoSender = null }
-        connection.getAndSet(null)?.close()
+        // dispose(), not close(): close() leaves the native connection allocated, and with it
+        // the observer that holds this session.
+        connection.getAndSet(null)?.dispose()
     }
 
     // ──────────────────────────────────────────────────────────────────────────

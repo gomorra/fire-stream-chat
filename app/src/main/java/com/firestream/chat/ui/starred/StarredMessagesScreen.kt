@@ -27,10 +27,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.ui.chat.ReplyImageThumbnail
+import com.firestream.chat.ui.components.stickerLabel
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -147,6 +150,10 @@ private fun StarredMessageItem(
 
         androidx.compose.material3.ListItem(
             overlineContent = { Text(formattedDate, style = MaterialTheme.typography.labelSmall) },
+            // The first frame of a sticker or a GIF, whose text line says little.
+            leadingContent = if (message.type == MessageType.STICKER || message.type == MessageType.GIF) {
+                { ReplyImageThumbnail(message = message, modifier = Modifier.size(40.dp)) }
+            } else null,
             headlineContent = {
                 Text(
                     text = when (message.type) {
@@ -154,6 +161,8 @@ private fun StarredMessageItem(
                         MessageType.VIDEO -> if (message.content.isNotBlank()) "🎥 ${message.content}" else "🎥 Video"
                         MessageType.VOICE -> "🎤 Voice message"
                         MessageType.DOCUMENT -> "📄 Document"
+                        MessageType.STICKER -> stickerLabel(message.content)
+                        MessageType.GIF -> if (message.content.isNotBlank()) "🎞️ ${message.content}" else "🎞️ GIF"
                         else -> message.content
                     },
                     maxLines = 2

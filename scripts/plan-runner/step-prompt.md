@@ -17,7 +17,9 @@ Placeholders:
   {{SCHEMA_PATH}}   repo-relative path of step-result.schema.json
   {{TRIPWIRE_RULES}} the driver's diff tripwire as bullet text (lib.sh pr_tripwire_rules)
   {{ADVISOR_BLOCK}} the "## Advisor" section when the run attaches an advisor model, else empty
-  {{ATTEMPT_BLOCK}} the "## Earlier attempt" section on an escalated re-run, else empty
+  {{ATTEMPT_BLOCK}} the "## Earlier attempt" section on an escalated re-run, the "## Interrupted
+                    attempt" section for a fresh session that replaces one a usage limit cut off
+                    with no session left to resume; empty otherwise
 -->
 
 Implement **step {{STEP}}** of the plan `{{PLAN_PATH}}` in this worktree, on branch `{{BRANCH}}`.

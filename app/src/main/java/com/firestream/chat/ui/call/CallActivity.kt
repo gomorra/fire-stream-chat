@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
+import android.util.Log
 import android.util.Rational
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -17,12 +18,14 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
 import com.firestream.chat.data.call.CallService
@@ -30,11 +33,12 @@ import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.domain.model.CallState
 import com.firestream.chat.domain.model.CallSurface
 import com.firestream.chat.domain.model.dockable
-import com.firestream.chat.domain.repository.CallRepository
+import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.ui.theme.FireStreamTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -48,8 +52,9 @@ import javax.inject.Inject
 class CallActivity : ComponentActivity() {
 
     @Inject lateinit var callStateHolder: CallStateHolder
-    @Inject lateinit var callPlacer: OutgoingCallPlacer
-    @Inject lateinit var callRepository: CallRepository
+
+    /** Outlives a rotation, so the call setup and a pending permission request are not lost to one. */
+    private val viewModel: CallViewModel by viewModels()
 
     companion object {
         const val EXTRA_ACTION = "call_action"
@@ -57,10 +62,22 @@ class CallActivity : ComponentActivity() {
         const val EXTRA_CALLEE_NAME = "callee_name"
         const val EXTRA_CALLEE_AVATAR_URL = "callee_avatar_url"
         const val EXTRA_CHAT_ID = "chat_id"
-        /** With [ACTION_OUTGOING]: start the call as a video call. Absent means a voice call. */
+        /** With [ACTION_OUTGOING] and [ACTION_RING]: the call was started as a video call. Absent means a voice call. */
         const val EXTRA_VIDEO = "video"
         const val ACTION_OUTGOING = "outgoing"
         const val ACTION_ANSWER = "answer"
+
+        /**
+         * Ring for an incoming call whose push could not start the call service. The fallback
+         * notification opens the screen with it, and the extras below name the call.
+         */
+        const val ACTION_RING = "ring"
+        const val EXTRA_CALL_ID = "call_id"
+        const val EXTRA_CALLER_ID = "caller_id"
+        const val EXTRA_CALLER_NAME = "caller_name"
+        const val EXTRA_CALLER_AVATAR_URL = "caller_avatar_url"
+
+        private const val TAG = "CallActivity"
 
         /** The intent that brings the stage of the running call to the front. */
         fun stageIntent(context: Context): Intent = Intent(context, CallActivity::class.java).apply {
@@ -101,14 +118,12 @@ class CallActivity : ComponentActivity() {
 
     private var cameraRefusalExplained = false
 
-    // What to do once the permission dialog has been answered, whatever the answer.
-    private var afterPermissions: (() -> Unit)? = null
-
     private val requestPermissions = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) {
-        afterPermissions?.invoke()
-        afterPermissions = null
+        val action = viewModel.pendingPermissionAction
+        viewModel.pendingPermissionAction = null
+        action?.let(::runPermissionAction)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -121,22 +136,25 @@ class CallActivity : ComponentActivity() {
         inPictureInPicture = isInPictureInPictureMode
 
         // The stage opens for a call that is about to be placed or answered.
-        callRepository.prepareCall()
+        viewModel.prepareCall()
         if (savedInstanceState == null) {
             handleIntent()
         }
 
         lifecycleScope.launch {
-            // A call that ends while it is docked, or otherwise off the stage, closes the stage
-            // where it is. Only an end this activity watched: the state of the call before stays
-            // `Ended` until the next one starts. On the stage, CallScreen says so first and closes.
-            var watched = false
-            callStateHolder.callState.collect { state ->
-                if (state is CallState.Live) {
-                    watched = true
-                } else if (state is CallState.Ended && watched && !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
-                    finish()
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.setupFailed.collect {
+                    Toast.makeText(this@CallActivity, "Couldn't start the call", Toast.LENGTH_LONG).show()
                 }
+            }
+        }
+
+        // Collected while the screen is stopped too: CallScreen only closes a screen it shows, and
+        // a call that ends while it is docked closes the stage where it is.
+        // The first value is the state the screen opened on, which handleIntent has dealt with.
+        lifecycleScope.launch {
+            callStateHolder.callState.drop(1).collect { state ->
+                if (closesUnseen(state, lifecycle.currentState)) finishAndRemoveTask()
             }
         }
         lifecycleScope.launch {
@@ -160,7 +178,10 @@ class CallActivity : ComponentActivity() {
                     onAnswer = ::answer,
                     onSetCamera = ::setCamera,
                     onMinimise = ::minimise,
-                    onFinish = ::finish
+                    // Out of Recents too: relaunching a finished call screen from there must not
+                    // bring back the intent that placed or answered its call.
+                    onFinish = { finishAndRemoveTask() },
+                    viewModel = viewModel
                 )
             }
         }
@@ -182,6 +203,12 @@ class CallActivity : ComponentActivity() {
         callStateHolder.setSurfaceShowing(CallSurface.STAGE, true)
     }
 
+    override fun onPause() {
+        super.onPause()
+        // Back or finishAndRemoveTask(). A setup still running must end its call, not start it.
+        if (isFinishing) viewModel.onScreenClosed()
+    }
+
     // The small window counts as on screen: it stops the activity only when it is closed.
     override fun onStop() {
         super.onStop()
@@ -194,58 +221,80 @@ class CallActivity : ComponentActivity() {
     }
 
     private fun handleIntent() {
-        when (intent?.getStringExtra(EXTRA_ACTION)) {
-            ACTION_OUTGOING -> startOutgoingCall()
+        val launchedFromHistory = intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0
+        val launch = callLaunchFor(
+            action = intent.getStringExtra(EXTRA_ACTION),
+            launchedFromHistory = launchedFromHistory,
+            callOngoing = callStateHolder.callState.value.isOngoing
+        )
+        when (launch) {
+            CallLaunch.PLACE_CALL -> placeOutgoingCall()
             // From the notification or the lock screen: the camera stays off.
-            ACTION_ANSWER -> answer(withVideo = false)
+            CallLaunch.ANSWER -> answer(withVideo = false)
+            CallLaunch.RING -> ringIncomingCall()
             // Opened from a notification that outlived its call.
-            else -> finishIfNoCall()
+            CallLaunch.SHOW -> if (!callStateHolder.callState.value.isOngoing) finishAndRemoveTask()
+            CallLaunch.CLOSE -> finishAndRemoveTask()
         }
     }
 
     // ── Starting and answering ──────────────────────────────────────────────
 
+    /**
+     * Runs before the permission prompt. The call screen composes behind the prompt, and the
+     * previous call's Ended state would finish this activity underneath it.
+     */
+    private fun placeOutgoingCall() {
+        if (!callStateHolder.prepareOutgoingCall()) {
+            // A call is already running. This screen shows it instead of placing a second one.
+            Toast.makeText(this, "You're already in a call", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+        withPermissions(if (video) PermissionAction.PLACE_VIDEO_CALL else PermissionAction.PLACE_VOICE_CALL)
+    }
+
+    /** The session starts the preview of a video call once the call exists and the stage shows it. */
     private fun startOutgoingCall() {
-        // A call is already running. The stage shows that one.
-        if (callStateHolder.callState.value is CallState.Live) return
-        val request = PlacingCall(
-            calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return finishIfNoCall(),
-            calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown",
-            calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL),
-            chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return finishIfNoCall(),
-            video = intent.getBooleanExtra(EXTRA_VIDEO, false)
-        )
-        // The service starts the preview of a video call once the call exists and the stage shows it.
-        withCallPermissions(video = request.video) { callPlacer.place(request) }
-    }
-
-    /** [withVideo] asks for the camera if needed. A refusal answers with the camera off. */
-    private fun answer(withVideo: Boolean) {
-        withCallPermissions(video = withVideo) { cameraOn ->
-            // Before the answer, so a preview that ran during the ring goes off for "voice only".
-            CallService.sendSetCamera(this, cameraOn)
-            CallService.sendAction(this, CallService.ACTION_ANSWER)
-        }
-    }
-
-    private fun setCamera(on: Boolean) {
-        if (!on) return CallService.sendSetCamera(this, false)
-        withPermissions(camera = true, microphone = false) {
-            if (hasCamera()) CallService.sendSetCamera(this, true) else explainCameraRefusal()
-        }
+        val calleeId = intent.getStringExtra(EXTRA_CALLEE_ID) ?: return finishAndRemoveTask()
+        val chatId = intent.getStringExtra(EXTRA_CHAT_ID) ?: return finishAndRemoveTask()
+        val calleeName = intent.getStringExtra(EXTRA_CALLEE_NAME) ?: "Unknown"
+        val calleeAvatarUrl = intent.getStringExtra(EXTRA_CALLEE_AVATAR_URL)
+        val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+        viewModel.placeCall(calleeId, chatId, calleeName, calleeAvatarUrl, video)
     }
 
     /**
-     * What starting and answering a call share: no call without the microphone, and a call with
-     * [video] goes on with the camera off when the camera is refused. [then] is told whether the
-     * camera may come on.
+     * Ring for the call the intent names. Android would not let its push start the call service,
+     * so FCMService rang with a notification that opens this screen. From the foreground the
+     * service may start, and it then rings as usual, in place of the notification.
      */
-    private fun withCallPermissions(video: Boolean, then: (cameraOn: Boolean) -> Unit) {
-        withPermissions(camera = video) {
-            if (!hasMicrophone()) return@withPermissions refuseWithoutMicrophone()
-            if (video && !hasCamera()) explainCameraRefusal()
-            then(video && hasCamera())
+    private fun ringIncomingCall() {
+        // A call that is already going is shown instead.
+        if (callStateHolder.callState.value.isOngoing) return
+        val callId = intent.getStringExtra(EXTRA_CALL_ID)
+        val callerId = intent.getStringExtra(EXTRA_CALLER_ID)
+        if (callId == null || callerId == null) {
+            finishAndRemoveTask()
+            return
         }
+        val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: "Unknown"
+        val callerAvatarUrl = intent.getStringExtra(EXTRA_CALLER_AVATAR_URL)
+        val video = intent.getBooleanExtra(EXTRA_VIDEO, false)
+        try {
+            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl, video)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "Could not start the call service for call $callId", e)
+            finishAndRemoveTask()
+        }
+    }
+
+    /** [withVideo] asks for the camera if needed. A refusal answers with the camera off. */
+    private fun answer(withVideo: Boolean) =
+        withPermissions(if (withVideo) PermissionAction.ANSWER_WITH_VIDEO else PermissionAction.ANSWER)
+
+    private fun setCamera(on: Boolean) {
+        if (on) withPermissions(PermissionAction.CAMERA_ON) else viewModel.setCamera(false)
     }
 
     // ── Leaving the stage ───────────────────────────────────────────────────
@@ -322,21 +371,36 @@ class CallActivity : ComponentActivity() {
         .setAutoEnterEnabled(videoShowing && !docking)
         .build()
 
-    private fun finishIfNoCall() {
-        if (callStateHolder.callState.value !is CallState.Live && callPlacer.placing.value == null) finish()
-    }
-
     // ── Permissions ─────────────────────────────────────────────────────────
 
-    /** Ask for what is missing, then run [then] whatever the answer. [then] checks what it got. */
-    private fun withPermissions(camera: Boolean, microphone: Boolean = true, then: () -> Unit) {
+    /**
+     * Run [action] now when nothing it asks for is missing, or once the prompt has been answered,
+     * whatever the answer. The action waits in the ViewModel, so a rotation under the prompt does
+     * not lose it.
+     */
+    private fun withPermissions(action: PermissionAction) {
         val missing = buildList {
-            if (microphone && !hasMicrophone()) add(Manifest.permission.RECORD_AUDIO)
-            if (camera && !hasCamera()) add(Manifest.permission.CAMERA)
+            if (action.microphone && !hasMicrophone()) add(Manifest.permission.RECORD_AUDIO)
+            if (action.camera && !hasCamera()) add(Manifest.permission.CAMERA)
         }
-        if (missing.isEmpty()) return then()
-        afterPermissions = then
+        if (missing.isEmpty()) return runPermissionAction(action)
+        viewModel.pendingPermissionAction = action
         requestPermissions.launch(missing.toTypedArray())
+    }
+
+    /**
+     * No call without the microphone. A call goes on with the camera off when the camera is
+     * refused, and says why once.
+     */
+    private fun runPermissionAction(action: PermissionAction) {
+        if (action.microphone && !hasMicrophone()) return refuseWithoutMicrophone()
+        val cameraOn = action.camera && hasCamera()
+        if (action.camera && !cameraOn) explainCameraRefusal()
+        when (action) {
+            PermissionAction.PLACE_VOICE_CALL, PermissionAction.PLACE_VIDEO_CALL -> startOutgoingCall()
+            PermissionAction.ANSWER, PermissionAction.ANSWER_WITH_VIDEO -> viewModel.answer(cameraOn)
+            PermissionAction.CAMERA_ON -> if (cameraOn) viewModel.setCamera(true)
+        }
     }
 
     private fun hasMicrophone() = isGranted(Manifest.permission.RECORD_AUDIO)
@@ -348,7 +412,8 @@ class CallActivity : ComponentActivity() {
 
     private fun refuseWithoutMicrophone() {
         Toast.makeText(this, "Microphone permission is required for calls", Toast.LENGTH_LONG).show()
-        finishIfNoCall()
+        // No call was placed. A ringing call stays, so it can still be declined.
+        if (callStateHolder.callState.value is CallState.Idle) finishAndRemoveTask()
     }
 
     /** Says once why the camera stays off. The call goes on without it. */

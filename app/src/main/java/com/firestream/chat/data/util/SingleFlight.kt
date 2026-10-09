@@ -1,6 +1,9 @@
 package com.firestream.chat.data.util
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -17,15 +20,30 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * Failures propagate to every waiter and leave nothing behind, so the next
  * caller retries rather than inheriting a stale exception.
+ *
+ * A cancellation is not a failure of the work. When the first caller is
+ * cancelled, a waiter runs [block] itself, or joins the waiter that got there
+ * first. A waiter that is cancelled stops waiting and takes nobody with it.
  */
 class SingleFlight<K : Any, V> {
 
     private val inFlight = ConcurrentHashMap<K, CompletableDeferred<V>>()
 
     suspend fun run(key: K, block: suspend () -> V): V {
-        val pending = CompletableDeferred<V>()
-        inFlight.putIfAbsent(key, pending)?.let { return it.await() }
+        while (true) {
+            val pending = CompletableDeferred<V>()
+            val running = inFlight.putIfAbsent(key, pending) ?: return runFirst(key, pending, block)
+            try {
+                return running.await()
+            } catch (e: CancellationException) {
+                // This caller's own cancellation goes on. Any other was the first caller's,
+                // which says nothing about the work, so it is done here.
+                currentCoroutineContext().ensureActive()
+            }
+        }
+    }
 
+    private suspend fun runFirst(key: K, pending: CompletableDeferred<V>, block: suspend () -> V): V {
         val result = try {
             block()
         } catch (e: Throwable) {

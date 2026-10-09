@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.core.app.ApplicationProvider
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -13,6 +14,7 @@ import io.mockk.spyk
 import io.mockk.unmockkAll
 import io.mockk.verify
 import kotlinx.coroutines.test.runTest
+import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.domain.model.MessageType
 import okhttp3.Call
 import okhttp3.OkHttpClient
@@ -22,6 +24,7 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -44,6 +47,7 @@ class MediaFileManagerTest {
         every { contentResolver } returns resolver
     }
     private val httpClient = mockk<OkHttpClient>(relaxed = true)
+    private val stickerDownloads = mockk<StickerDownloads>()
 
     private val rowUri: Uri = Uri.parse("content://media/external_primary/downloads/1")
 
@@ -52,7 +56,7 @@ class MediaFileManagerTest {
 
     @Before
     fun setUp() {
-        manager = MediaFileManager(context, httpClient, DocumentFiles(context))
+        manager = MediaFileManager(context, httpClient, DocumentFiles(context), stickerDownloads)
 
         // A real, readable temp file so the input stream copy works.
         sourceFile = File.createTempFile("mfm-test-", ".jpg").apply {
@@ -65,6 +69,28 @@ class MediaFileManagerTest {
     fun tearDown() {
         unmockkAll()
         sourceFile.delete()
+    }
+
+    // ── old-storage migration ──────────────────────────────────────────────
+
+    @Test
+    fun `migrateOldStorage leaves the avatar cache in Android media alone`() = runTest {
+        // The old Android/media root also holds profile_pictures/, which is not a chat
+        // folder. Migrating it moved every avatar into the public Pictures folder and
+        // deleted the cache.
+        val externalRoot = File.createTempFile("mfm-media-", "").apply { delete(); mkdirs() }
+        val avatar = File(externalRoot, "profile_pictures/uid1.jpg").apply {
+            parentFile!!.mkdirs()
+            writeText("avatar")
+        }
+        every { context.externalMediaDirs } returns arrayOf(externalRoot)
+
+        val moved = manager.migrateOldStorage()
+
+        assertEquals(0, moved)
+        assertTrue(avatar.exists())
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+        externalRoot.deleteRecursively()
     }
 
     // ── documents: private file, never MediaStore ─────────────────────────
@@ -84,13 +110,55 @@ class MediaFileManagerTest {
         every { httpClient.newCall(any()) } returns call
 
         val file = manager.downloadFor(
-            "chat1", "doc1", MessageType.DOCUMENT, "https://storage.example/o/doc1.txt", "notes.txt", "text/plain",
-        )
+            "chat1", "doc1", MessageType.DOCUMENT, "https://storage.example/o/doc1.txt", "notes.txt", "text/plain", null,
+        )!!
 
         assertEquals(File(realContext.filesDir, "documents/doc1.txt"), file)
         assertEquals("hello, file", file.readText())
         verify(exactly = 0) { resolver.insert(any(), any()) }
         file.delete()
+    }
+
+    // A GIF saved through MediaStore would show up in the gallery, beside the user's photos.
+    @Test
+    fun `a GIF downloads into the private documents dir without touching MediaStore`() = runTest {
+        val body = "GIF89a".toByteArray()
+        val call = mockk<Call> {
+            every { execute() } returns Response.Builder()
+                .request(Request.Builder().url("https://storage.example/o/gif1.gif").build())
+                .protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(body.toResponseBody())
+                .build()
+        }
+        every { httpClient.newCall(any()) } returns call
+
+        val file = manager.downloadFor(
+            "chat1", "gif1", MessageType.GIF, "https://storage.example/o/gif1.gif", null, "image/gif", null,
+        )!!
+
+        assertEquals(File(realContext.filesDir, "documents/gif1.gif"), file)
+        assertEquals("GIF89a", file.readText())
+        verify(exactly = 0) { resolver.insert(any(), any()) }
+        file.delete()
+    }
+
+    @Test
+    fun `a sticker goes to the sticker downloads with its id, and a refusal is no file`() = runTest {
+        val sticker = File(realContext.filesDir, "stickers/abc.webp")
+        coEvery { stickerDownloads.ensureLocal("abc", "https://storage.example/o/abc.webp") } returns sticker
+        coEvery { stickerDownloads.ensureLocal("bad", any()) } returns null
+
+        val kept = manager.downloadFor(
+            "chat1", "m1", MessageType.STICKER, "https://storage.example/o/abc.webp", null, "image/webp", "abc",
+        )
+        val refused = manager.downloadFor(
+            "chat1", "m2", MessageType.STICKER, "https://storage.example/o/abc.webp", null, "image/webp", "bad",
+        )
+
+        assertEquals(sticker, kept)
+        assertNull(refused)
+        verify(exactly = 0) { httpClient.newCall(any()) }
+        verify(exactly = 0) { resolver.insert(any(), any()) }
     }
 
     // ── happy path: insert + write + clear IS_PENDING ─────────────────────

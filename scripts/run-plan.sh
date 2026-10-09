@@ -5,7 +5,7 @@
 # Claude session.
 #
 #   scripts/run-plan.sh <plan.md> [--from N] [--to N] [--dry-run] [--cap max|strong|mid] [--budget USD]
-#                                 [--variant NAME] [--base REF]
+#                                 [--variant NAME] [--base REF] [--sync-from REF|none]
 #
 #   --variant NAME  load scripts/plan-runner/variants/NAME.env over the tunables below and run
 #                   on plan/<name>-NAME (own worktree, own log) — two configurations of one
@@ -13,13 +13,30 @@
 #   --base REF      the commit a new plan branch starts from (default: main)
 #   --to N          stop after step N is validated (and judged); later steps stay untouched and a
 #                   run without --to continues from there. Exit 0.
+#   --sync-from REF where the owner edits the plan during a run (default: main). At every step
+#                   boundary the plan file, and nothing else, is merged from REF into the branch's
+#                   copy. A remote-tracking REF is fetched first: pass origin/main in a cloud
+#                   container, whose local main never moves. none = no sync.
+#
+# Step boundary: before each launch, a pause file docs/plans/.runs/<run-id>.pause stops the run
+# (exit 5; the file is removed, and running again continues), then the plan is synced from REF.
+# A sync that cannot merge cleanly writes docs/plans/.runs/<run-id>.plan-sync.conflict.md,
+# prints the one commit that records a hand merge, and stops with exit 5.
+#
+# Usage limit: the driver reads each session's stream while it runs. It stops a session whose usage
+# window is used up, because a cloud session would go on on cloud credits. Then it waits for the
+# reset and resumes the same session. It waits at most USAGE_WAIT_MAX_S for one reset and
+# USAGE_RESUME_MAX times per step; past either, the step is blocked (exit 3). A pause file also stops
+# a wait (exit 5), and the next run resumes the session. Ctrl-C stops the running session and exits 130.
 #
 # Exit codes: 0 all steps shipped (or dry run) · 1 usage/config error ·
-#             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint
+#             2 a decision is needed · 3 a step is blocked · 4 stopped at a ‖ checkpoint ·
+#             5 stopped for the owner: a pause file between steps or during a usage-limit wait, or a
+#               plan sync that needs a hand merge · 130 interrupted (Ctrl-C or SIGTERM)
 #
-# The runner never commits and never pushes. Every commit on plan/<name> is a
-# step session's. The one thing it changes in the worktree: to escalate a failed
-# step it keeps the attempt (branch + patch + tarball), then resets and cleans. State lives in the plan file (**Shipped** blocks) and in the
+# The runner commits nothing but a plan sync, and never pushes. Every other commit on
+# plan/<name> is a step session's. The other thing it changes in the worktree: to escalate a
+# failed step it keeps the attempt (branch + patch + tarball), then resets and cleans. State lives in the plan file (**Shipped** blocks) and in the
 # gitignored run log docs/plans/.runs/<name>.log (one JSON object per line;
 # scripts/plan-runner/report.sh turns it into a per-step table).
 set -Eeuo pipefail
@@ -41,6 +58,13 @@ DEFAULT_BUDGET_USD=30      # per step; a `budget:` heading tag overrides, --budg
 NUDGE_BUDGET_USD=5         # the single fix-forward resume a step may get
 REVIEW_BUDGET_USD=8        # the fresh review session that stands in for the nudge when only skills are missing
 JUDGE_BUDGET_USD=7
+# The usage limit. One per line: e2e.sh sets them small with sed.
+USAGE_POLL_S=10            # a running session's stream is read this often for its usage-window state
+USAGE_WAIT_SLACK_S=90      # added to the reset time; also the shortest wait after a limit stop
+USAGE_WAIT_FALLBACK_S=3600 # the wait when no reset time is known
+USAGE_WAIT_MAX_S=21600     # a reset further away is not waited for (a weekly limit): the step is blocked
+USAGE_RESUME_MAX=6         # limit stops waited out per step, over its step, nudge, review and judge sessions
+USAGE_SLICE_S=60           # a wait sleeps in slices against the wall clock, and looks for the pause file in each
 GATE_TASKS=":app:testFirebaseDebugUnitTest :app:assembleFirebaseDebug"
 NOTIFY_CMD=notify-send     # <cmd> "<title>" "<body>"; point at a phone bridge later
 PERMISSION_MODE=acceptEdits
@@ -53,6 +77,7 @@ ALLOWED_TOOLS=(
     "Bash(diff *)" "Bash(stat *)" "Bash(file *)" "Bash(test *)" "Bash(echo *)" "Bash(printf *)"
     "Bash(mkdir *)" "Bash(cp *)" "Bash(mv *)" "Bash(touch *)" "Bash(date *)" "Bash(dexdump *)"
     "Bash(rm -rf app/build/*)"
+    "Bash(scripts/plan-runner/selfcheck.sh*)" "Bash(scripts/plan-runner/e2e.sh*)"   # the gate of a plan that changes the runner
 )
 # Deny wins over allow. Prefix patterns cannot express "outside the worktree";
 # the prompt forbids leaving it and the run log shows every denial.
@@ -88,7 +113,7 @@ usage() { # usage [exit-code]  → the header comment, from its usage line to it
 }
 need_arg() { [ $# -ge 2 ] && [ -n "$2" ] || { echo "$1 needs a value" >&2; usage 1; }; }
 
-PLAN_ARG=''; FROM=1; TO=''; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''
+PLAN_ARG=''; FROM=1; TO=''; DRY_RUN=0; CAP=''; BUDGET_OVERRIDE=''; VARIANT=''; BASE_REF=''; SYNC_FROM=main
 while [ $# -gt 0 ]; do
     case "$1" in
         --from)    need_arg "$@"; FROM=$2; shift 2 ;;
@@ -98,6 +123,7 @@ while [ $# -gt 0 ]; do
         --budget)  need_arg "$@"; BUDGET_OVERRIDE=$2; shift 2 ;;
         --variant) need_arg "$@"; VARIANT=$2; shift 2 ;;
         --base)    need_arg "$@"; BASE_REF=$2; shift 2 ;;
+        --sync-from) need_arg "$@"; SYNC_FROM=$2; shift 2 ;;
         -h|--help) usage 0 ;;
         -*)        echo "unknown flag $1" >&2; usage 1 ;;
         *)         [ -z "$PLAN_ARG" ] || usage 1; PLAN_ARG=$1; shift ;;
@@ -142,6 +168,12 @@ RUNS=${PLAN_RUNNER_RUNS_DIR:-$ROOT/docs/plans/.runs}   # override for the self-c
 mkdir -p "$RUNS"
 RUNS=$(cd "$RUNS" && pwd)              # absolute: escalate writes into it from inside the worktree
 LOG=$RUNS/$RUN_ID.log
+PAUSE=$RUNS/$RUN_ID.pause                        # the owner creates it; the next step boundary stops for it
+SYNC_CONFLICT=$RUNS/$RUN_ID.plan-sync.conflict.md
+# Session transcripts: <home>/projects/<cwd slug>/<session id>.jsonl. Override for the self-check.
+CLAUDE_HOME=${PLAN_RUNNER_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
+# The prompt that resumes a session after a usage-limit wait. e2e.sh's stub recognises it by its start.
+CONTINUE_PROMPT='This session was stopped at a usage limit, and the limit has reset. Carry on where you left off, and end with the JSON result object your instructions ask for.'
 if [ -n "$BASE_REF" ]; then
     git -C "$ROOT" rev-parse --verify --quiet "$BASE_REF^{commit}" >/dev/null || { echo "--base: '$BASE_REF' is not a commit" >&2; exit 1; }
 fi
@@ -222,7 +254,7 @@ prepare_step() {
     # model only — a cheaper model thinking longer is the better trade.
     EFFORT=$(pr_tag_effort "$HEADING" "$(effort_for "$TAGGED_TIER")" || exit 1) || exit 1
     BUDGET=${BUDGET_OVERRIDE:-$(pr_tag_budget "$HEADING" "$DEFAULT_BUDGET_USD")}
-    NUDGED=0; SESSION_ID=''; RESULT_FILE=''; ATTEMPT=1; ATTEMPT_BLOCK=''; RUN_SKILLS=''; PRESTATE=''
+    NUDGED=0; SESSION_ID=''; RESULT_FILE=''; ATTEMPT=1; ATTEMPT_BLOCK=''; RUN_SKILLS=''; PRESTATE=''; WAITS=0
 }
 
 # The "## Advisor" section of the step prompt; empty when the step's tier has no advisor.
@@ -260,32 +292,275 @@ write_prompt() {
     printf '%s' "$PROMPT" > "$PROMPT_FILE"
 }
 
-claude_args() { # claude_args <budget> [--resume <id>]  → fills CLAUDE_ARGS
-    CLAUDE_ARGS=(-p --output-format json --json-schema "$(cat "$SCHEMA")"
-        --model "$MODEL" --effort "$EFFORT" --max-budget-usd "$1"
-        --permission-mode "$PERMISSION_MODE"
-        --allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DISALLOWED_TOOLS[@]}"
-        -n "plan $RUN_ID step $STEP")
-    if [ -n "$ADVISOR" ]; then CLAUDE_ARGS+=(--advisor "$ADVISOR"); fi
-    if [ $# -ge 3 ] && [ "$2" = --resume ]; then CLAUDE_ARGS+=(--resume "$3"); fi
+# session_args <schema> <model> <effort> <budget> <permission-mode>  → starts CLAUDE_ARGS with the flags
+# every session shares. The caller appends the tool lists, then `-n`: the tool flags take a list, and
+# `-n` ends it before the prompt.
+session_args() {
+    CLAUDE_ARGS=(-p --output-format stream-json --verbose --json-schema "$(cat "$1")"
+        --model "$2" --effort "$3" --max-budget-usd "$4" --permission-mode "$5")
 }
 
-run_claude() { # run_claude <out-file> <prompt>  (cwd = worktree; a non-zero exit is a result, not an error)
-    (cd "$WT" && claude "${CLAUDE_ARGS[@]}" "$2" > "$1" 2> "$1.stderr") || true
+claude_args() { # claude_args <budget>  → fills CLAUDE_ARGS; run_session appends --resume
+    session_args "$SCHEMA" "$MODEL" "$EFFORT" "$1" "$PERMISSION_MODE"
+    CLAUDE_ARGS+=(--allowedTools "${ALLOWED_TOOLS[@]}" --disallowedTools "${DISALLOWED_TOOLS[@]}"
+        -n "plan $RUN_ID step $STEP")
+    if [ -n "$ADVISOR" ]; then CLAUDE_ARGS+=(--advisor "$ADVISOR"); fi
+}
+
+judge_args() { # judge_args <budget>  → fills CLAUDE_ARGS for the read-only judge (no acceptEdits)
+    session_args "$JUDGE_SCHEMA" "$JUDGE_MODEL" "$JUDGE_EFFORT" "$1" default
+    CLAUDE_ARGS+=(--allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}"
+        -n "plan review step $STEP")
 }
 
 # result_get <jq-path>  → the field from RESULT_FILE as text, or "null". Shape: lib.sh pr_result_kind.
 result_get() { pr_result_field "$RESULT_FILE" "$1"; }
 
-log_result() { # never fails: every value has a fallback (the file may be empty or not JSON)
-    log result --arg step "$STEP" --arg session "$(result_get .session_id)" --arg subtype "$(result_get .subtype)" \
-        --arg status "$(result_get .structured_output.status)" --arg commit "$(result_get .structured_output.commit)" \
-        --argjson cost "$(pr_result_json "$RESULT_FILE" .total_cost_usd 0)" \
-        --argjson turns "$(pr_result_json "$RESULT_FILE" .num_turns 0)" \
-        --argjson denials "$(pr_result_json "$RESULT_FILE" .permission_denials '[]')" \
-        --argjson models "$(pr_result_json "$RESULT_FILE" '.modelUsage | map_values(.costUSD)' '{}')" \
-        --argjson consults "$(pr_result_json "$RESULT_FILE" .structured_output.advisorConsults null)" \
-        --arg file "$(rel "$RESULT_FILE")"
+# log_result <file> <kind> <session>  → the `result` event of one invocation. <kind> is step, nudge,
+# review or judge; report.sh leaves the judge's out of the step's cost. <session> comes from the
+# stream, which names it even when the invocation was stopped before its result. Never fails: every
+# value has a fallback (the file may be missing, empty or not JSON).
+log_result() {
+    local f=$1
+    log result --arg step "$STEP" --arg kind "$2" --arg session "$3" \
+        --arg subtype "$(pr_result_field "$f" .subtype)" \
+        --arg status "$(pr_result_field "$f" .structured_output.status)" --arg commit "$(pr_result_field "$f" .structured_output.commit)" \
+        --argjson cost "$(pr_result_json "$f" .total_cost_usd 0)" \
+        --argjson turns "$(pr_result_json "$f" .num_turns 0)" \
+        --argjson denials "$(pr_result_json "$f" .permission_denials '[]')" \
+        --argjson models "$(pr_result_json "$f" '.modelUsage | map_values(.costUSD)' '{}')" \
+        --argjson consults "$(pr_result_json "$f" .structured_output.advisorConsults null)" \
+        --arg file "$(rel "$f")"
+}
+
+# ---- sessions and the usage limit ------------------------------------------------
+# Every session runs through run_session: step, nudge, review and judge. claude runs in the background
+# so the driver can read its stream and stop it at a usage limit. Contract: §6 of
+# docs/plans/done/plan-runner.md.
+SESSION_PID=''; SESSION_KIND=''; SESSION_STREAM=''; NAP_PID=''   # the running invocation, for the INT/TERM trap
+RUN_SID=''; RUN_SPENT=0; SESSION_STOP=''; WAITS=0
+# The reset time (epoch) of the newest used-up window a stream showed, and that stream's session;
+# empty once a stream shows an open window or a wait has passed the reset. The next launch waits for it.
+WINDOW_RESET=''; WINDOW_SID=''
+LIMIT_SOURCE=''; LIMIT_RESET=''; LIMIT_TRANSCRIPT=''      # set by limit_hit
+
+# nap <seconds>  → sleeps in the background and waits for it, so INT/TERM run their trap at once.
+nap() { sleep "$1" & NAP_PID=$!; wait "$NAP_PID" 2>/dev/null || true; NAP_PID=''; }
+
+# local_time <epoch>  → the owner's wall-clock time of it (GNU date, then BSD date).
+local_time() { date -d "@$1" '+%a %H:%M %Z' 2>/dev/null || date -r "$1" '+%a %H:%M %Z' 2>/dev/null || echo "epoch $1"; }
+
+# stop_session  → SIGTERM to the running claude, SIGKILL ten seconds later if it is still alive.
+stop_session() {
+    local i=0
+    kill -TERM "$SESSION_PID" 2>/dev/null || true
+    while kill -0 "$SESSION_PID" 2>/dev/null && [ "$i" -lt 50 ]; do nap 0.2; i=$((i + 1)); done
+    kill -KILL "$SESSION_PID" 2>/dev/null || true
+    wait "$SESSION_PID" 2>/dev/null || true
+}
+
+# invoke <cwd> <out> <prompt>  → one claude invocation with CLAUDE_ARGS. The stream goes to
+# <out>.stream.jsonl, stderr to <out>.stderr, and the stream's last result line to <out> (empty when
+# there is none). Returns 1 when the driver stopped it because its stream said the window is used up.
+invoke() {
+    local cwd=$1 out=$2 stream=$2.stream.jsonl ms=10 next=$((SECONDS + USAGE_POLL_S)) stopped=0 frac
+    SESSION_STREAM=$stream
+    : > "$stream"; : > "$out.stderr"     # there even when the cd fails: set_aside moves both
+    (cd "$cwd" && exec claude "${CLAUDE_ARGS[@]}" "$3" > "$stream" 2> "$out.stderr") &
+    SESSION_PID=$!
+    while kill -0 "$SESSION_PID" 2>/dev/null; do
+        printf -v frac '%03d' $((ms % 1000)); nap "$((ms / 1000)).$frac"
+        ms=$((ms < 500 ? ms * 2 : 1000))     # a stub ends in milliseconds, a real session in minutes
+        [ "$SECONDS" -ge "$next" ] || continue
+        next=$((SECONDS + USAGE_POLL_S))
+        case "$(pr_stream_limit "$stream")" in limited*) stop_session; stopped=1; break ;; esac
+    done
+    wait "$SESSION_PID" 2>/dev/null || true
+    SESSION_PID=''
+    pr_stream_result "$stream" > "$out"
+    [ "$stopped" = 0 ]
+}
+
+# transcript_of <session-id>  → the session's transcript file, or nothing.
+transcript_of() {
+    local f
+    [ -n "$1" ] && [ "$1" != null ] || return 0
+    for f in "$CLAUDE_HOME"/projects/*/"$1".jsonl; do
+        if [ -f "$f" ]; then printf '%s' "$f"; return 0; fi
+    done
+}
+
+# limit_hit <out> <stopped> <session>  → sets LIMIT_SOURCE to stream, result or transcript when the
+# invocation ended at a usage limit, else to nothing; LIMIT_RESET to the reset time (the stream's, else
+# the transcript's; empty when unknown). Notes the stream's newest window state in WINDOW_RESET either
+# way. A complete result or a spent budget is never a limit stop: that session finished, whatever its
+# stream says, and only the next launch waits (await_window). <session> is the one the invocation's
+# own stream names, or empty: a resume that died before its init line must not find, in the
+# transcript, the stop that preceded it.
+limit_hit() {
+    local out=$1 state reset='' kind tr_reset='' tr_hit=0
+    LIMIT_SOURCE=''; LIMIT_RESET=''; LIMIT_TRANSCRIPT=''
+    state=$(pr_stream_limit "$out.stream.jsonl")
+    case "$state" in
+        "limited "*) reset=${state#limited }; reset=${reset%.*}; WINDOW_RESET=$reset; WINDOW_SID=$3 ;;
+        limited|open) WINDOW_RESET='' ;;
+    esac
+    kind=$(pr_result_kind "$out")
+    case "$kind" in complete|budget) return 0 ;; esac
+    LIMIT_TRANSCRIPT=$(transcript_of "$3")
+    if [ -n "$LIMIT_TRANSCRIPT" ] && tr_reset=$(pr_transcript_usage_limit "$LIMIT_TRANSCRIPT" || exit 1); then tr_hit=1; fi
+    if [ "$2" = 1 ] || [ "${state%% *}" = limited ]; then LIMIT_SOURCE=stream
+    elif [ "$kind" = usage_limit ]; then LIMIT_SOURCE=result
+    elif [ "$tr_hit" = 1 ]; then LIMIT_SOURCE=transcript
+    else return 0; fi
+    LIMIT_RESET=${reset:-${tr_reset%.*}}
+}
+
+# past_ceiling <resetsAt|''> <target>  → exit 0, with SESSION_STOP set, when <target> lies further ahead
+# than USAGE_WAIT_MAX_S: a weekly limit, not waited for.
+past_ceiling() {
+    local wait_s=$(($2 - $(date +%s)))
+    [ "$wait_s" -gt "$USAGE_WAIT_MAX_S" ] || return 1
+    SESSION_STOP="the usage limit resets $(local_time "${1:-$2}") ($(pr_fmt_duration "$wait_s") away), past the $(pr_fmt_duration "$USAGE_WAIT_MAX_S") the runner waits — a weekly limit? Run this again after the reset"
+}
+
+# wait_out <kind> <session> <resetsAt|''> <target>  → notifies once with the local reset time, waits
+# until <target> and logs resumed. Kind `launch` is the wait before a launch. The wait sleeps in slices
+# of at most USAGE_SLICE_S against the wall clock, so a host that was suspended does not oversleep, and
+# a pause file stops the run in any slice (exit 5).
+wait_out() {
+    local start left
+    start=$(date +%s); left=$(($4 - start))
+    if [ "$left" -gt 0 ]; then
+        notify "usage limit in step $STEP" "$([ -n "$3" ] && echo "the limit resets $(local_time "$3")" || echo "no reset time known"); waiting $(pr_fmt_duration "$left"), until $(local_time "$4"), then the $([ "$1" = launch ] && echo "next session starts" || echo "$1 session resumes")"
+    fi
+    while [ "$left" -gt 0 ]; do
+        [ ! -f "$PAUSE" ] || stop_paused "during the usage-limit wait of step $STEP"
+        nap "$((left < USAGE_SLICE_S ? left : USAGE_SLICE_S))"
+        left=$(($4 - $(date +%s)))
+    done
+    log resumed --arg step "$STEP" --arg session "$2" --arg kind "$1" --argjson waited_s "$(($(date +%s) - start))"
+    WINDOW_RESET=''
+}
+
+# limit_wait <kind> <session> <source> <resetsAt|''> <file> <transcript>  → logs usage_limit and waits
+# out the reset plus slack: the fallback when no reset is known, and at least the slack after a stop.
+# Returns 1 with SESSION_STOP set, without waiting, past the ceiling or (any kind but launch) the cap.
+limit_wait() {
+    local kind=$1 reset=$4 now target
+    now=$(date +%s)
+    if [ -n "$reset" ]; then target=$((reset + USAGE_WAIT_SLACK_S)); else target=$((now + USAGE_WAIT_FALLBACK_S)); fi
+    # A reset already past would resume into the same stop at once; the slack is the least a stop waits.
+    if [ "$kind" != launch ] && [ "$target" -lt $((now + USAGE_WAIT_SLACK_S)) ]; then target=$((now + USAGE_WAIT_SLACK_S)); fi
+    log usage_limit --arg step "$STEP" --arg session "$2" --arg kind "$kind" --argjson resets_at "${reset:-null}" \
+        --arg source "$3" --argjson wait_s "$((target - now))" --arg file "$5" --arg transcript "$6"
+    if past_ceiling "$reset" "$target"; then return 1; fi
+    if [ "$kind" != launch ]; then
+        WAITS=$((WAITS + 1))
+        if [ "$WAITS" -gt "$USAGE_RESUME_MAX" ]; then
+            SESSION_STOP="usage limit hit $WAITS times in step $STEP — the runner waits out at most $USAGE_RESUME_MAX per step"
+            return 1
+        fi
+    fi
+    wait_out "$kind" "$2" "$reset" "$target"
+}
+
+# await_window  → before a launch: while the newest used-up window a stream showed has its reset ahead,
+# wait for it. Returns 1 with SESSION_STOP set when that reset is past the ceiling.
+await_window() {
+    [ -n "$WINDOW_RESET" ] && [ "$WINDOW_RESET" -gt "$(date +%s)" ] 2>/dev/null || return 0
+    limit_wait launch "$WINDOW_SID" stream "$WINDOW_RESET" '' ''
+}
+
+# The "## Interrupted attempt" section for a fresh step session that replaces one cut off at a usage
+# limit with no session left to resume.
+interrupted_block() {
+    printf '\n## Interrupted attempt\n\n%s\n' "An earlier session at this step was cut off at a usage limit and could not be resumed. The worktree holds its work: the commits since the step's start commit \`$START_SHA\`, and whatever is uncommitted. Read \`git log --oneline $START_SHA..HEAD\` and \`git status\` first, keep what is sound, and finish the step from there."
+}
+
+# session_total <session-id>  → the last total cost logged for that session (0 for none): a resumed
+# session reports its cost cumulatively, so its next total counts from there.
+session_total() {
+    local c=''
+    if [ -n "$1" ] && [ -f "$LOG" ]; then
+        c=$(jq -r --arg s "$1" 'select(.event == "result" and .session == $s and (.cost // 0) > 0) | .cost' "$LOG" 2>/dev/null | tail -1 || true)
+    fi
+    printf '%s' "${c:-0}"
+}
+
+# on_signal  → the INT/TERM trap of a real run. claude runs as a background job, which ignores SIGINT in
+# a non-interactive shell, so Ctrl-C reaches only the driver: it stops the running session itself.
+on_signal() {
+    local sid=''
+    trap - INT TERM
+    if [ -n "$SESSION_PID" ]; then sid=$(pr_session_id "$SESSION_STREAM"); stop_session; SESSION_PID=''; fi
+    [ -z "$NAP_PID" ] || kill "$NAP_PID" 2>/dev/null || true
+    log interrupted --arg step "$STEP" --arg session "$sid" --arg kind "$SESSION_KIND" || true
+    [ -z "$sid" ] || SESSION_ID=$sid
+    say "interrupted$([ -z "$sid" ] || echo " — session $sid stopped; resume it by hand with: $(resume_hint)")"
+    exit 130
+}
+
+# set_aside <out> <to>  → moves an invocation's result, stream and stderr out of the way of the next one.
+set_aside() { mv "$1" "$2"; mv "$1.stream.jsonl" "$2.stream.jsonl"; mv "$1.stderr" "$2.stderr"; }
+
+# run_session <kind> <cwd> <out> <budget> <prompt> [<resume-id> [after-limit]]  → runs one session of
+# <kind> (step, nudge, review, judge) until it ends by itself. A limit stop is logged, waited
+# out and the same session resumed with CONTINUE_PROMPT on what is left of <budget>; the interrupted
+# invocation's files move to <out minus .json>.limit<N>.json*. A session with no id to resume, or a
+# resume after a wait that ends without a result (its files: .noresume<N>.json*), is replaced by a
+# fresh session of its kind (a nudge's by a step session, with the Interrupted attempt block). Every
+# invocation's result is logged; <out> ends up holding the last one. Sets RUN_SID, and RUN_SPENT to
+# what the session's invocations reported spending. Sets SESSION_STOP, and returns, at the ceiling or
+# the cap. <after-limit> 1: the first invocation already resumes after a wait (resume_cut_off).
+run_session() {
+    local kind=$1 cwd=$2 out=$3 budget=$4 prompt=$5 sid=${6:-} after_limit=${7:-0}
+    local total prev n=0 tag stopped left=$4 text aside
+    SESSION_STOP=''; RUN_SID=$sid; RUN_SPENT=0
+    await_window || return 0
+    prev=$(session_total "$sid")
+    while :; do
+        if [ "$kind" = judge ]; then judge_args "$left"; else claude_args "$left"; fi
+        [ -z "$sid" ] || CLAUDE_ARGS+=(--resume "$sid")
+        if [ "$after_limit" = 1 ]; then text=$CONTINUE_PROMPT; else text=$prompt; fi
+        SESSION_KIND=$kind; stopped=0
+        invoke "$cwd" "$out" "$text" || stopped=1
+        SESSION_KIND=''
+        RUN_SID=$(pr_session_id "$out.stream.jsonl")
+        total=$(pr_result_field "$out" .total_cost_usd 0)
+        if awk -v t="$total" 'BEGIN { exit !(t > 0) }'; then
+            RUN_SPENT=$(awk -v a="$RUN_SPENT" -v d="$(pr_cost_delta "$total" "$prev")" 'BEGIN { print a + d }'); prev=$total
+        fi
+        limit_hit "$out" "$stopped" "$RUN_SID"
+        RUN_SID=${RUN_SID:-$sid}
+        # A resume after a wait that ends without a result had no session left to resume.
+        if [ -n "$LIMIT_SOURCE" ]; then tag=limit
+        elif [ "$after_limit" = 1 ] && [ ! -s "$out" ]; then tag=noresume
+        else log_result "$out" "$kind" "$RUN_SID"; return 0; fi
+        n=$((n + 1)); aside=${out%.json}.$tag$n.json
+        set_aside "$out" "$aside"
+        log_result "$aside" "$kind" "$RUN_SID"
+        if [ "$tag" = limit ]; then
+            say "step $STEP: the $kind session ${RUN_SID:-(no id)} stopped at a usage limit ($LIMIT_SOURCE)"
+            limit_wait "$kind" "$RUN_SID" "$LIMIT_SOURCE" "$LIMIT_RESET" "$(rel "$aside")" "$LIMIT_TRANSCRIPT" || return 0
+        else
+            say "step $STEP: the resumed $kind session ${RUN_SID:-(no id)} ended without a result — starting a fresh one"
+            RUN_SID=''
+        fi
+        left=$(pr_budget_left "$budget" "$RUN_SPENT")    # the flag counts per invocation
+        if [ -n "$RUN_SID" ]; then sid=$RUN_SID; after_limit=1; continue; fi
+        # No session to resume: a fresh one of the same kind, which resumes nothing. A step's gets the
+        # Interrupted attempt block and keeps the step's START_SHA; a review or a judge its own prompt.
+        # A nudge has no fresh form: a step session replaces it, on what is left of the step's budget.
+        sid=''; prev=0; after_limit=0
+        if [ "$kind" = nudge ]; then
+            kind=step; budget=$(pr_budget_left "$BUDGET" "$(kind_spent "$SESSION_ID" launched)"); RUN_SPENT=0; left=$budget
+        fi
+        if [ "$kind" = step ]; then
+            case "$ATTEMPT_BLOCK" in *"## Interrupted attempt"*) ;; *) ATTEMPT_BLOCK+=$(interrupted_block)$NL ;; esac
+            write_prompt; prompt=$PROMPT
+        fi
+    done
 }
 
 resume_hint() { printf 'cd %q && claude --resume %s\n' "$WT" "$SESSION_ID"; }
@@ -357,9 +632,15 @@ stop_needs_decision() {
 stop_blocked() { # stop_blocked <why>
     log blocked --arg step "$STEP" --arg session "${SESSION_ID:-unknown}" --arg why "$1"
     notify "step $STEP is blocked" "$1"
-    echo; echo "  $(result_get .structured_output.summary)"; echo
-    echo "  inspect the worktree, then either resume the session or fix by hand and run this again:"
-    echo "    $(resume_hint)"
+    local summary; summary=$(result_get .structured_output.summary)
+    echo; [ "$summary" = null ] || { echo "  $summary"; echo; }
+    if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" = null ]; then
+        echo "  no session to resume — inspect the worktree, fix by hand if needed, and run this again:"
+        echo "    cd $(printf '%q' "$WT") && git status"
+    else
+        echo "  inspect the worktree, then either resume the session or fix by hand and run this again:"
+        echo "    $(resume_hint)"
+    fi
     exit 3
 }
 
@@ -369,10 +650,9 @@ nudge() {
     NUDGED=1
     log nudged --arg step "$STEP" --arg session "$SESSION_ID" --arg reasons "$1"
     say "nudging the session once (budget \$$NUDGE_BUDGET_USD)"
-    claude_args "$NUDGE_BUDGET_USD" --resume "$SESSION_ID"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).nudge.result.json
-    run_claude "$RESULT_FILE" "$1"$'\n\n'"Then end again with the JSON result object."
-    log_result
+    run_session nudge "$WT" "$RESULT_FILE" "$NUDGE_BUDGET_USD" "$1"$'\n\n'"Then end again with the JSON result object." "$SESSION_ID"
+    SESSION_ID=${RUN_SID:-$SESSION_ID}      # a fresh session replaces one it could not resume
 }
 
 # review_nudge <reasons>  — what the nudge becomes when the only thing wrong is a missed
@@ -387,10 +667,8 @@ review_nudge() {
     say "the diff requires skills the session did not run ($missing) — running them in a fresh session (budget \$$REVIEW_BUDGET_USD)"
     prompt=$(pr_render "$SKILLS_TEMPLATE" "PLAN_PATH=$PLAN_REL" "STEP=$STEP" "STEP_HEADING=$HEADING" \
         "BRANCH=$BRANCH" "START_SHA=$START_SHA" "TIER=$TIER" "MISSING=$missing" "SCHEMA_PATH=$SCHEMA_REL")
-    claude_args "$REVIEW_BUDGET_USD"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).review.result.json
-    run_claude "$RESULT_FILE" "$prompt"
-    log_result
+    run_session review "$WT" "$RESULT_FILE" "$REVIEW_BUDGET_USD" "$prompt"
 }
 
 # escalate <why>  — the one fresh re-run a step may get once its nudge is spent: the failed
@@ -459,7 +737,7 @@ judge_count() { pr_result_json "$1" "[.structured_output.findings[]? | select(.s
 # judge that writes despite its tool list damages nothing — its grade is dropped instead.
 judge_step() {
     [ -n "$JUDGE_MODEL" ] || return 0
-    local names head out prompt jwt dirty
+    local names head out prompt jwt dirty why
     names=$(mktemp); wt_git diff --name-only "$START_SHA..HEAD" > "$names"
     if ! pr_has_code "$names"; then rm -f "$names"; say "nothing but docs in the diff — judge skipped"; return 0; fi
     rm -f "$names"
@@ -474,20 +752,20 @@ judge_step() {
     prompt=$(pr_render "$JUDGE_TEMPLATE" "PLAN_PATH=$PLAN_REL" "STEP=$STEP" "STEP_HEADING=$HEADING" \
         "START_SHA=$START_SHA" "HEAD_SHA=$head")
     say "judging step $STEP on $JUDGE_MODEL/$JUDGE_EFFORT (read-only, budget \$$JUDGE_BUDGET_USD)"
-    (cd "$jwt" && claude -p --output-format json --json-schema "$(cat "$JUDGE_SCHEMA")" \
-        --model "$JUDGE_MODEL" --effort "$JUDGE_EFFORT" --max-budget-usd "$JUDGE_BUDGET_USD" \
-        --permission-mode default --allowedTools "${JUDGE_ALLOWED_TOOLS[@]}" --disallowedTools "${JUDGE_DISALLOWED_TOOLS[@]}" \
-        -n "plan review step $STEP" "$prompt" > "$out" 2> "$out.stderr") || true
+    run_session judge "$jwt" "$out" "$JUDGE_BUDGET_USD" "$prompt"
     dirty=''
     if [ "$(git -C "$jwt" rev-parse HEAD)" != "$head" ] || [ -n "$(git -C "$jwt" status --porcelain)" ]; then dirty=1; fi
     git -C "$ROOT" worktree remove --force "$jwt" || true
-    if [ -n "$dirty" ] || [ "$(pr_result_kind "$out")" != complete ]; then
-        log judge_failed --arg step "$STEP" --arg file "$(rel "$out")" --argjson cost "$(pr_result_json "$out" .total_cost_usd 0)" \
-            --arg why "$([ -n "$dirty" ] && echo "the judge wrote to its worktree — grade dropped" || echo "no usable result ($(pr_result_field "$out" .subtype))")"
-        say "warning: step $STEP has no grade — $([ -n "$dirty" ] && echo "the judge wrote to its (throwaway) worktree" || echo "the judge ended without a usable result"); the plan goes on"
+    # A judge that still fails after a usage-limit wait, or stops at the ceiling or the cap, gets no grade either.
+    if [ -n "$dirty" ] || [ -n "$SESSION_STOP" ] || [ "$(pr_result_kind "$out")" != complete ]; then
+        if [ -n "$dirty" ]; then why="the judge wrote to its worktree — grade dropped"
+        elif [ -n "$SESSION_STOP" ]; then why=$SESSION_STOP
+        else why="no usable result ($(pr_result_error "$out"))"; fi
+        log judge_failed --arg step "$STEP" --arg file "$(rel "$out")" --argjson cost "$RUN_SPENT" --arg why "$why"
+        say "warning: step $STEP has no grade — $why; the plan goes on"
         return 0
     fi
-    log judged --arg step "$STEP" --arg session "$(pr_result_field "$out" .session_id)" \
+    log judged --arg step "$STEP" --arg session "$RUN_SID" \
         --arg model "$JUDGE_MODEL" --arg effort "$JUDGE_EFFORT" --arg verdict "$(pr_result_field "$out" .structured_output.verdict)" \
         --argjson high "$(judge_count "$out" high)" --argjson medium "$(judge_count "$out" medium)" --argjson low "$(judge_count "$out" low)" \
         --arg tests_adequate "$(pr_result_field "$out" .structured_output.testsAdequate)" \
@@ -500,9 +778,15 @@ judge_step() {
 handle_result() {
     local reasons
     while :; do
+        [ -z "$SESSION_STOP" ] || stop_blocked "$SESSION_STOP"      # a usage-limit wait past the ceiling or the cap
         case "$(pr_result_kind "$RESULT_FILE")" in
             budget) stop_blocked "budget or turn limit exhausted ($(result_get .subtype)) — not resumed" ;;
-            failed) stop_blocked "session ended without a usable result ($(result_get .subtype); stderr in $(rel "$RESULT_FILE").stderr)" ;;
+            failed|usage_limit)
+                # A usage limit (HTTP 429) is waited out in run_session and never ends up here.
+                if [ "$(result_get .terminal_reason)" = api_error ]; then
+                    say "the session ended on an API error. The CLI retries transient errors before it gives up, so the runner does not retry. Once the cause is gone (a login, an outage), run this again: a fresh session restarts the step and sees what this one left uncommitted"
+                fi
+                stop_blocked "session ended without a usable result ($(pr_result_error "$RESULT_FILE"); stderr in $(rel "$RESULT_FILE").stderr)" ;;
             incomplete)
                 if [ "$NUDGED" = 1 ]; then
                     escalate "the session ended without the JSON result object, and its one nudge was already spent"
@@ -537,20 +821,74 @@ handle_result() {
     done
 }
 
-# launch — one fresh session for the current attempt; sets RESULT_FILE and SESSION_ID.
+# launch — one fresh session for the current attempt; sets RESULT_FILE and SESSION_ID. A used-up
+# usage window that a stream reported waits first, before the launch is logged.
 launch() {
+    await_window || stop_blocked "$SESSION_STOP"
     write_prompt
-    claude_args "$BUDGET"
     RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$STAMP.result.json
     log launched --arg step "$STEP" --arg start "$START_SHA" --arg tier "$TIER" --arg tagged "$TAGGED_TIER" \
         --arg model "$MODEL" --arg effort "$EFFORT" --arg advisor "${ADVISOR:-none}" --argjson attempt "$ATTEMPT" \
         --arg base "$(wt_git merge-base main HEAD | cut -c1-8)" \
         --arg budget "$BUDGET" --arg prompt "$(rel "$PROMPT_FILE")"
     say "step $STEP → $MODEL/$EFFORT${ADVISOR:+ + advisor $ADVISOR}, attempt $ATTEMPT, budget \$$BUDGET, floor $(pr_join "$FLOOR" none)"
-    run_claude "$RESULT_FILE" "$PROMPT"
-    SESSION_ID=$(result_get .session_id)
-    log_result
-    say "step $STEP session $SESSION_ID: $(result_get .subtype), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
+    run_session step "$WT" "$RESULT_FILE" "$BUDGET" "$PROMPT"
+    SESSION_ID=$RUN_SID
+    say "step $STEP session ${SESSION_ID:-(no id)}: $(pr_result_kind "$RESULT_FILE"), status $(result_get .structured_output.status), \$$(result_get .total_cost_usd), denials $(pr_result_json "$RESULT_FILE" '.permission_denials | length' '?')"
+}
+
+# cut_off <step>  → exit 0 when a stop during a usage-limit wait (a pause, a crash, Ctrl-C) left a step
+# or nudge session of <step> to resume: the step's last limit event is a usage_limit with no resumed
+# after it. Sets CUT_KIND, CUT_SID, CUT_RESET (epoch or empty) and CUT_TARGET, the epoch the
+# interrupted wait was to end at. A review, a judge or a pre-launch wait is redone the way a re-run
+# always treats a step: a fresh launch.
+CUT_KIND=''; CUT_SID=''; CUT_RESET=''; CUT_TARGET=''
+cut_off() {
+    local last
+    CUT_KIND=''; CUT_SID=''; CUT_RESET=''; CUT_TARGET=''
+    [ -f "$LOG" ] || return 1
+    # One line, fields split by the unit separator: IFS whitespace would merge an empty field away.
+    last=$(jq -rs --arg s "$1" 'map(select(.step == $s and (.event == "usage_limit" or .event == "resumed"))) | last
+        | select(.event? == "usage_limit")
+        | [.kind, (.session // "" | if . == "null" then "" else . end), (.resets_at // ""), ((.ts | fromdateiso8601) + (.wait_s // 0))]
+        | map(tostring) | join("\u001f")' "$LOG" 2>/dev/null || true)
+    [ -n "$last" ] || return 1
+    IFS=$'\x1f' read -r CUT_KIND CUT_SID CUT_RESET CUT_TARGET <<< "$last" || true
+    case "$CUT_KIND" in step|nudge) [ -n "$CUT_SID" ] ;; *) return 1 ;; esac
+}
+
+# kind_spent <session> <event>  → what <session> spent since the step's last <event> (launched for a step
+# session, nudged for a nudge), from the logged results: each result's increase over the session's
+# previous one, the rule of lib.sh pr_cost_delta and report.sh. A result with no cost counts nothing.
+kind_spent() {
+    local out
+    out=$(jq -rs --arg s "$STEP" --arg sid "$1" --arg ev "$2" '
+        map(select(.step == $s)) | ((map(.event == $ev) | rindex(true)) // 0) as $i
+        | def costs: map(select(.event == "result" and .session == $sid and (.cost // 0) > 0) | .cost);
+          reduce (.[$i:] | costs)[] as $c ({p: (.[:$i] | costs | last // 0), s: 0};
+              .s += (if $c >= .p then $c - .p else $c end) | .p = $c) | .s' "$LOG" 2>/dev/null || true)
+    printf '%s' "${out:-0}"
+}
+
+# resume_cut_off  → the re-run side of a stop during a usage-limit wait (cut_off): waits out the rest of
+# that wait if it still lies ahead, logs resumed and resumes the step or nudge session where it was cut
+# off, on what is left of its kind's budget. The step keeps the START_SHA of its last launch. Sets
+# RESULT_FILE and SESSION_ID.
+resume_cut_off() {
+    local kind=$CUT_KIND sid=$CUT_SID target=${CUT_TARGET%.*} budget=$BUDGET from=launched now
+    START_SHA=$(jq -r --arg s "$STEP" 'select(.event == "launched" and .step == $s) | .start' "$LOG" 2>/dev/null | tail -1 || true)
+    START_SHA=${START_SHA:-$(wt_git rev-parse HEAD)}
+    SESSION_ID=$sid
+    if [ "$kind" = nudge ]; then NUDGED=1; budget=$NUDGE_BUDGET_USD; from=nudged; fi
+    budget=$(pr_budget_left "$budget" "$(kind_spent "$sid" "$from")")
+    say "step $STEP: resuming its $kind session $sid, which a usage limit stopped in an earlier run (budget \$$budget left)"
+    now=$(date +%s)
+    [ -n "$target" ] && [ "$target" -gt "$now" ] 2>/dev/null || target=$now
+    if past_ceiling "$CUT_RESET" "$target"; then stop_blocked "$SESSION_STOP"; fi
+    wait_out "$kind" "$sid" "$CUT_RESET" "$target"
+    RESULT_FILE=$RUNS/$RUN_ID.step$STEP.$(date +%Y%m%d-%H%M%S).resume.result.json
+    run_session "$kind" "$WT" "$RESULT_FILE" "$budget" "$CONTINUE_PROMPT" "$sid" 1
+    SESSION_ID=${RUN_SID:-$sid}
 }
 
 run_step() {
@@ -585,7 +923,7 @@ run_step() {
             (cd "$WT" && git ls-files -o --exclude-standard -z | tar --null -czf "$PRESTATE.untracked.tgz" -T -)
         fi
     fi
-    launch
+    if cut_off "$STEP"; then resume_cut_off; else launch; fi
     handle_result
 }
 
@@ -620,14 +958,202 @@ validate_pending_from_log() {
     judge_step
 }
 
+# ---- the walk over the Order line ----------------------------------------------
+SHIPPED_NOW=' '     # the steps this invocation shipped (a dry run: would ship), space-delimited
+NEXT=''; PENDING=0; STOPPED_TO=0; SYNCED=0; SYNC_NOTED=0; SYNC_FETCHED=0
+
+# load_tokens  → TOKENS from the Order line of the branch's plan; read again after every sync.
+load_tokens() {
+    local order
+    order=$(pr_order_tokens "$PLAN_WT" || exit 1) || exit 1
+    mapfile -t TOKENS <<< "$order"
+}
+
+# checkpoint_due <step left of the ‖> <index of the ‖>  → exit 0 when the ‖ stops the run. Only
+# at the frontier: no later step of the Order line is shipped. So a ‖ that a sync adds behind the
+# run's position never stops it. At the frontier it is due when its step shipped in this
+# invocation, or when the step is shipped and the log rule of pr_checkpoint_due holds.
+checkpoint_due() {
+    [ -n "$1" ] || return 1
+    ! pr_shipped_after "$PLAN_WT" "$2" "${TOKENS[@]}" || return 1
+    case "$SHIPPED_NOW" in *" $1 "*) return 0 ;; esac
+    pr_step_shipped "$PLAN_WT" "$1" && pr_checkpoint_due "$LOG" "$1"
+}
+
+stop_checkpoint() { # stop_checkpoint <step>
+    log checkpoint --arg step "$1"
+    notify "checkpoint after step $1" "sign off the departures in $PLAN_REL, then run again to continue"
+    echo "  $(wt_git log --oneline "$(wt_git merge-base main HEAD)..HEAD" | wc -l) commit(s) on $BRANCH — git -C $ROOT log main..$BRANCH"
+    echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
+    exit 4
+}
+
+# walk  → one pass over TOKENS from the top. A real run stops at the first step to launch and
+# leaves it in NEXT (empty: nothing left, or STOPPED_TO=1 past --to). A dry run lists every
+# step instead. Exits at a due ‖ (4) and at an unanswered **Decision needed** block (2).
+walk() {
+    local i tok prev='' last_session
+    NEXT=''
+    for i in "${!TOKENS[@]}"; do
+        tok=${TOKENS[$i]}
+        # --to: the first step past N ends the run. A ‖ between N and that step has had its turn by
+        # now (CP tokens carry no number), so a checkpoint due after step N still stops with exit 4.
+        if [ -n "$TO" ] && [ "$tok" != CP ] && [ "$(pr_step_num "$tok")" -gt "$TO" ]; then STOPPED_TO=1; return 0; fi
+        if [ "$tok" = CP ]; then
+            if checkpoint_due "$prev" "$i"; then
+                if [ "$DRY_RUN" = 1 ]; then echo; echo "‖ the run would stop here after step $prev (listing continues for review)"; continue; fi
+                stop_checkpoint "$prev"
+            fi
+            continue
+        fi
+        prev=$tok
+        if [ "$(pr_step_num "$tok")" -lt "$FROM" ]; then continue; fi
+        if pr_step_shipped "$PLAN_WT" "$tok"; then continue; fi
+        if pr_step_decision_pending "$PLAN_WT" "$tok"; then
+            STEP=$tok
+            if [ "$DRY_RUN" = 1 ]; then echo; echo "step $tok — has an unanswered **Decision needed** block; a real run stops here"; PENDING=1; continue; fi
+            say "step $tok has an unanswered **Decision needed** block — answer it (resume the last session, or edit the branch's plan and rename the block to **Decision taken**)"
+            last_session=$(jq -r --arg s "$tok" 'select(.event=="needs_decision" and .step==$s) | .session' "$LOG" 2>/dev/null | tail -1 || true)
+            [ -z "${last_session:-}" ] || { SESSION_ID=$last_session; echo "    $(resume_hint)"; }
+            exit 2
+        fi
+        if [ "$DRY_RUN" = 1 ]; then PENDING=1; run_step "$tok"; SHIPPED_NOW+="$tok "; continue; fi
+        NEXT=$tok; return 0
+    done
+}
+
+# ---- the step boundary: pause file and plan sync ---------------------------------
+stop_paused() { # stop_paused [<where>]  — default: before step NEXT. A run paused during a wait resumes its session.
+    log paused --arg next "$NEXT"
+    rm -f "$PAUSE"
+    notify "paused ${1:-before step $NEXT}" "the pause file is removed; run the same command again to continue"
+    exit 5
+}
+
+# sync_fetch  → a remote-tracking REF (origin/main) is fetched first: the owner's edits arrive
+# there by push, and a cloud container's local main never moves. A failed fetch is a warning.
+# Once per boundary: the main loop clears SYNC_FETCHED after each step, so the walk that follows a
+# sync commit, and the first boundary after the start-up check, do not fetch again.
+sync_fetch() {
+    local full remote branch err
+    [ "$SYNC_FETCHED" = 0 ] || return 0
+    SYNC_FETCHED=1
+    full=$(git -C "$ROOT" rev-parse --symbolic-full-name "$SYNC_FROM" 2>/dev/null || true)
+    case "$full" in refs/remotes/*/*) ;; *) return 0 ;; esac
+    full=${full#refs/remotes/}; remote=${full%%/*}; branch=${full#*/}
+    # `|| exit 1` inside: a failing command in $(…) fires the ERR trap there, `if !` outside or not.
+    if ! err=$(git -C "$ROOT" fetch -q "$remote" "$branch" 2>&1 || exit 1); then
+        say "warning: git fetch $remote $branch failed ($(tail -1 <<< "$err")) — syncing from $SYNC_FROM as it is"
+    fi
+}
+
+# last_sync <range>  → the REF sha named by the newest sync commit's trailer in <range>, or nothing.
+last_sync() { pr_synced_from "$(wt_git log -1 --format=%B --grep="^$PR_SYNC_TRAILER: " "$1")"; }
+
+# sync_message <ref-sha>  → the -m arguments of a sync commit, one per line: subject, then trailer.
+sync_message() {
+    printf 'docs(plan): sync %s from %s at %s\n%s: %s\n' "$PLAN_REL" "$SYNC_FROM" "$(git -C "$ROOT" rev-parse --short "$1")" "$PR_SYNC_TRAILER" "$1"
+}
+
+# sync_base <ref-sha>  → the merge base of the plan: the newer of the fork point and the REF commit
+# named by the trailer of the branch's newest sync commit. A trailer commit no longer on REF is
+# ignored. Prints nothing when the two share no history.
+sync_base() {
+    local mb t
+    mb=$(wt_git merge-base "$1" HEAD 2>/dev/null || true)
+    [ -n "$mb" ] || return 0
+    t=$(last_sync "$mb..HEAD")
+    if [ -n "$t" ] && wt_git merge-base --is-ancestor "$t" "$1" 2>/dev/null && ! wt_git merge-base --is-ancestor "$t" "$mb" 2>/dev/null; then
+        echo "$t"
+    else
+        echo "$mb"
+    fi
+}
+
+stop_sync() { # stop_sync <ref-sha> <why>  — nothing was written to the worktree
+    local msg
+    mapfile -t msg < <(sync_message "$1")
+    log plan_sync_failed --arg next "$NEXT" --arg ref "$SYNC_FROM" --arg sha "$1" --arg why "$2" --arg file "$(rel "$SYNC_CONFLICT")"
+    notify "the plan sync from $SYNC_FROM needs you" "$2"
+    echo; echo "  the merged plan is in $(rel "$SYNC_CONFLICT"); the worktree and $BRANCH are untouched."
+    echo "  merge it by hand into $(rel "$WT")/$PLAN_REL, record the merge with this one commit, and run this again:"
+    echo "    git -C $(printf '%q' "$WT") commit -m '${msg[0]}' -m '${msg[1]}' -- $PLAN_REL"
+    echo "  or run again with --sync-from none to go on without the change."
+    exit 5
+}
+
+# sync_plan  → merges the plan file, and only the plan file, from SYNC_FROM into the branch's copy
+# and commits it. Sets SYNCED=1 when it committed; exits 5 when the merge needs the owner.
+sync_plan() {
+    local sha base tmp rc=0 why='' placed=0 problems msg
+    SYNCED=0
+    [ "$SYNC_FROM" != none ] || return 0
+    if [ -n "$(wt_git status --porcelain -- "$PLAN_REL")" ]; then
+        say "note: $PLAN_REL has uncommitted changes in the worktree (an answer to a decision?) — plan sync skipped; a later step boundary syncs"
+        return 0
+    fi
+    # A step whose session a usage limit cut off resumes mid-step: a sync commit here would land inside its range.
+    if cut_off "$NEXT"; then say "note: step $NEXT resumes a session cut off at a usage limit — plan sync deferred to the next step boundary"; return 0; fi
+    sync_fetch
+    sha=$(git -C "$ROOT" rev-parse --verify --quiet "$SYNC_FROM^{commit}" || true)
+    if [ -z "$sha" ]; then say "warning: $SYNC_FROM no longer names a commit — plan sync skipped"; return 0; fi
+    if ! git -C "$ROOT" cat-file -e "$sha:$PLAN_REL" 2>/dev/null; then
+        [ "$SYNC_NOTED" = 1 ] || say "note: $SYNC_FROM has no $PLAN_REL — nothing to sync"
+        SYNC_NOTED=1; return 0
+    fi
+    base=$(sync_base "$sha")
+    if [ -z "$base" ]; then say "warning: $BRANCH and $SYNC_FROM share no history — plan sync skipped"; return 0; fi
+    # The plan changed on REF only when its blob differs from the base's.
+    [ "$(git -C "$ROOT" rev-parse "$sha:$PLAN_REL")" != "$(git -C "$ROOT" rev-parse --verify --quiet "$base:$PLAN_REL" || true)" ] || return 0
+    tmp=$(mktemp -d)
+    cp "$PLAN_WT" "$tmp/ours"
+    git -C "$ROOT" show "$sha:$PLAN_REL" > "$tmp/theirs"
+    git -C "$ROOT" show "$base:$PLAN_REL" > "$tmp/base" 2>/dev/null || : > "$tmp/base"
+    git merge-file -p --zdiff3 --marker-size=13 -L "$BRANCH" -L "base" -L "$SYNC_FROM" \
+        "$tmp/ours" "$tmp/base" "$tmp/theirs" > "$tmp/merged" || rc=$?
+    if [ "$rc" -ge 128 ]; then
+        why="git merge-file failed (exit $rc)"
+    elif [ "$rc" -gt 0 ]; then
+        # Same-spot insertions (a Shipped block here, a new step there) are placed, not stopped on.
+        if pr_merge_inserts "$tmp/merged" > "$tmp/placed"; then placed=$rc; else why="$PLAN_REL changed at the same place on $BRANCH and on $SYNC_FROM"; fi
+        mv "$tmp/placed" "$tmp/merged"
+    fi
+    if [ -z "$why" ]; then
+        problems=$(pr_plan_check "$tmp/merged" "$tmp/ours" || true)
+        [ -z "$problems" ] || why="the merged plan does not check: ${problems//$'\n'/; }"
+    fi
+    if [ -n "$why" ]; then cp "$tmp/merged" "$SYNC_CONFLICT"; rm -rf "$tmp"; stop_sync "$sha" "$why"; fi
+    if cmp -s "$tmp/merged" "$PLAN_WT"; then rm -rf "$tmp"; return 0; fi     # REF's change is already here
+    cp "$tmp/merged" "$PLAN_WT"; rm -rf "$tmp"
+    mapfile -t msg < <(sync_message "$sha")
+    if ! wt_git commit -q -m "${msg[0]}" -m "${msg[1]}" -- "$PLAN_REL"; then
+        cp "$PLAN_WT" "$SYNC_CONFLICT"
+        wt_git checkout -q -- "$PLAN_REL"
+        stop_sync "$sha" "git commit of the merged plan failed"
+    fi
+    log plan_synced --arg next "$NEXT" --arg ref "$SYNC_FROM" --arg sha "$sha" --arg base "$base" \
+        --arg commit "$(wt_git rev-parse HEAD)" --argjson placed "$placed"
+    say "${msg[0]#docs(plan): }$([ "$placed" = 0 ] || echo ", $placed same-spot insertion(s) placed with the branch's lines first") — reading the Order line again"
+    SYNCED=1
+}
+
 # ---- main --------------------------------------------------------------------
 if [ "$DRY_RUN" = 0 ]; then
+    if [ "$SYNC_FROM" != none ]; then
+        sync_fetch
+        git -C "$ROOT" rev-parse --verify --quiet "$SYNC_FROM^{commit}" >/dev/null \
+            || { echo "--sync-from: '$SYNC_FROM' is not a commit (none turns the plan sync off)" >&2; exit 1; }
+    fi
     ensure_worktree
     PLAN_WT=$WT/$PLAN_REL
     [ -f "$PLAN_WT" ] || { echo "plan-runner: $PLAN_REL is not on $BRANCH — commit the plan on main first, then merge main into $BRANCH or recreate the worktree" >&2; exit 1; }
-    # Not a cmp with the branch's copy: that differs from the first **Shipped** block on.
-    if ! git -C "$ROOT" diff --quiet "$(wt_git merge-base main HEAD)" -- "$PLAN_REL" 2>/dev/null; then
-        say "warning: $PLAN_REL changed in the main tree since $BRANCH forked from (or last merged) main — the runner reads the branch's copy ($(rel "$WT")/$PLAN_REL); merge main into $BRANCH to pick the change up"
+    # A committed edit reaches the run by the plan sync at the next step boundary; an uncommitted one never does.
+    if [ -n "$(git -C "$ROOT" status --porcelain -- "$PLAN_REL" 2>/dev/null || true)" ]; then
+        say "warning: $PLAN_REL has uncommitted changes in the main checkout — a run never sees them; $([ "$SYNC_FROM" = none ] && echo "commit them and merge them into $BRANCH" || echo "commit them on $SYNC_FROM, and the next step boundary syncs them")"
+    fi
+    if [ -f "$PAUSE" ]; then
+        rm -f "$PAUSE"
+        say "note: removed a stale pause file ($(rel "$PAUSE")) from before this start — to pause this run, create it again while it runs"
     fi
     behind=$(git -C "$ROOT" rev-list --count "$BRANCH..main" 2>/dev/null || echo 0)
     [ "$behind" = 0 ] || say "note: $BRANCH is $behind commit(s) behind main"
@@ -637,54 +1163,44 @@ else
     say "dry run — reading $PLAN_REL from $([ -d "$WT" ] && echo "the worktree" || echo "the main tree"); nothing is launched, rendered prompts go to $(rel "$RUNS")"
 fi
 
-if ! ORDER=$(pr_order_tokens "$PLAN_WT"); then exit 1; fi
-mapfile -t TOKENS <<< "$ORDER"
-[ "$DRY_RUN" = 1 ] || validate_pending_from_log
+load_tokens
+if [ "$DRY_RUN" = 0 ]; then
+    trap on_signal INT TERM
+    # A driver that dies on its ERR trap must not leave a session running in the worktree.
+    trap '[ -z "$SESSION_PID" ] || stop_session' EXIT
+    # The newest known window state at start-up is the log's last usage_limit: a run stopped during a
+    # wait, or blocked past the ceiling, waits out a reset that still lies ahead before its first launch.
+    last_limit=$(jq -r 'select(.event == "usage_limit") | "\(.resets_at // "") \(.session)"' "$LOG" 2>/dev/null | tail -1 || true)
+    WINDOW_RESET=${last_limit%% *}; WINDOW_RESET=${WINDOW_RESET%.*}; WINDOW_SID=${last_limit#* }
+    validate_pending_from_log
+fi
 
-ran_prev=0; prev=''; pending=0; stopped_to=0
-for tok in "${TOKENS[@]}"; do
-    # --to: the first step past N ends the run. A ‖ between N and that step has had its turn by
-    # now (CP tokens carry no number), so a checkpoint due after step N still stops with exit 4.
-    if [ -n "$TO" ] && [ "$tok" != CP ] && [ "$(pr_step_num "$tok")" -gt "$TO" ]; then stopped_to=1; break; fi
-    if [ "$tok" = CP ]; then
-        # Due after a step this run shipped (or, dry, would ship), or one the runner had a
-        # hand in earlier that never got its pause — see pr_checkpoint_due.
-        if [ -n "$prev" ] && { [ "$ran_prev" = 1 ] || pr_step_shipped "$PLAN_WT" "$prev"; } \
-           && pr_checkpoint_due "$LOG" "$prev" "$ran_prev"; then
-            if [ "$DRY_RUN" = 1 ]; then echo; echo "‖ the run would stop here after step $prev (listing continues for review)"; ran_prev=0; continue; fi
-            log checkpoint --arg step "$prev"
-            notify "checkpoint after step $prev" "sign off the departures in $PLAN_REL, then run again to continue"
-            echo "  $(wt_git log --oneline "$(wt_git merge-base main HEAD)..HEAD" | wc -l) commit(s) on $BRANCH — git -C $ROOT log main..$BRANCH"
-            echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
-            exit 4
-        fi
-        continue
-    fi
-    prev=$tok; ran_prev=0
-    if [ "$(pr_step_num "$tok")" -lt "$FROM" ]; then continue; fi
-    if pr_step_shipped "$PLAN_WT" "$tok"; then continue; fi
-    if pr_step_decision_pending "$PLAN_WT" "$tok"; then
-        STEP=$tok
-        if [ "$DRY_RUN" = 1 ]; then echo; echo "step $tok — has an unanswered **Decision needed** block; a real run stops here"; pending=1; continue; fi
-        say "step $tok has an unanswered **Decision needed** block — answer it (resume the last session, or edit the branch's plan and rename the block to **Decision taken**)"
-        last_session=$(jq -r --arg s "$tok" 'select(.event=="needs_decision" and .step==$s) | .session' "$LOG" 2>/dev/null | tail -1 || true)
-        [ -z "${last_session:-}" ] || { SESSION_ID=$last_session; echo "    $(resume_hint)"; }
-        exit 2
-    fi
-    pending=1
-    run_step "$tok"
-    ran_prev=1
-done
+if [ "$DRY_RUN" = 1 ]; then
+    walk        # one pass, no boundary: a dry run never pauses and never syncs
+else
+    # Walk from the top to the next step, stop at the boundary for a pause file, sync the plan;
+    # a sync commit means a new Order line, so walk again before launching anything.
+    while :; do
+        walk
+        [ -n "$NEXT" ] || break
+        [ ! -f "$PAUSE" ] || stop_paused
+        sync_plan
+        if [ "$SYNCED" = 1 ]; then load_tokens; continue; fi
+        PENDING=1
+        run_step "$NEXT"
+        SHIPPED_NOW+="$NEXT "; SYNC_FETCHED=0
+    done
+fi
 
-if [ "$pending" = 0 ]; then
+if [ "$PENDING" = 0 ]; then
     say "nothing to do — no unshipped step at or after step $FROM (a plan shipped by hand has no **Shipped** lines and would list every step; see --dry-run)"
     exit 0
 fi
 if [ "$DRY_RUN" = 1 ]; then
-    [ "$stopped_to" = 0 ] || { echo; echo "--to $TO: the run would stop here; later steps are not listed"; }
+    [ "$STOPPED_TO" = 0 ] || { echo; echo "--to $TO: the run would stop here; later steps are not listed"; }
     exit 0
 fi
-if [ "$stopped_to" = 1 ]; then
+if [ "$STOPPED_TO" = 1 ]; then
     say "stopped after step $TO as asked (--to) — later steps are untouched; run again without --to to continue"
     echo "  per-step cost, turns, nudges and grades: scripts/plan-runner/report.sh $RUN_ID"
     exit 0
@@ -700,5 +1216,13 @@ if [ "$behind" = 0 ]; then
 else
     echo "  main moved on by $behind commit(s) while the plan ran — merge main into $BRANCH (or rebase), re-run the gate,"
     echo "  then: git -C $ROOT checkout main && git -C $ROOT merge --ff-only $BRANCH && git -C $ROOT push"
+fi
+last_sync=$(last_sync "$(wt_git merge-base main HEAD)..HEAD")
+if [ -n "$last_sync" ]; then
+    last_sync=$(git -C "$ROOT" rev-parse --short "$last_sync")
+    echo "  $BRANCH carries plan sync commits: its plan holds main's plan as of $last_sync. Merging main is clean where a"
+    echo "  sync merged cleanly. Git asks once more about the plan where a step was added right after one that shipped,"
+    echo "  or where a Shipped block sits next to a line main changed. Keep the branch's side there, then re-apply what"
+    echo "  main changed in the plan after the last sync: git -C $ROOT diff $last_sync main -- $PLAN_REL"
 fi
 exit 0

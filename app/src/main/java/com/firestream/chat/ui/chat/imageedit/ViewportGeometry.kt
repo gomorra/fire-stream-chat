@@ -22,7 +22,7 @@ internal data class ZoomTransform(val scale: Float, val offsetX: Float, val offs
  * where the bugs would be, and a JVM test can pin every edge case a finger on
  * glass would take an afternoon to reach.
  *
- * All three functions describe an image drawn `ContentScale.Fit` in a
+ * Every function here describes an image drawn `ContentScale.Fit` in a
  * `boxWidth × boxHeight` box, then scaled about the box centre and translated,
  * which is exactly how `ZoomableBox` composes its content. `ImageFitMapper`
  * supplies the 1x fit; everything here is that fit times [ZoomTransform.scale].
@@ -120,6 +120,74 @@ internal object ViewportGeometry {
             offsetY = fit.fittedHeight * scale * (0.5f - viewport.centerY),
         )
         return clamp(unclamped, boxWidth, boxHeight, imageWidth, imageHeight)
+    }
+
+    /**
+     * [anchor], a zoom made in an `anchorBoxWidth × anchorBoxHeight` box, carried
+     * into a `boxWidth × boxHeight` box so that [frame] — the crop it stands
+     * for — looks the same: the same size on screen, centred, and wholly in view.
+     *
+     * The box changes size whenever the keyboard slides over the caption field,
+     * and with it the 1x fit. Keeping the anchor's own scale and offset would
+     * then draw the photo smaller and slide the frame sideways. So the scale is
+     * the one that keeps the photo's screen pixels per photo pixel, reduced
+     * only as far as [frame] needs to fit the box. [frame] changes when the crop
+     * pill picks another shape, and a taller shape may need a smaller scale.
+     * The point of the photo at the anchor's box centre stays at the box
+     * centre, which keeps the frame centred, since a frame is centred on the
+     * view it was cut from.
+     *
+     * The answer depends only on the anchor, never on an earlier carry, so a
+     * keyboard sliding down and back up returns to exactly the anchor. An
+     * unzoomed anchor stays unzoomed: a photo at 1x simply fits the new box.
+     */
+    fun transformAfterResize(
+        anchor: ZoomTransform,
+        anchorBoxWidth: Float,
+        anchorBoxHeight: Float,
+        frame: CropRect,
+        boxWidth: Float,
+        boxHeight: Float,
+        imageWidth: Int,
+        imageHeight: Int,
+        maxScale: Float,
+    ): ZoomTransform {
+        if (anchor.scale <= 1f) return ZoomTransform.Identity
+        val anchorFit = ImageFitMapper(anchorBoxWidth, anchorBoxHeight, imageWidth, imageHeight)
+        val fit = ImageFitMapper(boxWidth, boxHeight, imageWidth, imageHeight)
+        if (anchorFit.scale <= 0f || fit.scale <= 0f) return clamp(anchor, boxWidth, boxHeight, imageWidth, imageHeight)
+        val sameSize = anchor.scale * anchorFit.scale / fit.scale
+        val fitsFrame = if (frame.width > 0f && frame.height > 0f) {
+            minOf(boxWidth / (frame.width * fit.fittedWidth), boxHeight / (frame.height * fit.fittedHeight))
+        } else {
+            sameSize
+        }
+        val scale = minOf(sameSize, fitsFrame).coerceIn(1f, maxScale)
+        val centre = visible(anchor, anchorBoxWidth, anchorBoxHeight, imageWidth, imageHeight)
+        val centred = ZoomTransform(
+            scale = scale,
+            offsetX = fit.fittedWidth * scale * (0.5f - centre.centerX),
+            offsetY = fit.fittedHeight * scale * (0.5f - centre.centerY),
+        )
+        // A frame off the view's centre (a restore pushed against the photo's
+        // edge) is pulled back into the box, which the scale guarantees it fits.
+        // The clamp after that only closes gaps past the photo's edge, and the
+        // frame is on the photo, so it cannot push the frame out again.
+        val rect = toScreen(frame, centred, boxWidth, boxHeight, imageWidth, imageHeight)
+            ?: return clamp(centred, boxWidth, boxHeight, imageWidth, imageHeight)
+        val inView = centred.copy(
+            offsetX = centred.offsetX + intoBox(rect.left, rect.right, boxWidth),
+            offsetY = centred.offsetY + intoBox(rect.top, rect.bottom, boxHeight),
+        )
+        return clamp(inView, boxWidth, boxHeight, imageWidth, imageHeight)
+    }
+
+    /** How far to move a span of `start..end` so it lies inside `0..length`, when it fits. */
+    private fun intoBox(start: Float, end: Float, length: Float): Float = when {
+        end - start > length -> 0f
+        start < 0f -> -start
+        end > length -> length - end
+        else -> 0f
     }
 
     /**

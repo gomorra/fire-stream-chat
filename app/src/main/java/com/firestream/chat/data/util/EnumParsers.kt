@@ -3,6 +3,8 @@ package com.firestream.chat.data.util
 import android.util.Log
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.StickerFormat
+import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.domain.model.TimerAlarmSound
 import com.firestream.chat.domain.model.TimerAlarmStyle
 import com.firestream.chat.domain.model.TimerState
@@ -30,6 +32,18 @@ internal fun parseTimerState(raw: String): TimerState? =
     runCatching { TimerState.valueOf(raw) }.getOrElse {
         Log.w(TAG, "Unknown timer state '$raw' — defaulting to null")
         null
+    }
+
+internal fun parseStickerFormat(raw: String): StickerFormat =
+    runCatching { StickerFormat.valueOf(raw) }.getOrElse {
+        Log.w(TAG, "Unknown sticker format '$raw' — defaulting to WEBP")
+        StickerFormat.WEBP
+    }
+
+internal fun parseStickerPackKind(raw: String): StickerPackKind =
+    runCatching { StickerPackKind.valueOf(raw) }.getOrElse {
+        Log.w(TAG, "Unknown sticker pack kind '$raw' — defaulting to USER")
+        StickerPackKind.USER
     }
 
 // Both alarm parsers return null rather than a default on an unknown value, so

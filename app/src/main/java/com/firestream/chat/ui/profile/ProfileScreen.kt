@@ -59,14 +59,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import coil.compose.AsyncImage
 import com.firestream.chat.domain.model.Message
 import com.firestream.chat.ui.chat.FullscreenImagePager
 import com.firestream.chat.ui.chat.FullscreenImageViewer
@@ -74,7 +72,7 @@ import com.firestream.chat.ui.chat.FullscreenMediaItem
 import com.firestream.chat.ui.components.SharedMediaTile
 import com.firestream.chat.ui.components.cameraCacheUri
 import com.firestream.chat.ui.components.rememberImagePicker
-import com.firestream.chat.ui.components.rememberAvatarRequest
+import com.firestream.chat.ui.components.AvatarImage
 import com.firestream.chat.ui.theme.OnlineGreen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -148,15 +146,12 @@ fun ProfileScreen(
                                 .clickable(enabled = user.avatarUrl != null || user.localAvatarPath != null) { fullscreenAvatar = true },
                             contentAlignment = Alignment.Center
                         ) {
-                            val avatarRequest = rememberAvatarRequest(user.localAvatarPath, user.avatarUrl)
-                            if (avatarRequest != null) {
-                                AsyncImage(
-                                    model = avatarRequest,
-                                    contentDescription = "Avatar",
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
+                            AvatarImage(
+                                localAvatarPath = user.localAvatarPath,
+                                avatarUrl = user.avatarUrl,
+                                contentDescription = "Avatar",
+                                modifier = Modifier.fillMaxSize()
+                            ) {
                                 Box(
                                     modifier = Modifier
                                         .fillMaxSize()

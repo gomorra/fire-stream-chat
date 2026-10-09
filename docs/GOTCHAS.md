@@ -133,6 +133,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   finger-to-grip gap, measured at touch-*down*: `detectDragGestures` calls back only after
   touch slop, so record the down position yourself (a non-consuming `Initial`-pass
   `awaitFirstDown`). Accumulating `dragAmount` instead loses the slop, and the grip lags.
+- **`Modifier.contentReceiver` hears nothing from the keyboard on a value-based `BasicTextField`.**
+  That field (`value` / `onValueChange`, not `TextFieldState`) talks to the keyboard through
+  `RecordingInputConnection`, whose `commitContent` returns false, and its `EditorInfo` names no
+  content types. So a keyboard greys out its GIF and sticker tabs, or says the app does not take
+  them. Wrap the field in `InterceptPlatformTextInput` instead. The interceptor wraps the
+  connection the field makes: `EditorInfoCompat.setContentMimeTypes` on its `EditorInfo`, and
+  `InputConnectionCompat.createWrapper` with an `OnCommitContentListener`
+  (`ui/chat/KeyboardContentReceiver.kt`). Text input passes through untouched. In a Robolectric
+  test the field starts its input session only after `dispatchWindowFocusChanged(true)` on the
+  `AndroidComposeView`, and `onCreateInputConnection` on that view then returns the wrapped
+  connection (`KeyboardContentReceiverTest`). `adb shell dumpsys input_method` shows the
+  focused field's `contentMimeTypes` on a device.
 - **Two overlays showing the same content must not cross-fade over a third.**
   Closing the fullscreen viewer in the same frame as opening the send preview over
   it — both black, both drawing the photo at `Fit` — looked like it should be
@@ -186,6 +198,31 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (the re-entry force-write in `RealtimePresenceSource.startPresence`) are gated on the
   last `.info/connected` value; the listener itself writes online on reconnect. Regression:
   `RealtimePresenceSourceTest.startPresence re-entry after a disconnect writes nothing until the reconnect`.
+- **A waiter on shared in-flight work must not inherit the first caller's cancellation.**
+  `CompletableDeferred.completeExceptionally` with a `CancellationException` makes every
+  `await()` throw that cancellation, inside coroutines nobody cancelled. A `LaunchedEffect`
+  then ends without a word, and a loop over a chat's downloads stops at that message. It shows
+  as soon as a UI scope shares a flight with longer-lived callers: a sticker cell that scrolls
+  away, and the chat-open scan waiting for the same download. `SingleFlight.run` calls
+  `currentCoroutineContext().ensureActive()` when its `await()` is cancelled, and runs the
+  block itself when the cancellation was not its own. A hand-written copy of the idiom needs
+  the same check. Regression:
+  `SingleFlightTest.a waiter runs the block itself when the first caller is cancelled`.
+- **`catch (e: Exception)` around a suspend call also catches cancellation.** Most
+  repositories wrap their calls in `try { … } catch (e: Exception) { Result.failure(e) }` or
+  `resultOf`, so a coroutine cancelled while suspended in one gets a failure back and carries
+  on. `CallService`'s ring timeout kept running after the call's cleanup cancelled it, and tore
+  the call down a second time on another thread. Wrap a suspend call in `cancellableResultOf`
+  instead, which lets the cancellation through. `CallRepositoryImpl` does. With any other
+  repository, do not rely on `cancel()` to stop the code after its call: check that the work is
+  still wanted before acting on the result. Regression:
+  `CallRepositoryImplTest.a caller cancelled in any repository call stops instead of getting a failure`.
+- **A Firestore listener on a parallel executor can deliver snapshots out of order.**
+  `addSnapshotListener(executor, …)` hands every snapshot to the executor, and
+  `Dispatchers.Default.asExecutor()` runs two of them on two threads. A flow that emits
+  differences then sees a removal before the addition it follows. Map off the main thread on
+  `Dispatchers.Default.limitedParallelism(1).asExecutor()`, which keeps the order
+  (`FirestoreStickerPackSource`).
 - **A snapshot filter that depends on the clock needs its own timer.** Filtering
   `typingUsers` by age inside the Firestore listener only re-runs when the document
   changes, so an entry whose typing-off write never landed (writer offline or killed)
@@ -211,9 +248,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   content LIKE …)` short-circuit first so the no-query path doesn't scan every row's
   content against `'%%'`. See `MessageDao.searchMessages`, whose one query serves both the in-chat and the global scope via `(:chatId IS NULL OR chatId = :chatId)`.
 
-- **Shared-storage files: `exists()` is not enough.** MediaStore files from a prior
-  install can pass `File.exists()` yet throw `EACCES` on open. Gate with
-  `exists() && isFile && canRead()`.
+- **Shared-storage files: `exists()` is not enough, and neither is `canRead()`.** MediaStore
+  files from a prior install can pass `File.exists()` yet throw `EACCES` on open. Gate with
+  `exists() && isFile && canRead()`, and still fall back when the open fails. `canRead()` can
+  pass too, because `Android/media` and `Pictures/` go through the FUSE layer. A cache only
+  this app reads belongs in `filesDir`, which skips that layer. The avatar cache lives there
+  for this reason: on Android 17 its `Android/media` copies failed to load, and the URL
+  fallback behind `canRead()` never ran (2026-10-07).
 - **Firestore echoes your own write under its client-set id before the server has it.**
   Message ids are Room row ids, so `document(id).set()` fires the snapshot listener at once
   with that id and the payload's `status = SENT` while `metadata.hasPendingWrites()` is still
@@ -223,6 +264,12 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   (`RawMessage.hasPendingWrites`, checked in `MessageRepositoryImpl.reconcileRawMessage`).
   Regression: `MessageRepositorySnapshotTest.a pending echo of our own write leaves the
   local SENDING row alone`.
+- **A listener sees your own Firestore `update()` before the `await()` returns.** The SDK
+  applies the write to its cache and fires listeners at once, while `await()` waits for the
+  server. `CallService`'s ring timeout awaited `endCall("timeout")` and only then logged the
+  call, so its own "ended" echo reached the signalling listener first and was handled as the
+  other side hanging up: every unanswered call was logged as `remote_hangup`. Record what you
+  did before you write the status your own listener reacts to, or stop the listener first.
 - **A retried Firestore write must not `set()` over a document that may already exist.**
   `firestore.rules` lets any participant `update` a message, so a blind re-`set()` wipes the
   recipient's `readBy` / `deliveredTo` / `reactions`. Retry with `waitForPendingWrites()`
@@ -238,6 +285,16 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   indicator — fires it) and must not overwrite a newer local value with them. Hit when the chat
   preview became a newer-only transaction: `ChatDao.upsertRemote` keeps a strictly newer local
   preview. Regression: `ChatDaoUpsertRemoteTest.upsertRemote keeps a local preview newer than the snapshot's`.
+- **A document missing from a Firestore query snapshot was not necessarily deleted.** A
+  listener's first snapshot can come from the local cache, which holds whatever was read
+  before and nothing after a reinstall. A mirror that deletes every local row the snapshot
+  lacks wipes its table on such a snapshot. A snapshot that is from the server can still be
+  older than a write this device made a moment later, when the collector is slow. So a
+  mirror deletes only on a `DocumentChange.Type.REMOVED` change, which is sent for a document
+  that was in the result and left it, and only a row with no local changes
+  (`FirestoreStickerPackSource.observeOwnPacks`, `StickerDao.removeIfSynced`). Such a flow
+  emits differences, so it needs `buffer(Channel.UNLIMITED)`: a `trySend` into a full default
+  buffer drops a difference that never comes again.
 - **Room's `@Upsert` with a partial entity keeps the columns the object does not carry; a
   `REPLACE` insert does not.** `OnConflictStrategy.REPLACE` deletes the row and inserts the
   new one, so every column the new object lacks goes back to its default. `messages` is split
@@ -266,15 +323,21 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
 - **MockK `relaxed = true` returns a mock, not `null`, for nullable types.** A
   `Foo?`-returning stub silently defeats `?: return` guards; stub explicitly with
   `coEvery { fn(any()) } returns null` when the null path is the one under test.
-- **`backgroundScope` + `advanceUntilIdle()` does not deliver flow emissions.** When
-  testing a component that owns a never-completing collector (`Chat*Manager`,
-  `ChatMessageLoader`), passing `backgroundScope` as its scope makes every emission
-  vanish — the collector appears to run but the state under test stays at its initial
-  value, which reads exactly like a broken production diff. Passing the `runTest`
-  scope itself instead hangs the test on the collector (`UncompletedCoroutinesError`).
-  Use a root scope sharing the test dispatcher —
-  `CoroutineScope(coroutineContext + SupervisorJob())` — and cancel it in `@After`.
+- **`advanceUntilIdle()` stops once only `backgroundScope` work is left.** It leaves that
+  work unrun. A component given `backgroundScope` as its scope then never gets going: a
+  collector misses every emission, and a one-shot `launch` never starts. Both read exactly
+  like a broken production diff. A coroutine that always finishes can take the `runTest`
+  scope itself. One that may not finish would hang the test there
+  (`UncompletedCoroutinesError`): a never-completing collector (`Chat*Manager`,
+  `ChatMessageLoader`), or a call create the test never completes (`CallViewModelTest`).
+  Give it a root scope that shares the test dispatcher, `CoroutineScope(coroutineContext +
+  SupervisorJob())`, and cancel that scope in `@After`.
   See `ChatMessageLoaderReactionCueTest.startLoader()`.
+- **`advanceUntilIdle()` runs every pending timeout.** It moves virtual time forward until
+  nothing is scheduled, so a `withTimeoutOrNull` around a call the test has not completed yet
+  times out before the test completes it. The code under test then takes its timeout path, and
+  later assertions can still pass by accident. Use `runCurrent()` until the test has completed
+  what the code waits on (`CallViewModelTest`).
 - **A paused `mainClock` never sees a bare state write.** With
   `composeTestRule.mainClock.autoAdvance = false`, setting a `mutableStateOf` from the
   test thread and then calling `advanceTimeBy` / `advanceTimeByFrame` runs frames the
@@ -285,6 +348,13 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   `waitForIdle()` → advance the clock (`runOnIdle { … }` alone is not enough), and an
   `AnimatedVisibility` must be composed hidden and *then* shown — one composed visible
   from the start skips its enter animation. See `ui/components/OnEnterSettledTest.kt`.
+
+- **A test tag inside a clickable parent is not in the merged semantics tree.**
+  `clickable` and `combinedClickable` merge their children's semantics into one node. A child's
+  content description is carried up, and its test tag is not. So `onNodeWithTag(tag)` on a child
+  of a bubble's click target finds nothing, and `assertDoesNotExist()` on it passes for the wrong
+  reason. Pass `useUnmergedTree = true` for a tag below a click target
+  (`ui/chat/LottieStickerUiTest.kt`).
 
 - **Robolectric records a network callback but never dispatches to it.**
   `ShadowConnectivityManager` keeps every callback passed to
@@ -326,12 +396,34 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   row is enqueued, and the row points at the copy. A staging failure fails the send at once
   (a FAILED bubble) rather than queue a row nothing can read. Regression: `OutboxFilesTest`,
   `MessageRepositoryMediaSendFailureTest`.
+- **A heavily subsampled `BitmapFactory` decode can return a black bitmap.** It raises no
+  error. It hits a large camera original shown small, which Coil's default decoder reaches
+  by a power-of-two `inSampleSize`. Any request that shows a full-size photo small attaches
+  `ScaledImageDecoder.Factory()`, which decodes through `ImageDecoder.setTargetSize`.
+  Both the Shared Media grid and every avatar (`buildAvatarRequest`) do. Disabling hardware
+  bitmaps does not fix it. Regression: `AvatarRequestTest`, `ScaledImageDecoderTest`.
 - **WorkManager typed `setForeground` needs a manifest merge on Android 14+.** Declare
   `<service android:name="androidx.work.impl.foreground.SystemForegroundService"
   android:foregroundServiceType="dataSync" tools:node="merge"/>` or the worker 400s.
 - **A `com.android.test` submodule can't use a versioned `alias()`** for an
   already-loaded plugin — AGP rejects it. Use bare `id("com.android.test")` without a
   version (see `:baselineprofile`).
+- **Stop a service with `stopSelf(startId)`, not `stopSelf()`.** Pass the id of the latest
+  start the service has handled; the system ignores the call while a newer start is queued
+  (`CallService.stopIfIdle`). `stopSelf()` stops the service anyway, because the system
+  queues each start on the main thread before `onStartCommand()` runs. The queued start
+  then runs on the dying service, where `startForeground()` does nothing, so the state it
+  publishes is never undone. If that start came from `startForegroundService()` after
+  `stopForeground()`, the stop crashes the app instead: "did not then call
+  `startForeground()`". No JVM test covers `CallService`.
+- **WebRTC calls back on its signaling thread, and the factory owns that thread.**
+  `PeerConnection.Observer` and `SdpObserver` run there, and `PeerConnectionFactory.dispose()`
+  frees the factory's threads. Tearing a call down from one of those callbacks destroys the
+  thread the callback is running on. Hop to the main thread first: `PeerSession` reports
+  through an event channel, which `CallSession` collects there.
+  `PeerConnection.close()` frees nothing: only `dispose()` releases the native connection and
+  the observer it holds. `PeerConnectionFactory.builder()` makes an audio device module that
+  nothing releases unless you pass your own and call `release()` after `dispose()`.
 - **A `NotificationChannel`'s sound and vibration are frozen at creation.** Editing the
   code that builds one changes nothing on a device where it already exists —
   `createNotificationChannel` silently ignores sound/vibration/importance changes to a
@@ -383,7 +475,7 @@ verification*.
   then disposes it on the next `setTrack`. A track that several sessions share goes on with `false`.
 - **A disposed track throws on every call, `removeSink` included.** Take every sink off a track,
   and the track off every sender, before its owner disposes it. `CallVideoSinks.close()` and
-  `PeerSession.setCamera(null)` run before `CallService` releases anything.
+  `PeerSession.setCamera(null)` run before `WebRtcCallLocalMedia.dispose()` releases anything.
 - **`VideoTextureViewRenderer` is single-use.** `onDetachedFromWindow` releases its EGL renderer,
   so a view that left its window draws nothing when it comes back. Make a new one.
 - **A surface that arrives before `VideoTextureViewRenderer.init()` is dropped without a word.**
@@ -460,6 +552,18 @@ verification*.
   looks across files (`scripts/plan-runner/step-prompt.md`). Interactive sessions never see this —
   they get a permission prompt instead.
 
+- **`producer | grep -q` under `set -o pipefail` can fail on a match.** `grep -q` exits at the
+  first match. A producer that is still writing then dies of `SIGPIPE`, and `pipefail` turns
+  that into a failed pipeline. `pr_step_shipped` in `scripts/plan-runner/lib.sh` is this
+  shape (`awk … | grep -qE '^\*\*Shipped\*\*'`), and `scripts/run-plan.sh` runs under
+  `pipefail`. awk writes to a pipe in 4096-byte blocks, so a step section over 4 KB with its
+  `**Shipped**` line in an early block is a race. On 2026-10-03 the driver reported "no
+  **Shipped** line under step 3" for `docs/plans/stickers-and-gifs.md` while the line was
+  committed under the heading, in an 8 KB section. The cause was inferred from the code, not
+  reproduced. Until the check is `grep … >/dev/null`, which reads its whole input, put a long
+  step's `**Shipped**` block at the end of the step's section: the match is then in awk's last
+  write.
+
 - **A bare `Internal compiler error` from Kotlin can mean the locale, not the code.**
   Several test names in this repo contain an em dash (e.g.
   `ListDetailViewModelCoalesceTest` → `cooldown resets on each edit — a new bubble…`),
@@ -505,3 +609,21 @@ verification*.
   stops matching at the first match there too, and only its own draining of the pipe keeps
   the writer alive. `scripts/plan-runner/lib.sh` read a shipped plan step as not shipped
   about one time in thirteen this way (2026-10-03, `efab2741`).
+
+- **A resumed `claude -p` session reports its cost cumulatively.**
+  `total_cost_usd` in the result of `claude -p --resume <id>` is the session's total so far, not
+  the invocation's. `--max-budget-usd` still caps each invocation. Summing every result therefore
+  counts a resumed session twice: video-calls step 2 read 15.05 USD instead of 7.82. Count each
+  result's increase over the same session's previous result, and give a resume what is left of its
+  budget. `scripts/plan-runner/report.sh` and `lib.sh` (`pr_cost_delta`, `pr_budget_left`) do.
+  A total below the previous one is a per-invocation figure from an older CLI. Seen on CLI 2.1.288:
+  0.0409 → 0.0478 over one resume (2026-10-03).
+
+- **A cloud session does not stop at the usage limit: it goes on on cloud credits.**
+  A headless driver that must stay on the subscription reads the session's stream
+  (`--output-format stream-json --verbose`) and stops the session itself. The signal is a
+  `rate_limit_info` with `status: "rejected"`, or a `unifiedWindows` entry at `utilization` ≥ 1.
+  Nothing in the CLI's output says that cloud credits are paying, and the stream's fields do not
+  show which pool pays. `scripts/run-plan.sh` stops the session on a desktop too, where it would
+  end at the limit by itself. Two cloud sessions, one of them a plan-runner step, were seen
+  working while `rejected`, with overage rejected too (2026-10-03).

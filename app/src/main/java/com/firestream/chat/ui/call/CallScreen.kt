@@ -83,7 +83,6 @@ internal data class CallScreenCallbacks(
 /**
  * Everything the stage draws from.
  *
- * @param placing an outgoing call that has no call document yet, or that could not be created.
  * @param locked the phone is locked. An incoming video call then offers only *Answer*.
  * @param inPictureInPicture the stage is the small window. Only the other person is drawn.
  */
@@ -92,7 +91,6 @@ internal data class CallStageState(
     val call: CallState = CallState.Idle,
     val controls: CallUiControls = CallUiControls(),
     val participants: List<CallParticipant> = emptyList(),
-    val placing: PlacingCall? = null,
     val locked: Boolean = false,
     val inPictureInPicture: Boolean = false,
 ) {
@@ -104,6 +102,8 @@ internal data class CallStageState(
 
     val person: StagePerson?
         get() = when (call) {
+            // Not held by the call service yet, so the holder has nobody in the call.
+            is CallState.Placing -> StagePerson(call.calleeName, call.calleeAvatarUrl)
             is CallState.OutgoingRinging ->
                 StagePerson(call.calleeName, call.calleeAvatarUrl, call.calleeLocalAvatarPath)
             is CallState.IncomingRinging ->
@@ -112,8 +112,8 @@ internal data class CallStageState(
                 StagePerson(call.remoteName, call.remoteAvatarUrl, call.remoteLocalAvatarPath)
             is CallState.Connected ->
                 StagePerson(call.remoteName, call.remoteAvatarUrl, call.remoteLocalAvatarPath)
-            else -> placing?.let { StagePerson(it.calleeName, it.calleeAvatarUrl) }
-                ?: remote?.let { StagePerson(it.name, it.avatarUrl, it.localAvatarPath) }
+            // An ended call still names who it was with.
+            else -> remote?.let { StagePerson(it.name, it.avatarUrl, it.localAvatarPath) }
         }
 }
 
@@ -144,29 +144,25 @@ internal fun CallScreen(
     val callState by viewModel.callState.collectAsState()
     val uiControls by viewModel.uiControls.collectAsState()
     val participants by viewModel.participants.collectAsState()
-    val placing by viewModel.placing.collectAsState()
 
-    // The state of the call before stays `Ended` until the next one starts. Only an end this
-    // screen watched closes it, or it would close under a call that is about to be placed.
-    var sawCall by rememberSaveable { mutableStateOf(false) }
-    if (callState is CallState.Live) sawCall = true
-    val ended = callState is CallState.Ended && sawCall && placing == null
-    val failed = placing?.failed == true
-    LaunchedEffect(ended, failed) {
-        if (ended || failed) {
+    // The end shows for a moment, then the screen closes. A call that could not be placed ends
+    // the same way. The activity clears the end of the call before, ahead of placing the next
+    // one, so an end seen here is the end of the call this screen shows.
+    val ended = callState is CallState.Ended
+    LaunchedEffect(ended) {
+        if (ended) {
             delay(CLOSE_AFTER_END_MILLIS)
-            if (failed) viewModel.cancelPlacing()
             onFinish()
         }
     }
 
     BackHandler(enabled = callState.dockable, onBack = onMinimise)
 
-    val callbacks = remember(viewModel, onAnswer, onSetCamera, onMinimise, onFinish) {
+    val callbacks = remember(viewModel, onAnswer, onSetCamera, onMinimise) {
         CallScreenCallbacks(
             onAnswer = onAnswer,
             onDecline = viewModel::decline,
-            onHangup = { if (viewModel.hangup()) onFinish() },
+            onHangup = viewModel::hangup,
             onToggleMute = viewModel::toggleMute,
             onSetCamera = onSetCamera,
             onFlipCamera = viewModel::flipCamera,
@@ -175,8 +171,8 @@ internal fun CallScreen(
         )
     }
 
-    val state = remember(callState, uiControls, participants, placing, locked, inPictureInPicture) {
-        CallStageState(callState, uiControls, participants, placing, locked, inPictureInPicture)
+    val state = remember(callState, uiControls, participants, locked, inPictureInPicture) {
+        CallStageState(callState, uiControls, participants, locked, inPictureInPicture)
     }
     CallStage(state, callbacks) { participantId -> CallVideoView(viewModel, participantId) }
 }
@@ -208,11 +204,12 @@ internal fun CallStage(
     videoTile: @Composable (participantId: String) -> Unit,
 ) {
     val call = state.call
-    val placing = state.placing
     val person = state.person
     Box(modifier.fillMaxSize().background(StageColors.Black)) {
         when {
-            person == null -> if (call is CallState.Ended) EndedScene(null, "Call ended")
+            // A placing that failed ends with nobody in the call.
+            call is CallState.Ended -> EndedScene(person)
+            person == null -> Unit
             state.inPictureInPicture && call is CallState.Live ->
                 RemoteTile(state.remote, videoTile) { StageAvatar(person, 72.dp, Modifier.align(Alignment.Center)) }
             call is CallState.IncomingRinging -> RingScene(
@@ -234,12 +231,11 @@ internal fun CallStage(
                 StageDock(state.controls, callbacks, unavailableLine = unavailableLine(person))
             }
             call is CallState.Connected -> ConnectedScene(state, person, call.startTime, callbacks, videoTile)
-            placing != null && placing.failed -> EndedScene(person, "Call failed")
-            // No call exists yet, so there is nothing to switch and nothing to minimise.
-            placing != null -> RingScene(state, person, "Calling…", onMinimise = null, videoTile = videoTile) {
+            // The call service does not hold the call yet, so there is nothing to switch and
+            // nothing to minimise. Looks like the ringing that follows it.
+            call is CallState.Placing -> RingScene(state, person, "Calling…", onMinimise = null, videoTile = videoTile) {
                 StageDock(state.controls, callbacks, hangUpOnly = true)
             }
-            call is CallState.Ended -> EndedScene(person, "Call ended")
         }
     }
 }
@@ -289,16 +285,18 @@ private fun RingScene(
 }
 
 @Composable
-private fun EndedScene(person: StagePerson?, status: String) {
+private fun EndedScene(person: StagePerson?) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         StageGlow()
         if (person != null) {
-            StageIdentity(person, { status })
+            StageIdentity(person, { CALL_ENDED })
         } else {
-            Text(text = status, style = MaterialTheme.typography.headlineSmall, color = StageColors.DimText)
+            Text(text = CALL_ENDED, style = MaterialTheme.typography.headlineSmall, color = StageColors.DimText)
         }
     }
 }
+
+private const val CALL_ENDED = "Call ended"
 
 // ── Connected ───────────────────────────────────────────────────────────────
 

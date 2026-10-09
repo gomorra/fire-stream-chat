@@ -33,7 +33,8 @@ class AuthRepositoryImplCallVideoLineTest {
         mockk<SignalDatabase>(relaxed = true),
         mockk<UserDao>(relaxed = true),
         mockk<SignalManager>(relaxed = true),
-        firebaseMessaging
+        firebaseMessaging,
+        mockk(relaxed = true),
     )
 
     @Before

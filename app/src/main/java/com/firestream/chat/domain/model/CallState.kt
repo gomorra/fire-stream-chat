@@ -3,7 +3,22 @@ package com.firestream.chat.domain.model
 sealed interface CallState {
     data object Idle : CallState
 
-    /** A call that is ringing, connecting or connected. */
+    /**
+     * This phone is placing a call to [calleeId]: the call document is being created, or the call
+     * is on its way to the call service. [placingId] tells one placing from the next, and [callId]
+     * is null until the document exists. [video] is how the call was started. The service replaces
+     * this with [OutgoingRinging]. Counts as ongoing, so no other call starts meanwhile.
+     */
+    data class Placing(
+        val placingId: Long,
+        val calleeId: String,
+        val calleeName: String,
+        val calleeAvatarUrl: String?,
+        val callId: String? = null,
+        val video: Boolean = false
+    ) : CallState
+
+    /** A call the call service holds: it is ringing, connecting or connected. */
     sealed interface Live : CallState {
         val callId: String
 
@@ -69,18 +84,37 @@ sealed interface CallState {
 }
 
 /**
- * The call can leave its stage and dock over its chat: it is running, and it is not a ring that
- * came in. The stage offers to minimise exactly these calls, and the chat draws exactly these.
+ * The call can leave its stage and dock over its chat: the call service holds it, and it is not a
+ * ring that came in. The stage offers to minimise exactly these calls, and the chat draws exactly
+ * these. A call that is still being placed cannot dock.
  */
 val CallState.dockable: Boolean
     get() = this is CallState.Live && this !is CallState.IncomingRinging
+
+/**
+ * True while a call is being placed, ringing, connecting or connected.
+ *
+ * [CallState.Ended] is not ongoing. It is the last frame of a call that is over, kept so the call
+ * screen can show "Call Ended", and it stays published until the next call replaces it. Ask this,
+ * not `!is CallState.Idle`, to find out whether the user is in a call.
+ */
+val CallState.isOngoing: Boolean
+    get() = this !is CallState.Idle && this !is CallState.Ended
 
 enum class EndReason {
     HANGUP,
     REMOTE_HANGUP,
     DECLINED,
     TIMEOUT,
-    ERROR
+    ERROR;
+
+    /** How the reason is written to the call document and to the call's chat message. */
+    val wireName: String get() = name.lowercase()
+
+    companion object {
+        /** The reason [wireName] names, or null for one this version does not know. */
+        fun fromWireName(wireName: String?): EndReason? = entries.firstOrNull { it.wireName.equals(wireName, ignoreCase = true) }
+    }
 }
 
 /**

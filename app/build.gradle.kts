@@ -109,6 +109,7 @@ android {
             dimension = "backend"
             isDefault = true
             buildConfigField("Boolean", "SUPPORTS_SIGNAL", "true")
+            buildConfigField("Boolean", "SUPPORTS_CALLS", "true")
             buildConfigField("String", "POCKETBASE_URL", "\"\"")
             buildConfigField(
                 "String",
@@ -119,6 +120,8 @@ android {
         create("pocketbase") {
             dimension = "backend"
             buildConfigField("Boolean", "SUPPORTS_SIGNAL", "false")
+            // The PocketBase backend has no call signalling, so the app offers no calls.
+            buildConfigField("Boolean", "SUPPORTS_CALLS", "false")
             // Default targets the emulator's loopback to the host PC. Override
             // for physical-device testing on the same Wi-Fi via either:
             //   ./gradlew assemblePocketbaseDebug -PpocketbaseUrl=http://192.168.x.x:8090
@@ -437,6 +440,10 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
     implementation(libs.coil.video)
+    implementation(libs.coil.gif)
+    // Lottie stickers (.was, .tgs): ui/components/StickerImage.kt plays them,
+    // data/sticker/LottieThumbnails.kt draws their first frame.
+    implementation(libs.lottie.compose)
     // Text of a PDF for the file bubble's excerpt (docs/plans/file-handling.md step 4);
     // the first-page thumbnail is the platform PdfRenderer.
     implementation(libs.pdfbox.android)
@@ -474,6 +481,9 @@ dependencies {
 
     // Play Services Location
     implementation(libs.play.services.location)
+
+    // The sticker maker's cutout: data/sticker/SubjectCutout.kt
+    implementation(libs.mlkit.subject.segmentation)
 
     // Baseline Profile
     implementation(libs.androidx.profileinstaller)

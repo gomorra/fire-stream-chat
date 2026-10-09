@@ -6,7 +6,7 @@ The app uses **two Room databases** so that destructive schema migrations on the
 
 | Database         | File              | Tables                                                                                                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`                                                                                                       |
+| `AppDatabase`    | `fire_stream_chat.db` | `users`, `chats`, `messages`, `contacts`, `lists`, `reminders`, `stickers`, `sticker_packs`, `sticker_pack_items`                                       |
 | `SignalDatabase` | `signal.db`       | `signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities` |
 
 `AppDatabase.MIGRATION_18_19` drops the legacy Signal tables from `fire_stream_chat.db`; from version 19 onward Signal keys live exclusively in `signal.db`.
@@ -25,6 +25,25 @@ The app uses **two Room databases** so that destructive schema migrations on the
 Every `AppDatabase` version is reached by destructive migration, except 18 → 19. The current version is the `version` in `AppDatabase.kt`.
 
 `isVideoCall` is a backend column on `MessageRecord`. It is true for a `CALL` message whose call was started as video, and it mirrors the Firestore field `video`.
+
+**The sticker library is three tables.** `stickers` holds one row per sticker file. Its `id` is the SHA-256 of the file's bytes, which is also the file's name under `filesDir/stickers/`. `sticker_packs` holds the packs, and `sticker_pack_items` puts a sticker into a pack at a `position`. A sticker can be in several packs and is in each at most once.
+
+| Column | Meaning |
+|---|---|
+| `sticker_packs.id` | A random UUID. It is not derived from the pack's source, because it will be a backend document id that only its owner may write |
+| `sticker_packs.importKey` | What an import made the pack from: a WhatsApp pack's id, name and publisher, an archive's title and author, or the loose pack's name. Unique. A second import finds the pack through it. The `FAVOURITES` and `SAVED` packs have the fixed keys `kind:FAVOURITES` and `kind:SAVED`, so the unique index keeps them at one each. `null` for a pack made by hand |
+| `sticker_packs.kind` | `USER`, `INSTALLED`, `FAVOURITES` or `SAVED` |
+| `sticker_packs.sortOrder` | The pack's place in the user's order |
+| `sticker_packs.syncState` | `PENDING`, `SYNCED` or `DELETED`. Every `StickerDao` write that changes a pack or its items sets `PENDING`. `StickerSyncWorker` uploads a `PENDING` pack and marks it `SYNCED`. `DELETED` is a tombstone: the pack is gone from the library, and the row stays until the worker has deleted the backend's copy |
+| `sticker_packs.updatedAt` | Moves strictly forward on every change, even on two changes in one millisecond. The worker marks a pack `SYNCED` only while this is still the value it uploaded, and a restore applies a backend copy only when that copy's value is later |
+| `sticker_pack_items.position` | Order inside the pack, ascending. A favourite is added in front, so positions can be negative |
+| `stickers.remoteUrl` | Where the backend holds the file. `null` until this device has uploaded the sticker or found it there (`StickerObjectSource.ensureUploaded`). Never taken from a received message |
+
+Removing a sticker from a pack deletes its item row. Deleting a pack deletes its item rows and turns the pack row into a tombstone without an import key. In both cases the `stickers` row and the file stay. A received sticker has a `stickers` row and no pack item.
+
+A row can be there before its file. A restored pack, and a pack added from someone else, write `stickers` rows from a manifest, and each file is fetched when the sticker is first shown (`StickerRepository.ensureFile`). An `INSTALLED` pack has the import key `installed:<root pack id>`, which keeps a pack from being added twice.
+
+**A `STICKER` message names its sticker (version 31).** `messages.stickerId` is the sticker's hash and `messages.stickerPackId` the pack it was sent from, or `null`. Both are part of `MessageRecord`, so a snapshot writes them. On a received row they are the sender's claim: the id is checked with `StickerFiles.isValidId` before it reaches a path, and against the downloaded bytes before a file is stored. The row's `localUri` is the sticker's file in `filesDir/stickers/`, shared by every message that points at that sticker. A `GIF` row's `localUri` is its copy in `filesDir/documents/`.
 
 ```mermaid
 erDiagram
@@ -77,6 +96,8 @@ erDiagram
         String fileName
         Long fileSize
         String mimeType
+        String stickerId
+        String stickerPackId
         Long timestamp
         Long editedAt
         Boolean isStarred
@@ -122,6 +143,36 @@ erDiagram
         String genericStyle
     }
 
+    stickers {
+        String id PK
+        String format
+        Int width
+        Int height
+        Boolean isAnimated
+        String emojisJSON
+        Long createdAt
+        String remoteUrl
+    }
+
+    sticker_packs {
+        String id PK
+        String name
+        String publisher
+        String kind
+        String originPackId
+        String importKey
+        Int sortOrder
+        Long createdAt
+        Long updatedAt
+        String syncState
+    }
+
+    sticker_pack_items {
+        String packId PK
+        String stickerId PK
+        Int position
+    }
+
     signal_identities {
         String address PK
         String identityKey
@@ -161,6 +212,8 @@ erDiagram
     users ||--o{ messages : "sends"
     users ||--o{ contacts : "has"
     users ||--o{ lists : "owns"
+    sticker_packs ||--o{ sticker_pack_items : "orders"
+    stickers ||--o{ sticker_pack_items : "is in"
 ```
 
 _The seven Signal tables (`signal_identities`, `signal_sessions`, `signal_prekeys`, `signal_signed_prekeys`, `signal_kyber_prekeys`, `signal_sender_keys`, `signal_trusted_identities`) live in the dedicated `signal.db` and preserve the persistent cryptographic state required by the Signal Protocol, including post-quantum Kyber pre-keys. `signal_trusted_identities` is omitted from the diagram above for clarity but follows the same shape as `signal_identities`._

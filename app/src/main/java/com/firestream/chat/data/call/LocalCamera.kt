@@ -2,10 +2,11 @@
 // Responsibility: The call's own camera — pick a device (front first), capture into one video
 //   track, stop, flip, and release everything in the right order.
 // Owns: The capturer, its texture helper, the video source and the video track of one call.
-// Collaborators: WebRtcPeerConnectionFactory (source, track, EGL context), CallService (decides
-//   when the camera runs, and hands the track to the sessions and to CallVideoSinks).
-// Don't put here: Permission checks or the foreground type (CallService), attaching the track to
-//   a connection (PeerSession.setCamera), views (CallVideoSinks).
+// Collaborators: WebRtcPeerConnectionFactory (source, track, EGL context), WebRtcCallLocalMedia
+//   (calls it on its worker, and hands the track to the sessions and to CallVideoSinks),
+//   CameraSwitch (decides when the camera runs).
+// Don't put here: Permission checks or the foreground type (CameraSwitch, CallService),
+//   attaching the track to a connection (PeerSession.setCamera), views (CallVideoSinks).
 // endregion
 
 package com.firestream.chat.data.call

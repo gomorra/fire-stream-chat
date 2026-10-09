@@ -31,9 +31,12 @@ import kotlin.math.roundToInt
  * a power-of-two subsample), which sidesteps the pathology while still producing
  * a small, memory-cheap bitmap. It also honours EXIF orientation automatically.
  *
- * Scoped per-request via [coil.request.ImageRequest.Builder.decoderFactory] so
- * only the grid uses it; avatars, message bubbles, and the fullscreen viewer keep
- * Coil's defaults. Available unconditionally at this app's `minSdk = 29`.
+ * Avatars have the same problem: a full camera original shown at 40-96dp. So
+ * `buildAvatarRequest` uses this decoder too.
+ *
+ * It is attached per request via [coil.request.ImageRequest.Builder.decoderFactory].
+ * Message bubbles and the fullscreen viewer keep Coil's defaults. `ImageDecoder`
+ * needs API 28, below this app's `minSdk`.
  */
 class ScaledImageDecoder(
     private val source: ImageSource,

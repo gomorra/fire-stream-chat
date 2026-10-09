@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
+import com.firestream.chat.data.sticker.StickerDownloads
 import com.firestream.chat.domain.model.MessageType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
@@ -25,6 +26,7 @@ class MediaFileManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val httpClient: OkHttpClient,
     private val documentFiles: DocumentFiles,
+    private val stickerDownloads: StickerDownloads,
 ) {
 
     private val inFlightDownloads = ConcurrentHashMap<String, CompletableDeferred<File>>()
@@ -60,10 +62,18 @@ class MediaFileManager @Inject constructor(
         }
 
     /**
-     * Downloads a message's media to where its [type] keeps it: a DOCUMENT into
-     * the app's documents directory ([DocumentFiles]) with plain file IO — the
-     * MediaStore image collection refuses any non-image type — and anything else
-     * through [downloadAndSave].
+     * Downloads a message's media to where its [type] keeps it. The one router,
+     * so the auto-download, the chat-open scan and the backfill agree:
+     *
+     * - A DOCUMENT and a GIF go into the app's documents directory
+     *   ([DocumentFiles]) with plain file IO. The MediaStore image collection
+     *   refuses a non-image type, and a GIF must not reach the gallery.
+     * - A STICKER goes into the sticker directory, checked against [stickerId]
+     *   ([StickerDownloads]).
+     * - Anything else goes through [downloadAndSave].
+     *
+     * Returns `null` for a sticker that is refused: the message keeps rendering
+     * from its url and gets no local file. A failed download throws.
      */
     suspend fun downloadFor(
         chatId: String,
@@ -72,12 +82,13 @@ class MediaFileManager @Inject constructor(
         mediaUrl: String,
         fileName: String?,
         mimeType: String?,
-    ): File =
-        if (type == MessageType.DOCUMENT) {
+        stickerId: String?,
+    ): File? = when (type) {
+        MessageType.STICKER -> stickerDownloads.ensureLocal(stickerId, mediaUrl)
+        MessageType.DOCUMENT, MessageType.GIF ->
             downloadToFile(messageId, mediaUrl, documentFiles.fileFor(messageId, fileName, mimeType, mediaUrl))
-        } else {
-            downloadAndSave(chatId, messageId, mediaUrl)
-        }
+        else -> downloadAndSave(chatId, messageId, mediaUrl)
+    }
 
     /** Downloads [mediaUrl] into [target] through a `.part` sibling, so a cut-off download never looks finished. */
     private suspend fun downloadToFile(messageId: String, mediaUrl: String, target: File): File =
@@ -256,7 +267,11 @@ class MediaFileManager @Inject constructor(
         if (!root.exists()) return 0
 
         var moved = 0
-        val chatDirs = root.listFiles()?.filter { it.isDirectory } ?: return 0
+        // The old Android/media root also holds the old avatar cache, which is not a chat
+        // folder. Moving it would publish every avatar in the Pictures folder.
+        val chatDirs = root.listFiles()
+            ?.filter { it.isDirectory && it.name != ProfileImageManager.PROFILE_FOLDER }
+            ?: return 0
 
         for (chatDir in chatDirs) {
             val chatId = chatDir.name

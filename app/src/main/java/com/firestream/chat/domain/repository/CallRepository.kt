@@ -1,6 +1,7 @@
 package com.firestream.chat.domain.repository
 
 import com.firestream.chat.domain.model.CallSignalingData
+import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.domain.model.IceCandidateData
 import com.firestream.chat.domain.model.OutgoingCall
 import com.firestream.chat.domain.model.SdpData
@@ -21,7 +22,7 @@ interface CallRepository {
     suspend fun createCall(calleeId: String, video: Boolean): Result<OutgoingCall>
     suspend fun answerCall(callId: String): Result<Unit>
     suspend fun declineCall(callId: String): Result<Unit>
-    suspend fun endCall(callId: String, reason: String): Result<Unit>
+    suspend fun endCall(callId: String, reason: EndReason): Result<Unit>
     suspend fun sendOffer(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendAnswer(callId: String, sdp: SdpData): Result<Unit>
     suspend fun sendAnswerAndAccept(callId: String, sdp: SdpData): Result<Unit>
@@ -32,5 +33,5 @@ interface CallRepository {
     fun observeCallDocument(callId: String): Flow<CallSignalingData>
     fun observeIceCandidates(callId: String, subcollection: String): Flow<List<IceCandidateData>>
     suspend fun getCallById(callId: String): Result<CallSignalingData>
-    suspend fun logCallMessage(chatId: String, endReason: String, durationSeconds: Int, video: Boolean): Result<Unit>
+    suspend fun logCallMessage(chatId: String, endReason: EndReason, durationSeconds: Int, video: Boolean): Result<Unit>
 }

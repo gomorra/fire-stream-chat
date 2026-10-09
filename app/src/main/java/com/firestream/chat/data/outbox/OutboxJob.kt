@@ -28,8 +28,13 @@ enum class OutboxJob {
 
 private val UNACKNOWLEDGED = setOf(MessageStatus.SENDING.name, MessageStatus.FAILED.name)
 
-/** Types whose first send uploads a file. */
-private val UPLOAD_TYPES = setOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT, MessageType.VOICE).map { it.name }
+/**
+ * Types whose first send uploads a file. A STICKER is not one: its file is at
+ * most 1 MB, and is uploaded only the first time anyone sends that sticker.
+ */
+private val UPLOAD_TYPES = setOf(
+    MessageType.IMAGE, MessageType.VIDEO, MessageType.DOCUMENT, MessageType.VOICE, MessageType.GIF,
+).map { it.name }
 
 /** Whether the backend has not acknowledged this own row: still queued, in flight, or given up on. */
 val MessageEntity.isUnacknowledged: Boolean

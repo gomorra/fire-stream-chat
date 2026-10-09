@@ -171,6 +171,67 @@ check "budget exhausted → budget"             "budget"     "$(pr_result_kind "
 check "execution error → failed"              "failed"     "$(pr_result_kind "$F/result-failed.json")"
 check "empty file → failed"                   "failed"     "$(pr_result_kind "$F/result-empty.json")"
 check "missing file → failed"                 "failed"     "$(pr_result_kind "$TMP/nope.json")"
+check "API error (subtype success, is_error true) → failed" "failed" "$(pr_result_kind "$F/result-api-error.json")"
+check "API error: reason, status and the CLI's message, no 'success'" "api_error, HTTP 500: API Error: 500 · Internal server error" "$(pr_result_error "$F/result-api-error.json")"
+check "a 429 API error (shape read from the CLI's code) → usage_limit" "usage_limit" "$(pr_result_kind "$F/result-usage-limit.json")"
+printf '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"api_error_status":429,"structured_output":null}\n' > "$TMP/budget-429.json"
+check "a spent budget stays budget, whatever the status" "budget" "$(pr_result_kind "$TMP/budget-429.json")"
+check "execution error: the subtype is the reason" "error_during_execution" "$(pr_result_error "$F/result-failed.json")"
+check "empty file: says the CLI wrote nothing" "the CLI wrote no result" "$(pr_result_error "$F/result-empty.json")"
+check "missing file: same"                    "the CLI wrote no result" "$(pr_result_error "$TMP/nope.json")"
+printf 'not json\n' > "$TMP/garbage.json"
+check "not JSON: says so"                     "the CLI output is not a result object" "$(pr_result_error "$TMP/garbage.json")"
+
+echo "Streams and transcripts"
+check "stream result: the probe's result line"  "s-probe true" "$(pr_stream_result "$F/stream-probe.jsonl" | jq -r '"\(.session_id) \(.structured_output.ok)"')"
+check "stream result: one line, the stream's last result" "1" "$(pr_stream_result "$F/stream-probe.jsonl" | wc -l | tr -d ' ')"
+check "stream result: a stopped session has none" "" "$(pr_stream_result "$F/stream-killed.jsonl")"
+check "stream result: a missing stream has none" "" "$(pr_stream_result "$TMP/nope.jsonl")"
+check "session id: from the init line"          "s-probe" "$(pr_session_id "$F/stream-probe.jsonl")"
+check "session id: a stopped session's, from its init line" "s-killed" "$(pr_session_id "$F/stream-killed.jsonl")"
+printf '{"type":"result","subtype":"success","is_error":true,"session_id":"s-only-result"}\n' > "$TMP/only-result.jsonl"
+check "session id: no init line → the result's" "s-only-result" "$(pr_session_id "$TMP/only-result.jsonl")"
+check "session id: neither → nothing"           "" "$(pr_session_id "$F/result-empty.json")"
+check "limit: the probe's window is open (allowed, five_hour at 0)" "open" "$(pr_stream_limit "$F/stream-probe.jsonl")"
+check "limit: rejected → limited at the full window's reset; the escaped tool output after it does not count" \
+    "limited 1791090000" "$(pr_stream_limit "$F/stream-limit-rejected.jsonl")"
+check "limit: allowed but five_hour at utilization 1 → limited at that window's reset" "limited 1791089400" "$(pr_stream_limit "$F/stream-window-full.jsonl")"
+check "limit: a stream with no rate_limit_info → nothing" "" "$(pr_stream_limit "$F/stream-killed.jsonl")"
+check "limit: a missing stream → nothing"       "" "$(pr_stream_limit "$TMP/nope.jsonl")"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":100,"unifiedWindows":{"five_hour":{"utilization":0.9,"resetsAt":50}}}}\n' > "$TMP/rl-top.jsonl"
+check "limit: rejected with no full window → the top-level reset" "limited 100" "$(pr_stream_limit "$TMP/rl-top.jsonl")"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":100,"unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":200},"seven_day":{"utilization":1.2,"resetsAt":900}}}}\n' > "$TMP/rl-two.jsonl"
+check "limit: two full windows → the later reset" "limited 900" "$(pr_stream_limit "$TMP/rl-two.jsonl")"
+printf '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected"}}\n' > "$TMP/rl-none.jsonl"
+check "limit: rejected with no reset anywhere → limited alone" "limited" "$(pr_stream_limit "$TMP/rl-none.jsonl")"
+printf '{"type":"system","subtype":"status","session_id":"x","data":{"rate_limit_info":{"status":"rejected","resetsAt":7}}}\n{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":8}}\n' > "$TMP/rl-newest.jsonl"
+check "limit: found at any depth, and the newest one wins" "open" "$(pr_stream_limit "$TMP/rl-newest.jsonl")"
+head -1 "$TMP/rl-newest.jsonl" > "$TMP/rl-deep.jsonl"
+check "limit: a nested rate_limit_info counts"  "limited 7" "$(pr_stream_limit "$TMP/rl-deep.jsonl")"
+tr_rc=0; tr_out=$(pr_transcript_usage_limit "$F/transcript-usage-limit.jsonl") || tr_rc=$?
+check "transcript: the last main-chain entry is a rate_limit stop (a sidechain entry after it does not count)" "0 1791089400" "$tr_rc $tr_out"
+check_rc "transcript: resumed after the stop → not stopped" 1 pr_transcript_usage_limit "$F/transcript-resumed.jsonl"
+head -4 "$F/transcript-resumed.jsonl" > "$TMP/tr-prompt-only.jsonl"
+check_rc "transcript: a resume that wrote its prompt but no turn yet → not stopped" 1 pr_transcript_usage_limit "$TMP/tr-prompt-only.jsonl"
+check_rc "transcript: a missing file → not stopped" 1 pr_transcript_usage_limit "$TMP/nope.jsonl"
+sed 's/,"quotaLimits":{"resetsAt":1791089400}//' "$F/transcript-usage-limit.jsonl" > "$TMP/tr-noreset.jsonl"
+tr_rc=0; tr_out=$(pr_transcript_usage_limit "$TMP/tr-noreset.jsonl") || tr_rc=$?
+check "transcript: a stop with no quotaLimits → exit 0, no reset" "0 " "$tr_rc $tr_out"
+
+echo "Waits and cost"
+check "duration: seconds"                       "45s" "$(pr_fmt_duration 45)"
+check "duration: minutes"                       "59m" "$(pr_fmt_duration 3599)"
+check "duration: hours and minutes"             "1h 05m" "$(pr_fmt_duration 3900)"
+check "duration: the ceiling"                   "6h 00m" "$(pr_fmt_duration 21600)"
+check "duration: days and hours"                "3d 1h" "$(pr_fmt_duration 262800)"
+check "duration: a negative wait is none"       "0s" "$(pr_fmt_duration -5)"
+check "cost delta: a cumulative total adds its increase" "3.5" "$(pr_cost_delta 5.5 2)"
+check "cost delta: a total below the previous is a per-invocation figure" "1.5" "$(pr_cost_delta 1.5 4)"
+check "cost delta: an equal total adds nothing"  "0" "$(pr_cost_delta 4 4)"
+check "budget left: what is left"               "27.5" "$(pr_budget_left 40 12.5)"
+check "budget left: at least 1"                 "1" "$(pr_budget_left 5 4.5)"
+check "budget left: never below 1, even overspent" "1" "$(pr_budget_left 5 9)"
+check "budget left: nothing spent"              "40" "$(pr_budget_left 40 0)"
 
 echo "Result fields"
 check "field from a complete result"          "s-complete" "$(pr_result_field "$F/result-complete.json" .session_id)"
@@ -192,11 +253,43 @@ check_rc "judge schema is JSON"                       0 jq -e . "$HERE/judge-res
 check "every required result field is described"      "" "$(jq -r '.required - (.properties | keys) | .[]' "$HERE/step-result.schema.json")"
 
 echo "Checkpoints"
-check_rc "due when shipped in this run"                 0 pr_checkpoint_due "$F/run.log" 9 1
-check_rc "not due: no log at all"                       1 pr_checkpoint_due "$TMP/nolog" 1 0
-check_rc "not due: step 1 already had its checkpoint"   1 pr_checkpoint_due "$F/run.log" 1 0
-check_rc "due: step 2 launched, finished by resume, no checkpoint yet" 0 pr_checkpoint_due "$F/run.log" 2 0
-check_rc "not due: step 3 never touched by the runner"  1 pr_checkpoint_due "$F/run.log" 3 0
+check_rc "not due: no log at all"                       1 pr_checkpoint_due "$TMP/nolog" 1
+check_rc "not due: step 1 already had its checkpoint"   1 pr_checkpoint_due "$F/run.log" 1
+check_rc "due: step 2 launched, finished by resume, no checkpoint yet" 0 pr_checkpoint_due "$F/run.log" 2
+check_rc "not due: step 3 never touched by the runner"  1 pr_checkpoint_due "$F/run.log" 3
+printf '**Order: 1 ‖ 2 → 3**\n\n### Step 1 — a\n\n**Shipped** `abc1234`\n\n### Step 2 — b\n\n**Shipped** `def5678`\n\n### Step 3 — c\n' > "$TMP/front.md"
+check_rc "frontier: a shipped step after the ‖ (index 1) puts it behind the run" 0 pr_shipped_after "$TMP/front.md" 1 1 CP 2 3
+check_rc "frontier: nothing shipped after step 2 (index 2)"  1 pr_shipped_after "$TMP/front.md" 2 1 CP 2 3
+check_rc "frontier: past the last token"                     1 pr_shipped_after "$TMP/front.md" 3 1 CP 2 3
+# shellcheck disable=SC2086
+check_rc "frontier: the fixture's ‖ after step 4 is at the frontier" 1 pr_shipped_after "$PLAN" 4 $tokens
+
+echo "Plan sync"
+merged=$(pr_merge_inserts "$F/merge-insert.txt") || true
+check_rc "same-spot insertions only → exit 0"          0 pr_merge_inserts "$F/merge-insert.txt"
+check "…and no marker is left"                         "0" "$(grep -c '^[<|=>]\{13\}' <<< "$merged" || true)"
+check "the branch's block, a blank line, then the ref's new step" "Departures (for sign-off): none||### Step 1a — new" \
+    "$(awk '/^Departures/ { n = 3 } n-- > 0 { printf "%s%s", (n < 2 ? "|" : ""), $0 }' <<< "$merged")"
+check "no extra blank line where the branch's side ends with one" "**Shipped** \`def5678\` (2026-10-03) — tier: mid. skills: none. Reviewer models: none." \
+    "$(awk '/^A note from main/ { print p2 } { p2 = p1; p1 = $0 }' <<< "$merged")"
+merged=$(pr_merge_inserts "$F/merge-edit.txt") || true
+check_rc "an edit conflict → exit 1"                   1 pr_merge_inserts "$F/merge-edit.txt"
+check "…which stays marked, with its base part"        "1 1 1 1" "$(for m in '<' '|' '=' '>'; do grep -c "^[$m]\{13\}" <<< "$merged" || true; done | paste -sd' ' -)"
+check "…while the insertion beside it is placed"       "1" "$(grep -c '^### Step 1a — new$' <<< "$merged")"
+check "the fixture plan passes the plan check"         "" "$(pr_plan_check "$PLAN")"
+printf '**Order: 1 → 2 → 9**\n\n### Step 1 — a\n\n### Step 2 — b — model: huge\n' > "$TMP/check.md"
+check "plan check: a bad tier, a step with no heading" "step 2: unknown tier 'huge'|the Order line names step 9, which has no '### Step 9' heading" \
+    "$(pr_plan_check "$TMP/check.md" | paste -sd'|' -)"
+check_rc "plan check: exit 1 on a problem"             1 pr_plan_check "$TMP/check.md"
+check "plan check: no Order line"                      "no Order line that names a step" "$(pr_plan_check "$TMP/o4.md")"
+printf '**Order: 1 ‖ 2 → 3**\n\n### Step 1 — a\n\n### Step 2 — b\n\n**Shipped** `0000000`\n\n### Step 3 — c\n' > "$TMP/front-lost.md"
+check "plan check: a lost and a changed Shipped line" "step 1 lost its **Shipped** line|step 2's **Shipped** line names another commit" \
+    "$(pr_plan_check "$TMP/front-lost.md" "$TMP/front.md" | paste -sd'|' -)"
+check "plan check: the branch's own copy passes against itself" "" "$(pr_plan_check "$TMP/front.md" "$TMP/front.md")"
+sha=0123456789abcdef0123456789abcdef01234567
+check "trailer: the last Plan-Synced-From line"        "$sha" "$(pr_synced_from "$(printf 'docs(plan): sync\n\nPlan-Synced-From: %040d\nPlan-Synced-From: %s\n' 0 "$sha")")"
+check "trailer: none → nothing"                        "" "$(pr_synced_from 'docs(plan): step 1 shipped')"
+check "trailer: a short sha is not one"                "" "$(pr_synced_from 'Plan-Synced-From: 0123abc')"
 
 echo "Prompt template"
 TPL=$HERE/step-prompt.md
@@ -251,7 +344,10 @@ check "malformed variant file exits 1"        "1" "$(PLAN_RUNNER_VARIANTS_DIR=$F
 check "fixture variant ok.env loads (ESCALATE=0 shows as blocked)" "1" "$(PLAN_RUNNER_RUNS_DIR=$TMP/runs PLAN_RUNNER_VARIANTS_DIR=$F/variants "$HERE/../run-plan.sh" "$PLAN" --dry-run --variant ok 2>/dev/null | grep -c 'after a failed nudge: blocked | judge: opus/high' | sed 's/^[1-9][0-9]*$/1/')"
 check "bad --base exits 1"                    "1" "$("$HERE/../run-plan.sh" "$PLAN" --dry-run --base no-such-ref >/dev/null 2>&1; echo $?)"
 check "usage exits 1 without a plan"          "1" "$("$HERE/../run-plan.sh" >/dev/null 2>&1; echo $?)"
-check "--help prints the usage block with the new flags" "3" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to) ' || true)"
+check "--help prints the usage block with the new flags" "4" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -cE '^  --(variant|base|to|sync-from) ' || true)"
+check "--help names exit 5"                   "1" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -c '5 stopped for the owner' || true)"
+check "--help names exit 130"                 "1" "$("$HERE/../run-plan.sh" --help 2>/dev/null | grep -c '130 interrupted' || true)"
+check "the dry run shows the stream format the driver reads" "4" "$(grep -c -- '--output-format stream-json --verbose' <<< "$dry" || true)"
 check "--help exits 0"                        "0" "$("$HERE/../run-plan.sh" --help >/dev/null 2>&1; echo $?)"
 check "--from without a value exits 1"        "1" "$("$HERE/../run-plan.sh" "$PLAN" --from >/dev/null 2>&1; echo $?)"
 check "bad --cap exits 1"                     "1" "$("$HERE/../run-plan.sh" "$PLAN" --cap huge --dry-run >/dev/null 2>&1; echo $?)"
@@ -265,10 +361,16 @@ check "--to before --from exits 1"            "1" "$("$HERE/../run-plan.sh" "$PL
 echo "Report"
 rep=$(PLAN_RUNNER_RUNS_DIR=$F "$HERE/report.sh" run-bench 2>"$TMP/rep.err") || { echo "  report exit $? — stderr:"; sed 's/^/    /' "$TMP/rep.err"; fail=$((fail + 1)); }
 row() { printf '%s\n' "$rep" | awk -v s="$1" '$1 == s { $1 = $1; print }'; }
-check "step 1: last config, attempts, nudges, escalations, consults, cost, turns, denials, minutes, tests, grade" \
-    "1 opus/high+fable 2 1 1 3 6.5 102 1 30 validated 100→104 0/1/2 \$1.24" "$(row 1)"
-check "step 2: blocked, no consults reported, and the failed judge's cost is not lost" "2 opus/medium 1 0 0 - 1 20 0 - blocked - failed \$4.9" "$(row 2)"
+check "step 1: last config, attempts, nudges, escalations, consults, cost, turns, denials, minutes, wait, tests, grade" \
+    "1 opus/high+fable 2 1 1 3 6.5 102 1 30 - validated 100→104 0/1/2 \$1.24" "$(row 1)"
+check "step 2: blocked, no consults reported, and the failed judge's cost is not lost" "2 opus/medium 1 0 0 - 1 20 0 - - blocked - failed \$4.9" "$(row 2)"
 check "the header names the base the run forked from" "1" "$(printf '%s\n' "$rep" | grep -c '^== run-bench (base abc12345)$')"
+rep=$(PLAN_RUNNER_RUNS_DIR=$F "$HERE/report.sh" run-limit 2>"$TMP/rep.err") || { echo "  report exit $? — stderr:"; sed 's/^/    /' "$TMP/rep.err"; fail=$((fail + 1)); }
+check "a resumed session's cumulative cost counted once (2 → 5.5 → 6.25), the judge's result left out, the wait in minutes" \
+    "1 opus/xhigh 1 1 0 - 6.25 125 0 71 31 validated 10→12 0/0/1 \$1.5" "$(row 1)"
+check "a stopped invocation (cost 0) adds nothing; a total below the previous is per-invocation (4 + 1.5)" \
+    "2 opus/xhigh 1 1 0 - 5.5 25 0 36 10 validated 12→13 -" "$(row 2)"
+check "the total row sums the waits"            "41" "$(printf '%s\n' "$rep" | awk '$1 == "total" { print $10 }')"
 check "report without a run id exits 1"       "1" "$("$HERE/report.sh" >/dev/null 2>&1; echo $?)"
 
 echo "End to end"

@@ -21,13 +21,48 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### Calls after the video work moved onto `CallSession` (2026-10-09)
+
+`docs/plans/video-calls.md` step 5a. The video work of steps 1 to 5 now runs in main's
+`CallSession`, with `PeerSession` as the connection, and no call has run on a device since. JVM
+tests cover the session, the camera switch and the connection against fakes. The WebRTC side,
+`WebRtcCallLocalMedia`, has no test. The lists below from steps 1 to 5 still apply, and so does
+*Calls — teardown, ringing, answering and the call log*. On top of them, with a phone and the
+emulator:
+1. **Deploy `firestore.rules` first.** Without it every call placed from this build is refused,
+   because the call document carries `video`. A camera or microphone switch must not fail
+   either: `adb logcat -s CallMediaPublisher` stays silent during a video call.
+2. A voice call and a video call in each direction connect, with sound both ways.
+3. Cancel a call while it is being placed. Let a call ring out. Both end on both phones, and the
+   next call starts normally.
+4. Hang up while the camera runs, from each side, a few times. The camera indicator goes out, the
+   app does not crash, and the next call's camera opens.
+5. Switch the camera on and off quickly, several times, and flip it. The self view follows, and
+   the other side shows the avatar while it is off.
+6. Kill the app on the phone that is called, then call it with video. The fallback ring says
+   *Incoming Video Call*, its Decline ends the ring on the caller's side, and a tap on it rings
+   in the call screen with the two answer buttons.
+7. Rotate the phone under the permission prompt of a video call. The call is still placed.
+8. Call a phone that runs the released app. The call runs as a voice call, the camera button is
+   disabled, and the released app does not crash when it answers.
+9. Open and close ten calls in a row. Memory does not climb: each call releases its connection
+   (`PeerSession.close()` now disposes it).
+10. Hang up with the camera on. The other side's sound stops at once, and a video or a voice
+    message played right after sounds normal, not in call mode.
+11. Answer a video ring from the notification's *Answer*, on an unlocked phone with the camera
+    permission. The call starts with the camera off. Watch whether the camera indicator flashes
+    first: the stage can come on screen, and start the ring's preview, a moment before the
+    answer reaches the service.
+12. The rules tests have not run: `npm test` in `firestore-rules-tests/` needs the Firestore
+    emulator. Run them before the rules are deployed.
+
 ### Voice calls after the `PeerSession` move (2026-10-03)
 
 `docs/plans/video-calls.md` step 1 (`da97e8c3`). The connection handling moved from `CallService`
 into `PeerSession`, and no call has run on a device since. JVM tests cover the session against a
 mocked `PeerConnection`. These need a phone and the emulator:
 1. One voice call in each direction connects, with audio both ways, and the timer runs.
-2. `adb logcat -s CallService` shows `Connected: direct (…)` or `Connected: relayed (…)`, or a
+2. `adb logcat -s PeerSession` shows `Connected: direct (…)` or `Connected: relayed (…)`, or a
    `Path: …` line right after `Connected: path not known yet`.
 3. Hang up from each side, decline, and let a call ring out. Each ends on both phones, and the
    next call starts normally.
@@ -55,7 +90,7 @@ mocks. Offer and answer between this build and a released one ran on the emulato
 app, without media. Nothing else here has run on a device, and the plan's two emulator checks were
 not made.
 1. A voice call in each direction still connects with audio both ways, between two phones with
-   this build. `adb logcat -s CallService` shows no `Session failed` line. Both user documents
+   this build. `adb logcat -s PeerSession` shows no `Session failed` line. Both user documents
    carry `callVideoLine: true` after the apps started once.
 2. **An older build as the partner.** A voice call between this build and a build from before
    video calls connects in each direction, with audio both ways, and stays up for a minute. The
@@ -173,7 +208,7 @@ function's answer and the order of the waits.
 1. Create a TURN key in the Cloudflare dashboard. Run `firebase functions:secrets:set
    CLOUDFLARE_TURN_KEY_ID` and `… CLOUDFLARE_TURN_API_TOKEN`, then `firebase deploy --only
    functions`. The deploy goes through and lists `getTurnCredentials`.
-2. One call on mobile data connects, and `adb logcat -s CallService` shows `Connected: relayed
+2. One call on mobile data connects, and `adb logcat -s PeerSession` shows `Connected: relayed
    (local relay, …) through turn:turn.cloudflare.com:…` or the same as a `Path:` line. If the line
    says *relayed* without a server, WebRTC does not report the server on this path, and the
    candidate's address has to be compared with Cloudflare's by hand.
@@ -191,6 +226,234 @@ function's answer and the order of the waits.
    answers waits up to three seconds for the relay's servers before it writes the answer, and the
    caller's ring timeout keeps running meanwhile. If the caller gives up while the other side
    says *Connecting*, the wait on the answering side needs a shorter bound.
+### Calls — teardown, ringing, answering and the call log (2026-10-08)
+
+`CallService` runs a call's work on the main thread, disposes the `PeerConnection` and its audio
+module, and records how a call ended on the application scope. The incoming-call channel rings.
+JVM tests cover the call state, the call log, the launch decision, the outgoing setup and the
+notification channel.
+No test runs WebRTC, the foreground service or a notification sound, so none of this has been
+seen on a phone.
+1. Upgrade over an existing install (a fresh one hides channel problems). Locked phone, incoming
+   call: it rings and vibrates until answered, declined or cancelled by the caller, and stops at
+   once in each case. Silent mode: no ring. Vibrate mode: vibration only.
+2. Fresh install on Android 14+, microphone never granted: answer with the green button on the
+   full-screen call screen. The permission prompt appears, and the call connects once allowed.
+3. Connected call, then Wi-Fi and mobile data off on one phone: within about 30 s both phones
+   end the call, and neither app crashes. Then a call where both people hang up at the same moment.
+4. Ten calls in a row: memory does not climb from call to call (Android Studio memory profiler).
+5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
+6. After a call, both phones' chat lists show the call as the chat's last message.
+7. Cancel an outgoing call before it is answered: the other phone shows a missed call, in the
+   chat and in the Calls tab, with a "Missed call" notification and an unread badge on the chat.
+   After an answered or a declined call the other phone shows neither (needs the updated Cloud
+   Functions). Decline a call: both phones show "Declined", in the chat and in the
+   Calls tab, and only the phone that declined shows it in red.
+8. During a call, open another chat and tap call: "You're already in a call", and the call goes
+   on. Rotate right after tapping call: the call still starts. Open a finished call's card from
+   Recents: no new call is placed. During a call press Home, and let the other person hang up:
+   the call's card leaves Recents at once.
+9. With mobile data slowed or briefly off, tap call: the screen shows the name and
+   "Calling..." at once. Press Back before it rings, once straight away and once after turning
+   the phone, and once press Cancel instead: the other phone does not ring, or stops at once
+   and shows a missed call.
+   Tap call twice quickly: it rings once. With no network at all, the screen says the call
+   could not start within about 20 s.
+10. Fresh install: rotate while the microphone prompt is up, then allow. The call starts.
+    Do the same when answering with the green button: the call connects. Take the microphone
+    permission away again, tap call, and while the prompt is up have the other phone call:
+    the incoming call rings.
+11. Hang up, then have the other phone call straight back, twice. Each call rings: the service
+    stops and starts cleanly between calls.
+12. Set the app's battery use to Restricted, lock the phone, and call it. If Android will not let
+    the app start ringing, a ringing notification appears instead. Opening it shows the call
+    screen, which rings, and the call can be answered. Call again and press Decline on the
+    notification: the ring stops, and both phones show "Declined".
+
+### Crop frame above the keyboard (2026-10-08)
+
+`ZoomCropSurface` carries the zoom with `ViewportGeometry.transformAfterResize` on a resize and
+on a new shape. JVM tests cover the arithmetic, and `ZoomCropSurfaceTest` covers when it runs
+under Robolectric. No test runs a real keyboard, so the slide itself has not been seen.
+1. Open a received photo fullscreen, zoom in, set the pill to 1:1, tap Edit, tap the caption:
+   the square keeps its width, stays centred and whole, and does not jitter while the keyboard slides.
+2. Close the keyboard: the zoom is the one you made. Send: the crop is the square you framed.
+3. Repeat from the send preview on a picked photo, at 1x and zoomed, with Free and a portrait shape.
+4. With the keyboard up, tap the pill through every shape: each frame stays whole above the
+   keyboard, and 16:9 comes back to the size you zoomed to. Close the keyboard: your zoom is back.
+   Send: the crop is the last shape, cut from what you framed.
+5. In the fullscreen viewer, zoom in, set the pill to 1:1, swipe to the next photo and back:
+   nothing jumps during the swipe, each photo shows at 1x, and the pill does not zoom it.
+   Then, on a photo just swiped to, before any pinch or pan, set the pill to 1:1: the square is
+   drawn on that photo, not a frame around the whole of it. Tap Edit: the preview opens on the same square.
+
+### Picker search above the keyboard (2026-10-07)
+
+`ComposerPickerPanel` search layouts. Robolectric covers the strip, the hoisted state and the
+layout decision. No test runs a real keyboard, so nothing about the insets has been seen.
+1. Emoji tab → search button: the keyboard opens at once. One row of results and the search
+   field sit directly on the keyboard, and the composer stays visible above them.
+2. Pick two emoji from the strip: both land in the composer and the search stays open.
+   The backspace key in the search row deletes from the composer.
+3. Back hides the keyboard: the full emoji panel returns, filtered by the query. Tap the field:
+   the strip comes back. A second Back closes the search.
+4. Tap the composer during an emoji search: the search closes and the keyboard types into the message.
+5. Stickers tab → search button: the picker slides up to just below the top bar, the keyboard
+   opens under it, and the conversation and composer are hidden. Nothing behind it takes a tap.
+6. Pick a sticker from that search: it is sent, and the picker and keyboard close.
+7. Back with the keyboard down, or the field's ×: the overlay slides away and the Stickers tab is
+   back in the keyboard's place.
+8. Rotate during each search, and repeat once in split screen.
+
+### GIFs and stickers from the keyboard (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 9. Checked on the emulator (API 36, Gboard with a
+hardware keyboard, so its floating toolbar): a GIF and a sticker from Gboard's palette were
+each sent and arrived. Nothing ran on a phone.
+1. Gboard as an on-screen keyboard on a phone: its GIF and sticker tabs are offered in the
+   composer, and a pick is sent at once. Text typed before the pick stays in the composer.
+2. Samsung's keyboard: it is reported to refuse content in Compose fields. Check whether its
+   GIF and sticker buttons are live in the composer, and what a pick does.
+3. A Gboard sticker keeps its transparency in the bubble and is in the Stickers tab
+   afterwards, under Recents and in the *Saved* pack. The same sticker sent twice is one
+   entry there.
+4. A Bitmoji or another large keyboard sticker: it is sent, scaled to 512 px on its long edge.
+5. While a message is being edited, a keyboard pick is refused and nothing is sent.
+6. A `.gif` picked from the gallery goes through the send preview and arrives animated, with
+   its caption. Cropped or drawn on in the preview, it arrives as a still photo.
+7. A `.gif` shared into the app from another app arrives animated. One over 8 MB is refused
+   with *GIFs over 8 MB can't be sent*.
+
+### The sticker maker (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 8. JVM and Robolectric tests cover the geometry, the
+trim, the outline, the size loop with a stand-in encoder, the repository and the screen's
+states. ML Kit's cutout, the platform's WebP encoder and the pinch never ran. Nothing ran on
+a device.
+1. Settings → Storage → *Import stickers* → *Create*, and the **+** at the end of the Stickers
+   tab's pack row, both open the maker, and the photo picker opens with it.
+2. The first cutout on a phone waits for Play services to fetch the model
+   (`SubjectCutout`, at most 45 seconds). Check a fresh install: the cutout arrives, or the
+   screen says that no subject was cut out and a second try works once the model is there.
+3. The cutout follows the subject. *Outline* puts a white edge around it, round at corners
+   and without gaps around thin parts such as hair or fingers.
+4. *Original* shows the whole photo. A pinch and a drag crop it, and the picture cannot be
+   dragged off an edge it fills.
+5. The saved sticker looks like the preview, with a transparent background, in the library,
+   in the Stickers tab and in a chat on a second account.
+6. The file under `filesDir/stickers/` is a WebP of 512 × 512 and at most 100 KB. A detailed
+   photo still saves, at a lower quality.
+7. *Add emoji* opens the emoji sheet. The sticker is found by its emoji in the Stickers tab's
+   search and in the suggestion strip.
+8. A second sticker joins *My stickers* without asking. The pack is in `stickerPacks/` in the
+   Firestore console after the save, and the file under `stickers/` in Storage.
+9. On a phone without Play services, or the pocketbase flavor on one: the maker offers the
+   photo and the crop, and no cutout.
+10. A debug build opens the maker and a chat. `ChatScreen` gained one parameter, and only a
+    device runs the dex verifier (`docs/GOTCHAS.md`, register pressure).
+
+### Lottie stickers (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 7. JVM and Robolectric tests cover the container, the
+import, the receive path and which renderer draws a sticker. One real `.was` from the owner's
+phone was read and drawn in a scratch test. Nothing ran on a device.
+1. *From WhatsApp* lists the `.was` files among the `.webp` ones, each as a cell with an
+   animation mark. Importing one puts it into a pack named after its pack id (`SchoolDays`).
+2. The imported sticker shows its first frame in the library, the Stickers tab, the pack row
+   and the suggestion strip. Its emojis find it in the search.
+3. Sent to a second account, it plays in the bubble on both sides, on the chat background,
+   and loops. The reply, forward and starred previews show the first frame.
+4. *From files* with a Telegram `.tgs`: it imports, plays and sends the same way.
+5. Scroll a chat with a dozen Lottie stickers on a mid-range phone. Each bubble plays its own
+   animation, and nothing pauses the ones off screen but leaving the composition.
+6. After a reinstall, a restored Lottie sticker shows grey, then its first frame.
+7. A release build plays them too: R8 runs over Lottie there, and only its consumer rules
+   keep what it needs.
+
+### Sticker library and import (2026-10-03)
+
+`docs/plans/stickers-and-gifs.md` steps 1–2. JVM/Robolectric tests cover the parsers, the import
+and the screen's state. Nothing has run on a device:
+1. Settings → Storage → *Import stickers* → *From WhatsApp*. The folder picker opens inside
+   `Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers`, or says why it cannot.
+   Android may refuse a grant for a folder under `Android/media`; if it does, the route needs
+   another way in.
+2. The grid lists the folder newest first and stays smooth with a few thousand files.
+   *Select all*, then *Import N*: the summary line is right and the packs come out grouped by
+   the pack each sticker names. Stickers without metadata land in one *WhatsApp* pack.
+3. Import the same selection again: nothing is added.
+4. *From files* with a `.webp` and a `.wastickers` archive, then with a photo: the photo is
+   counted as not imported.
+5. Rename, move up, move down and delete a pack. In a pack, long-press to select, move to
+   another pack, remove.
+6. WhatsApp Business keeps its stickers under `com.whatsapp.w4b`. The picker does not open
+   there by itself; navigate to it by hand and import.
+
+### Sticker and GIF bubbles (2026-10-03)
+
+`docs/plans/stickers-and-gifs.md` step 4. Robolectric covers which branch draws a message. No
+JVM test decodes a frame, and no screen sends either type before step 5, so check these with it:
+1. An animated sticker and a GIF play in the chat. A static sticker keeps its transparency on
+   both themes.
+2. A sticker has no bubble behind it. Time and ticks sit under it, and the jump highlight frames it.
+3. A reply to a sticker or a GIF, the forward preview and the starred list show a still first frame.
+4. Link previews and avatars do not animate.
+5. A chat with many animated bubbles scrolls smoothly.
+6. A debug build opens a chat. `MessageBubble` is close to the dex register ceiling
+   (`docs/GOTCHAS.md`), and only a device runs the verifier.
+
+### Sticker backup, restore and shared packs (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 6. JVM and Robolectric tests cover the merge rules, the
+worker, the restore and the sheets against mocked backends. Nothing ran against Firestore or on a
+device. **First deploy `firestore.rules`**: until then every manifest write is refused, the sync
+run fails, and the packs stay pending.
+1. Import a pack, then look at `stickerPacks/` in the Firestore console. There is one document per
+   pack, with `ownerId`, the pack's fields and a `stickers` array. An imported pack's `importKey`
+   reads percent-encoded (`wa%3A…%00…`).
+2. Add a favourite and delete a pack. The favourites document changes and the deleted pack's
+   document is gone.
+3. Clear the app's data, or reinstall, and sign in. Open a chat and the Stickers tab: the packs and
+   the favourites return, in their order. Each sticker shows a grey placeholder first and then its
+   picture. A sticker can be sent once its picture shows.
+4. Import the same WhatsApp stickers again after the restore. No second pack appears.
+5. On a fresh install, add a favourite before opening a chat for the first time. After the restore
+   there is still one favourites shelf, holding the new favourite and the restored ones.
+6. With a second account: receive a sticker sent from a pack, tap it, *View pack*. The sheet shows
+   the pack's name and stickers. *Add pack* puts it in the library, and the sheet then says the pack
+   is in your library. A sticker from the favourites or from the loose stickers has no *View pack*.
+7. View a pack whose owner has deleted it: the sheet says the pack is no longer available.
+8. The first backup of a large library. WorkManager stops a run after ten minutes, and the next run
+   continues with the files that are left. Check that the packs do end up synced, and how long it takes.
+9. Sign out and sign in as another account on the same phone. The first account's packs and recents
+   are gone, and the second account's packs arrive.
+10. A debug build opens a chat and the sticker sheet. `ChatScreen` gained code, and only a device runs
+    the dex verifier (`docs/GOTCHAS.md`).
+
+### Stickers tab in the composer (2026-10-04)
+
+`docs/plans/stickers-and-gifs.md` step 5. JVM and Robolectric tests cover the search, the managers
+and the panel's logic. Nothing ran on a device, and no test draws a real sticker file.
+1. The emoji button opens the panel with an island: *Emoji* and *Stickers*. The search button, the
+   island and the backspace key sit left-aligned in that order.
+2. *Stickers* shows Recents, the favourites, then each pack. A tap sends the sticker and it appears
+   at once, with a clock while offline. An empty library shows *Import stickers*, which opens the library.
+3. Between two accounts: a static and an animated sticker arrive with transparency and animation.
+   The chat list and the notification say *Sticker*. Forwarding one works. Nothing new is in the gallery.
+4. Send the same sticker twice and confirm one object under `stickers/` in Storage. This needs the
+   Storage rule from step 3 of the plan.
+5. Kill the app during a send. The outbox finishes it.
+6. A long press in the grid adds a sticker to the favourites, and a second one takes it out. A
+   snackbar says which. Check that it is visible above the panel.
+7. Tap a received sticker's bubble: the sheet offers *Add to favourites*, and the sticker then shows
+   in the favourites shelf.
+8. Search *cat* in the Stickers tab. Stickers tagged with a cat emoji show. The keyboard that opens
+   for the search field must not close the panel.
+9. Type one emoji that tags a sticker. The strip shows above the composer. A pick sends the sticker
+   and clears the composer. Typing a second character hides the strip.
+10. Recents does not reorder while the panel stays open, and does after it is reopened.
+11. A debug build opens a chat and the panel. `ChatScreen` gained code, and only a device runs the
+    dex verifier (`docs/GOTCHAS.md`).
 
 ### File messages — card, open with, previews, send sheet (2026-09-27)
 
@@ -900,21 +1163,34 @@ caller or callee of a ringing call document. Not planned. Watch the Cloudflare u
 
 ### Stickers & GIFs (4.6)
 
-Planned in [`docs/plans/stickers-and-gifs.md`](plans/stickers-and-gifs.md): approved, no step
-started. The plan owns the scope, the data model and the step order. It covers sticker and GIF
-messages, packs, favourites and recents, import from WhatsApp, and an in-app GIFs tab. Nothing
-of it has shipped: the only stickers today are the twelve drawn marks the image editor places
-on a photo.
+Stickers are imported or made from a photo, sent from the composer's Stickers tab and shown
+in a chat. Lottie stickers (`.was`, `.tgs`) are among them. Packs and favourites are saved
+under the account, and a received sticker's pack can be viewed and added. A GIF and a
+sticker can be inserted from the keyboard. The plan is `docs/plans/stickers-and-gifs.md`, and these parts of it are open:
 
-Two decisions stay recorded here, and the plan cites the first:
-
-- **Recipient privacy.** The recipient's device fetches a sticker or a GIF from our Storage
-  only. Sending a provider URL would make the recipient fetch from the provider, which tells a
-  third party who received what and hollows out the Signal-Protocol story. The bytes are
-  downloaded and re-uploaded as an ordinary media message. That costs bandwidth and keeps the
-  recipient private.
-- **GIF on a photo is impossible, not unbuilt.** The image editor's pipeline ends at JPEG, and
-  a flattened animation is one frame and a worse sticker (`docs/plans/image-editor.md` §2.8).
+- **Drawing on a made sticker, and placing emoji, text and shapes on it.** The sticker maker
+  has the cutout, the outline and the crop. The image editor's Draw and Overlay screens are
+  not mounted on it. They get their rasterizer through `ImageEditServices`, which only
+  `ChatViewModel` builds, and `ImageEditRasterizer.rasterize` writes JPEG, which drops the
+  cutout's transparency. Mounting them needs an output format on `rasterize` that keeps a
+  source with alpha as PNG, and a host for the services outside the chat screen.
+- **A made sticker's outline scales with the crop.** The outline is drawn once, around the
+  whole subject, when the photo is prepared. A zoom into the subject thickens it. An outline
+  of constant width would be drawn after the crop.
+- **A Lottie sticker sent to an older build shows as a broken image.** That build stores
+  WebP only, and its bubble hands the url to an image decoder.
+- **A GIFs tab and an online sticker catalogue.** A GIF is sent from the keyboard, the
+  gallery or the share sheet. The in-app GIFs tab and the online catalogue are steps 10–11.
+- **A picture pasted from the keyboard's clipboard becomes a sticker.** Every keyboard
+  picture that is not a GIF is sent as a sticker, at most 512 px on its long edge. A
+  screenshot pasted from Gboard's clipboard row is such a picture. A rule that tells a
+  photo from a sticker, by its size or its lack of transparency, would send it as a photo.
+- **The provider-privacy rule for GIFs is decided.** The recipient fetches from Storage
+  only. Search and media go through a Cloud Function, so the provider never sees a user's
+  IP. The pocketbase flavor gets no GIFs tab.
+- **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
+  flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
+- **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.
 
 ### Document sharing enhancements (4.7)
 The file card, *Open with*, text/PDF previews, the send sheet, Save/Share and inline audio shipped

@@ -51,10 +51,12 @@ class MediaBackfillWorker @AssistedInject constructor(
             }
         }
 
-        // Clear stale localUri values where file no longer exists
+        // Clear stale localUri values where file no longer exists. Asked once per
+        // path: every message that points at one sticker shares its file.
+        val exists = HashMap<String, Boolean>()
         for (msg in messageDao.getAllMediaMessages()) {
             val uri = msg.localUri ?: continue
-            if (!java.io.File(uri).exists()) {
+            if (!exists.getOrPut(uri) { java.io.File(uri).exists() }) {
                 messageDao.updateLocalUri(msg.id, null)
             }
         }
@@ -66,10 +68,10 @@ class MediaBackfillWorker @AssistedInject constructor(
         var done = 0
         for (msg in messages) {
             try {
-                val file = mediaFileManager.downloadFor(
-                    msg.chatId, msg.id, parseMessageType(msg.type), msg.mediaUrl!!, msg.fileName, msg.mimeType,
-                )
-                messageDao.updateLocalUri(msg.id, file.absolutePath)
+                // null: a sticker that was refused. It keeps rendering from its url.
+                mediaFileManager.downloadFor(
+                    msg.chatId, msg.id, parseMessageType(msg.type), msg.mediaUrl!!, msg.fileName, msg.mimeType, msg.stickerId,
+                )?.let { messageDao.updateLocalUri(msg.id, it.absolutePath) }
             } catch (_: Exception) { }
             done++
             setProgress(workDataOf("done" to done, "total" to total))

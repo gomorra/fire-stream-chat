@@ -12,6 +12,8 @@ import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.VideoSource
 import org.webrtc.VideoTrack
+import org.webrtc.audio.AudioDeviceModule
+import org.webrtc.audio.JavaAudioDeviceModule
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -50,6 +52,12 @@ class WebRtcPeerConnectionFactory(context: Context) {
     private var audioSource: AudioSource? = null
 
     /**
+     * Built here rather than left to the factory builder: the module the builder makes itself has
+     * no owner, so nothing ever released it, and one leaked with every call.
+     */
+    private val audioDeviceModule: AudioDeviceModule
+
+    /**
      * The EGL context of this call. The encoders and decoders, the camera's texture helper and
      * every video view are built on it, so a frame stays a texture from the camera to the screen.
      */
@@ -57,7 +65,9 @@ class WebRtcPeerConnectionFactory(context: Context) {
 
     init {
         initializeOnce(context)
+        audioDeviceModule = JavaAudioDeviceModule.builder(context.applicationContext).createAudioDeviceModule()
         factory = PeerConnectionFactory.builder()
+            .setAudioDeviceModule(audioDeviceModule)
             .setVideoEncoderFactory(
                 DefaultVideoEncoderFactory(
                     eglBase.eglBaseContext,
@@ -105,6 +115,7 @@ class WebRtcPeerConnectionFactory(context: Context) {
         audioSource?.dispose()
         audioSource = null
         factory.dispose()
+        audioDeviceModule.release()
         eglBase.release()
     }
 }

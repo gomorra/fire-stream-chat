@@ -81,13 +81,46 @@ class MessageRepositoryPushReconcileTest {
     fun `a pushed photo is written to Room and downloaded without the chat being open`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
         val saved = File("/storage/emulated/0/Pictures/FireStream Images/m1.jpg")
-        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } returns saved
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any(), any()) } returns saved
 
         repository.reconcileFromPush(CHAT, "m1")
 
         coVerify(exactly = 1) { messageDao.upsertRecord(match { it.id == "m1" && it.mediaUrl == photoUrl("m1") }) }
-        coVerify(timeout = 2_000) { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) }
+        coVerify(timeout = 2_000) { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any(), any()) }
         coVerify(timeout = 2_000) { messageDao.updateLocalUri("m1", saved.absolutePath) }
+    }
+
+    @Test
+    fun `a pushed sticker is written with what it points at, and downloaded by its sticker id`() = runTest {
+        val stickerId = "e".repeat(64)
+        val sticker = photo("m1").copy(type = MessageType.STICKER.name, content = "😺", stickerId = stickerId, stickerPackId = "pack1")
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } returns sticker
+        val saved = File("/data/files/stickers/$stickerId.webp")
+        coEvery {
+            mediaFileManager.downloadFor(CHAT, "m1", MessageType.STICKER, photoUrl("m1"), any(), any(), stickerId)
+        } returns saved
+
+        repository.reconcileFromPush(CHAT, "m1")
+
+        coVerify(exactly = 1) {
+            messageDao.upsertRecord(match { it.type == "STICKER" && it.stickerId == stickerId && it.stickerPackId == "pack1" })
+        }
+        coVerify(timeout = 2_000) { messageDao.updateLocalUri("m1", saved.absolutePath) }
+    }
+
+    // A sticker whose bytes are not what its id claims gets no local file. The
+    // message keeps its url, and nothing is queued to try again.
+    @Test
+    fun `a pushed sticker that is refused keeps rendering from its url`() = runTest {
+        val sticker = photo("m1").copy(type = MessageType.STICKER.name, stickerId = "e".repeat(64))
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } returns sticker
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), any(), any(), any(), any()) } returns null
+
+        repository.reconcileFromPush(CHAT, "m1")
+
+        coVerify(timeout = 2_000) { mediaFileManager.downloadFor(CHAT, "m1", any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { messageDao.updateLocalUri(any(), any()) }
+        coVerify(exactly = 0) { mediaBackfillScheduler.retryDownloads() }
     }
 
     @Test
@@ -249,7 +282,7 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a failed auto-download queues the retry`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
-        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any(), any()) } throws IOException("network went away")
 
         repository.reconcileFromPush(CHAT, "m1")
 
@@ -260,12 +293,27 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a successful auto-download queues nothing`() = runTest {
         coEvery { messageSource.fetchMessage(CHAT, "m1") } returns photo("m1")
-        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any()) } returns File("/tmp/m1.jpg")
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), photoUrl("m1"), any(), any(), any()) } returns File("/tmp/m1.jpg")
 
         repository.reconcileFromPush(CHAT, "m1")
 
         coVerify(timeout = 2_000) { messageDao.updateLocalUri("m1", any()) }
         coVerify(exactly = 0) { mediaBackfillScheduler.retryDownloads() }
+    }
+
+    // A sticker's bubble would fetch it from the url anyway, and only the local
+    // copy is checked against the id the message claims.
+    @Test
+    fun `a pushed sticker is fetched even when auto-download is off`() = runTest {
+        every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.NEVER)
+        val sticker = photo("m1").copy(type = MessageType.STICKER.name, stickerId = "e".repeat(64))
+        coEvery { messageSource.fetchMessage(CHAT, "m1") } returns sticker
+        val saved = File("/data/files/stickers/sticker.webp")
+        coEvery { mediaFileManager.downloadFor(CHAT, "m1", any(), any(), any(), any(), any()) } returns saved
+
+        repository.reconcileFromPush(CHAT, "m1")
+
+        coVerify(timeout = 2_000) { messageDao.updateLocalUri("m1", saved.absolutePath) }
     }
 
     // "Wi-Fi only" off Wi-Fi is the case the UNMETERED constraint exists for:
@@ -278,7 +326,7 @@ class MessageRepositoryPushReconcileTest {
         repository.reconcileFromPush(CHAT, "m1")
 
         coVerify(timeout = 2_000, exactly = 1) { mediaBackfillScheduler.retryDownloads() }
-        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -291,7 +339,24 @@ class MessageRepositoryPushReconcileTest {
         repository.getMessages(CHAT).first()
 
         coVerify(timeout = 2_000, exactly = 1) { mediaBackfillScheduler.retryDownloads() }
-        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `opening a chat on Wi-Fi only off Wi-Fi still fetches its stickers, and leaves the photo for Wi-Fi`() = runTest {
+        every { preferencesDataStore.autoDownloadFlow } returns flowOf(AutoDownloadOption.WIFI_ONLY)
+        val sticker = pendingRow("s").let { it.copy(record = it.record.copy(type = "STICKER", stickerId = "e".repeat(64))) }
+        coEvery { messageDao.getMessagesWithoutLocalMediaForChat(CHAT) } returns listOf(pendingRow("a"), sticker)
+        every { messageDao.getMessagesByChatId(CHAT) } returns flowOf(emptyList())
+        every { messageSource.observeMessages(CHAT) } returns flowOf(emptyList())
+        val saved = File("/data/files/stickers/sticker.webp")
+        coEvery { mediaFileManager.downloadFor(CHAT, "s", any(), any(), any(), any(), any()) } returns saved
+
+        repository.getMessages(CHAT).first()
+
+        coVerify(timeout = 2_000) { messageDao.updateLocalUri("s", saved.absolutePath) }
+        coVerify(timeout = 2_000, exactly = 1) { mediaBackfillScheduler.retryDownloads() }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(CHAT, "a", any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -310,7 +375,7 @@ class MessageRepositoryPushReconcileTest {
     fun `a per-chat scan with failures queues the retry once`() = runTest {
         val rows = listOf(pendingRow("a"), pendingRow("b"))
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat(CHAT) } returns rows
-        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any()) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any(), any()) } throws IOException("network went away")
         coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
 
         repository.ensureLocalCopiesForChat(CHAT)
@@ -323,7 +388,7 @@ class MessageRepositoryPushReconcileTest {
     @Test
     fun `a scheduler failure does not fail the scan`() = runTest {
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat(CHAT) } returns listOf(pendingRow("a"))
-        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any()) } throws IOException("network went away")
+        coEvery { mediaFileManager.downloadFor(CHAT, any(), any(), any(), any(), any(), any()) } throws IOException("network went away")
         coEvery { mediaBackfillScheduler.retryDownloads() } throws IllegalStateException("WorkManager not initialised")
 
         repository.ensureLocalCopiesForChat(CHAT)

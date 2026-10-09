@@ -3,12 +3,12 @@
 //   out a ready `View` per participant, keeps each view on that participant's current track,
 //   and reports who has delivered a first frame.
 // Owns: Which track belongs to which participant, every live video view, the first-frame set.
-// Collaborators: CallService (opens it with the call's EGL context, sets and drops tracks, closes
+// Collaborators: WebRtcCallLocalMedia (opens it with the call's EGL context, sets and drops tracks, closes
 //   it before anything is disposed), the call screens (createView / releaseView),
 //   WebRtcPeerConnectionFactory (the EGL context).
 // Don't put here: Compose, layout, or which tile shows when (ui/call); camera capture
 //   (LocalCamera); negotiation (PeerSession). No WebRTC type leaves through the public API
-//   except the two CallService passes in.
+//   except the two WebRtcCallLocalMedia passes in.
 // endregion
 
 package com.firestream.chat.data.call

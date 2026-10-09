@@ -50,13 +50,13 @@ class MessageRepositoryEnsureLocalFileTest {
         val path = repository.ensureLocalFile(doc.copy(localUri = kept.absolutePath)).getOrThrow()
 
         assertEquals(kept.absolutePath, path)
-        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `no local copy downloads one and remembers it on the row`() = runTest {
         coEvery {
-            mediaFileManager.downloadFor("chat1", "doc1", MessageType.DOCUMENT, doc.mediaUrl!!, "Report.pdf", "application/pdf")
+            mediaFileManager.downloadFor("chat1", "doc1", MessageType.DOCUMENT, doc.mediaUrl!!, "Report.pdf", "application/pdf", null)
         } returns kept
 
         val path = repository.ensureLocalFile(doc).getOrThrow()
@@ -69,11 +69,11 @@ class MessageRepositoryEnsureLocalFileTest {
     fun `a local file the provider cannot grant is replaced by a download`() = runTest {
         every { documentFiles.owns(kept) } returns false
         every { outboxFiles.isStaged(kept.path) } returns false
-        coEvery { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) } returns kept
+        coEvery { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) } returns kept
 
         repository.ensureLocalFile(doc.copy(localUri = kept.absolutePath)).getOrThrow()
 
-        coVerify(exactly = 1) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
     }
 
     @Test

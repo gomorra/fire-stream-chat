@@ -19,7 +19,9 @@ import com.firestream.chat.data.reminder.ReminderNotificationChannel
 import com.firestream.chat.data.timer.TimerNotificationChannel
 import com.firestream.chat.data.util.CurrentActivityHolder
 import com.firestream.chat.data.util.ImageEditRasterizer
+import com.firestream.chat.data.util.ProfileImageManager
 import com.firestream.chat.data.worker.MediaBackfillWorker
+import com.firestream.chat.data.worker.StickerSyncScheduler
 import com.firestream.chat.data.worker.UpdateCheckWorker
 import com.firestream.chat.di.ApplicationScope
 import com.firestream.chat.di.FlavorBootstrap
@@ -55,11 +57,17 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
     lateinit var outboxScheduler: OutboxScheduler
 
     @Inject
+    lateinit var stickerSyncScheduler: StickerSyncScheduler
+
+    @Inject
     lateinit var imageEditRasterizer: ImageEditRasterizer
 
     // Lazy: only the launched announcement needs it, so nothing is built on the main thread.
     @Inject
     lateinit var authRepository: dagger.Lazy<AuthRepository>
+
+    @Inject
+    lateinit var profileImageManager: ProfileImageManager
 
     @Inject
     @ApplicationScope
@@ -115,9 +123,11 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             // an unswept edit cache grows per edit *step* and never shrinks;
             // sweepStale keeps only what a recent send might still retry.
             imageEditRasterizer.sweepStale()
+            profileImageManager.deleteLegacyExternalCache()
         }
         requeueQueuedSends()
         announceCallVideoLine()
+        syncPendingStickerPacks()
         scheduleUpdateCheck()
         scheduleMediaBackfill()
     }
@@ -140,6 +150,12 @@ class FireStreamApp : Application(), Configuration.Provider, ImageLoaderFactory 
             runCatching { outboxScheduler.requeueAll() }
                 .onFailure { Log.w("FireStreamApp", "requeueAll failed", it) }
         }
+    }
+
+    // A sticker pack changed while offline, or in the moment a sync run ended,
+    // is still marked pending. This queues the run that backs it up.
+    private fun syncPendingStickerPacks() {
+        appScope.launch { stickerSyncScheduler.syncIfPending() }
     }
 
     private fun scheduleUpdateCheck() {

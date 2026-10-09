@@ -38,7 +38,11 @@ chats/{chatId}
     ├── senderId, content, type, status, timestamp
     ├── ciphertext, signalType                  # present when E2E encrypted (release builds)
     ├── mediaUrl, mediaThumbnailUrl, mediaWidth, mediaHeight
-    ├── fileName, fileSize, mimeType            # DOCUMENT only — plaintext, like mediaUrl (docs/plans/file-handling.md)
+    ├── fileName, fileSize, mimeType            # DOCUMENT — plaintext, like mediaUrl (docs/plans/file-handling.md).
+    │                                           # A STICKER and a GIF carry mimeType alone
+    ├── stickerId, stickerPackId                # STICKER only — the SHA-256 of the sticker's bytes, and the pack it
+    │                                           # was sent from (absent for favourites and loose stickers). Plaintext.
+    │                                           # mediaUrl then points at the shared Storage object stickers/<id>.<ext>
     ├── localUri                                # NOT synced to Firestore — Room only
     ├── replyToId, isForwarded, isPinned, duration
     ├── editedAt, deletedAt
@@ -76,6 +80,15 @@ lists/{listId}
 
 inviteLinks/{token}
 └── chatId, createdAt, createdBy               # maps invite token → chat
+
+stickerPacks/{packId}                          # one sticker pack's manifest; id = the pack's random UUID
+├── ownerId                                    # the only user who may list or write it
+├── name, publisher, kind                      # kind: "USER" | "INSTALLED" | "FAVOURITES" | "SAVED"
+├── originPackId                               # INSTALLED only: the pack it was first copied from
+├── importKey                                  # percent-encoded: its parts are joined by U+0000
+├── sortOrder, createdAt, updatedAt            # updatedAt decides which side is newer on a restore
+└── stickers[]                                 # in pack order, at most 4000
+    └── { id, format, width, height, animated, emojis[] }   # id = SHA-256 of the file; no url
 ```
 
 ### Realtime Database
@@ -95,8 +108,11 @@ The RTDB presence path uses the `.info/connected` pattern: on connect, set `isOn
 - **Encryption duality**: Messages store either `content` (plaintext — debug builds, or release builds where the user has opted out) or `ciphertext` + `signalType` (Signal-encrypted, release builds with E2E enabled). Never both.
 - **List items live in a subcollection.** Each item mutation is a single-doc write under `lists/{listId}/items/{itemId}`; `itemCount` / `checkedCount` on the parent metadata doc are kept in sync via `FieldValue.increment()` in the same batch. A one-shot `migrateEmbeddedItemsIfNeeded` upgrade runs on first observe for legacy lists that still carry an embedded `items[]` array.
 - **`callVideoLine` is a capability, written only as `true`.** An app that can take a video line in a call offer writes it when it starts and when an existing user signs in (`AuthRepository.announceCallVideoLine`). A new user document carries it from its creation. A caller reads the callee's field before it creates the call document (`CallRepository.createCall`) and offers the video line only on a stored `true`. Never write `false` and never remove the field: an app from before video calls crashes on an offer with a video line.
+- **`firestore.rules` lists what a call document may hold.** A call is created with `video` or without it, and never with `media`. An update may change only the writer's own entry under `media`, as two booleans. `video` never changes. A new field needs the rules changed and deployed before an app writes it. Tests: `firestore-rules-tests/calls.test.js`.
 - **A call's `media` is written only once both sides agreed on the video line.** An app from before video calls that placed the call applies the answer again on every change of an answered call document, and ends the call when that fails (`CallMediaPublisher`).
 - **Subcollection isolation**: `blockedUsers`, `messages`, `items`, `history`, `callerCandidates`/`calleeCandidates` are subcollections — they don't appear in parent document reads.
+- **A call document holds only the fields `firestore.rules` lists.** Only the caller and the callee read a call or its ICE candidates. An update may change only `status`, `endReason`, `endedAt`, `offer` and `answer`. Only the caller writes `offer` and `callerCandidates`, and only the callee writes `answer` and `calleeCandidates`. The status only moves forward: `ringing`, then `answered` or `declined`, then `ended`. A new field needs a rules change, a test in `firestore-rules-tests/`, and a rules deploy before the app version that writes it ships.
+- **A sticker pack manifest is a backup and a share at once.** `stickerPacks/{packId}` is written by `StickerSyncWorker` for every pack of its owner, the favourites and the loose stickers included. Any signed-in user may `get` one by id, which is how **View pack** reads the pack a received sticker names. Only the owner may list or write (`firestore.rules`). A manifest names its stickers by hash and holds no url: a file is fetched from the Storage object `stickers/<id>.<ext>` and checked against that hash.
 
 ---
 

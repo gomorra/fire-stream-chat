@@ -13,9 +13,10 @@ import com.firestream.chat.domain.model.CallAudioRoute
  * a Bluetooth pick would blank nothing, but acquiring on one would blank the screen during the
  * ~1 s SCO ramp while the audio is still on the earpiece.
  *
- * Owns its synchronisation because [follow] runs on the call's route collector while
- * [setVideoShowing] and [shutdown] arrive on other threads. [shutdown] latches: a call that was
- * already in flight when the call ended cannot re-acquire the lock afterwards.
+ * [follow] runs on the call's route collector, [setVideoShowing] when a camera goes on or off, and
+ * [shutdown] on call teardown, all on the main thread. [shutdown] latches: a call that comes after
+ * it cannot re-acquire the lock. The class owns its synchronisation, so the latch holds for a
+ * caller on any thread.
  */
 class ProximityLock(private val powerManager: PowerManager) {
 

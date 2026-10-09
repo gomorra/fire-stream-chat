@@ -2,7 +2,7 @@
 
 All notable changes to FireStream Chat. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); each section is headed by the SemVer `versionName` shipped on that merge day (e.g. `## [1.2.3] — 2026-04-24`). Bump rule: `feat:` → minor, `fix:` → patch, `feat!:` / `BREAKING CHANGE:` → major. `versionCode` is derived from `git rev-list --count HEAD`.
 
-## [UNRELEASED] [1.39.0] — 2026-10-05
+## [UNRELEASED] [1.41.0] — 2026-10-09
 
 ### Added
 
@@ -13,9 +13,78 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Calls use their own relay.** When two phones cannot reach each other directly, a call now runs through a Cloudflare relay with a login that the app fetches for each signed-in user, in place of a free public relay with a fixed password. The login is fetched before the call rings and kept for twelve hours. A call that cannot get one still connects wherever a direct path exists. (`cd6a382e`)
 
+## [1.40.4] — 2026-10-09
+
 ### Fixed
 
-- **The mute button starts every call unmuted.** After a call that ended muted, the next call showed the microphone as muted while it was live. The call's controls now start fresh with every call. (`70b59566`)
+- **A crop shape picked with the keyboard open stays whole above it.** In the send preview, with the keyboard open for the caption, switching to a taller crop shape, such as 4:5 after 1:1, could cut the frame off at the top and bottom until the keyboard moved. The photo now zooms out just enough to show the whole frame. The crop that is sent was never affected. (`61e6e38b`)
+- **A crop shape picked on a photo you just swiped to is drawn on that photo.** In the fullscreen gallery, swiping to another photo and setting the crop pill before any pinch or pan drew the frame around the whole photo instead of the shape you picked, and Edit opened the send preview without the photo's size. Each photo in the gallery now keeps its own size across swipes, while its zoom and shape still start over. The photo that was sent was always cropped right. (`df4b92e1`)
+
+## [1.40.3] — 2026-10-09
+
+### Fixed
+
+- **The Calls tab says "Declined" the way the chat does.** A call you declined showed as *Declined* in the chat but as *Missed* in the Calls tab. A call of yours that the other person declined showed as *Declined* in the chat but as *No answer* in the Calls tab. Both now read *Declined* in the Calls tab too, in the list and in the call's details. A call you declined stays red, as it is in the chat. Calls already in your history are shown the new way. (`5c3dd0f2`)
+- **A call nobody answered reads "No answer" in the chat too.** A call you placed and hung up before it was answered, or one that failed to connect, showed as *Outgoing call* in the chat but as *No answer* in the Calls tab. It now reads *No answer* in both, so *Outgoing call* always means the call connected. (`eadfb767`)
+- **A call that cannot connect ends on its own.** A call that was answered but never connected stayed on *Connecting…*, and a call whose connection dropped for good kept its timer running in silence, both until someone hung up. Each now ends after 30 seconds. A call that rang out on the other phone first is now recorded as unanswered, not as hung up. (`166cd9d9`)
+- **Placing a call shows who you are calling at once.** The call screen stayed blank while the call was being set up, which can take a few seconds on a slow network, and Cancel did nothing until the other phone rang. It now shows the name and *Calling...* as soon as the call starts, Cancel works from the first moment, and a call that cannot be set up within 20 seconds says so. A call you cancel after it reached the other phone shows there as a missed call. An incoming call that arrives while you are placing a call no longer rings over it. (`40ea4367`, `a9909431`)
+- **Only a missed call notifies.** After every call, the person called got a *New message* notification and an unread badge on the chat, even for a call they had just answered or declined. Now only a missed call notifies, as *Missed call*, and only a missed call counts as unread. A phone that comes online long after a call is also no longer woken to ring for it. Until the updated Cloud Functions are deployed, every call still notifies, as *Call*, and the unread count and the ring's expiry stay as they were. (`b9f52e4f`)
+- **A call placed offline no longer rings later.** A call placed with no connection waited on the phone and rang the other person whenever yours next came online, possibly long after you had given up. It now fails within seconds, and the call screen says the call could not start. (`1b8de121`)
+- **A call that ends while you are in another app leaves Recents.** Its call screen stayed in the recent apps until you opened it, only to show *Call Ended* and close. It now closes as the call ends. (`01692628`)
+- **A call still rings when Android holds the app back.** When Android would not let the app start ringing from the background, for example after it lowered the app's priority, an incoming call was missed without any sign. It now rings with a notification, whose *Decline* declines the call. Opening it brings up the call screen, where the call can be answered. (`d72ce3c2`, `24a4e0ea`)
+- **The self-hosted build no longer offers calls it cannot make.** The PocketBase build showed the call button, and tapping it crashed the app, because that backend has no calls. The button is gone there. (`a58c2303`)
+- **Only the two people in a call can see its connection details.** Any signed-in user who knew a call's id could read the network addresses its two phones exchanged, and either person could rewrite who the call was between. Now only the caller and the callee can read a call, each writes only their own part of it, and nobody can change who it is between. This takes effect once the updated Firestore rules are deployed. (`aa56dea1`)
+
+## [1.40.2] — 2026-10-08
+
+### Fixed
+
+- **Incoming calls ring.** An incoming call used to arrive in silence: its notification had no sound and did not vibrate, so a phone in a pocket gave no sign of it. It now rings with your ringtone and vibrates until you answer or decline, following the ring volume, silent and vibrate mode, and Do Not Disturb. Android fixes a notification channel's sound when the channel is created, so the silent *Incoming Calls* channel is replaced by a new one, and a change you made to the old one in Android's settings does not carry over. (`aec1caa4`)
+- **Calls you never picked up show as missed.** When the caller gave up before you answered, the call showed as an answered *Incoming call*, in the chat and in the Calls tab alike. A received call now counts as answered only if it connected, and the chat and the Calls tab agree on every call, including the ones already in your history. (`66467123`)
+- **The Calls tab shows names instead of "Unknown".** A caller who is not in your contacts, and anyone listed before your contacts had finished loading, stayed "Unknown" until something else in the list changed. Names now appear as soon as they are known, and a contact sync or a pull to refresh no longer turns them back into "Unknown". (`66467123`, `12d14a39`)
+- **A call no longer shows muted while the microphone is on.** Ending a call while muted left the next call showing the microphone as muted while it was live, so the other person heard you while the screen said they could not. Every call now starts unmuted, and a mute tap is no longer lost when the audio route changes at the same moment. (`53a29586`)
+- **Dictation works again after a call.** Once you had been in a call, dictation in the composer refused to start until the app was closed, saying you were in a call. It now refuses only while a call is ringing or under way. (`53a29586`)
+- **Answering on the call screen asks for the microphone instead of crashing.** On Android 14 and later, answering with the green button on the full-screen call screen crashed the app if it had never been given microphone access. It now asks first, as the notification's *Answer* button already did. (`53a29586`)
+- **Placing a call is more dependable.** A call placed soon after another one could open on "Call Ended" and close its own screen, sometimes leaving the other phone ringing with nobody on the line. Tapping call during a call now says you are already in one, and a double tap places one call. Turning the phone during setup or at the microphone prompt no longer abandons the call, and pressing Back during setup cancels it instead of ringing the other phone. A call that cannot start says so without hiding an incoming call that rang meanwhile, and reopening a finished call screen from Recents no longer dials again. (`53a29586`, `9cdf2675`)
+- **Calls end cleanly.** Hanging up, a dropped connection or an error could crash the app as the call ended. The call was torn down from inside the calling library's own thread, and sometimes torn down twice at once. All of a call's work now runs one step at a time on the app's main thread. Each call also left its connection and its audio device allocated after it ended; both are now released. A call that comes in just as another ends now rings, instead of being lost and leaving the app unable to take or place calls until it restarts. (`eeb706ae`, `219499eb`)
+- **The end of a call is recorded properly.** The chat list usually skipped the call as the chat's latest message, because the call service shut down before that write finished. An outgoing call nobody answered is now recorded as unanswered, not as hung up by the other person. The call timer no longer restarts at 0:00 after a short network drop, and answering a call the caller had just cancelled no longer leaves you on "Connecting…". (`eeb706ae`)
+- **A crop frame keeps its shape when the keyboard opens.** Zoom into a photo, pick a crop shape such as square, tap Edit, then tap the caption field. The keyboard used to shrink the frame and push it to one side, so a square looked narrower, with only a thin strip of photo on one side. The frame now keeps its size and stays centred and whole above the keyboard. When the keyboard closes, the zoom you made comes back exactly. The crop that is sent was never affected. (`01c0289f`)
+
+## [1.40.1] — 2026-10-07
+
+### Fixed
+
+- **Profile pictures load again on Android 17.** Every avatar in the app showed as a black circle on Android 17. The app kept its copies of profile pictures in the shared `Android/media` folder, and on Android 17 they most likely could not be opened even though the system reported them as readable. They now live in the app's private storage and are downloaded again once. An avatar whose saved copy still fails is loaded from the server, and one that cannot be loaded at all shows the placeholder icon instead of an empty circle. (`14de8fe3`)
+- **Profile pictures no longer end up in your gallery.** The daily media download moved the app's copies of profile pictures into the public *Pictures/FireStream Images* folder, where any gallery app showed them. It now leaves them alone. Copies it already moved stay in that folder until you delete them. (`14de8fe3`)
+
+## [1.40.0] — 2026-10-07
+
+### Changed
+
+- **Searching emoji and stickers no longer hides behind the keyboard.** The keyboard used to open over the whole emoji panel, covering the search field and its results. Opening the search now brings up the keyboard straight away. Emoji results show as one row directly above the keyboard, with your message still in view, so you can pick several in a row. Sticker search slides up to fill the screen below the chat's header, with the results between the search field and the keyboard. Picking a sticker from it sends the sticker and closes the search. (`aaaa089b`)
+
+## [1.39.1] — 2026-10-07
+
+### Fixed
+
+- **Profile pictures no longer show as black circles.** Avatars were stored as the full camera photo and shrunk to avatar size by a decode that returns a black image for some large photos, so on Android 17 every avatar in the app went black. Avatars now decode the same way as the Shared Media grid, which has no such problem, and a picture that fails to load shows the placeholder icon instead of an empty circle. A new profile or group picture is also scaled to at most 1024 px before it is uploaded, so it is a fraction of the size for everyone who downloads it. (`226004e4`)
+- **A tapped sticker is shown larger, and a second tap enlarges it.** The sheet a tap on a sticker opens showed the sticker smaller than the chat bubble did. It is now a little larger than in the bubble, and tapping it there grows it to most of the screen's width, without going full screen. Tap again to shrink it back. (`e08e3973`)
+
+## [1.39.0] — 2026-10-04
+
+### Added
+
+- **Your sticker library is saved with your account, and a pack you were sent can be added.** Packs, their order and your favourites are backed up under your account and come back after a reinstall or on a new phone. Each sticker's picture is fetched when it is first shown. Tapping a sticker in a chat now also offers *View pack*, which shows the pack it was sent from, and *Add pack* puts that pack into your library. (`33f54406`)
+- **Lottie stickers.** WhatsApp's newer animated stickers (`.was`) now show up in *From WhatsApp* and can be imported, and *From files* takes Telegram's `.tgs` stickers. They play in a chat like any animated sticker, show a still first frame in the library and the picker, and are backed up with their pack. Someone on an older version of the app sees a broken image in place of one. (`51f04ab4`)
+- **Make your own stickers.** *Create* in the sticker library, and the **+** at the end of the pack row in the Stickers tab, turn one of your photos into a sticker. The subject is cut out for you and gets a white outline, which you can switch off, or you keep the whole photo. Pinch and drag to crop, pick up to three emojis the sticker is found by, and choose the pack it joins. On a phone without Google Play services the cutout is left out and the crop remains. (`8e9ddf5d`)
+- **GIFs and stickers from the keyboard, and GIFs that stay GIFs.** The keyboard's GIF and sticker buttons now work in a chat: a pick is sent at once, a GIF as a GIF and a sticker as a sticker, which is also kept in your sticker library under *Saved*. A GIF picked from the gallery or shared into the app from elsewhere now arrives animated. It used to be flattened into a still photo. Crop it or draw on it before sending and it is still sent as a photo. (`5a98ac49`)
+
+## [1.38.0] — 2026-10-04
+
+### Added
+
+- **Stickers can be sent in a chat.** The emoji panel has a second tab, *Stickers*, with your recent stickers, your favourites and each pack. A tap sends the sticker, a long press adds it to the favourites or takes it out, and the search finds stickers by what their emoji means. Typing a single emoji offers the stickers tagged with it above the composer. A sticker arrives without a bubble behind it, animated ones play, and tapping one in a chat adds it to your favourites. GIFs that arrive in a chat play in place. (`0f70776a`, `da2eaf18`, `daf5a088`)
+- **A sticker library, filled from WhatsApp or from files.** Settings → Storage → *Import stickers* opens your sticker packs. *From WhatsApp* asks once for WhatsApp's sticker folder and shows every sticker you have sent or received there to pick from; *From files* takes `.webp` stickers and `.wastickers` packs. Stickers are sorted into the packs they name, and importing the same ones again adds nothing. Packs can be renamed, reordered and deleted, and stickers moved between packs or removed. (`4d0edd6d`)
 
 ## [1.37.0] — 2026-10-03
 

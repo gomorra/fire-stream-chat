@@ -68,6 +68,9 @@ class PreferencesDataStore @Inject constructor(
     // Emoji recents
     private val recentEmojisKey = stringPreferencesKey("recent_emojis")
 
+    // Sticker recents
+    private val recentStickerIdsKey = stringPreferencesKey("recent_sticker_ids")
+
     // Lists sort option
     private val listSortOptionKey = stringPreferencesKey("list_sort_option")
 
@@ -262,10 +265,25 @@ class PreferencesDataStore @Inject constructor(
 
     // --- Emoji recents ---
 
-    val recentEmojisFlow: Flow<List<String>> = context.dataStore.data.map { prefs ->
-        val raw = prefs[recentEmojisKey] ?: return@map emptyList()
-        raw.split(",").filter { it.isNotEmpty() }
+    val recentEmojisFlow: Flow<List<String>> = recentsFlow(recentEmojisKey)
+
+    /** A most-recent-first list kept as one comma-joined string, so no value may hold a comma. */
+    private fun recentsFlow(key: Preferences.Key<String>): Flow<List<String>> = context.dataStore.data.map { prefs ->
+        prefs[key]?.split(",")?.filter { it.isNotEmpty() }.orEmpty()
     }
+
+    /** Moves [value] to the front of the list under [key] and keeps the newest [cap]. */
+    private suspend fun pushRecent(key: Preferences.Key<String>, value: String, cap: Int) {
+        context.dataStore.edit { prefs ->
+            val current = prefs[key]?.split(",")?.filter { it.isNotEmpty() }.orEmpty()
+            prefs[key] = (listOf(value) + (current - value)).take(cap).joinToString(",")
+        }
+    }
+
+    // --- Sticker recents ---
+
+    /** Ids of the stickers sent most recently, newest first. Device-only. */
+    val recentStickerIdsFlow: Flow<List<String>> = recentsFlow(recentStickerIdsKey)
 
     // --- Last open chat ---
 
@@ -360,13 +378,12 @@ class PreferencesDataStore @Inject constructor(
         }
     }
 
-    suspend fun addRecentEmoji(emoji: String) {
-        context.dataStore.edit { prefs ->
-            val current = (prefs[recentEmojisKey] ?: "")
-                .split(",").filter { it.isNotEmpty() }.toMutableList()
-            current.remove(emoji)
-            current.add(0, emoji)
-            prefs[recentEmojisKey] = current.take(40).joinToString(",")
-        }
+    suspend fun addRecentEmoji(emoji: String) = pushRecent(recentEmojisKey, emoji, cap = 40)
+
+    suspend fun addRecentSticker(stickerId: String) = pushRecent(recentStickerIdsKey, stickerId, cap = 30)
+
+    /** Forgets the sticker recents. They are the signed-in user's, and the next user's library may hold the same stickers. */
+    suspend fun clearRecentStickers() {
+        context.dataStore.edit { prefs -> prefs.remove(recentStickerIdsKey) }
     }
 }

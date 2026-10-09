@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"s-limit","claude_code_version":"2.1.288","model":"claude-opus","permissionMode":"acceptEdits"}
+{"type":"assistant","session_id":"s-limit"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1791090000,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.98,"resetsAt":1791090000},"seven_day":{"utilization":0.4,"resetsAt":1791500000}}},"uuid":"u-rate-1","session_id":"s-limit"}
+{"type":"user","session_id":"s-limit"}
+{"type":"assistant","session_id":"s-limit"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1791090000,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1791090000},"seven_day":{"utilization":0.41,"resetsAt":1791500000}}},"uuid":"u-rate-2","session_id":"s-limit"}
+{"type":"assistant","session_id":"s-limit"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t-1","content":"{\"type\":\"rate_limit_event\",\"rate_limit_info\":{\"status\":\"allowed\"}}"}]},"session_id":"s-limit"}

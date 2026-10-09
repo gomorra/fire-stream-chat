@@ -78,18 +78,22 @@ internal fun EmojiHandlerPanel(
             }
         },
         searchTrailing = {
-            if (mode == EmojiMode.TEXT_INPUT) {
-                IconButton(onClick = onBackspace, modifier = Modifier.size(36.dp)) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Backspace,
-                        contentDescription = "Backspace",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            if (mode == EmojiMode.TEXT_INPUT) PickerBackspaceKey(onClick = onBackspace)
         },
     ) { _, query ->
         EmojiTab(query = query, recentEmojis = recentEmojis, onSelection = onPick)
+    }
+}
+
+/** The backspace key a host that types into a text field puts at the end of the picker's search row. */
+@Composable
+internal fun PickerBackspaceKey(onClick: () -> Unit) {
+    IconButton(onClick = onClick, modifier = Modifier.size(36.dp)) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.Backspace,
+            contentDescription = "Backspace",
+            modifier = Modifier.size(20.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

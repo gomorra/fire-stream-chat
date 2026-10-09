@@ -26,6 +26,7 @@ import android.util.Log
 import com.firestream.chat.data.remote.source.FileMetadata
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.RawMessage
+import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.data.remote.source.TimerSendResult
 import com.firestream.chat.domain.model.MessageStatus
 import com.firestream.chat.domain.model.MessageType
@@ -57,6 +58,18 @@ private const val TAG = "FirestoreMessageSource"
  */
 internal const val SEND_ACK_TIMEOUT_MS = 30_000L
 
+/**
+ * Runs [block] under [SEND_ACK_TIMEOUT_MS]; past it, an [IOException] naming
+ * [what]. A Firestore write completes only on the server's acknowledgement, so
+ * without a connection it would wait for as long as the connection is missing.
+ */
+internal suspend fun awaitAck(what: String, block: suspend () -> Unit) {
+    withTimeoutOrNull(SEND_ACK_TIMEOUT_MS) {
+        block()
+        true
+    } ?: throw IOException("$what not acknowledged within $SEND_ACK_TIMEOUT_MS ms — offline?")
+}
+
 @Singleton
 class FirestoreMessageSource @Inject constructor(
     private val firestore: FirebaseFirestore
@@ -78,7 +91,10 @@ class FirestoreMessageSource @Inject constructor(
         MessageType.LOCATION -> "📍 Location"
         MessageType.CALL -> CALL_CONTENT
         MessageType.TIMER -> if (plain.isNotBlank()) "⏱ $plain" else TIMER_CONTENT
-        else -> plain.ifBlank { "Message" }
+        // A sticker's content is its emoji, which alone would read as a text message.
+        MessageType.STICKER -> if (plain.isNotBlank()) "$plain Sticker" else "Sticker"
+        MessageType.GIF -> if (plain.isNotBlank()) "🎞️ $plain" else "🎞️ GIF"
+        MessageType.TEXT -> plain.ifBlank { "Message" }
     }
 
     /**
@@ -214,14 +230,6 @@ class FirestoreMessageSource @Inject constructor(
     private fun messageRef(chatId: String, messageId: String) =
         firestore.collection("chats").document(chatId).collection("messages").document(messageId)
 
-    /** Runs [block] under [SEND_ACK_TIMEOUT_MS]; past it, an [IOException] naming [what]. */
-    private suspend fun awaitAck(what: String, block: suspend () -> Unit) {
-        withTimeoutOrNull(SEND_ACK_TIMEOUT_MS) {
-            block()
-            true
-        } ?: throw IOException("$what not acknowledged within $SEND_ACK_TIMEOUT_MS ms — offline?")
-    }
-
     /**
      * The tombstone of a message deleted while it was queued (offline outbox plan
      * §2.5). The document may exist — an earlier attempt's write landed — or may be
@@ -269,6 +277,7 @@ class FirestoreMessageSource @Inject constructor(
         longitude: Double?,
         isHd: Boolean,
         file: FileMetadata?,
+        sticker: StickerRef?,
         ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
@@ -293,6 +302,7 @@ class FirestoreMessageSource @Inject constructor(
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
         putFileMetadata(data, file)
+        putStickerRef(data, sticker)
         writeMessage(chatId, messageId, data, ifAbsent)
 
         // The chat document is readable by the server like any other, so an
@@ -323,6 +333,7 @@ class FirestoreMessageSource @Inject constructor(
         longitude: Double?,
         isHd: Boolean,
         file: FileMetadata?,
+        sticker: StickerRef?,
         ifAbsent: Boolean,
     ): String {
         val data = hashMapOf(
@@ -346,6 +357,7 @@ class FirestoreMessageSource @Inject constructor(
         if (longitude != null) data["longitude"] = longitude
         if (isHd) data["isHd"] = true
         putFileMetadata(data, file)
+        putStickerRef(data, sticker)
         writeMessage(chatId, messageId, data, ifAbsent)
 
         writeBackChatPreview(chatId, lastContentFor(type, content), timestamp, senderId)
@@ -729,6 +741,8 @@ class FirestoreMessageSource @Inject constructor(
             fileSize = (data["fileSize"] as? Number)?.toLong(),
             mimeType = data["mimeType"] as? String,
             isVideoCall = data["video"] as? Boolean ?: false,
+            stickerId = data["stickerId"] as? String,
+            stickerPackId = data["stickerPackId"] as? String,
             hasPendingWrites = hasPendingWrites,
         )
     }
@@ -738,6 +752,12 @@ class FirestoreMessageSource @Inject constructor(
         file.name?.let { data["fileName"] = it }
         file.size?.let { data["fileSize"] = it }
         file.mimeType?.let { data["mimeType"] = it }
+    }
+
+    private fun putStickerRef(data: MutableMap<String, Any?>, sticker: StickerRef?) {
+        if (sticker == null) return
+        data["stickerId"] = sticker.id
+        sticker.packId?.let { data["stickerPackId"] = it }
     }
 
     private fun parseIntFloatMap(raw: Any?): Map<Int, Float> {

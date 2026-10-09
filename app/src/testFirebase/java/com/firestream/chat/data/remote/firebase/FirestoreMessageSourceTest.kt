@@ -1,6 +1,7 @@
 package com.firestream.chat.data.remote.firebase
 
 import com.firestream.chat.data.remote.source.FileMetadata
+import com.firestream.chat.data.remote.source.StickerRef
 import com.firestream.chat.domain.model.MessageType
 import com.google.android.gms.tasks.Task
 import com.google.firebase.firestore.CollectionReference
@@ -483,6 +484,73 @@ class FirestoreMessageSourceTest {
     @Test
     fun `a call message without the field reads as a voice call`() = runTest {
         assertFalse(readCallMessage())
+    }
+
+    @Test
+    fun `a sticker's id and pack are written beside its media url`() = runTest {
+        val written = slot<Map<String, Any?>>()
+        every { messageRef.set(capture(written)) } returns setTask
+
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "😺", type = MessageType.STICKER, replyToId = null, timestamp = 1L,
+            mediaUrl = "https://storage.example/stickers/abc.webp",
+            sticker = StickerRef("abc", "pack1"),
+        )
+
+        assertEquals("STICKER", written.captured["type"])
+        assertEquals("abc", written.captured["stickerId"])
+        assertEquals("pack1", written.captured["stickerPackId"])
+    }
+
+    @Test
+    fun `a sticker sent without a pack writes no pack field, and any other message no sticker fields`() = runTest {
+        val written = mutableListOf<Map<String, Any?>>()
+        every { messageRef.set(capture(written)) } returns setTask
+
+        source.sendPlainMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1",
+            content = "", type = MessageType.STICKER, replyToId = null, timestamp = 1L,
+            sticker = StickerRef("abc", null),
+        )
+        source.sendMessage(
+            chatId = "chat1", senderId = "uid1", messageId = "msg1", ciphertext = "c", signalType = 3,
+            type = MessageType.TEXT, replyToId = null, timestamp = 2L,
+        )
+
+        assertEquals("abc", written[0]["stickerId"])
+        assertFalse(written[0].containsKey("stickerPackId"))
+        assertFalse(written[1].containsKey("stickerId"))
+    }
+
+    @Test
+    fun `a read carries a sticker's id and pack`() = runTest {
+        val doc = mockk<DocumentSnapshot>(relaxed = true)
+        every { doc.id } returns "msg1"
+        every { doc.data } returns mapOf(
+            "senderId" to "peer1", "type" to "STICKER", "content" to "😺",
+            "mediaUrl" to "https://firebasestorage.example/stickers/abc.webp", "timestamp" to 5L,
+            "stickerId" to "abc", "stickerPackId" to "pack1",
+        )
+        every { doc.metadata.hasPendingWrites() } returns false
+        val getTask = mockk<Task<DocumentSnapshot>>(relaxed = true)
+        completeImmediately(getTask)
+        every { getTask.result } returns doc
+        every { messageRef.get() } returns getTask
+
+        val raw = source.fetchMessage("chat1", "msg1")!!
+
+        assertEquals("STICKER", raw.type)
+        assertEquals("abc", raw.stickerId)
+        assertEquals("pack1", raw.stickerPackId)
+    }
+
+    @Test
+    fun `a sticker and a GIF have their own chat preview`() {
+        assertEquals("😺 Sticker", source.lastContentFor(MessageType.STICKER, "😺"))
+        assertEquals("Sticker", source.lastContentFor(MessageType.STICKER, ""))
+        assertEquals("🎞️ GIF", source.lastContentFor(MessageType.GIF, ""))
+        assertEquals("🎞️ look", source.lastContentFor(MessageType.GIF, "look"))
     }
 
     @Test

@@ -74,7 +74,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.** Two related list-sync bugs shipped in 2026-04-23/24 — `e3c2c9c` (new items colliding on `order` after deletes) and `eed7519` (receiver's live updates clobbered by a race between `observeList`'s metadata listener, its items listener, and `ensureListSyncRunning`'s `observeMyLists` sync). Both were caught by dogfooding, not by tests. The race-condition class in particular can't be reliably reproduced in `runTest` with mocked DAOs: I tried adding a unit test for `eed7519`, found it passed even with the mutex reverted (false negative), and pulled it. The per-list mutex fix is logically correct but has no executable regression guard.
 
 **Why we haven't fixed it.** The gap is two pieces, and neither is a drive-by:
-- No Firebase emulator harness. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
+- No Firebase emulator harness for the app. `firestore-rules-tests/` runs `firestore.rules` in the emulator from Node, but nothing runs the app sources against it. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
 - No white-box tripwire asserting that `listDao.insert` callers in `ListRepositoryImpl.observeList`'s two listeners and `ensureListSyncRunning` hold `mutexFor(listId)`. A future refactor that accidentally strips one of the three `mutexFor(...).withLock { ... }` blocks would re-introduce `eed7519` silently. Five-minute test, lasts forever.
 
 **When to revisit.** Planned-for-soon, not deferred indefinitely — the user flagged a longer development horizon on 2026-04-24 and asked what coverage was in place. The trigger is the next free half-day: scaffold the emulator task first (`sender + receiver` repository instances against one emulator, asserting Room convergence on list add/toggle/clear, chat send/receive, and shared-list fan-out — ~5–10 tests total, not a full suite), then the tripwire test. Skip property-based / stress tests; they'll only produce the same false-negatives my pulled test did.
@@ -131,7 +131,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **Why we haven't fixed it.** A notification needs the concrete Activity class for its PendingIntent. The clean alternatives (an `Intent` factory bound in `di/`, or routing through `MainActivity` deep-link extras like FCM notifications do) are pure ceremony for one class reference.
 
-**When to revisit.** The next time call-notification code is touched. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation").
+**When to revisit.** With the video-calls plan, which adds to the same intent contract. The fix is a call-screen intent contract in `data/call/`, used by `CallActivity`, `CallLaunch`, `ChatScreen`, `CallsScreen` and `CallNotificationManager`, plus one entry for it in the UI→data allowlist. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation"). Deferred on 2026-10-08, when the fallback ring added five of `CallActivity`'s extras here: the fix touches about 30 references in five files, outside the call fixes that release carried.
 
 ---
 
@@ -172,6 +172,16 @@ Known refactors and code smells that have been consciously deferred or declined.
 **Why we haven't fixed it.** The fullscreen viewer's zoom/paging interaction has been fixed three separate times and has no UI-test coverage of the gesture split; folding it into a new shared composable in the same change that introduced the second caller doubles the blast radius. The duplicated part is ~8 lines and is now at least documented in one place.
 
 **When to revisit.** When a third zoomable pager appears, or when the fullscreen viewer gains Compose UI tests for the zoom/page gesture split.
+
+---
+
+### `ZoomCropSurface` tells its own zoom changes from gestures by timing
+
+**The smell.** `ZoomCropSurface` sees its own `zoom.set` calls and the user's gestures alike, as changes to `ZoomableState`. It skips its own by restarting the effect whose collector drops its first value. So the restore and every carry restart that effect, and a change that lands in the same frame can be missed. Two guards cover the cases known today, and `ZoomCropSurfaceTest` pins both. A new crop from the host, a new shape included, never writes the decoded size. A page resetting itself on paging away is not carried, which holds only because the surface's effect is composed before `ZoomableBox`'s reset.
+
+**Why we haven't fixed it.** The fix reaches past the crop-shape bug this turned up in. `ZoomableBox` could report gestures and resets through a callback, so a programmatic set never echoes back and effect order stops mattering. It has one caller, but every gesture path changes, and the viewer's zoom and page gestures have no UI tests.
+
+**When to revisit.** With the next change that adds a programmatic `zoom.set` or another key to the surface's effect. Found 2026-10-08, while fixing the crop shape above the keyboard.
 
 ---
 
@@ -237,23 +247,23 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `CallAudioRouter` holds its monitor across AudioService binder calls
+### `CallAudioRouter` keeps a lock that no caller needs
 
-**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run make their `AudioManager` calls — `availableCommunicationDevices`, `setCommunicationDevice`, `clearCommunicationDevice`, and both un/register calls — inside `synchronized(lock)`, while the two listeners it registers fire on the main looper and block on that same monitor. A slow AudioService round-trip, made from the WebRTC signaling thread, therefore stalls the main thread for its duration. The lock strictly only needs to guard the four routing fields (`started`, `previousAvailable`, `userPick`, `currentRoute`).
+**The smell.** `CallAudioRouter.start()` / `select()` / `stop()` and the policy run hold `synchronized(lock)` around their routing fields and their `AudioManager` calls. `CallService` calls the router on the main thread, and its two listeners fire on the main looper, so nothing can race for that lock. The binder calls run on the main thread with or without it: single round-trips, a handful per call.
 
-**Why we haven't fixed it.** Narrowing it means copying the fields out, dropping the monitor, calling into `AudioManager`, and re-taking it to publish — which re-opens exactly the read-modify-write races the lock exists for (a device-list callback landing between the query and the `setCommunicationDevice`, so the route is chosen from one device list and applied to another). The calls held under the lock are single binder round-trips on a path that runs a handful of times per call, and `docs/plans/call-audio-routes.md` §4 rules out the retry/polling logic that would make them slow.
+**Why we haven't fixed it.** An uncontended monitor costs nothing measurable, and it keeps the router correct if a caller on another thread ever comes back.
 
-**When to revisit.** If an ANR trace or a jank report ever points at `CallAudioRouter`'s monitor on the main thread — then the fix is to move the whole router onto the main looper (the listeners are already there) and drop the lock entirely, rather than to narrow it.
+**When to revisit.** The next change to `CallAudioRouter`: drop the lock and its `Guarded by [lock]` notes then. If an ANR trace ever points at the router's binder calls, move those calls off the main thread instead.
 
 ---
 
-### `CallService.mediaLock` is taken on the main thread
+### A call's WebRTC objects are built on the main thread
 
-**The smell.** `openSession` and `detachMedia` take `mediaLock` on the main thread: the first from the intent that starts or answers a call, the second from a hang-up. `driveCamera` holds the same lock on `serviceScope` across camera calls that wait, and `LocalCamera.stop()` waits for a camera that is still opening. A hang-up tapped while the camera opens or closes therefore holds the main thread for that long. `openSession` also builds the WebRTC factory there, which now creates an EGL context and the video codec factories.
+**The smell.** `WebRtcCallLocalMedia` builds the WebRTC factory on the main thread, with its EGL context, its audio module and the video codec factories. `openPeer` creates the peer connection there, `PeerSession.setCamera` waits there for the signalling thread, and `dispose()` closes the connections there. Each is short, and together they are the wait between a tap and the first ring or answer, and at a hang-up. The camera's device calls and the release of a finished call's camera, tracks and factory already run on a worker.
 
-**Why we haven't fixed it.** The lock is what keeps opening a session, switching the camera and ending the call from interleaving. Narrowing it to field swaps re-opens those races. `docs/plans/video-calls.md` step 7 confines the call's state to one serial dispatcher that the intents post into, and then the main thread never takes the lock.
+**Why we haven't fixed it.** A call's state is confined to the main thread, which is what removed every lock from `CallService`. Building the factory elsewhere means a call that exists before its media does, and every entry point of `CallSession` would have to wait for it.
 
-**When to revisit.** With step 7 of the video-calls plan, or on the first ANR trace that points at `CallService.mediaLock`.
+**When to revisit.** On the first ANR trace or a visible stall that points at `WebRtcCallLocalMedia`, or when step 7 of `docs/plans/video-calls.md` opens three connections at once.
 
 ---
 
@@ -298,6 +308,61 @@ Known refactors and code smells that have been consciously deferred or declined.
 **Why we haven't fixed it.** Each is either a rare path (a same-path re-download, a staged copy of an unknown type) or cosmetic, and none produces wrong data. Fixing the preview key means carrying `lastModified` through the bubble's state; the Latin-1 case means guessing an encoding, which is its own can of worms.
 
 **When to revisit.** The next change to `FileMessageBubble`, `TextPreview` or `OutboxFiles` — fold the matching item in then. The describe duplication goes away by itself if the UI→data allowlist ever gains a file-metadata adapter.
+
+---
+
+### Plan runner — leftovers from the usage-limit review
+
+**The smell.** The whole-branch `/simplify` pass over the plan-runner live-changes work left five things in `scripts/run-plan.sh`:
+- The cost-delta rule is written three times. `lib.sh` `pr_cost_delta` uses awk, and `kind_spent` and `report.sh` each use jq. `report.sh` does not source `lib.sh`.
+- In `run_session`, a nudge that cannot be resumed is replaced by a step session. This is the loop's one step-specific branch.
+- `limit_wait` switches the slack floor and the `USAGE_RESUME_MAX` cap off for the kind `launch`.
+- `invoke` polls with sleeps that grow from 10 ms to 1 s. With `wait -n <pid>…` it could wait on events instead, but that needs bash 5.1.
+- Six call sites repeat the shape "the last logged value of an event for this step" (`jq … "$LOG" | tail -1`).
+
+**Why we haven't fixed it.** Each fix moves cost or wait accounting that `e2e.sh` pins only through its outcomes. A shared jq definition would have to reach `report.sh`. Moving the cap or the fallback out of the loop changes the shape of `run_session` and of its callers. None of the five produces a wrong result.
+
+**When to revisit.** When the cost rule or the limit handling changes next. Fold in the matching item then.
+
+---
+
+### Stickers — leftovers from the 1.39.0 pre-release review
+
+**The smell.** The `/code-review` pass over `v1.38.0..main` found no release blocker and left five things:
+- `StickerMaker.prepare` holds a `MediaProcessingLimiter` permit across `SubjectCutout.cutOut`, which waits up to 45 s for the segmentation model on first use. One of the two process-wide permits is gone for that time, so image and video sends run one at a time.
+- `StickerLibrarySync` catches a listener error and completes inside `shareIn(WhileSubscribed)`. The restore listener does not start again until every collector of `observePacks()` has left. A `PERMISSION_DENIED` while a chat is open stops the restore until that chat closes.
+- `StickerRepositoryImpl.saveSticker` converts a keyboard picture inside `importLock`, although its comment says outside. An import waits while a conversion waits for a permit.
+- `installPack` writes the `format` a shared pack's manifest names, and `mergeStickers` never corrects it. A manifest from a modified client can leave a row that says `LOTTIE` over a WebP file, and that sticker cannot be shown or sent from the library.
+- `LottieThumbnails` and the `Semaphore(4)` in `StickerRepositoryImpl` decode outside `MediaProcessingLimiter`. The Lottie gate draws frame 0 only, with no time bound, so a heavy animation from a contact passes it.
+
+**Why we haven't fixed it.** None loses data or reaches another user's library. The first two need a regression test each and a new gate run, and the release was cut at step 9 on the owner's request.
+
+**When to revisit.** The first two before the next release: wait for the model outside the permit, and retry the listener. Fold the others into the next change to `StickerRepositoryImpl` or `LottieThumbnails`.
+
+---
+
+### Calls — the known limits
+
+**The smell.**
+- `CallService`, `WebRtcCallLocalMedia` and `CallActivity` have no JVM test. `CallSessionTest` covers a call's transitions, its timers, its camera and its end-of-call writes, and `PeerSessionTest`, `CameraSwitchTest` and `LocalCameraTest` the pieces under it. How the service enters and leaves the foreground, how it stops by start id, how the camera's and WebRTC's callbacks reach the main thread, and the order a finished call's media is released in are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
+- The fallback ring that `FCMService` posts when Android will not start the call service does not know when the caller hangs up. It rings until it is declined or times out with the ring, 30 s at most. Opening it after the call ended shows "Call Ended".
+- The call document's `status` and `endReason` are read as strings. `CallSignalingData` carries them raw, and `CallSession` decodes them where it reads them. Writes go through `EndReason`, so the wire names have one source.
+- An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification. If the placed call's document already existed, its callee rang and the chat records nothing. The incoming call replaces the placing with a plain state write, so neither the setup nor a Cancel owns that record.
+- A call that rings in while the microphone prompt for an outgoing call is up, and ends there, closes the call screen 1.5 s later, and the prompt with it. The outgoing call is not placed until the user taps call again. It needs the first call ever, an incoming call, and its end, all within the prompt.
+
+**Why we haven't fixed it.** Both adapters are thin layers over Android and WebRTC, which Robolectric cannot run: WebRTC needs its native library, and the foreground-service checks are the platform's. A test there would mostly check its own mocks. The fallback ring is the rare path, and listening to the call document from a push needs a running service, the very thing Android refused. The missed-call push that follows a hang-up could stop the ring, but it does not name the call, so it could stop the ring of the caller's next call. The call document's strings are decoded in one place, and typing them would change the signalling source on both flavors with no change in behaviour.
+
+**When to revisit.** When a bug is traced to either adapter, or when the fallback ring turns out to fire often. Type the call document's fields when it gains a status or a reason, as video calls would.
+
+---
+
+### Repositories other than `CallRepositoryImpl` turn cancellation into a failure
+
+**The smell.** `resultOf` and the hand-written `try { … } catch (e: Exception)` in the other repositories catch `CancellationException`. A coroutine cancelled while suspended in one gets `Result.failure` back and runs on. `cancellableResultOf` (`ResultExt.kt`) lets the cancellation through, and only `CallRepositoryImpl` uses it. `docs/GOTCHAS.md` describes the trap.
+
+**Why we haven't fixed it.** Each call site needs checking that no caller relies on getting a failure when it is cancelled, across about a hundred catch sites in eight repositories. No known bug comes from it today: the callers that cancel check that the work is still wanted.
+
+**When to revisit.** When a bug is traced to a cancelled repository call, or when a repository is next reworked. Move that repository to `cancellableResultOf` then.
 
 ---
 
@@ -595,6 +660,151 @@ Phase 5b (2026-09-10) as real but edge-case.
 sticker-heavy photo — or if the overlay cap is ever raised. Fix is a per-`StickerDesign`
 normalized `Path` cache plus a `withTransform`, in `OverlayPainter` and its rasterizer
 twin together, never one alone.
+
+---
+
+### Sticker files are never deleted
+
+**The smell.** `StickerRepositoryImpl.removeStickers` and `deletePack` delete rows of
+`sticker_pack_items` only. The `stickers` row and the file under `filesDir/stickers/` stay,
+even when no pack holds the sticker any more. A destructive `AppDatabase` bump drops the rows
+and leaves every file. `StickerFiles.store` writes through a `.part` temp file, and a process
+death between the write and the rename leaves that file too.
+
+A received sticker adds a `stickers` row and a file that no pack holds (`StickerDownloads`).
+So does every sticker of a pack that was viewed and not added (`StickerRepositoryImpl.ensureFile`).
+A sign-out clears the rows and leaves the files, which the next user's restore takes back
+without a download when a hash matches.
+
+**Why we haven't fixed it.** A file is at most 1 MB and is shared: the same sticker can sit
+in several packs, in the recents list and in any number of messages, whose `localUri` is the
+file's path. A sweep has to read all three, and a file it deletes wrongly costs one download.
+
+**When to revisit.** When the directory's size shows up in a storage report. The fix is a
+sweep that deletes files no pack item, recent or message names, and every `.part` file.
+
+---
+
+### Nothing on the backend checks that a sticker object matches its name
+
+**The smell.** A sticker's Storage object is `stickers/<sha256>.<ext>`, create-only. Storage
+rules cannot hash a file, so a signed-in user can create the object for a hash with other
+bytes. Everyone who sends that sticker afterwards gets that object's url from
+`StickerObjectSource.ensureUploaded`, which looks the object up and uploads nothing.
+
+**Why we haven't fixed it.** A receiver hashes what it downloads and stores only a match
+(`StickerDownloads`), so the library and every later send from it stay honest. What a wrong
+object costs is a sticker that renders from its url as the wrong picture, for everyone, until
+the object is deleted by hand. A device that stored that object's url in `stickers.remoteUrl`
+keeps sending it after the deletion, because nothing clears the column. The user base is
+closed, and the plan accepted this
+(`docs/plans/stickers-and-gifs.md`, open risk 2). The rules themselves are kept in the Firebase
+console and are not in this repo.
+
+**When to revisit.** Before the app is opened to users who are not trusted, or when step 10
+adds Cloud Functions that could own the upload. The fix is an upload through a function that
+hashes the bytes and writes the object itself, with client writes to `stickers/` closed.
+
+---
+
+### `StickerDao` exposes the writes its sync rule depends on
+
+**The smell.** Every change to a pack must set `syncState = PENDING`. `StickerDao`'s
+transaction methods (`addToPack`, `removeFromPack`, `moveBetweenPacks`, `reorderPacks`) do
+that through `touchPack`, but `insertItems`, `deleteItems` and `insertPack` are public on the
+same interface, so a caller can change a pack and leave it unmarked.
+
+`StickerSyncWorker` reads the column, so a missed mark is a pack change that never reaches
+the backup. `updatePack` writes a whole row, `syncState` included, and is meant for the
+restore alone.
+
+**Why we haven't fixed it.** `StickerRepositoryImpl` uses only the transaction methods. The
+restore (`applyRemotePack`, `installPack`) uses the single-statement writes inside its own
+transactions and sets `syncState` itself. Hiding them needs an abstract-class DAO with
+protected members, which no DAO in this repo is.
+
+**When to revisit.** When a second class starts to write packs, or when a pack is found
+unsynced with no pending mark. `StickerDaoTest` asserts the mark for each transaction method.
+
+---
+
+### The sticker backup has limits it does not report
+
+**The smell.** Five things in the sync of `stickerPacks/{packId}` are accepted, and none of
+them tells the user:
+
+- **A manifest lists at most 4000 stickers** (`StickerManifest.MAX_STICKERS`). A manifest is
+  one Firestore document of at most 1 MiB. A larger pack is backed up without its tail, and a
+  restore brings back the first 4000. A pack whose stickers carry many long emoji tags is cut
+  earlier, at 900 000 bytes of list (`MAX_LIST_BYTES`).
+- **The newer side wins, by each device's clock.** A restore replaces a local pack when the
+  backend's `updatedAt` is later (`StickerDao.applyRemotePack`). Two devices of one account
+  that edit the same pack lose the earlier edit whole, and a device with a wrong clock wins
+  or loses wrongly.
+- **The worker's write is not conditional on the backend's copy.** `StickerSyncWorker` checks
+  that the pack did not change locally right before it writes, and not what the backend holds.
+  A second device's newer manifest that lands in that moment is overwritten by the older one.
+  Both devices then show the newer state and the backup holds the older.
+- **A sign-out drops what was not uploaded yet.** `AuthRepositoryImpl.signOut` clears the
+  tables and cancels the sync. A pack changed offline and never synced is gone.
+- **A change in the moment a sync run ends waits for the next trigger.** The work is unique
+  with `KEEP`, so a request made while a run is finishing is dropped. The pack stays pending
+  until the next pack change, the next restore or the next app start (`StickerSyncScheduler`).
+
+**Why we haven't fixed it.** The app is used on one phone per account, a pack of 4000
+stickers is far from what an import produces today, and each fix is a design of its own:
+chunked manifests, a merge per sticker with server timestamps and a rule that refuses an
+older `updatedAt`, a flush before sign-out.
+
+**When to revisit.** When a second device per account is supported, when an import reports a
+pack near the cap, or when a user loses favourites over a sign-out.
+
+---
+
+### A sticker pack's id can be claimed by whoever writes its manifest first
+
+**The smell.** `firestore.rules` lets any signed-in user create `stickerPacks/{packId}` for an
+id no document has yet, as long as the document names the writer as `ownerId`. A pack id is
+random and private until a sticker from the pack is sent: the message carries it
+(`MessageRepositoryImpl.sendStickerMessage`). A recipient with a modified client can then
+create the manifest under that id, in two situations:
+
+- **Before the owner's first upload.** The send and the backup both wait for a connection, so
+  the message can arrive before `StickerSyncWorker` has written the manifest. The owner's write
+  is then an update of someone else's document, which the rules refuse. That pack is never
+  backed up: every run ends in `Result.failure()`.
+- **After the owner deleted the pack.** Old messages still name the id.
+
+In both, *View pack* on those messages shows the other user's manifest. Its sticker ids, names
+and sizes are checked like any manifest's (`StickerManifest`), and no url is taken from it.
+
+**Why we haven't fixed it.** It needs a hostile client among the signed-in users, which the
+plan accepts for the sticker files too (`docs/plans/stickers-and-gifs.md`, open risk 2). Rules
+cannot tell who minted a random id. The fix changes what a pack's document id is: derive it
+from the owner, `sha256(ownerUid + ":" + localPackId)`, send that id in messages, and let the
+`create` rule recompute it with `hashing.sha256`. That is a change to the pack model. Its rule
+would get emulator tests in `firestore-rules-tests/`, next to the calls rules.
+
+**When to revisit.** Before the user base stops being closed, or when a pack is found pending
+with a manifest of another owner under its id. Found by `/code-review` on step 6 of the plan.
+
+---
+
+### `ListRepositoryImplRaceTest` can fail under load
+
+**The smell.** `toggleItemChecked waits for in-flight migration before hitting Firestore` failed
+once in a full `./gradlew test` run with `migration should have started`, and passed in the
+next run with no change to the code. The test asserts right after `advanceUntilIdle()` that
+the migration has begun. So the migration `observeList` starts is not on the test's dispatcher,
+and the assertion races a real thread.
+
+**Why we haven't fixed it.** It was seen once, during a step of the sticker plan that touches
+no list code, and the cause above is read from the test, not confirmed. The fix is in the list
+repository's test wiring: run the migration on the test dispatcher, or wait for
+`migrationStarted` in place of asserting it.
+
+**When to revisit.** The next time it fails, or when the list sync path is touched. A red gate
+that names this test is not the diff under test. Seen 2026-10-04.
 
 ---
 

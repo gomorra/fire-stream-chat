@@ -325,7 +325,7 @@ class CallStageUiTest {
     fun `a call that is still being placed shows the callee and only the hang-up button`() {
         var hungUp = 0
         show(
-            CallStageState(placing = PlacingCall("remote1", "Alice", null, "chat1", video = true)),
+            CallStageState(call = CallState.Placing(1L, "remote1", "Alice", null, video = true)),
             CallScreenCallbacks(onHangup = { hungUp++ }),
         )
 
@@ -338,25 +338,28 @@ class CallStageUiTest {
         assertEquals(1, hungUp)
     }
 
-    // The state of the call before stays `Ended` until the next call starts.
+    // The call service does not hold a call that is being placed, so the stage names the callee
+    // from the placing itself.
     @Test
-    fun `a call that is being placed shows over the end of the call before`() {
+    fun `a call that is being placed names its callee, not the person of the call before`() {
         show(
             CallStageState(
-                call = CallState.Ended("call0", com.firestream.chat.domain.model.EndReason.HANGUP),
-                placing = PlacingCall("remote1", "Alice", null, "chat1", video = false),
+                call = CallState.Placing(1L, "remote2", "Bob", null),
+                participants = listOf(alice),
             )
         )
 
+        composeTestRule.onNodeWithText("Bob").assertIsDisplayed()
         composeTestRule.onNodeWithText("Calling…").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Call ended").assertDoesNotExist()
+        composeTestRule.onNodeWithText("Alice").assertDoesNotExist()
     }
 
+    // A placing that fails ends with nobody in the call. CallActivity says why in a toast.
     @Test
-    fun `a call that could not be created says so`() {
-        show(CallStageState(placing = PlacingCall("remote1", "Alice", null, "chat1", video = false, failed = true)))
+    fun `a call that could not be created shows the end`() {
+        show(CallStageState(call = CallState.Ended("", com.firestream.chat.domain.model.EndReason.ERROR)))
 
-        composeTestRule.onNodeWithText("Call failed").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Call ended").assertIsDisplayed()
         composeTestRule.onNodeWithContentDescription("Hang up").assertDoesNotExist()
     }
 

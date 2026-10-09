@@ -50,6 +50,16 @@ class PendingMediaTest {
     }
 
     @Test
+    fun `a GIF is sent as a GIF until an edit step replaces it, and again once that step is undone`() {
+        val picked = PendingMedia(originalUri = uri("content://pick/1"), mimeType = "image/gif")
+        val edited = picked.landEdit(uri("file:///edits/a.jpg")).item
+
+        assertEquals("image/gif", picked.sendMimeType)
+        assertEquals("the editor writes JPEG", "image/jpeg", edited.sendMimeType)
+        assertEquals("image/gif", edited.copy(editCursor = 0).sendMimeType)
+    }
+
+    @Test
     fun `cursor mid-history yields that step, not the newest`() {
         val item = PendingMedia(
             originalUri = uri("content://pick/1"),

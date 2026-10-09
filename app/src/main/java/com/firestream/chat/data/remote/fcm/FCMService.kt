@@ -4,17 +4,20 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationCompat.MessagingStyle
 import androidx.core.app.Person
 import com.firestream.chat.MainActivity
 import com.firestream.chat.R
+import com.firestream.chat.data.call.CallNotificationManager
 import com.firestream.chat.data.call.CallService
 import com.firestream.chat.data.call.CallStateHolder
 import com.firestream.chat.data.local.PreferencesDataStore
-import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.CallLogType
 import com.firestream.chat.domain.model.ChatType
 import com.firestream.chat.domain.model.MessageType
+import com.firestream.chat.domain.model.isOngoing
 import com.firestream.chat.domain.repository.AuthRepository
 import com.firestream.chat.domain.repository.ChatRepository
 import com.firestream.chat.domain.repository.MessageRepository
@@ -39,6 +42,10 @@ class FCMService : FirebaseMessagingService() {
     @Inject lateinit var activeChatTracker: ActiveChatTracker
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private companion object {
+        const val TAG = "FCMService"
+    }
 
     override fun onNewToken(token: String) {
         super.onNewToken(token)
@@ -102,6 +109,13 @@ class FCMService : FirebaseMessagingService() {
             }
         }
 
+        // A call message records a call. Only a missed one is news: the callee saw the others ring.
+        val callText = if (messageType == MessageType.CALL.name) {
+            callPushNotificationText(data) ?: return
+        } else {
+            null
+        }
+
         serviceScope.launch {
             // For group chats: if mention-only notifications are enabled,
             // suppress notification unless the current user is mentioned
@@ -124,7 +138,10 @@ class FCMService : FirebaseMessagingService() {
             }
 
             val messageContent = data["messageContent"]
-            showNotification(chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent, messageId = messageId)
+            showNotification(
+                chatId, senderId, senderName, chatName, chatType == ChatType.GROUP.name, messageType, messageContent,
+                overrideText = callText, messageId = messageId
+            )
         }
     }
 
@@ -184,10 +201,21 @@ class FCMService : FirebaseMessagingService() {
         val video = data["video"] == "true"
 
         // Don't start if already in a call
-        val currentState = callStateHolder.callState.value
-        if (currentState !is CallState.Idle && currentState !is CallState.Ended) return
+        if (callStateHolder.callState.value.isOngoing) return
 
-        CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl, video)
+        try {
+            CallService.startIncoming(this, callId, callerId, callerName, callerAvatarUrl, video)
+        } catch (e: IllegalStateException) {
+            // Android 12+ lets a push start a foreground service only if it arrived at high
+            // priority, and FCM can lower an app's priority. Ring with a notification instead:
+            // opening it starts the service from the foreground.
+            Log.w(TAG, "Could not start the call service for call $callId; ringing with a notification", e)
+            val notifications = CallNotificationManager(this)
+            notifications.updateNotification(
+                notifications.buildIncomingCallFallbackNotification(callId, callerId, callerName, callerAvatarUrl, video),
+                CallNotificationManager.NOTIFICATION_ID_RING_FALLBACK
+            )
+        }
     }
 
     private fun showNotification(
@@ -230,6 +258,8 @@ class FCMService : FirebaseMessagingService() {
             MessageType.VOICE -> "\uD83C\uDF99\uFE0F Voice message"
             MessageType.DOCUMENT -> "\uD83D\uDCCE Document"
             MessageType.POLL -> "\uD83D\uDCCA Poll"
+            MessageType.STICKER -> "Sticker"
+            MessageType.GIF -> "\uD83C\uDF9E\uFE0F GIF"
             else -> "New message"
         }
         style.addMessage(notificationText, System.currentTimeMillis(), sender)
@@ -268,3 +298,15 @@ class FCMService : FirebaseMessagingService() {
  */
 internal fun notificationPartnerHint(isGroup: Boolean, senderId: String): String =
     if (isGroup) "" else senderId
+
+/**
+ * The notification text for a pushed call message, or null when the call needs no notification.
+ * Only the caller writes a call message, so the recipient is the callee. A call that never connected
+ * and was not declined is a missed call. The callee saw any other call ring. A push from a Cloud
+ * Function that does not send `callDurationSeconds` cannot tell the two apart, and says "Call".
+ */
+internal fun callPushNotificationText(data: Map<String, String>): String? {
+    val durationSeconds = data["callDurationSeconds"]?.toIntOrNull() ?: return "\uD83D\uDCDE Call"
+    val type = CallLogType.of(isOwnMessage = false, endReason = data["messageContent"].orEmpty(), durationSeconds = durationSeconds)
+    return if (type == CallLogType.MISSED) "\uD83D\uDCDE Missed call" else null
+}

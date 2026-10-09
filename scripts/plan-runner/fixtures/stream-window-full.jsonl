@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"s-full","claude_code_version":"2.1.288","model":"claude-opus","permissionMode":"acceptEdits"}
+{"type":"assistant","session_id":"s-full"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1793865600,"rateLimitType":"ccr_promotional","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":1,"resetsAt":1791089400},"seven_day":{"utilization":0.17,"resetsAt":1791162000}}},"uuid":"u-rate","session_id":"s-full"}
+{"type":"assistant","session_id":"s-full"}

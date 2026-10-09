@@ -294,19 +294,30 @@ pr_variant_check() {
 
 # ---- result classification (§2.5) -----------------------------------------
 
-# pr_result_kind <result-file>  → complete | incomplete | budget | failed
+# pr_result_kind <result-file>  → complete | incomplete | budget | usage_limit | failed
 # The result object `claude -p --output-format json --json-schema …` writes,
 # confirmed live on 2026-09-13 (this build):
 #   { "type":"result", "subtype":"success", "is_error":false, "terminal_reason":"completed",
 #     "session_id":"…", "num_turns":2, "total_cost_usd":0.059, "permission_denials":[],
 #     "result":"<json text>", "structured_output":{…}, … }
+# Sessions run with --output-format stream-json --verbose, and the result file is the stream's last
+# `result` line (pr_stream_result). That line has the same fields, structured_output included, and
+# its total_cost_usd counts the whole session across --resume. Confirmed by a probe on CLI 2.1.288
+# (2026-10-03 23:51 UTC, fixtures/stream-probe.jsonl).
 # Budget exhaustion: "subtype":"error_max_budget_usd", "is_error":true,
 #   "terminal_reason":"budget_exhausted", "structured_output":null.
-#   complete   — success, not an error, structured_output is an object
-#   incomplete — success but no structured object (the session ended without the
-#                result); worth exactly one fix-forward nudge
-#   budget     — budget or turn limit hit; blocked at once, never resumed
-#   failed     — anything else (no file, no JSON, API error, execution error)
+# API error: "subtype":"success", "is_error":true, "terminal_reason":"api_error",
+#   "api_error_status":<http>, "result":"<the CLI's message>". The subtype says success;
+#   is_error is what marks it (confirmed 2026-10-03).
+# Usage limit: the same with "api_error_status":429. Read from the CLI's code by a desktop session on
+#   2026-10-03 (CLI 2.1.263–2.1.278); no headless limit result has been seen live
+#   (fixtures/result-usage-limit.json). The driver also reads the stream and the transcript for it.
+#   complete    — success, not an error, structured_output is an object
+#   incomplete  — success but no structured object (the session ended without the
+#                 result); worth exactly one fix-forward nudge
+#   budget      — budget or turn limit hit; blocked at once, never resumed
+#   usage_limit — an API error with HTTP 429: the driver waits for the reset and resumes the session
+#   failed      — anything else (no file, no JSON, API error, execution error); say why with pr_result_error
 pr_result_kind() {
     local f=$1 subtype is_error so
     [ -s "$f" ] && jq -e . "$f" >/dev/null 2>&1 || { echo failed; return; }
@@ -314,11 +325,25 @@ pr_result_kind() {
     subtype=$(jq -r '.subtype // "null"' "$f"); is_error=$(jq -r '.is_error | tostring' "$f")
     so=$(jq -r '.structured_output | type' "$f")
     case "$subtype" in error_max_budget_usd|error_max_turns) echo budget; return ;; esac
+    if [ "$is_error" = true ] && [ "$(pr_result_field "$f" .api_error_status)" = 429 ]; then echo usage_limit; return; fi
     if [ "$subtype" = success ] && [ "$is_error" = false ]; then
         if [ "$so" = object ]; then echo complete; else echo incomplete; fi
     else
         echo failed
     fi
+}
+
+# pr_result_error <result-file>  → one line on why a `failed` result failed: the subtype
+# (left out when it is "success"), terminal_reason, HTTP status, then the CLI's own message
+# from `result`, cut to 300 characters. Never fails, never prints nothing.
+pr_result_error() {
+    local out
+    [ -s "$1" ] || { printf 'the CLI wrote no result'; return; }
+    out=$(jq -r '([(.subtype | select(. != "success")), .terminal_reason, (.api_error_status | select(. != null) | "HTTP \(.)")]
+            | map(select(. != null and . != "")) | join(", ")) as $why
+        | (.result // "" | tostring | gsub("\\s+"; " ") | if length > 300 then .[0:300] + "…" else . end) as $msg
+        | [$why, $msg] | map(select(. != "")) | join(": ")' "$1" 2>/dev/null || true)
+    printf '%s' "${out:-the CLI output is not a result object}"
 }
 
 # pr_result_field <file> <jq-path> [<default>]  → the field as text, or the default
@@ -338,23 +363,205 @@ pr_result_json() {
     printf '%s' "${out:-$3}"
 }
 
+# ---- streams, transcripts and the usage limit ------------------------------------
+# A session's stream (`--output-format stream-json --verbose`) is one JSON object per line and carries
+# every tool output, so it grows to megabytes. Each reader picks its candidate lines with grep -F and
+# parses only those. A tool output sits in the stream as an escaped string, so its quotes are `\"` and
+# a fixed-string match on `"key"` never hits it. Never fails, never stops a pipe early (GOTCHAS: pipefail).
+
+# pr_stream_result <stream>  → the stream's last line whose type is `result` (the object the json
+# output format prints), compact; nothing when the session ended without one.
+pr_stream_result() {
+    local cand
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"result"' "$1" || true)
+    [ -n "$cand" ] || return 0
+    jq -cnR 'last(inputs | fromjson? | objects | select(.type == "result")) // empty' <<< "$cand" 2>/dev/null || true
+}
+
+# pr_session_id <stream>  → the session id from the `system`/`init` line, else from the result line;
+# nothing when the session stopped before either.
+pr_session_id() {
+    local cand sid=''
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"init"' "$1" || true)
+    if [ -n "$cand" ]; then
+        sid=$(jq -rnR 'first(inputs | fromjson? | objects | select(.type == "system" and .subtype == "init") | .session_id | strings) // empty' <<< "$cand" 2>/dev/null || true)
+    fi
+    [ -n "$sid" ] || sid=$(jq -r '.session_id // empty' <<< "$(pr_stream_result "$1")" 2>/dev/null || true)
+    printf '%s' "$sid"
+}
+
+# pr_stream_limit <stream>  → the usage-window state of the newest `rate_limit_info`, at any depth:
+#   "limited <resetsAt>" when the window is used up — status "rejected", or a unified window at
+#   utilization ≥ 1. The reset is the latest resetsAt among the full windows, else the top-level one;
+#   plain "limited" when neither has one. "open" otherwise; nothing when the stream has no such object.
+# Its fields, as seen in real streams: status, rateLimitType, resetsAt (epoch s), isUsingOverage,
+# overageStatus, unifiedWindows.<name>.{utilization, resetsAt} (2026-10-03).
+pr_stream_limit() {
+    local cand
+    [ -f "$1" ] || return 0
+    cand=$(grep -F '"rate_limit_info"' "$1" || true)
+    [ -n "$cand" ] || return 0
+    jq -rnR '(last(inputs | fromjson? | [.. | objects | .rate_limit_info? | objects] | last // empty) // empty)
+        | ([.unifiedWindows // {} | .[]? | objects | select((.utilization // 0) >= 1)]) as $full
+        | if .status == "rejected" or ($full | length) > 0
+          then "limited" + (([$full[].resetsAt | numbers] | max) // (.resetsAt | numbers) // "" | tostring | if . == "" then "" else " " + . end)
+          else "open" end' <<< "$cand" 2>/dev/null || true
+}
+
+# pr_transcript_usage_limit <transcript.jsonl>  → exit 0 when the transcript's last main-chain message
+# is an assistant entry that is a usage-limit stop (`error: "rate_limit"`), and print its
+# quotaLimits.resetsAt (epoch s; nothing when absent). Exit 1 otherwise. A user entry after the stop is
+# a resume's prompt: that resume has not stopped there. A sidechain (sub-agent) entry is not the
+# session's own turn. Field names as recorded in 27 real entries (CLI 2.1.263–2.1.278): error,
+# apiErrorStatus, quotaLimits.resetsAt.
+pr_transcript_usage_limit() {
+    local out
+    [ -f "$1" ] || return 1
+    grep -qF '"rate_limit"' "$1" || return 1      # a file, not a pipe: grep -q stopping early is safe here
+    out=$(jq -nrR 'reduce (inputs | fromjson? | objects | select((.type == "assistant" or .type == "user") and .isSidechain != true)) as $e (null; $e)
+        | select(.type? == "assistant" and .error? == "rate_limit")
+        | "rate_limit " + ([.. | objects | .quotaLimits? | objects | .resetsAt? | numbers] | first // "" | tostring)' "$1" 2>/dev/null || true)
+    [ -n "$out" ] || return 1
+    out=${out#rate_limit}
+    printf '%s' "${out# }"
+}
+
+# pr_fmt_duration <seconds>  → "45s", "59m", "1h 05m", "3d 1h"; a negative duration is "0s".
+pr_fmt_duration() {
+    local s=${1%.*}
+    [ "$s" -ge 0 ] 2>/dev/null || s=0
+    if [ "$s" -lt 60 ]; then printf '%ss' "$s"
+    elif [ "$s" -lt 3600 ]; then printf '%sm' "$((s / 60))"
+    elif [ "$s" -lt 86400 ]; then printf '%sh %02dm' "$((s / 3600))" "$((s % 3600 / 60))"
+    else printf '%sd %sh' "$((s / 86400))" "$((s % 86400 / 3600))"; fi
+}
+
+# pr_cost_delta <total> <previous>  → what one invocation added to its session's cost, from the session's
+# total_cost_usd now and at its previous result. A resumed session reports its cost so far (CLI 2.1.288),
+# so the increase is the difference. A total below the previous one is a per-invocation figure from an
+# older CLI, and counts whole.
+pr_cost_delta() {
+    awk -v t="$1" -v p="$2" 'BEGIN { d = (t + 0 >= p + 0) ? t - p : t + 0; s = sprintf("%.6f", d); sub(/0+$/, "", s); sub(/\.$/, "", s); print s }'
+}
+
+# pr_budget_left <budget> <spent>  → the --max-budget-usd of a resumed session: what is left of its
+# budget, at least 1. The flag counts per invocation.
+pr_budget_left() {
+    awk -v b="$1" -v s="$2" 'BEGIN { l = b - s; if (l < 1) l = 1; o = sprintf("%.2f", l); sub(/0+$/, "", o); sub(/\.$/, "", o); print o }'
+}
+
 # ---- checkpoints (§2.4) -----------------------------------------------------
 
-# pr_checkpoint_due <log-file> <step-id> <ran-now 0|1>  → exit 0 when the ‖ after
-# <step> must stop this run. Due when the step shipped in this invocation, or
-# when the runner had a hand in it (any log event for the step — a launch, a
-# needs_decision the human then finished by resuming) and no `checkpoint`
-# event has been logged for it yet. A step the runner never touched (shipped
-# by hand, no log) passes: the human already had that pause.
+# pr_checkpoint_due <log-file> <step-id>  → exit 0 when the ‖ after a step shipped in
+# an earlier invocation must stop this run (the driver's checkpoint_due covers the
+# steps of this invocation and the frontier). Due when the runner had a hand in the
+# step (any log event for it — a launch, a needs_decision the human then finished by
+# resuming) and no `checkpoint` event has been logged for it yet. A step the runner
+# never touched (shipped by hand, no log) passes: the human already had that pause.
 pr_checkpoint_due() {
-    local log=$1 step=$2 ran_now=$3
-    [ "$ran_now" = 1 ] && return 0
+    local log=$1 step=$2
     [ -f "$log" ] || return 1
     jq -e --arg s "$step" 'select(.step == $s)' "$log" >/dev/null 2>&1 || return 1
     if jq -e --arg s "$step" 'select(.step == $s and .event == "checkpoint")' "$log" >/dev/null 2>&1; then
         return 1
     fi
     return 0
+}
+
+# pr_shipped_after <plan> <index> <tokens…>  → exit 0 when a step after position <index>
+# (0-based) of the Order tokens is shipped. A ‖ with a shipped step to its right is behind
+# the frontier: an earlier invocation went past it, so it never stops a run again.
+pr_shipped_after() {
+    local plan=$1 i=$2 tok; shift 2
+    [ $# -gt "$i" ] || return 1
+    shift "$((i + 1))"
+    for tok in "$@"; do
+        [ "$tok" = CP ] && continue
+        if pr_step_shipped "$plan" "$tok"; then return 0; fi
+    done
+    return 1
+}
+
+# ---- plan sync -----------------------------------------------------------------
+# The driver merges the plan file from the sync ref into the branch's copy at a step boundary.
+# Only the plan: main's code would change what the gate and the diff checks measure mid-run.
+
+# pr_merge_inserts <merge-file>  → <merge-file> is `git merge-file -p --zdiff3 --marker-size=13`
+# output. A conflict whose base part is empty is a same-spot insertion: a **Shipped** block on
+# the branch and a new step on the sync ref, both written right after the same line. It is
+# placed: the branch's lines, a blank line where neither side has one, then the ref's lines.
+# Any other conflict stays marked, and the exit code is 1. Literal markers, not `<{13}`:
+# mawk has no interval expressions.
+pr_merge_inserts() {
+    awk '
+        function marker(c) { return substr($0, 1, 13) == c && (length($0) == 13 || substr($0, 14, 1) == " ") }
+        BEGIN { L = "<<<<<<<<<<<<<"; B = "|||||||||||||"; S = "============="; R = ">>>>>>>>>>>>>" }
+        state == 0 && marker(L) { state = 1; head = $0; no = 0; nb = 0; nt = 0; hasbase = 0; next }
+        state == 1 && marker(B) { state = 2; bhead = $0; hasbase = 1; next }
+        (state == 1 || state == 2) && $0 == S { state = 3; next }
+        state == 3 && marker(R) {
+            state = 0
+            if (hasbase && nb == 0) {
+                for (i = 1; i <= no; i++) print ours[i]
+                if (no > 0 && nt > 0 && ours[no] != "" && theirs[1] != "") print ""
+                for (i = 1; i <= nt; i++) print theirs[i]
+            } else {
+                bad = 1; print head
+                for (i = 1; i <= no; i++) print ours[i]
+                if (hasbase) { print bhead; for (i = 1; i <= nb; i++) print base[i] }
+                print S
+                for (i = 1; i <= nt; i++) print theirs[i]
+                print
+            }
+            next
+        }
+        state == 1 { ours[++no] = $0; next }
+        state == 2 { base[++nb] = $0; next }
+        state == 3 { theirs[++nt] = $0; next }
+        { print }
+        END { exit bad }
+    ' "$1"
+}
+
+# pr_plan_check <plan> [<before>]  → prints what keeps <plan> from being run, one problem per
+# line; exit 1 when there is any. The Order line must parse, and every step it names must have
+# a heading whose tier and effort tags are valid. With <before> (the branch's copy before a
+# merge), every step shipped there must still be shipped here, naming the same commit.
+pr_plan_check() {
+    local plan=$1 before=${2:-} tokens tok h id out=''
+    if ! tokens=$(pr_order_tokens "$plan" 2>/dev/null); then
+        out+="no Order line that names a step"$'\n'
+    else
+        for tok in $tokens; do
+            [ "$tok" = CP ] && continue
+            if ! h=$(pr_step_heading "$plan" "$tok" 2>/dev/null); then
+                out+="the Order line names step $tok, which has no '### Step $tok' heading"$'\n'; continue
+            fi
+            pr_tag_tier "$h" >/dev/null 2>&1 || out+="step $tok: unknown tier '$(pr_tag "$h" model)'"$'\n'
+            pr_tag_effort "$h" medium >/dev/null 2>&1 || out+="step $tok: unknown effort '$(pr_tag "$h" effort)'"$'\n'
+        done
+    fi
+    if [ -n "$before" ]; then
+        for id in $(sed -nE 's/^### Step ([0-9]+[a-z]?)([^0-9a-z].*)?$/\1/p' "$before"); do
+            pr_step_shipped "$before" "$id" || continue
+            if ! pr_step_shipped "$plan" "$id"; then
+                out+="step $id lost its **Shipped** line"$'\n'
+            elif [ "$(pr_shipped_commit "$plan" "$id")" != "$(pr_shipped_commit "$before" "$id")" ]; then
+                out+="step $id's **Shipped** line names another commit"$'\n'
+            fi
+        done
+    fi
+    printf '%s' "$out"
+    [ -z "$out" ]
+}
+
+PR_SYNC_TRAILER=Plan-Synced-From     # names the REF commit a sync commit merged the plan from
+
+# pr_synced_from <commit-message>  → the sha of its last `Plan-Synced-From: <sha>` trailer, or nothing.
+pr_synced_from() {
+    { grep -E "^$PR_SYNC_TRAILER: [0-9a-f]{40,64}\$" <<< "$1" || true; } | tail -1 | sed "s/^$PR_SYNC_TRAILER: //"
 }
 
 # ---- prompt rendering -------------------------------------------------------

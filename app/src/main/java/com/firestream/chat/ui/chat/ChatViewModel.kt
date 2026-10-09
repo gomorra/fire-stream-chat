@@ -37,6 +37,7 @@ import com.firestream.chat.domain.repository.ListRepository
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.PollRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.repository.UserRepository
 import com.firestream.chat.domain.usecase.chat.CheckGroupPermissionUseCase
 import com.firestream.chat.domain.usecase.message.SearchMessagesUseCase
@@ -110,6 +111,7 @@ class ChatViewModel @Inject constructor(
     private val dateTimeDetector: DateTimeDetector,
     private val pollRepository: PollRepository,
     private val userRepository: UserRepository,
+    private val stickerRepository: StickerRepository,
     private val preferencesDataStore: PreferencesDataStore,
     private val mediaFileManager: MediaFileManager,
     private val imageEditRasterizer: ImageEditRasterizer,
@@ -188,7 +190,8 @@ class ChatViewModel @Inject constructor(
         chatId, searchMessagesUseCase, linkPreviewSource, _uiState, viewModelScope
     )
     private val messageActions = ChatMessageActions(
-        chatId, partnerIdHint, messageRepository, reminderRepository, dateTimeDetector, _uiState, viewModelScope,
+        chatId, partnerIdHint, messageRepository, reminderRepository, stickerRepository, dateTimeDetector,
+        _uiState, viewModelScope,
         onReminderScheduled = { outcome ->
             if (outcome == ReminderScheduleOutcome.INEXACT_FALLBACK) {
                 commandsManager.setExactAlarmBannerVisible(true)
@@ -196,14 +199,14 @@ class ChatViewModel @Inject constructor(
         },
     )
     private val messageSender = ChatMessageSender(
-        chatId, chatRepository, messageRepository, _uiState, viewModelScope
+        chatId, chatRepository, messageRepository, stickerRepository, _uiState, viewModelScope
     )
     private val messageLoader = ChatMessageLoader(
         chatId, listRepository, linkPreviewSource, chatRepository, messageRepository, reminderRepository,
         context, _uiState, viewModelScope
     )
     private val infoManager = ChatInfoManager(
-        chatId, partnerIdHint, chatRepository, listRepository, userRepository, preferencesDataStore,
+        chatId, partnerIdHint, chatRepository, listRepository, userRepository, stickerRepository, preferencesDataStore,
         checkGroupPermissionUseCase, connectivityObserver, _uiState, viewModelScope
     )
     private val dictationManager = ChatDictationManager(
@@ -423,6 +426,18 @@ class ChatViewModel @Inject constructor(
 
     // ── Emoji ──
     fun addRecentEmoji(emoji: String) = infoManager.addRecentEmoji(emoji)
+
+    // ── Stickers ──
+    fun sendSticker(stickerId: String, packId: String?) = messageSender.sendSticker(stickerId, packId)
+
+    fun sendKeyboardContent(uri: Uri, mimeType: String, onHandled: () -> Unit) =
+        messageSender.sendKeyboardContent(uri, mimeType, onHandled)
+
+    /** Flips a sticker's favourite state. [message] is the bubble it was tapped in, null for a pick from the library. */
+    fun toggleStickerFavourite(stickerId: String, message: Message? = null) =
+        messageActions.toggleStickerFavourite(stickerId, message) { line ->
+            viewModelScope.launch { _snackbarEvent.emit(SnackbarEvent(line)) }
+        }
 
     // ── Image editing ──
 

@@ -3,9 +3,9 @@
 //   1:1 call (`media.<uid>`), and decide whether the call may be written to at all.
 // Owns: The state to publish, the one job that writes it, and the rule that nothing is written
 //   before the call is connected and both sides agreed on the video line.
-// Collaborators: CallService (tells it what happens to the call and what the user switched),
+// Collaborators: CallSession (tells it what happens to the call and what the user switched),
 //   CallRepository.setMedia (the write).
-// Don't put here: Reading the other side's state (CallService.observeCallDocument), the camera
+// Don't put here: Reading the other side's state (CallSession.onRemoteMedia), the camera
 //   itself (LocalCamera), a group call's member rows (a group call does not use this document).
 // endregion
 

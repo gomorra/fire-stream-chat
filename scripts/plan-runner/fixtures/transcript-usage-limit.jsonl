@@ -1,0 +1,4 @@
+{"type":"user","isSidechain":false,"sessionId":"s-transcript","uuid":"t-1","parentUuid":null,"message":{"role":"user","content":"Implement step 3 of the plan."}}
+{"type":"assistant","isSidechain":false,"sessionId":"s-transcript","uuid":"t-2","parentUuid":"t-1","message":{"role":"assistant","content":[{"type":"text","text":"Reading the plan first."}]}}
+{"type":"assistant","isSidechain":false,"sessionId":"s-transcript","uuid":"t-3","parentUuid":"t-2","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"quotaLimits":{"resetsAt":1791089400},"message":{"role":"assistant","content":[{"type":"text","text":"You've hit your limit · resets 9:40pm"}]}}
+{"type":"assistant","isSidechain":true,"sessionId":"s-transcript","uuid":"t-4","parentUuid":"t-2","message":{"role":"assistant","content":[{"type":"text","text":"A sub-agent's turn, not the main chain."}]}}

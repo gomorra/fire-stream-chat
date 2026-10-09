@@ -10,6 +10,13 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * The types whose media this device keeps a local copy of, as an SQL list. Each
+ * one has a place `MediaFileManager.downloadFor` puts it, and matches
+ * `AUTO_DOWNLOAD_TYPES` in `MessageRepositoryImpl`.
+ */
+private const val LOCAL_MEDIA_TYPES = "'IMAGE', 'VIDEO', 'DOCUMENT', 'STICKER', 'GIF'"
+
 @Dao
 interface MessageDao {
 
@@ -292,13 +299,13 @@ interface MessageDao {
     @Query("UPDATE messages SET localUri = :localUri WHERE id = :messageId")
     suspend fun updateLocalUri(messageId: String, localUri: String?)
 
-    @Query("SELECT * FROM messages WHERE type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL")
     suspend fun getMessagesWithoutLocalMedia(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE type IN ('IMAGE', 'VIDEO', 'DOCUMENT')")
+    @Query("SELECT * FROM messages WHERE type IN ($LOCAL_MEDIA_TYPES)")
     suspend fun getAllMediaMessages(): List<MessageEntity>
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND type IN ('IMAGE', 'VIDEO', 'DOCUMENT') AND localUri IS NULL AND mediaUrl IS NOT NULL")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND type IN ($LOCAL_MEDIA_TYPES) AND localUri IS NULL AND mediaUrl IS NOT NULL")
     suspend fun getMessagesWithoutLocalMediaForChat(chatId: String): List<MessageEntity>
 
     // Call log

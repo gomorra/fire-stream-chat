@@ -2,7 +2,11 @@ package com.firestream.chat.data.util
 
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
@@ -87,5 +91,50 @@ class SingleFlightTest {
 
         assertEquals("boom", first.await().exceptionOrNull()?.message)
         assertEquals("boom", second.await().exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `a waiter runs the block itself when the first caller is cancelled`() = runBlocking {
+        val singleFlight = SingleFlight<String, Int>()
+        val entered = CompletableDeferred<Unit>()
+
+        // A cell that scrolls away while its download is running.
+        val first = launch {
+            singleFlight.run("k") {
+                entered.complete(Unit)
+                awaitCancellation()
+            }
+        }
+        entered.await()
+        val second = async { singleFlight.run("k") { 7 } }
+        yield()
+        first.cancelAndJoin()
+
+        // The first caller's cancellation is not the waiter's.
+        assertEquals(7, second.await())
+    }
+
+    @Test
+    fun `a waiter that is cancelled itself stops waiting`() = runBlocking {
+        val singleFlight = SingleFlight<String, Int>()
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val runs = AtomicInteger()
+
+        val first = async {
+            singleFlight.run("k") {
+                entered.complete(Unit)
+                release.await()
+                42
+            }
+        }
+        entered.await()
+        val second = launch { singleFlight.run("k") { runs.incrementAndGet() } }
+        yield()
+        second.cancelAndJoin()
+        release.complete(Unit)
+
+        assertEquals(42, first.await())
+        assertEquals("the cancelled waiter never ran the block", 0, runs.get())
     }
 }

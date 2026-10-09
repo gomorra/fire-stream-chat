@@ -45,6 +45,7 @@ class ChatInfoManagerRecentEmojiTest {
         chatRepository = FakeChatRepository(),
         listRepository = mockk<ListRepository>(relaxed = true),
         userRepository = FakeUserRepository(),
+        stickerRepository = com.firestream.chat.test.fakes.emptyStickerRepository(),
         preferencesDataStore = preferencesDataStore,
         checkGroupPermissionUseCase = mockk<CheckGroupPermissionUseCase>(relaxed = true),
         connectivityObserver = FakeConnectivityObserver(),

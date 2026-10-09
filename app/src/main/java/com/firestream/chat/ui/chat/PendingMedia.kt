@@ -81,6 +81,13 @@ internal data class PendingMedia(
         }
 
     /**
+     * The type [uri] is sent as. An edit step is always a JPEG, whatever the
+     * pick was, so an edited GIF goes out as a photo and an untouched one as a GIF.
+     */
+    val sendMimeType: String
+        get() = if (uri == originalUri) mimeType else EDITED_MIME_TYPE
+
+    /**
      * This item after a rasterized step lands on top of it, plus every history
      * file the step made unreachable.
      *
@@ -153,6 +160,9 @@ internal data class PendingMedia(
          * of editor visits anyone makes before sending.
          */
         const val MAX_EDIT_STEPS = 8
+
+        /** What `ImageEditRasterizer` writes for every step. */
+        private const val EDITED_MIME_TYPE = "image/jpeg"
 
         /**
          * Flattens to fixed-size `[originalUri, mime, caption, isHd, history,

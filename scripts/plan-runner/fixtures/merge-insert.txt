@@ -1,0 +1,26 @@
+# P
+
+**Order: 1 → 1a → 2**
+
+### Step 1 — a
+Body 1.
+
+<<<<<<<<<<<<< plan/p
+**Shipped** `abc1234` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+Departures (for sign-off): none
+||||||||||||| base
+=============
+### Step 1a — new
+Body 1a.
+>>>>>>>>>>>>> main
+
+### Step 2 — b
+Body 2.
+<<<<<<<<<<<<< plan/p
+
+**Shipped** `def5678` (2026-10-03) — tier: mid. skills: none. Reviewer models: none.
+
+||||||||||||| base
+=============
+A note from main.
+>>>>>>>>>>>>> main

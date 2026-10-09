@@ -31,22 +31,45 @@ class ProfileImageManagerTest {
     private val context = mockk<Context>()
     private val httpClient = mockk<OkHttpClient>()
 
-    private lateinit var profileDir: File
+    private lateinit var filesDir: File
+    private lateinit var externalMediaDir: File
     private lateinit var manager: ProfileImageManager
 
     @Before
     fun setUp() {
-        profileDir = tempDir.newFolder("profile_pictures")
-        // externalMediaDirs returns our temp dir's parent so profileDir = parent/profile_pictures
-        every { context.externalMediaDirs } returns arrayOf(tempDir.root)
+        filesDir = tempDir.newFolder("files")
+        externalMediaDir = tempDir.newFolder("media")
+        every { context.filesDir } returns filesDir
+        every { context.externalMediaDirs } returns arrayOf(externalMediaDir)
 
-        manager = ProfileImageManager(context, httpClient)
+        manager = ProfileImageManager(context, httpClient, MediaProcessingLimiter())
     }
 
     @Test
     fun `getLocalFile returns file in profile directory`() {
         val file = manager.getLocalFile("user123")
         assertTrue(file.absolutePath.endsWith("profile_pictures/user123.jpg"))
+    }
+
+    @Test
+    fun `avatar cache lives in internal storage, not Android media`() {
+        // Android/media goes through the shared-storage FUSE layer, which can report a
+        // file readable and then refuse to open it. Internal storage never does.
+        val file = manager.getLocalFile("user123")
+
+        assertEquals(File(filesDir, "profile_pictures/user123.jpg"), file)
+    }
+
+    @Test
+    fun `deleteLegacyExternalCache removes the old Android media avatar folder`() {
+        val legacy = File(externalMediaDir, "profile_pictures/user123.jpg").apply {
+            parentFile!!.mkdirs()
+            writeText("old")
+        }
+
+        manager.deleteLegacyExternalCache()
+
+        assertFalse(legacy.parentFile!!.exists())
     }
 
     @Test
@@ -145,6 +168,22 @@ class ProfileImageManagerTest {
         manager.deleteAvatar("user1")
 
         assertFalse(file.exists())
+    }
+
+    @Test
+    fun `avatarTargetSize caps the long edge of a camera original`() {
+        assertEquals(1024 to 768, avatarTargetSize(4000, 3000))
+        assertEquals(768 to 1024, avatarTargetSize(3000, 4000))
+    }
+
+    @Test
+    fun `avatarTargetSize never upscales a small image`() {
+        assertEquals(300 to 200, avatarTargetSize(300, 200))
+    }
+
+    @Test
+    fun `avatarTargetSize keeps at least one pixel per edge`() {
+        assertEquals(1024 to 1, avatarTargetSize(100_000, 10))
     }
 
     private fun stubHttpResponse(code: Int, body: ByteArray) {

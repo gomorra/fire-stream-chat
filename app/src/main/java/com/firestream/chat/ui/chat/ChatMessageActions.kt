@@ -16,13 +16,16 @@ import com.firestream.chat.domain.model.ReminderScheduleOutcome
 import com.firestream.chat.domain.reminder.DateTimeDetector
 import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.ReminderRepository
+import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.ui.components.destinationLabel
+import com.firestream.chat.ui.components.stickerLabel
 
 internal class ChatMessageActions(
     private val chatId: String,
     private val partnerIdHint: String,
     private val messageRepository: MessageRepository,
     private val reminderRepository: ReminderRepository,
+    private val stickerRepository: StickerRepository,
     private val dateTimeDetector: DateTimeDetector,
     private val _uiState: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope,
@@ -107,6 +110,38 @@ internal class ChatMessageActions(
         }
     }
 
+    /**
+     * Adds a sticker to the favourites, or takes it out when it is one. The
+     * repository decides which, in one transaction, so two quick taps flip twice.
+     *
+     * [message] is the bubble the sticker was tapped in, and null for a sticker
+     * picked from the library. A received sticker has no library row until its
+     * file is downloaded and checked. So when the library refuses the sticker,
+     * the bubble's file is fetched and the toggle is tried once more. The fetch
+     * fails for a sticker whose bytes were refused.
+     *
+     * [onDone] gets the line to show, for either outcome.
+     */
+    fun toggleStickerFavourite(
+        stickerId: String,
+        message: Message? = null,
+        onDone: (String) -> Unit,
+    ) {
+        scope.launch {
+            var toggled = stickerRepository.toggleFavourite(stickerId)
+            if (toggled.isFailure && message != null) {
+                if (messageRepository.ensureLocalFile(message).isFailure) {
+                    onDone("Couldn't save this sticker")
+                    return@launch
+                }
+                toggled = stickerRepository.toggleFavourite(stickerId)
+            }
+            toggled
+                .onSuccess { isFavourite -> onDone(if (isFavourite) "Added to favourites" else "Removed from favourites") }
+                .onFailure { onDone("Couldn't update favourites") }
+        }
+    }
+
     fun toggleStar(message: Message) {
         scope.launch {
             messageRepository.starMessage(message.id, !message.isStarred)
@@ -175,6 +210,8 @@ internal class ChatMessageActions(
             ?: "📍 $LOCATION_DEFAULT_CONTENT"
         MessageType.CALL -> message.content.takeIf { it.isNotBlank() } ?: "Call"
         MessageType.TIMER -> message.content.takeIf { it.isNotBlank() } ?: "Timer"
+        MessageType.STICKER -> stickerLabel(message.content)
+        MessageType.GIF -> message.content.takeIf { it.isNotBlank() } ?: "GIF"
         MessageType.TEXT -> message.content
     }
 }

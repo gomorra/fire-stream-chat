@@ -5,6 +5,7 @@ import com.firestream.chat.data.crypto.SignalManager
 import com.firestream.chat.data.local.PreferencesDataStore
 import com.firestream.chat.data.local.dao.ChatDao
 import com.firestream.chat.data.local.dao.MessageDao
+import com.firestream.chat.data.local.dao.StickerDao
 import com.firestream.chat.data.local.entity.ChatEntity
 import com.firestream.chat.data.outbox.BlockCheck
 import com.firestream.chat.data.outbox.MessageWriter
@@ -16,6 +17,7 @@ import com.firestream.chat.data.remote.fcm.ActiveChatTracker
 import com.firestream.chat.data.remote.source.AuthSource
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.UserSource
+import com.firestream.chat.data.sticker.StickerFiles
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.DocumentInfo
 import com.firestream.chat.data.util.MediaFileManager
@@ -69,6 +71,8 @@ internal fun messageRepository(
     activeChatTracker: ActiveChatTracker = ActiveChatTracker(),
     mediaBackfillScheduler: MediaBackfillScheduler = mockk(relaxed = true),
     documentFiles: DocumentFiles = mockk(relaxed = true) { coEvery { describe(any()) } returns DocumentInfo(null, null) },
+    stickerDao: StickerDao = mockk(relaxed = true) { coEvery { getSticker(any()) } returns null },
+    stickerFiles: StickerFiles = mockk(relaxed = true),
 ) = MessageRepositoryImpl(
     messageDao = messageDao,
     chatDao = chatDao,
@@ -91,6 +95,8 @@ internal fun messageRepository(
     activeChatTracker = activeChatTracker,
     mediaBackfillScheduler = mediaBackfillScheduler,
     documentFiles = documentFiles,
+    stickerDao = stickerDao,
+    stickerFiles = stickerFiles,
 )
 
 /**

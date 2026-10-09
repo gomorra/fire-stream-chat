@@ -88,6 +88,49 @@ class MessageDaoOutboxQueueTest {
         assertEquals(setOf("queued-text", "queued-photo", "deleted-after-give-up"), queued.toSet())
     }
 
+    // A SENDING sticker or GIF the outbox did not know would be failed on the next
+    // app start instead of sent (failQueuedOfOtherTypes).
+    @Test
+    fun `a queued sticker and a queued GIF are the outbox's to send, not stranded rows`() = runTest {
+        dao.insertOutbox(own("sticker", type = MessageType.STICKER))
+        dao.insertOutbox(own("gif", type = MessageType.GIF))
+
+        val queued = dao.getQueuedMessages("me", sendable).map { it.id }
+        val stranded = dao.failQueuedOfOtherTypes("me", sendable)
+
+        assertEquals(setOf("sticker", "gif"), queued.toSet())
+        assertEquals(0, stranded)
+        assertEquals(MessageStatus.SENDING.name, dao.getMessageById("sticker")!!.status)
+    }
+
+    // The chat-open scan and the backfill select by these lists; a type missing
+    // from them never gets its local file.
+    @Test
+    fun `a received sticker and GIF without a local file are pending downloads`() = runTest {
+        fun received(id: String, type: MessageType, mediaUrl: String? = "https://storage.example/$id") =
+            MessageRecord.fromDomain(
+                Message(
+                    id = id, chatId = "c1", senderId = "them", type = type, status = MessageStatus.SENT,
+                    timestamp = 1_000L, mediaUrl = mediaUrl, stickerId = "s".takeIf { type == MessageType.STICKER },
+                )
+            )
+        dao.upsertRecords(
+            listOf(
+                received("sticker", MessageType.STICKER),
+                received("gif", MessageType.GIF),
+                received("photo", MessageType.IMAGE),
+                received("voice", MessageType.VOICE),
+                received("text", MessageType.TEXT, mediaUrl = null),
+            )
+        )
+        dao.updateLocalUri("photo", "/media/photo.jpg")
+
+        assertEquals(setOf("sticker", "gif"), dao.getMessagesWithoutLocalMedia().map { it.id }.toSet())
+        assertEquals(setOf("sticker", "gif"), dao.getMessagesWithoutLocalMediaForChat("c1").map { it.id }.toSet())
+        assertEquals(setOf("sticker", "gif", "photo"), dao.getAllMediaMessages().map { it.id }.toSet())
+        assertEquals("s", dao.getMessageById("sticker")!!.stickerId)
+    }
+
     // The SQL predicate and MessageEntity.outboxJob must agree on what is queued.
     @Test
     fun `getQueuedMessages agrees with outboxJob`() = runTest {

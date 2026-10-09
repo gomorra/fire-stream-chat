@@ -648,7 +648,7 @@ class PeerSessionTest {
         remoteObservers.single().onSetFailure("boom")
         connectionObserver.captured.onIceConnectionChange(IceConnectionState.FAILED)
 
-        verify(exactly = 0) { pc.close() }
+        verify(exactly = 0) { pc.dispose() }
     }
 
     @Test
@@ -657,7 +657,7 @@ class PeerSessionTest {
 
         createObservers.single().onCreateFailure("boom")
 
-        verify(exactly = 0) { pc.close() }
+        verify(exactly = 0) { pc.dispose() }
     }
 
     @Test
@@ -684,7 +684,7 @@ class PeerSessionTest {
 
         session.start()
 
-        verify(exactly = 1) { pc.close() }
+        verify(exactly = 1) { pc.dispose() }
         verify(exactly = 0) { pc.addTrack(any()) }
         verify(exactly = 0) { pc.createOffer(any(), any()) }
         assertTrue(events.isEmpty())
@@ -709,7 +709,7 @@ class PeerSessionTest {
         session.close()
         session.close()
 
-        verify(exactly = 1) { pc.close() }
+        verify(exactly = 1) { pc.dispose() }
         assertTrue(eventsJob.isCompleted)
     }
 

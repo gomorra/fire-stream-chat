@@ -76,24 +76,18 @@ class OneToOneSignalingTest {
         coVerify { repository.sendOffer("call", offer) }
     }
 
+    // CallSession reads the call document once before it answers, and CallSessionTest covers a
+    // document that cannot be read. The signalling never fetches it a second time.
     @Test
-    fun `the remote offer is fetched from the call document`() = runTest {
-        coEvery { repository.getCallById("call") } returns Result.success(call("ringing", offer = offer))
+    fun `the remote offer is the one the session read from the call document`() = runTest {
+        val callee = OneToOneSignaling(repository, "call", isCaller = false, offer = offer)
 
-        assertEquals(listOf(offer), callee().observeOffer().toList())
+        assertEquals(listOf(offer), callee.observeOffer().toList())
+        coVerify(exactly = 0) { repository.getCallById(any()) }
     }
 
     @Test
-    fun `a call document without an offer fails the offer flow`() = runTest {
-        coEvery { repository.getCallById("call") } returns Result.success(call("ringing"))
-
-        assertTrue(runCatching { callee().observeOffer().first() }.isFailure)
-    }
-
-    @Test
-    fun `a call document that cannot be fetched fails the offer flow`() = runTest {
-        coEvery { repository.getCallById("call") } returns Result.failure(Exception("offline"))
-
+    fun `a side without an offer fails the offer flow`() = runTest {
         assertTrue(runCatching { callee().observeOffer().first() }.isFailure)
     }
 

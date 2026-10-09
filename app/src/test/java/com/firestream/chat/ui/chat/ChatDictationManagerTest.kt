@@ -6,6 +6,7 @@ import com.firestream.chat.data.util.DictationEvent
 import com.firestream.chat.data.util.SpeechRecognizerManager
 import com.firestream.chat.domain.model.AppError
 import com.firestream.chat.domain.model.CallState
+import com.firestream.chat.domain.model.EndReason
 import com.firestream.chat.test.MainDispatcherRule
 import io.mockk.every
 import io.mockk.mockk
@@ -103,6 +104,21 @@ class ChatDictationManagerTest {
         assertFalse(uiState.value.dictation.isListening)
         assertNotNull(uiState.value.dictation.error)
         assertEquals(0, segments.size)
+    }
+
+    @Test
+    fun `start works once the call has ended`() = runTest {
+        val manager = newManager()
+        // A finished call leaves Ended published until the next call replaces it.
+        callStateHolder.updateState(CallState.Ended(callId = "c1", reason = EndReason.HANGUP))
+
+        manager.start("en-US")
+        runCurrent()
+
+        assertTrue(uiState.value.dictation.isListening)
+        assertNull(uiState.value.dictation.error)
+        assertEquals(1, segments.size)
+        manager.cancel()
     }
 
     @Test

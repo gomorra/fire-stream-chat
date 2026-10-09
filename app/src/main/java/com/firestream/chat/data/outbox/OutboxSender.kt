@@ -5,10 +5,12 @@
 //   every step it already records, so a first attempt and a retry run the same
 //   code. Which file the media dir keeps for an image — the encoding, or under
 //   "Keep Original Images" the input — is decided here too, and so is moving an
-//   uploaded document's staged copy into the documents dir, so the sender keeps
-//   a file to open (keepDocument). Covers TEXT, IMAGE,
-//   VIDEO, DOCUMENT, VOICE, LOCATION (SENDABLE_TYPES), and the tombstone of a
-//   row deleted while it was queued.
+//   uploaded document's or GIF's staged copy into the documents dir, so the
+//   sender keeps a file to open (keepDocument). A sticker uploads nothing of its
+//   own: its url comes from the library row, or from the one shared object
+//   (withStickerUrl). Covers TEXT, IMAGE, VIDEO, DOCUMENT, VOICE, LOCATION,
+//   STICKER, GIF (SENDABLE_TYPES), and the tombstone of a row deleted while it
+//   was queued.
 // Owns: uploadProgress (MessageRepository re-exposes it); the outbox columns on
 //   MessageEntity — the attempt count, the stored ciphertext — and the if-absent
 //   decision the count drives; one in-process lock per message id, so a REPLACE
@@ -18,7 +20,8 @@
 // Collaborators: OutboxWorker (only caller — one run per attempt, online by
 //   constraint), MessageWriter, MessageDao, ChatDao, MessageSource, StorageSource,
 //   OutboxFiles, ImageCompressor, VideoTranscoder, MediaFileManager,
-//   PreferencesDataStore, DocumentFiles.
+//   PreferencesDataStore, DocumentFiles, StickerUploads (the lock per sticker
+//   and the write of `stickers.remoteUrl`, shared with the pack backup).
 // Don't put here: validation, the optimistic insert, staging the input, the
 //   block check and FAILED marking — they stay in MessageRepositoryImpl and
 //   OutboxWorker, where a definite block and an unanswerable block check part
@@ -38,6 +41,8 @@ import com.firestream.chat.data.local.entity.MessageEntity
 import com.firestream.chat.data.local.entity.MessageRecord
 import com.firestream.chat.data.remote.source.MessageSource
 import com.firestream.chat.data.remote.source.StorageSource
+import com.firestream.chat.data.sticker.StickerFiles
+import com.firestream.chat.data.sticker.StickerUploads
 import com.firestream.chat.data.util.DocumentFiles
 import com.firestream.chat.data.util.ImageCompressor
 import com.firestream.chat.data.util.KeyedMutex
@@ -87,8 +92,10 @@ private class Encoded(val file: File, val width: Int, val height: Int, val durat
  * |---|---|---|
  * | — | — | `outboxAttempts + 1`, before anything else |
  * | compress (IMAGE) / transcode (VIDEO) | `mediaWidth != null` | `localUri`, dimensions, `duration` |
+ * | image bounds (GIF) | `mediaWidth != null` | dimensions |
  * | video thumbnail | `mediaThumbnailUrl != null` | `mediaThumbnailUrl` |
- * | upload (media, VOICE) | `mediaUrl != null` | `mediaUrl` |
+ * | upload (media, VOICE, GIF) | `mediaUrl != null` | `mediaUrl` |
+ * | sticker url (STICKER): the library row's, else look up, else upload | `mediaUrl != null` | `mediaUrl`, and `stickers.remoteUrl` |
  * | encrypt (1:1, release) | `outboxCiphertext != null` and the peer's identity is unchanged | `outboxCiphertext`, `outboxSignalType`, `outboxPeerIdentity` |
  * | message write | — | status SENT, outbox columns cleared, staged input deleted |
  *
@@ -110,6 +117,7 @@ class OutboxSender @Inject constructor(
     private val mediaFileManager: MediaFileManager,
     private val preferencesDataStore: PreferencesDataStore,
     private val documentFiles: DocumentFiles,
+    private val stickerUploads: StickerUploads,
 ) {
 
     private val _uploadProgress = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -159,6 +167,9 @@ class OutboxSender @Inject constructor(
         val row = when (stored.type) {
             MessageType.IMAGE, MessageType.VIDEO -> prepareMedia(stored)
             MessageType.DOCUMENT -> keepDocument(prepareMedia(withAudioDuration(stored)))
+            // The document route: the bytes go out as they are, and the sender keeps the copy.
+            MessageType.GIF -> keepDocument(prepareMedia(withImageBounds(stored)))
+            MessageType.STICKER -> withStickerUrl(stored)
             MessageType.VOICE -> uploadIfNeeded(stored, VOICE_MIME_TYPE)
             else -> stored
         }
@@ -302,11 +313,41 @@ class OutboxSender @Inject constructor(
     }
 
     /**
+     * A GIF's pixel size, read from the header of its staged copy and persisted
+     * like any other step, so the receiver's bubble has its shape before the file
+     * arrives. Nothing is decoded or re-encoded. Skipped once recorded.
+     */
+    private suspend fun withImageBounds(row: Message): Message {
+        if (row.mediaWidth != null) return row
+        val localUri = row.localUri ?: return row
+        val (width, height) = documentFiles.imageBounds(localUri) ?: return row
+        return persist(row.copy(mediaWidth = width, mediaHeight = height))
+    }
+
+    /**
+     * Where the backend holds a sticker's file: the url its library row already
+     * has, else the object's, which is looked up and uploaded only when the
+     * backend does not hold it ([StickerUploads], one sticker at a time). The url
+     * is kept on the library row as well as on the message, so the next send of
+     * this sticker asks nobody.
+     */
+    private suspend fun withStickerUrl(row: Message): Message {
+        // Already there: the library row had it at the insert, an earlier attempt
+        // stored it, or this is a forward of a sticker someone else sent.
+        if (row.mediaUrl != null) return row
+        val id = row.stickerId?.takeIf(StickerFiles::isValidId)
+            ?: throw IllegalStateException("Cannot send sticker message ${row.id}: it names no sticker")
+        return persist(row.copy(mediaUrl = stickerUploads.ensureUploaded(id)))
+    }
+
+    /**
      * Moves an uploaded document's staged copy into the documents directory, so
      * the sender keeps a file to open instead of downloading its own document
-     * back. A crash between the move and the column update leaves the row
-     * pointing at the vanished staged path; SENT then drops it as not durable
-     * and the auto-download fetches the copy — the old behaviour, not a loss.
+     * back. A GIF's copy takes the same way, which keeps it out of the gallery.
+     *
+     * A crash between the move and the column update leaves the row pointing at
+     * the vanished staged path. SENT then drops it as not durable, and the
+     * auto-download fetches the copy, so nothing is lost.
      */
     private suspend fun keepDocument(row: Message): Message {
         val staged = row.localUri?.takeIf { row.mediaUrl != null && outboxFiles.isStaged(it) } ?: return row
@@ -444,6 +485,7 @@ class OutboxSender @Inject constructor(
         val SENDABLE_TYPES = setOf(
             MessageType.TEXT, MessageType.IMAGE, MessageType.VIDEO,
             MessageType.DOCUMENT, MessageType.VOICE, MessageType.LOCATION,
+            MessageType.STICKER, MessageType.GIF,
         )
     }
 }

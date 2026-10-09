@@ -33,8 +33,15 @@ class FirestoreCallSource @Inject constructor(
 ) : CallSignalingSource {
     private val callsCollection get() = firestore.collection("calls")
 
+    /**
+     * Create the call in a transaction, not with set(). A set() made offline waits in the local
+     * cache and commits whenever the phone is next online, so the callee's phone would ring for a
+     * call nobody is making any more. A transaction needs the server, and fails instead.
+     *
+     * The transaction only writes: the rules refuse to read a call that does not exist yet.
+     */
     override suspend fun createCallDocument(callerId: String, calleeId: String, video: Boolean): String {
-        val callId = callsCollection.document().id
+        val callRef = callsCollection.document()
         val data = hashMapOf(
             "callerId" to callerId,
             "calleeId" to calleeId,
@@ -46,8 +53,8 @@ class FirestoreCallSource @Inject constructor(
             "offer" to null,
             "answer" to null
         )
-        callsCollection.document(callId).set(data).await()
-        return callId
+        firestore.runTransaction { transaction -> transaction.set(callRef, data) }.await()
+        return callRef.id
     }
 
     override suspend fun updateCallStatus(callId: String, status: String, endReason: String?) {

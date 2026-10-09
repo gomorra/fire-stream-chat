@@ -125,6 +125,12 @@ const val UNNAMED_FILE = "Document"
  */
 const val MAX_DOCUMENT_BYTES: Long = 100L * 1024 * 1024
 
+/** The largest GIF a chat accepts: 8 MB. A GIF is sent as it is, so nothing shrinks a larger one. */
+const val MAX_GIF_BYTES: Long = 8L * 1024 * 1024
+
+/** The type that makes a picked, shared or keyboard-inserted picture a `GIF` message. */
+const val GIF_MIME_TYPE = "image/gif"
+
 /** A byte count as people read it: `512 B`, `1.4 KB`, `23 MB`, `1.2 GB` (1024-based, one decimal under 10). */
 fun formatFileSize(bytes: Long): String {
     if (bytes < 1024) return "$bytes B"

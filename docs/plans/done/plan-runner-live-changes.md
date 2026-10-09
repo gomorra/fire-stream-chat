@@ -1,0 +1,386 @@
+# Plan runner: plan changes during a run, and a wait at the usage limit
+
+Plan built from the brief that stood in this file at `4f42e3d`
+(`git show 4f42e3d:docs/plans/plan-runner-live-changes-brief.md`). Two planning sessions wrote it
+on 2026-10-03, and the owner chose to merge them. A desktop session read the owner's local run
+results and transcripts. A cloud session read cloud transcripts, and it is building the plan with
+the runner. Line numbers are from `4f42e3d`; re-verify them before editing.
+
+**Order: 1 → 2 → 3**
+
+No checkpoint. The runner never pushes, and the owner reads `plan/<run>` before the new driver
+replaces the one in any checkout where a run is alive.
+
+## Rules for every step session
+
+- **This plan changes the runner that runs it.** The driver executing this plan is the copy in the
+  main checkout. You edit the worktree's copy. Never touch the main checkout, and never run
+  `scripts/run-plan.sh` against a real plan. `e2e.sh` runs it against a stub `claude`; that is the
+  only way to exercise the driver.
+- **The gate for this plan is `scripts/plan-runner/selfcheck.sh`.** It runs `e2e.sh`, and CI runs the
+  same. No step touches a file the Gradle build reads, so the driver skips the Gradle gate
+  (`pr_needs_gate`) and so do you. CLAUDE.md post-step items 2–3 are replaced by the self-check here;
+  this is not a departure.
+- **Write each new `e2e.sh` case first and see it fail.** Every new pure function in `lib.sh` gets
+  `selfcheck.sh` cases.
+- **Read the pipefail entry in `docs/GOTCHAS.md` before writing any pipeline.** Never pipe into a
+  reader that can stop early. Capture, then match from a here-string, or end the pipeline with
+  `|| true`.
+- **Docs ship with the code.** Each feature step updates, in its own code commit:
+  - the contract `docs/plans/done/plan-runner.md`, in a new §6 addendum (one row per change, the §5
+    shape);
+  - `scripts/plan-runner/README.md` and `flow.html`, both diagrams, the files table and the exit-code
+    table;
+  - the header comment of `run-plan.sh`;
+  - `CLAUDE.md` § *Plan runner*, a line or two per change.
+- Do not move this plan to `docs/plans/done/`. The driver validates every step by reading the plan
+  at this path. The owner moves it after the run is merged.
+- No CHANGELOG entry, no version bump: this is tooling.
+
+## Why
+
+Two things went wrong on 2026-10-03 and 2026-10-04.
+
+- The video-calls verdict was committed on main eight minutes after its run forked. The run could
+  not see it, and no moment existed to merge it in.
+- A run that hit the usage limit at 00:45 on the owner's desktop stopped as blocked in the middle
+  of step 3. Nobody was there to restart it, and a restart does not continue the interrupted
+  session. A cloud session does not stop at the limit at all. It keeps working on cloud credits,
+  which the owner does not want spent on a plan run.
+
+## 0. Decisions (taken 2026-10-03 — do not re-litigate)
+
+### 0.1 Plan changes and the pause file (step 1)
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | Pause file | `docs/plans/.runs/<run-id>.pause` (the runs dir; `PLAN_RUNNER_RUNS_DIR` in tests). It is one-shot. At each step boundary, the driver stops for it: it logs `paused`, removes the file, notifies and exits **5**. Running the driver again continues the run. A pause file found at start-up is stale: it is removed with a note. A `‖` due at the same boundary wins (exit 4); the pause file is then stale at the next start. |
+| 2 | Exit code 5 | **5 = stopped between steps for the owner**: a pause file, or a plan sync that needs the owner. Exit 4 stays the `‖` checkpoint, and exit 3 stays a blocked step. |
+| 3 | Sync source | `--sync-from REF`, default `main`. A ref under `refs/remotes/` (`origin/main`) is fetched first with `git fetch <remote> <branch>`. A failed fetch is a warning, and the sync uses the ref as it is. `--sync-from none` turns sync off. A cloud container uses `origin/main`, because the owner's edits arrive there by push and the container's local `main` never moves. |
+| 4 | What is merged | The plan file only. Main's code would change what the gate and the diff checks measure in the middle of a run. |
+| 5 | Merge base | The newer of `git merge-base REF HEAD` and the REF-side commit named by the `Plan-Synced-From: <sha>` trailer of the branch's newest sync commit. A trailer commit that is no longer an ancestor of REF is ignored. The plan changed on REF when the blob `REF:<plan>` differs from the blob `<base>:<plan>`. Evidence (desktop, `git merge-file` on a minimal case): a second sync gives 0 conflicts with this base and 3 with the fork point. |
+| 6 | Same-spot insertions | A `**Shipped**` block written under step N and a new step added on REF right after step N land at the same line, so a plain three-way merge conflicts there. The conflict's base part is empty. Such a conflict is placed without stopping: the branch's lines first, a blank line if needed, then REF's. Only a conflict whose base part is empty qualifies. The merge runs `git merge-file -p --zdiff3 --marker-size=13`. |
+| 7 | Any other conflict, or a broken merge | The merged text is checked before the commit. The Order line must parse, every step in it must have a heading whose tags are valid, and no `**Shipped**` line of the branch's copy may be lost. A real conflict or a failed check writes nothing to the worktree. The text goes to `docs/plans/.runs/<run-id>.plan-sync.conflict.md`. The driver logs `plan_sync_failed`, notifies, prints the one commit command that records a merge made by hand (with the trailer), and exits 5. |
+| 8 | Clean merge | The driver writes the merged text over the worktree's plan and commits only that path as `docs(plan): sync <plan> from <REF> at <short sha>`, with the trailer `Plan-Synced-From: <full sha>`. It logs `plan_synced`. **The runner now makes this one kind of commit**, overriding contract §2.1 "the runner itself never commits". It still never pushes. |
+| 9 | When it does not sync | The worktree's plan file has uncommitted changes (a `**Decision taken**` answer, a `**Decision needed**` block): skip with a note; a later boundary syncs. REF does not contain the plan: skip with a note once per run. A dry run never syncs, never pauses and never waits. |
+| 10 | After a sync | The driver re-reads the Order line and walks it again from the top. The first unshipped step of the re-read Order line runs next, wherever it sits. An unshipped step id gone from the Order line never runs. A shipped step that leaves or moves changes nothing. A change to the running step or to a shipped step's text is not picked up as work: it merges as text and re-runs nothing. |
+| 11 | `‖` and the frontier | A `‖` stops the run only at the frontier: the step to its left shipped in this invocation, or no later step of the Order line is shipped. So a `‖` added on REF behind the run's position does not stop it. This replaces `ran_prev`: the set of steps shipped in this invocation lets the walk restart from the top. |
+| 12 | Step-diff checks | Unchanged. The sync commit is made before the next step's `START_SHA` is taken. It sits between two steps' ranges, so the tripwire, the `@Test` count, the gate and the judge never see it. The step prompt's commit list shows it. |
+| 13 | Later real merge of main | Clean where the sync merged cleanly. At a same-spot insertion git asks once more, and the branch's side is right. When the branch carries a sync commit, the end-of-run message says so. |
+| 14 | Start-up warning | The plan-differs warning fires only for an uncommitted edit of the plan in the main checkout (`git status --porcelain -- <plan>` in `ROOT`): those edits never reach a run. Commit them on REF. |
+
+### 0.2 The usage limit (step 2)
+
+| # | Question | Decision |
+|---|---|---|
+| 15 | Evidence | Three sources, all real, none of them the CLI's message text. **(a) The stream.** `--output-format stream-json --verbose` carries objects with `rate_limit_info`. Fields seen in a cloud session's transcript at 23:02 UTC: `status` (`"rejected"`), `rateLimitType` (`"five_hour"`), `resetsAt` (epoch seconds), `isUsingOverage`, `overageStatus`, `overageDisabledReason`, `unifiedWindows`. **(b) The result.** A limit turn ends `subtype: "success"`, `is_error: true`, `api_error_status: 429`. The desktop session read this from the CLI's code; nobody has seen it live. **(c) The transcript.** The session transcript holds an assistant entry with `error: "rate_limit"`, `apiErrorStatus: 429` and `quotaLimits.resetsAt` (epoch seconds). The desktop session found 27 real entries (CLI 2.1.263–2.1.278), and `resetsAt` matched the "resets 9:40pm" text. The transcript is `${PLAN_RUNNER_CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}/projects/*/<session-id>.jsonl`. |
+| 16 | Output format | Sessions run with `--output-format stream-json --verbose`, written to `<result>.stream.jsonl`. The result file becomes the stream's last line whose `type` is `result`, so everything that reads result files today keeps working. |
+| 17 | What a limit stop is | Any of: (a) the newest `rate_limit_info` in the stream has `status: "rejected"`, or one of its `unifiedWindows` has `utilization` ≥ 1; (b) the result is `is_error: true` with `api_error_status: 429`; (c) the transcript's last main-chain assistant entry has `error == "rate_limit"`. For (a) the reset time is the latest `resetsAt` among the windows at ≥ 1, else the top-level `resetsAt`. `pr_result_kind` gains the kind `usage_limit` for (b). |
+| 18 | The cloud case | A cloud session keeps running past the limit on cloud credits. Two sessions were seen on 2026-10-03 working while `rejected` with overage rejected. One of them was a runner step session. So the driver **stops the session itself** as soon as its stream says `rejected`, on a desktop and in a cloud container alike. It sends SIGTERM to the `claude` process, and SIGKILL ten seconds later if it is still alive. The stream is checked every `USAGE_POLL_S` (10 s). |
+| 19 | Reset time | The stream's `resetsAt`, else the transcript's `quotaLimits.resetsAt`, plus `USAGE_WAIT_SLACK_S` (90). With neither, wait `USAGE_WAIT_FALLBACK_S` (3600) and try. |
+| 20 | Ceiling and cap | A reset more than `USAGE_WAIT_MAX_S` (21600, six hours) away is not waited for. That is a weekly limit: exit 3, naming the reset time. At most `USAGE_RESUME_MAX` (6) waits per step, shared by its step, nudge, review and judge sessions. Past the cap: exit 3. |
+| 21 | The wait | Against the wall clock, in 60 s slices, so a suspended host does not oversleep. The pause file is checked in each slice; a pause during a wait exits 5. |
+| 22 | Resume | The same session with `--resume <id>` and a fixed continue prompt. The budget is what is left of that session's budget, at least 1 USD. `--max-budget-usd` counts per invocation; a resumed session on the current build reports its cumulative cost (desktop evidence: nudge results in `.runs/`). A resume does not spend the step's nudge, and the nudge is still available afterwards. The session id comes from the stream's `system`/`init` line, or from the result. |
+| 23 | No resumable session | A session stopped before its `init` line has no id. So does one whose resume ends without a result. The driver then starts a fresh session of the same kind. A fresh step session gets an `## Interrupted attempt` block in its prompt: the worktree holds an interrupted attempt's work, and the step keeps its `START_SHA`. |
+| 24 | Which sessions | Every session the driver starts goes through one `run_session` wrapper: step, nudge, review and judge (the judge gets a `judge_args` builder next to `claude_args`). A judge that still fails after the wait gets no grade, logs `judge_failed`, and the plan goes on, as today. |
+| 25 | Before a launch | When the newest known stream state is `rejected` and its `resetsAt` lies ahead, the driver waits before launching. "Newest known" is this run's newest stream, or, at start-up, the log's last `usage_limit` event. A cold start inside a rejected window learns it only from the first session's first `rate_limit_event` (see §4). |
+| 26 | A re-run after a stop during a wait | A pause, a crash or Ctrl-C during a wait leaves the step's last limit event a `usage_limit` without a later `resumed`. A re-run then resumes that step or nudge session instead of launching a fresh one, after waiting out the reset if it still lies ahead. An interrupted review or judge is redone the way a re-run treats that step today. |
+| 27 | Log, report, notification | `usage_limit`: step, session, kind, `resets_at` (epoch or `null`), `source` (`stream`, `result` or `transcript`), `wait_s` planned, the result file and the transcript path. Before it, the interrupted invocation's `result` event, so its cost is counted. `resumed`: step, session, kind, `waited_s`. One notification when a wait starts, naming the local reset time. `report.sh` gets a `wait` column in minutes, and counts a resumed session's cost once: per session id, each result adds its increase over that session's previous result. A total below the previous one is a per-invocation figure from an older build. |
+| 28 | Ctrl-C | A session now runs in the background, because the driver polls its stream. A background job ignores SIGINT in a non-interactive shell. So the driver traps INT and TERM, stops its running session, logs `interrupted` and exits 130. |
+
+## 1. Current state (verified 2026-10-03 at `4f42e3d`)
+
+- **One fixed walk of the Order line.** `pr_order_tokens` runs once (`run-plan.sh:650`), and the
+  `for tok in "${TOKENS[@]}"` loop (`:655–687`) walks it. `ran_prev` and `prev` carry the
+  checkpoint rule (`pr_checkpoint_due`, `lib.sh:365–374`). `--to` breaks out at `:658`, and `--from`
+  skips at `:674`.
+- **Main's plan is only warned about.** `:638–641` compares the main checkout's working copy with
+  `merge-base main HEAD` and says "merge main into the branch". The e2e scenario at `e2e.sh:282`
+  pins that warning. Step 1 changes both (§0 14).
+- **Sessions run synchronously with `--output-format json`.** `run_claude` (`:273–275`) blocks on
+  `claude … > out 2> out.stderr`. `claude_args` (`:263–271`) builds the flags. The judge has its own
+  `claude` call (`:483–486`).
+- **An API error is a block.** `handle_result`'s `failed` arm (`:511–515`) prints why the runner does
+  not retry and calls `stop_blocked`. The e2e scenario at `e2e.sh:218` pins a 429 `api-error` as
+  blocked at once. Step 2 turns a 429 into a wait and keeps the block for every other API error.
+- **Exit codes** are listed in the header (`:17–18`): 0, 1, 2, 3, 4.
+- **`report.sh` sums every result's cost.** A resumed session that reports cumulative cost is
+  counted twice: video-calls step 2 shows 15.05 instead of 7.82 (desktop evidence).
+- **No headless usage-limit result exists in git.** The owner's desktop stop is
+  `docs/plans/.runs/video-calls.step3.20261004-004454.result.json` on the owner's machine,
+  gitignored. The driver printed `success, status null, $0.88` for it. `fixtures/result-api-error.json`
+  carries a 429 that nobody has checked against a real one.
+- **Step sessions may run the self-check.** `afd2940` added `selfcheck.sh` and `e2e.sh` to
+  `ALLOWED_TOOLS`. Without that, every step of this plan would have been denied its own gate.
+- **Probe** (23:51 UTC, CLI 2.1.288, this cloud container, Haiku, `-p --output-format stream-json
+  --verbose --json-schema`). A trimmed copy of the stream is `fixtures/stream-probe.jsonl`:
+  - The stream has nine lines: `active_goal`, `system`/`session_title_changed`, `autocompact_state`,
+    `system`/`init` (`session_id`), `assistant` ×2, `user`, `rate_limit_event`, `result`.
+  - `rate_limit_event` carries `rate_limit_info` at the top level. It came after the first
+    assistant turn, once per invocation. When a later one comes mid-session is not seen.
+  - The `result` line has the json format's fields, `structured_output` included.
+  - `--resume <id>` keeps the session id. `total_cost_usd` went from 0.0409 to 0.0478 over the
+    resume, so it is cumulative on this build.
+  - The transcript is `~/.claude/projects/<cwd slug>/<id>.jsonl`.
+  - After the reset, the event read `status: allowed`, `rateLimitType: "ccr_promotional"` (resets
+    2026-11-05) and `unifiedWindows.five_hour.utilization: 0`. At 23:02, with the five-hour window used
+    up, the same field read `five_hour` / `rejected`. Which pool pays in each state is not visible in
+    these fields. So the rule in §0 17 also reads the window utilization.
+
+## 2. Design
+
+### 2.1 The step boundary (step 1)
+
+The real-run main loop becomes a walk over an index that can restart:
+
+```
+start-up   → remove a stale pause file · validate a hand-finished step (today's rule)
+loop:
+  walk     → the Order tokens from the top, today's rules plus the frontier rule (§0 11):
+             --from skip · shipped skip · a due ‖ → exit 4 · **Decision needed** → exit 2 ·
+             first step past --to → stop (exit 0) · first unshipped step → the next launch ·
+             none left → done
+  boundary → before that launch: a pause file → exit 5 · sync_plan (§0 3–10);
+             a sync commit → load_tokens, walk again from the top
+  act      → run_step; on validation the step joins SHIPPED_NOW; back to walk
+```
+
+`load_tokens` re-reads the Order line. A dry run keeps one pass with no boundary, and its output
+does not change (`selfcheck.sh` pins it). "Nothing to do" and "plan complete" keep their messages
+and exit 0.
+
+`lib.sh` gains, each with `selfcheck.sh` cases:
+- `pr_merge_inserts`: reads `git merge-file --zdiff3 --marker-size=13` output. A conflict with an
+  empty base part becomes ours, a blank line if needed, then theirs. Any other conflict stays
+  marked, and the exit code is 1.
+- `pr_plan_check <plan> [<shipped-before>]`: the Order line parses, and every step in it has a heading
+  whose tier and effort tags are valid. It reuses `pr_order_tokens`, `pr_step_heading`,
+  `pr_tag_tier` and `pr_tag_effort`. With a second plan, no step shipped there is unshipped here.
+- `pr_shipped_after <plan> <index> <tokens…>`: for the frontier rule.
+- Reading a `Plan-Synced-From:` trailer out of a commit message. `lib.sh` never runs git.
+
+### 2.2 Sessions and the usage limit (step 2)
+
+`run_session` replaces the bare `run_claude` call in `launch`, `nudge`, `review_nudge` and
+`judge_step`. Its callers keep their shape:
+
+1. Start `claude … --output-format stream-json --verbose` in the background from the session's cwd
+   (`exec`, so `$!` is the `claude` process). The stream goes to `<out>.stream.jsonl` and stderr to
+   `<out>.stderr`.
+2. Every `USAGE_POLL_S` while it runs, read the stream's newest limit state. When §0 17 (a) holds,
+   stop the session (§0 18).
+3. When it has exited, write the stream's last `result` line to `<out>`. Leave `<out>` empty when
+   there is none.
+4. Classify (§0 17). A limit stop logs the interrupted result and `usage_limit`, renames the
+   interrupted invocation's files to `<out>.limit<N>.*`, notifies, waits (§0 19–21), logs `resumed`
+   and resumes (§0 22–23). Then it goes back to 1.
+5. Past the ceiling or the cap it returns the stop reason. `handle_result` blocks with it, and the
+   judge logs `judge_failed`. Otherwise it returns with `<out>` holding the last invocation's result.
+
+`lib.sh` gains, each with `selfcheck.sh` cases and fixtures:
+- `pr_stream_result <stream>`: the last `result` line.
+- `pr_session_id <stream>`.
+- `pr_stream_limit <stream>`: from the newest `rate_limit_info` at any depth, `limited <resetsAt>`
+  when §0 17 (a) holds, `open` when it does not, nothing when the stream has none. It finds candidate lines with `grep -F '"rate_limit_info"'` and parses only the
+  last one, because the stream carries every tool output and grows to megabytes.
+- `pr_transcript_usage_limit <jsonl>`: exit 0 when the last main-chain assistant entry has
+  `error == "rate_limit"`, and print `quotaLimits.resetsAt`. It reads with `jq -R 'fromjson?'` and no
+  pipe that can stop early.
+- `pr_fmt_duration`.
+- `pr_cost_delta <total> <previous>`: a total below the previous one is a per-invocation figure.
+- `pr_budget_left <budget> <spent>`.
+
+New tunables, next to the others: `USAGE_POLL_S=10`, `USAGE_WAIT_SLACK_S=90`,
+`USAGE_WAIT_FALLBACK_S=3600`, `USAGE_WAIT_MAX_S=21600`, `USAGE_RESUME_MAX=6`. `e2e.sh` sets them
+small with `sed`, the way it sets `NOTIFY_CMD`, so no scenario sleeps long.
+
+What stays: a spent budget is blocked at once. The nudge and escalation ladder is unchanged. A
+`failed` result that is not a limit stop is blocked as today, with today's message.
+
+## 3. Steps
+
+### Step 1 — Pause file and plan sync at the step boundary (`feat(plan-runner):`) — skills: code-review; model: strong
+
+**Approach**
+- Order: `e2e.sh` first (the stub learns the step id from `-n`, inserts its Shipped block at the end
+  of its step's section, runs a per-step `during.<step>` script in the main checkout; the twelve cases
+  of the list below plus the uncommitted-edit warning), run it red. Then `lib.sh` (`pr_merge_inserts`,
+  `pr_plan_check`, `pr_shipped_after`, `pr_synced_from`) with `selfcheck.sh` cases. Then `run-plan.sh`:
+  `--sync-from`, the pause file, `walk` / `checkpoint_due` / `sync_plan` / `stop_paused` / `stop_sync`,
+  the main loop as a restartable walk, the §0 14 warning, the §0 13 hint. Docs last.
+- The dry run keeps its single pass: `walk` lists every step when `DRY_RUN=1` and stops at the first
+  launch otherwise, so the rules (`--from`, `--to`, shipped, `‖`, Decision needed) live in one place.
+- `‖` reading of §0 11: due when the step to its left is in `SHIPPED_NOW`, or else when it is shipped,
+  no later Order step is shipped, and `pr_checkpoint_due` (log rule, unchanged) says so. The
+  "behind the frontier" case is therefore a step shipped in an earlier invocation.
+  **(step-1 /code-review)** Changed: the frontier condition now applies to both branches, so a
+  `‖` added behind two steps this invocation shipped does not stop the run either (§0 11's "So …"
+  sentence holds in every case).
+- `paused` and `plan_synced` log a `next` field, not `step`, so `report.sh` gets no row for them.
+- `--sync-from` is resolved at start-up of a real run only (CI's dry runs may lack a local `main`).
+- Nothing in the code contradicts §0 or §2. **(step-1)** Found later, in git rather than in the
+  code: §0 13's "clean where the sync merged cleanly" also fails where a `**Shipped**` block lands
+  next to a line main changed (a sync commit has one parent, so the later merge keeps the fork point
+  as its base). Recorded as a departure; the end-of-run hint covers it.
+
+**Shipped** `28a72cff` (2026-10-04) — tier: strong. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: opus, opus, opus, opus.
+Departures (for sign-off):
+- §0 11: the frontier condition applies to both branches. A `‖` is due only when no later Order step is shipped, and then when its step shipped in this invocation or by the old log rule. So a `‖` added behind two steps this run shipped does not stop it either (e2e case added). The literal reading stopped there, against §0 11's own "So …" sentence.
+- §0 13: a later `git merge main` also asks about the plan where a `**Shipped**` block lands next to a line main changed, sync or no sync. A sync commit has one parent, so the merge base stays the fork point. The end-of-run hint names the last synced main commit and the `git diff <it> main -- <plan>` to re-apply later edits. The e2e "merge is clean" case uses an edit away from step ends.
+- `--sync-from` is resolved at start-up of a real run (exit 1 if it names no commit, after a fetch for a remote ref). A boundary sync is skipped with a warning when REF stops resolving or shares no history with the branch. The fetch runs once per boundary.
+- `pr_plan_check` also rejects a `**Shipped**` line that names another commit after the merge, not only a lost one.
+- `pr_checkpoint_due` lost its `ran_now` argument: `SHIPPED_NOW` in the driver's `checkpoint_due` does that job.
+- `paused`, `plan_synced` and `plan_sync_failed` log a `next` field, not `step`, so `report.sh` gets no row for them. `plan_synced` logs `placed`, the number of same-spot insertions.
+- Extra e2e cases beyond the list: a failed fetch is a warning, not a "driver bug" (regression for a `/code-review` finding); a `‖` and a pause file at the same boundary (exit 4, the pause file stale at the next start).
+- `/simplify` skipped: deriving `PENDING`/`SYNCED` from other state, a token-list-only `pr_shipped_after` (the plan fixes its signature), caching shipped state per walk, and merging e2e scenarios to save CI time.
+
+- `run-plan.sh`: §2.1 and §0 1–14. `--sync-from REF|none` in the usage text and the flag parser.
+  Exit 5 and "the runner commits nothing but a plan sync" in the header. `stop_paused` and
+  `stop_sync`. The end-of-run hint of §0 13.
+- `lib.sh`: the functions of §2.1.
+- The `e2e.sh` stub learns the step id from `-n`, inserts its `**Shipped**` line at the end of its
+  step's section (not at the end of the file), and can commit a plan edit on main mid-session.
+  Cases, each seen red first:
+  - a pause stops at the boundary with exit 5, the file is gone, and the next run continues;
+  - a stale pause file at start-up is removed with a note;
+  - a new step added on main right after the running step runs next, with no stop;
+  - the next step's `launched.start` is the sync commit, which carries its trailer;
+  - two syncs in one run, the second one clean;
+  - a real edit conflict exits 5, writes the conflict file, and leaves the branch and the worktree
+    untouched;
+  - a merged plan with a step id that has no heading exits 5 and commits nothing;
+  - a dirty plan file skips the sync, and the run goes on;
+  - a `‖` added on main at the frontier stops with exit 4;
+  - a `‖` added on main behind the frontier does not stop;
+  - `git merge main` afterwards is clean for a cleanly merged sync;
+  - `--sync-from none` never syncs; `--sync-from origin/main` fetches from a bare scratch remote.
+  The plan-differs scenario at `e2e.sh:282` becomes the uncommitted-edit warning of §0 14.
+- Docs in the same commit, per the rules above. The contract's §6 says the runner now commits a
+  plan sync.
+
+### Step 2 — Wait out a usage limit and resume the same session (`feat(plan-runner):`) — skills: code-review; model: max; budget: 40
+
+**Approach**
+- Order: fixtures, then the `e2e.sh` stub (init line, transcript, unique session id per call, the
+  limit behaviours) and its cases, run red. Then `lib.sh` with `selfcheck.sh` cases. Then
+  `run-plan.sh`: `run_session` (background `claude`, poll, stop, classify, wait, resume),
+  `judge_args`, the pre-launch wait, the re-run resume in `run_step`, the INT/TERM trap. Then
+  `report.sh`, then the docs. Skills beyond the floor: `simplify` (signals, a background process and
+  polling; the diff will pass 600 lines).
+- A `complete` or `budget` result is never a limit stop, whatever the stream says. That is how "a
+  step that ends `done` while its stream says `rejected`" validates and makes only the next launch wait.
+- The pre-launch wait (§0 25) sits at the top of `run_session`, so a nudge, a review and a judge wait
+  too, and in `launch` before its `launched` event. It is logged as `usage_limit` with kind `launch`,
+  closed by `resumed`, so a re-run never resumes on it (§0 26 resumes kinds `step` and `nudge` only).
+- `fixtures/result-api-error.json` is a 429 today. It becomes a non-429 API error; the 429 is
+  `result-usage-limit.json`.
+- Nothing here contradicts §0 or §2.
+
+**Shipped** `2c953b8d` (2026-10-04) — tier: max. skills: code-review, simplify. Reviewer models: code-review: opus, opus; simplify: sonnet, opus, opus, opus.
+Departures (for sign-off):
+- §0 17: a `complete` or `budget` result is never a limit stop, whatever the stream says. That is how a step that ends `done` in a used-up window validates and only the next launch waits.
+- §0 17 (c): the transcript counts only when the stop is its last main-chain message (a user entry after it is a resume's prompt), and only the transcript of the session the invocation's own stream names. `/code-review` found a resume that died before its init line re-reading the old stop and waiting again up to the cap; regression case added.
+- §0 25: the pre-launch wait runs at the top of every `run_session` (nudge, review and judge too) and in `launch` before its `launched` event, not only at the main loop's boundary. It is logged as `usage_limit` with kind `launch`, then `resumed`.
+- §0 12 and §0 26: a re-run that resumes a cut-off session does not sync the plan at that boundary, because the sync commit would land inside the step's range. `sync_plan` says so and syncs at the next boundary.
+- §0 26: a re-run also resumes a step blocked at the ceiling or the cap. It waits out the rest of the logged wait (`ts` + `wait_s`), so a fallback wait counts too. The cap counts the waits of one run, so the owner's re-run can go on.
+- §0 19: every limit stop waits at least `USAGE_WAIT_SLACK_S`, even when the reset is already past, so a stale reset cannot spend six resumes in a minute. New tunable `USAGE_SLICE_S` (60), so `e2e.sh` can use 1 s slices.
+- §0 22: a session the driver stops reports no cost, so its resume gets the budget less only what results reported (a known limit in contract §6). A re-run's resume subtracts what the log shows the session spent.
+- §0 23: a nudge has no fresh form. When it cannot be resumed, a step session with the Interrupted attempt block replaces it, on what is left of the step's budget.
+- §0 27: `result` events carry a `kind`. The judge's invocations are logged too (kind `judge`), and `report.sh` leaves them out of usd, turns and denials; three existing judge scenarios gained that event. A judge that fails keeps its cost.
+- `result-api-error.json` is now a 500. The stub's session ids are per call (`s<N>-<kind>-<behaviour>`), and a resume keeps its id. The e2e Ctrl-C case uses `set -m`, so the backgrounded driver does not start with SIGINT ignored.
+- Exit 5 reads "stopped for the owner" in the header (a pause during a wait is mid-step), and exit 130 is new. An EXIT trap stops a running session when the driver dies on its ERR trap.
+- Regression cases for review findings were written after their fixes; only the stale-transcript case was seen red: the re-run's budget and rest-of-wait, a judge's cost at the cap, a fresh review's own prompt, a fresh session that ends without a result (blocked, no loop).
+- `/simplify` fixes: two bugs in `run_session`'s fresh-session path (a fresh review or judge got the continue prompt; a fresh session without a result looped), one cost fold in `kind_spent`, one jq call in `cut_off`, `wait_until` folded into `wait_out`, a grep prefilter on the transcript. Skipped, and noted under step 3: moving the fresh-session fallback out of `run_session`, moving the cap out of `limit_wait`, a watcher process instead of the polling backoff, incremental stream reads, e2e tunables at 0, log and stream helper extraction.
+
+- `run-plan.sh`: §2.2 and §0 15–28. `run_session`, `judge_args`, the pre-launch wait and the
+  re-run resume in `run_step`, the INT/TERM trap. `handle_result`'s `failed` arm loses its advice
+  line for a 429, because a 429 no longer reaches it.
+- `lib.sh`: the functions of §2.2. `pr_result_kind`'s comment records what was confirmed, how and
+  on which build.
+- Fixtures: `stream-probe.jsonl` (real, committed with this plan; §1);
+  `stream-limit-rejected.jsonl` in the probe's line shape with §0 15 (a)'s fields;
+  `stream-window-full.jsonl` (`status: allowed`, `ccr_promotional`, `five_hour.utilization: 1`);
+  `stream-killed.jsonl` (an `init` line, no result); `result-usage-limit.json` (§0 15 (b), marked as
+  read from the code); `transcript-usage-limit.jsonl` and `transcript-resumed.jsonl` (§0 15 (c), ids
+  and text made up, field names as recorded there).
+- `report.sh`: the `wait` column, and a resumed session's cost counted once (§0 27).
+- The `e2e.sh` stub writes stream lines (an `init` line, an optional `rate_limit_event`, its result
+  line) and a transcript under `PLAN_RUNNER_CLAUDE_HOME`. Existing behaviours keep working when
+  their result line is the stream's only `result` line. The scratch driver runs with 0 s slack, a
+  1 s fallback, a 1 s poll and 1 s slices. Cases, each seen red first:
+  - a session whose stream says `rejected` and then keeps running is stopped by the driver within a
+    poll, waits, and is resumed with `--resume <the same id>`. The step validates, and `waited_s` is
+    logged;
+  - a 429 result alone, and a transcript entry alone, each lead to the same wait and resume;
+  - no reset time anywhere: the fallback wait;
+  - the cap blocks with exit 3;
+  - a reset days away blocks at once, with no resume call;
+  - a nudge, a review session and a judge each resume their own session;
+  - the nudge is still available after a resume;
+  - a non-429 API error is still blocked at once (the old scenario at `e2e.sh:218`, with its status
+    changed);
+  - a pause file during the wait exits 5, and the re-run resumes the same session;
+  - a session stopped before its `init` line is replaced by a fresh step session whose prompt has
+    the `## Interrupted attempt` block;
+  - a step that ends `done` while its last `rate_limit_event` says `rejected`: the next step's launch
+    waits first (two-step mini plan);
+  - Ctrl-C (SIGINT to the driver) during a session stops the stub `claude` and exits 130.
+- `selfcheck.sh`: the helpers, the report row with its `wait` column, and a resumed session's cost
+  counted once.
+- Docs in the same commit, per the rules above. Also a `docs/GOTCHAS.md` entry on the cumulative cost
+  of a resumed session, and one on cloud sessions that run past the usage limit on cloud credits.
+- **(step-1)** The step boundary is the `while :` loop at the end of `run-plan.sh`: `walk` →
+  pause check (`stop_paused`) → `sync_plan` → `run_step`. The pre-launch wait of §0 25 belongs
+  there, after `sync_plan` and before `run_step`. A pause during a wait (§0 21) reuses `$PAUSE` and
+  `stop_paused`; `stop_paused` logs `paused` with a `next` field (not `step`) from `NEXT`, so set
+  `NEXT` or pass the step. Exit 5 already exists in the header, `flow.html` and the contract's §6.
+- **(step-1)** The `e2e.sh` stub now reads the step id from `-n` (`$step`), records `kind:step` per
+  call in `$STUB/steps`, writes Shipped / Decision needed blocks at the end of its step's section
+  (`section_add`), and runs `$STUB/during.<step>` in the main checkout while that step's session
+  runs (`during <step> <script>`; a pause file there is `touch "$PLAN_RUNNER_RUNS_DIR/mini.pause"`).
+  `write_plan <order> <id>…` builds a multi-step plan. Stream lines and transcripts are still to add.
+
+### Step 3 — Review the whole branch (`refactor(plan-runner):`) — skills: simplify
+
+**Approach**
+- Run `/simplify` over `git diff 8daebbbb..HEAD` (scripts, fixtures, docs), with its reviewers on the
+  mid tier and pointed at the step-2 list below. No skill beyond the floor: the diff touches no
+  crypto, worker, DI or ViewModel file, and step 1 and step 2 each ran `/code-review` already.
+- Apply only fixes that keep behaviour, mostly in `scripts/run-plan.sh`, `scripts/plan-runner/lib.sh`,
+  `report.sh` and `e2e.sh`. Then `scripts/plan-runner/selfcheck.sh` as the gate.
+- No new tests unless a fix adds a pure `lib.sh` function, which then gets `selfcheck.sh` cases.
+- Nothing in the code contradicts §0 or §2.
+
+**Shipped** `ae208f09` (2026-10-04) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- `/simplify` changed code, so this step has its own commit. `claude_args` and `judge_args` share `session_args`, and the tool lists and `-n` stay last. In `run_session`, the set-aside file is named once, and a nudge becomes a step session in one branch. `invoke`'s poll ladder starts at 10 ms. In `e2e.sh`, the fallback wait and the stub's default reset are 0 s, except in the fallback scenario. The self-check went from 1m49s to 1m36s.
+- Skipped and recorded in `TECH_DEBT.md` ("Plan runner — leftovers from the usage-limit review"): the cost-delta rule's three copies, the nudge-to-step branch in `run_session`, the kind `launch` in `limit_wait`, an event wait in place of the poll ladder (needs bash 5.1), and a helper for the six "last logged value" lookups. Also skipped: folding `pr_result_kind`'s jq calls into one, a template repo for `e2e.sh`, and reading the stream incrementally.
+
+- Run `/simplify` over the whole diff of this plan, from the branch's fork point (it is over 600
+  lines). Re-run the self-check after its fixes.
+- Commit only if `/simplify` changed something. Otherwise the **Shipped** line names step 2's code
+  commit, and says so.
+- Not this step's: the planning session compares `scripts/run-plan.sh docs/plans/video-calls.md
+  --dry-run` under the old and the new driver after the run. A step session may not start the driver.
+- **(step-2)** Step 2 ran `/simplify` on its own diff. A whole-branch pass should still look at
+  the places its reviewers raised and step 2 left:
+  - The cost-delta rule lives three times: `lib.sh` `pr_cost_delta` (in `run_session`), and jq in
+    `kind_spent` and in `report.sh`.
+  - `run_session` holds the one step-specific branch, where a nudge that cannot be resumed becomes a
+    step session.
+  - `claude_args` and `judge_args` overlap.
+  - The kind `launch` switches the slack floor and the cap off inside `limit_wait`.
+  - Every session polls in sleeps that grow from 50 ms to 1 s. A watcher process could replace them.
+  - `e2e.sh` takes about 90 s instead of 45 s. Its 1 s fallback and poll could drop to 0 in the
+    scenarios that do not measure them.
+
+## 4. Known limits
+
+- A run started cold inside a rejected window spends the first requests of one session before the
+  first `rate_limit_event` arrives. When that event arrives is not documented. The one observed came
+  three minutes into an interactive session.
+- An interrupted review or judge session is redone, not resumed, by a re-run (§0 26).
+- Main's code is never merged by the driver. A change to the running step or to a shipped step is
+  not picked up as work.
+- Revisit §0 18 if the CLI starts to wait at the limit by itself in print mode, as its interactive
+  "Continue automatically at usage limit" setting does.

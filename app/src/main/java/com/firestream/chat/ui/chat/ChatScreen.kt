@@ -5,8 +5,10 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import com.firestream.chat.BuildConfig
 import com.firestream.chat.ui.call.CallActivity
 import com.firestream.chat.ui.call.DockedCall
+import com.firestream.chat.ui.chat.picker.rememberPickerPanelState
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -46,6 +48,7 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -130,6 +133,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -154,6 +158,9 @@ import com.firestream.chat.ui.chat.imageedit.PendingCrop
 import com.firestream.chat.ui.components.FileIntents
 import com.firestream.chat.ui.components.OnEnterSettled
 import com.firestream.chat.ui.components.TypingIndicator
+import com.firestream.chat.ui.components.placeholderLabel
+import com.firestream.chat.ui.components.stickerLabel
+import com.firestream.chat.ui.stickers.StickerPackSheet
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
@@ -231,6 +238,10 @@ fun ChatScreen(
     onGroupSettingsClick: () -> Unit = {},
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
+    // Opens the sticker library screen, from the Stickers tab of an empty library.
+    onImportStickersClick: () -> Unit = {},
+    // Opens the sticker maker, from the + that ends the Stickers tab's pack row.
+    onCreateStickerClick: () -> Unit = {},
     fromNotification: Boolean = false,
     // Invoked once when the message list (or the empty state of a fresh chat)
     // becomes visible. MainActivity uses it to release the splash screen.
@@ -338,8 +349,58 @@ fun ChatScreen(
     // precedence (Compose gives it to the later-registered handler).
     BackHandler(enabled = showEmojiPanel && !imeVisible) { showEmojiPanel = false }
 
+    // The picker's tab, search and query live here rather than in the panel.
+    // While a search runs the panel changes place (composerSearchLayout), and
+    // the query and the focused field have to go with it.
+    val pickerState = rememberPickerPanelState(COMPOSER_PICKER_TABS)
+    val pickerSearchLayout =
+        if (showEmojiPanel) composerSearchLayout(pickerState.searchingTab, imeVisible)
+        else ComposerSearchLayout.PANEL
+    val pickerMounted = showEmojiPanel || animatedPanelPx > 0
+    // Each open starts on the first tab with the search closed, as it did when
+    // the panel owned this state and was disposed on close.
+    LaunchedEffect(pickerMounted) {
+        if (!pickerMounted) pickerState.reset(COMPOSER_PICKER_TABS.first())
+    }
+    val composerPickerCallbacks = ComposerPickerCallbacks(
+        onEmoji = { emoji, size ->
+            // Insert at the caret (replacing any selection), not at
+            // the end — the picker must work mid-sentence.
+            applyComposerEdit(
+                insertAtCursor(
+                    text = messageText,
+                    selection = inputCursor,
+                    insertion = emoji,
+                    emojiSizes = pendingEmojiSizes,
+                    insertionSize = size,
+                )
+            )
+        },
+        onBackspace = {
+            applyComposerEdit(deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes))
+        },
+        onRecentEmojiUsed = { viewModel.addRecentEmoji(it) },
+        onSticker = {
+            viewModel.sendSticker(it.stickerId, it.packId)
+            // A sticker picked from a search ends the search. The picker and
+            // the keyboard close so the sticker is seen landing in the chat.
+            if (pickerState.searchOpen) {
+                pickerState.closeSearch()
+                showEmojiPanel = false
+                keyboardController?.hide()
+            }
+        },
+        onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
+        onImportStickers = onImportStickersClick,
+        onCreateSticker = onCreateStickerClick,
+    )
+
     // Reaction picker state
     var reactionTargetMessage by remember { mutableStateOf<Message?>(null) }
+    // The sticker bubble that was tapped, while its sheet is open.
+    var stickerSheetMessage by remember { mutableStateOf<Message?>(null) }
+    // The pack that sheet's "View pack" asked for, while its preview is open.
+    var viewedStickerPackId by remember { mutableStateOf<String?>(null) }
     // Swipe-to-react panel state
     var swipeReactMessage by remember { mutableStateOf<Message?>(null) }
     // ID of the message whose reaction chips should be scrolled into view after reacting
@@ -1040,7 +1101,7 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (!uiState.session.isGroupChat && !uiState.session.isBroadcast) {
+                    if (BuildConfig.SUPPORTS_CALLS && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                         IconButton(onClick = { startCall(context, viewModel, uiState, video = true) }) {
                             Icon(
                                 imageVector = Icons.Default.Videocam,
@@ -1110,7 +1171,7 @@ fun ChatScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(modifier = Modifier.fillMaxSize()) { Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
@@ -1440,6 +1501,7 @@ fun ChatScreen(
                                                 onPreviewImageClick = { url ->
                                                     viewModel.showFullscreenImage(FullscreenImage(imageUrl = url))
                                                 },
+                                                onStickerClick = { stickerSheetMessage = message },
                                                 onOpenFile = { viewModel.openFile(message) },
                                                 filePreviews = viewModel.filePreviews,
                                                 onVideoClick = { source ->
@@ -1457,7 +1519,7 @@ fun ChatScreen(
                                                 onReplyPreviewClick = {
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
-                                                onCall = if (message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
+                                                onCall = if (BuildConfig.SUPPORTS_CALLS && message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                                                     // Calls back with the kind the call was.
                                                     { startCall(context, viewModel, uiState, video = message.isVideoCall) }
                                                 } else null,
@@ -1645,7 +1707,7 @@ fun ChatScreen(
             // Reply-to banner
             if (uiState.composer.replyToMessage != null) {
                 val replyTo = uiState.composer.replyToMessage!!
-                val isImageReply = replyTo.type == MessageType.IMAGE
+                val hasThumbnail = replyTo.type.hasStillPreview
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1660,7 +1722,7 @@ fun ChatScreen(
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    if (isImageReply) {
+                    if (hasThumbnail) {
                         ReplyImageThumbnail(
                             message = replyTo,
                             modifier = Modifier.size(36.dp)
@@ -1673,11 +1735,13 @@ fun ChatScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary
                         )
-                        val snippet = if (isImageReply) {
-                            replyTo.content.take(60)
+                        val snippet = when (replyTo.type) {
+                            MessageType.IMAGE -> replyTo.content.take(60)
                                 .ifBlank { stringResource(R.string.reply_preview_photo) }
-                        } else {
-                            replyTo.content.take(60)
+                            MessageType.STICKER -> stickerLabel(replyTo.content.take(60))
+                            MessageType.GIF -> replyTo.content.take(60)
+                                .ifBlank { MessageType.GIF.placeholderLabel }
+                            else -> replyTo.content.take(60)
                         }
                         Text(
                             text = snippet,
@@ -1772,6 +1836,17 @@ fun ChatScreen(
                     }
                 }
             }
+
+            // Stickers tagged with the one emoji in the composer. A pick sends
+            // the sticker in the emoji's place, so the composer is cleared.
+            StickerSuggestionStrip(
+                text = messageText,
+                packs = uiState.overlays.stickerPacks,
+                onSelection = { pick ->
+                    viewModel.sendSticker(pick.stickerId, pick.packId)
+                    applyComposerEdit(ComposerEdit("", TextRange(0), emptyMap()))
+                },
+            )
 
             // Recording control bar — slides in above the composer while dictation is active.
             AnimatedVisibility(
@@ -1920,7 +1995,12 @@ fun ChatScreen(
                         // No clip: large emoji must overflow the Row's cross-axis height constraint.
                         .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(24.dp))
                 ) {
-                    BasicTextField(
+                    // A GIF or a sticker from the keyboard is sent at once, like a pick
+                    // from the Stickers tab. Not while a message is being edited.
+                    KeyboardContentReceiver(
+                        enabled = uiState.composer.editingMessage == null,
+                        onContent = viewModel::sendKeyboardContent,
+                    ) { BasicTextField(
                         value = inputValue,
                         onValueChange = { newValue ->
                             // User interaction during dictation cancels the session
@@ -1942,6 +2022,10 @@ fun ChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(composerFocusRequester)
+                            // Typing into the message ends a picker search: the
+                            // strip would otherwise sit over a keyboard that
+                            // no longer types into it.
+                            .onFocusChanged { if (it.isFocused) pickerState.closeSearch() }
                             .padding(
                                 start = 16.dp,
                                 end = if (uiState.composer.editingMessage == null) 48.dp else 16.dp,
@@ -1981,7 +2065,7 @@ fun ChatScreen(
                                 innerTextField()
                             }
                         }
-                    )
+                    ) }
                     if (uiState.composer.editingMessage == null) {
                         IconButton(
                             onClick = { showAttachmentSheet = true },
@@ -2060,40 +2144,57 @@ fun ChatScreen(
                         ime = imeInsets,
                         navBars = navBarInsets,
                         panelPx = { animatedPanelPx },
-                        imeMaxOverlapPx = imeMaxOverlapPx
+                        imeMaxOverlapPx = imeMaxOverlapPx,
+                        stripOnKeyboard = pickerSearchLayout == ComposerSearchLayout.STRIP
                     )
                     .clipToBounds()
             ) {
-                if (showEmojiPanel || animatedPanelPx > 0) {
-                    EmojiHandlerPanel(
-                        mode = EmojiMode.TEXT_INPUT,
+                if (pickerMounted && pickerSearchLayout != ComposerSearchLayout.FULL) {
+                    val strip = pickerSearchLayout == ComposerSearchLayout.STRIP
+                    ComposerPickerPanel(
                         recentEmojis = uiState.overlays.recentEmojis,
-                        onEmojiSelected = { emoji, size ->
-                            // Insert at the caret (replacing any selection), not at
-                            // the end — the picker must work mid-sentence.
-                            applyComposerEdit(
-                                insertAtCursor(
-                                    text = messageText,
-                                    selection = inputCursor,
-                                    insertion = emoji,
-                                    emojiSizes = pendingEmojiSizes,
-                                    insertionSize = size,
-                                )
-                            )
-                        },
-                        onBackspace = {
-                            applyComposerEdit(
-                                deleteBeforeCursor(messageText, inputCursor, pendingEmojiSizes)
-                            )
-                        },
-                        onRecentUsed = { viewModel.addRecentEmoji(it) },
+                        stickerPacks = uiState.overlays.stickerPacks,
+                        recentStickers = uiState.overlays.recentStickers,
+                        callbacks = composerPickerCallbacks,
+                        state = pickerState,
+                        compact = strip,
+                        // The strip is as tall as its content and sits on the
+                        // keyboard; the panel is the keyboard's height.
                         modifier = Modifier
                             .align(Alignment.TopCenter)
                             .fillMaxWidth()
-                            .height(panelContentDp)
+                            .then(if (strip) Modifier else Modifier.height(panelContentDp))
                     )
                 }
             }
+        }
+
+        // Sticker search slides up over the conversation and the composer,
+        // from under the top bar down to the keyboard. A pick is sent at once,
+        // so the composer is not needed while it is open. It is drawn here, as
+        // a sibling of the Column, because the Column has no room to give it.
+        AnimatedVisibility(
+            visible = pickerSearchLayout == ComposerSearchLayout.FULL,
+            enter = slideInVertically(tween(220)) { it / 3 } + fadeIn(tween(220)),
+            exit = slideOutVertically(tween(180)) { it / 3 } + fadeOut(tween(180)),
+        ) {
+            ComposerPickerPanel(
+                recentEmojis = uiState.overlays.recentEmojis,
+                stickerPacks = uiState.overlays.stickerPacks,
+                recentStickers = uiState.overlays.recentStickers,
+                callbacks = composerPickerCallbacks,
+                state = pickerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .consumeWindowInsets(padding)
+                    .background(MaterialTheme.colorScheme.surface)
+                    // Swallows touches on the overlay's empty space, which
+                    // would otherwise reach the conversation underneath.
+                    .pointerInput(Unit) {}
+                    .imePadding()
+            )
+        }
         }
     }
 
@@ -2262,6 +2363,23 @@ fun ChatScreen(
                 modifier = Modifier.height((screenHeightDp * 2 / 5).dp)
             )
         }
+    }
+
+    // Sticker sheet — a tap on a sticker bubble.
+    stickerSheetMessage?.let { target ->
+        val stickerId = target.stickerId
+        StickerActionsSheet(
+            message = target,
+            isFavourite = stickerId != null && stickerId in uiState.overlays.favouriteStickerIds,
+            onToggleFavourite = { if (stickerId != null) viewModel.toggleStickerFavourite(stickerId, target) },
+            onViewPack = target.stickerPackId?.let { packId -> { viewedStickerPackId = packId } },
+            onDismiss = { stickerSheetMessage = null },
+        )
+    }
+
+    // Pack preview — "View pack" in the sticker sheet.
+    viewedStickerPackId?.let { packId ->
+        StickerPackSheet(packId = packId, onDismiss = { viewedStickerPackId = null })
     }
 
     // Forward picker — the chat picker the share target uses, slid in over the
@@ -2654,13 +2772,29 @@ private fun Modifier.imeOrPanelHeight(
     ime: WindowInsets,
     navBars: WindowInsets,
     panelPx: () -> Int,
-    imeMaxOverlapPx: MutableIntState
+    imeMaxOverlapPx: MutableIntState,
+    stripOnKeyboard: Boolean
 ): Modifier = layout { measurable, constraints ->
     val overlap = (ime.getBottom(this) - navBars.getBottom(this)).coerceAtLeast(0)
     if (overlap > imeMaxOverlapPx.intValue) imeMaxOverlapPx.intValue = overlap
-    val height = maxOf(overlap, panelPx())
-    val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
-    layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    if (stripOnKeyboard) {
+        // Emoji search: the strip keeps its own height and sits on top of the
+        // keyboard, so the region is the keyboard plus the strip. The panel's
+        // height is a floor while the keyboard is still sliding in.
+        val placeable = measurable.measure(
+            Constraints(
+                minWidth = constraints.maxWidth,
+                maxWidth = constraints.maxWidth,
+                maxHeight = constraints.maxHeight,
+            )
+        )
+        val height = maxOf(overlap + placeable.height, panelPx()).coerceAtMost(constraints.maxHeight)
+        layout(placeable.width, height) { placeable.place(0, 0) }
+    } else {
+        val height = maxOf(overlap, panelPx())
+        val placeable = measurable.measure(Constraints.fixed(constraints.maxWidth, height))
+        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+    }
 }
 
 /**

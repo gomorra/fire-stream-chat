@@ -149,8 +149,9 @@ class ChatRepositoryImpl @Inject constructor(
 
     override suspend fun uploadGroupAvatar(chatId: String, uri: String): Result<String> = resultOf {
         val parsedUri = Uri.parse(uri)
+        // The local copy is the scaled avatar: upload it, and keep it to avoid a re-download.
         val localFile = profileImageManager.saveLocalCopy(chatId, parsedUri)
-        val url = storageSource.uploadGroupAvatar(chatId, parsedUri)
+        val url = storageSource.uploadGroupAvatar(chatId, Uri.fromFile(localFile))
         updateGroup(chatId, name = null, avatarUrl = url).getOrThrow()
         chatDao.updateAvatarCache(chatId, url, localFile.absolutePath)
         url

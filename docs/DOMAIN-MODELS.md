@@ -40,7 +40,7 @@ data class Message(
     val chatId: String,
     val senderId: String,
     val content: String,
-    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION
+    val type: MessageType,       // TEXT | IMAGE | VIDEO | VOICE | DOCUMENT | POLL | CALL | LIST | LOCATION | TIMER | STICKER | GIF
     val mediaUrl: String?,
     val mediaThumbnailUrl: String?,
     val localUri: String?,                   // local file path for media (offline-first)
@@ -48,7 +48,9 @@ data class Message(
     val mediaHeight: Int?,                   // original image height for aspect ratio
     val fileName: String?,                   // DOCUMENT: display name as picked (null for other types)
     val fileSize: Long?,                     // DOCUMENT: size in bytes
-    val mimeType: String?,                   // DOCUMENT: type as picked
+    val mimeType: String?,                   // DOCUMENT: type as picked. STICKER, GIF: the file's type
+    val stickerId: String?,                  // STICKER: SHA-256 of the sticker's bytes; the sender's claim on receive
+    val stickerPackId: String?,              // STICKER: the pack it was sent from, when the sender shared one
     val status: MessageStatus,   // SENDING | SENT | DELIVERED | READ | FAILED
     val replyToId: String?,
     val timestamp: Long,
@@ -150,10 +152,58 @@ data class ListData(
 )
 ```
 
+### Sticker / StickerPack
+
+```kotlin
+enum class StickerFormat(val extension: String, val mimeType: String) { WEBP("webp", "image/webp") }
+enum class StickerPackKind { USER, INSTALLED, FAVOURITES, SAVED }
+
+data class Sticker(
+    val id: String,                   // SHA-256 of the file's bytes, lowercase hex
+    val format: StickerFormat,
+    val width: Int,
+    val height: Int,
+    val isAnimated: Boolean,
+    val emojis: List<String>,
+    val localPath: String             // filesDir/stickers/<id>.<ext>; the file may not be there yet
+)
+
+data class StickerPack(
+    val id: String,                   // random UUID
+    val name: String,                 // "" for FAVOURITES and SAVED; a screen labels those by kind
+    val publisher: String?,
+    val kind: StickerPackKind,
+    val originPackId: String?,        // the source pack of an INSTALLED one
+    val stickers: List<Sticker>,      // in pack order
+    val createdAt: Long,
+    val updatedAt: Long
+)
+
+data class StickerPackPreview(        // a pack someone shared, as it is offered for adding
+    val packId: String,               // the pack that was looked up
+    val rootPackId: String,           // the pack it was first copied from, else packId
+    val name: String,
+    val publisher: String?,
+    val stickers: List<Sticker>,
+    val isInLibrary: Boolean          // the user's own pack, or a copy is installed already
+)
+
+data class StickerImportResult(
+    val imported: Int,                // stickers added to a pack
+    val duplicates: Int,              // stickers the target pack already held
+    val rejected: Int,                // unreadable, not a sticker, too large; a refused archive counts once
+    val packIds: List<String>         // packs that gained a sticker
+)
+
+data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes: Long, val lastModified: Long)
+```
+
 ### CallLogEntry
 
 ```kotlin
-enum class CallDirection { OUTGOING, INCOMING, MISSED }
+// How a call message reads for the viewer. CallLogType.of(isOwnMessage, endReason, durationSeconds)
+// decides it for the Calls tab and the chat bubble alike.
+enum class CallLogType { OUTGOING, NO_ANSWER, OUTGOING_DECLINED, INCOMING, MISSED, DECLINED }
 
 data class CallLogEntry(
     val messageId: String,                // the CALL message the entry is built from
@@ -161,7 +211,7 @@ data class CallLogEntry(
     val otherPartyId: String,
     val displayName: String,
     val avatarUrl: String?,
-    val direction: CallDirection,
+    val type: CallLogType,
     val durationSeconds: Int?,
     val timestamp: Long,
     val video: Boolean                    // the call was started as video
@@ -173,14 +223,22 @@ data class CallLogEntry(
 ```kotlin
 sealed interface CallState {
     data object Idle : CallState
-    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl, calleeLocalAvatarPath, video) : CallState
-    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl, callerLocalAvatarPath, video) : CallState
-    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl, remoteLocalAvatarPath, video) : CallState
-    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime, remoteLocalAvatarPath, video) : CallState
+    // An outgoing call from the moment its setup starts until CallService takes it over.
+    // placingId tells one placing from the next; callId is null until the document exists.
+    data class Placing(placingId, calleeId, calleeName, calleeAvatarUrl, callId: String?, video) : CallState
+    data class OutgoingRinging(callId, calleeId, calleeName, calleeAvatarUrl, calleeLocalAvatarPath, video) : Live
+    data class IncomingRinging(callId, callerId, callerName, callerAvatarUrl, callerLocalAvatarPath, video) : Live
+    data class Connecting(callId, remoteUserId, remoteName, remoteAvatarUrl, remoteLocalAvatarPath, video) : Live
+    data class Connected(callId, remoteUserId, remoteName, remoteAvatarUrl, startTime, remoteLocalAvatarPath, video) : Live
     data class Ended(callId, reason: EndReason) : CallState
 }
 
+// isOngoing: every state but Idle and Ended. The one "am I in a call" rule.
+// dockable: a Live state that is not IncomingRinging. The call can leave its stage for its chat.
+
 enum class EndReason { HANGUP, REMOTE_HANGUP, DECLINED, TIMEOUT, ERROR }
+// wireName is the lower-case name written to the call document and the call message;
+// EndReason.fromWireName(...) reads one back, or null for a reason this version does not know.
 
 // In-call UI controls (exposed by CallStateHolder)
 // Where call audio plays. The router (data/call/CallAudioRouter) publishes what the OS reports.
@@ -210,7 +268,7 @@ data class CallParticipant(
 )
 ```
 
-The four states between `Idle` and `Ended` implement `CallState.Live` (`callId`, `video`, `withVideo()`). `video` says how the call was started. It sets the ring text and the call log entry. It is not the live camera state.
+The four states the call service holds implement `CallState.Live` (`callId`, `video`, `withVideo()`). `Placing` comes before them and is not `Live`: no service holds that call yet. `video` says how the call was started. It sets the ring text and the call log entry. It is not the live camera state.
 
 A screen shows a participant's video only while `cameraOn` and `hasFrame` are both true, and the avatar otherwise.
 
@@ -224,9 +282,11 @@ data class IceCandidateData(val sdpMid: String, val sdpMLineIndex: Int, val sdp:
 data class CallMedia(val camera: Boolean = false, val mic: Boolean = true)  // what one person says about their own side
 data class OutgoingCall(val callId: String, val videoLine: Boolean)        // CallRepository.createCall; videoLine = the callee's app takes a video line
 data class CallSignalingData(
-    val callId: String, val callerId: String, val calleeId: String, val status: String,
+    val callId: String, val callerId: String, val calleeId: String,
+    val status: String,                   // "ringing" | "answered" | "declined" | "ended"
     val offer: SdpData?, val answer: SdpData?,
-    val createdAt: Long, val endedAt: Long?, val endReason: String?,
+    val createdAt: Long, val endedAt: Long?,
+    val endReason: String?,               // an EndReason.wireName
     val video: Boolean,                   // how the call was started; false when the document has no such field
     val media: Map<String, CallMedia>     // live state per user id; no entry for someone who has written nothing
 )

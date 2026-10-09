@@ -130,7 +130,7 @@ class MessageRepositoryLocalUriTest {
         assertEquals("Hello edited", updateSlot.captured.content)
         assertEquals(99999L, updateSlot.captured.editedAt)
         // The row already has its file; the edit must not queue a second download.
-        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { mediaFileManager.downloadFor(any(), any(), any(), any(), any(), any(), any()) }
 
         job.cancel()
     }
@@ -177,14 +177,14 @@ class MessageRepositoryLocalUriTest {
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(pending)
         val savedFile = java.io.File("/storage/emulated/0/Pictures/FireStream Images/msgA.jpg")
         coEvery {
-            mediaFileManager.downloadFor("chat1", "msgA", any(), "https://firebasestorage.example/msgA.jpg", any(), any())
+            mediaFileManager.downloadFor("chat1", "msgA", any(), "https://firebasestorage.example/msgA.jpg", any(), any(), any())
         } returns savedFile
         coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
 
         repository.ensureLocalCopiesForChat("chat1")
         advanceUntilIdle()
 
-        coVerify { mediaFileManager.downloadFor("chat1", "msgA", any(), "https://firebasestorage.example/msgA.jpg", any(), any()) }
+        coVerify { mediaFileManager.downloadFor("chat1", "msgA", any(), "https://firebasestorage.example/msgA.jpg", any(), any(), any()) }
         coVerify { messageDao.updateLocalUri("msgA", savedFile.absolutePath) }
     }
 
@@ -202,10 +202,10 @@ class MessageRepositoryLocalUriTest {
         ))
         coEvery { messageDao.getMessagesWithoutLocalMediaForChat("chat1") } returns listOf(failing, ok)
         coEvery {
-            mediaFileManager.downloadFor("chat1", "bad", any(), any(), any(), any())
+            mediaFileManager.downloadFor("chat1", "bad", any(), any(), any(), any(), any())
         } throws java.io.IOException("network down")
         val goodFile = java.io.File("/storage/emulated/0/Pictures/FireStream Images/good.jpg")
-        coEvery { mediaFileManager.downloadFor("chat1", "good", any(), any(), any(), any()) } returns goodFile
+        coEvery { mediaFileManager.downloadFor("chat1", "good", any(), any(), any(), any(), any()) } returns goodFile
         coEvery { messageDao.updateLocalUri(any(), any()) } just Runs
 
         repository.ensureLocalCopiesForChat("chat1")
