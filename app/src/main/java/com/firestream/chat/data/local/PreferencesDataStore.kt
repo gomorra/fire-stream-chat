@@ -12,6 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.firestream.chat.domain.model.ChatFontSize
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -48,6 +49,9 @@ class PreferencesDataStore @Inject constructor(
     private val groupNotificationsKey = booleanPreferencesKey("group_notifications")
     private val notificationSoundKey = stringPreferencesKey("notification_sound")
     private val vibrationKey = booleanPreferencesKey("vibration")
+
+    // The user's "Not now" on the prompt for the full-screen notification access
+    private val fullScreenAccessPromptDismissedKey = booleanPreferencesKey("full_screen_access_prompt_dismissed")
 
     // Mention-only notifications (group chats)
     private val mentionOnlyNotificationsKey = booleanPreferencesKey("mention_only_notifications")
@@ -174,6 +178,17 @@ class PreferencesDataStore @Inject constructor(
 
     suspend fun setVibration(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[vibrationKey] = enabled }
+    }
+
+    // --- Full-screen notification access ---
+
+    /** True once the user said *Not now* to the prompt. The prompt then stays away for good. */
+    val fullScreenAccessPromptDismissedFlow: Flow<Boolean> = context.dataStore.data
+        .map { prefs -> prefs[fullScreenAccessPromptDismissedKey] ?: false }
+        .distinctUntilChanged()
+
+    suspend fun setFullScreenAccessPromptDismissed() {
+        context.dataStore.edit { prefs -> prefs[fullScreenAccessPromptDismissedKey] = true }
     }
 
     // --- Mention-only notifications ---

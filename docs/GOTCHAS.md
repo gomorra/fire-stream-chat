@@ -443,6 +443,18 @@ developer machine, and (c) likely to recur. Named, structural conventions belong
   platform timeout.** Nothing stops it on its own — unattended, it rings until the battery
   dies. Always pair it with `setTimeoutAfter(...)` as a backstop plus an explicit dismiss
   affordance; a Dismiss action alone only helps when somebody is present.
+- **A sideloaded app starts without the access *Full screen notifications* on Android 14 and
+  later.** The manifest's `USE_FULL_SCREEN_INTENT` does not grant it, and the installer cannot.
+  It was off on a phone with Android 17 and on an emulator with Android 16. Without the access
+  the system drops
+  `setFullScreenIntent` without an error and shows only the notification, so a call does not
+  wake the display. `FullScreenIntentAccess` reads the access and opens its settings page.
+  On a test device, grant it with
+  `adb shell appops set --uid com.firestream.chat USE_FULL_SCREEN_INTENT allow`.
+- **Robolectric 4.14's `ShadowNotificationManager` has no switch for
+  `canUseFullScreenIntent()`.** Put a mocked `NotificationManager` behind a `ContextWrapper`
+  that overrides `getSystemService(String)`. Do not name the method in a MockK `verify` under
+  an SDK below 34, where it does not exist: recording the call throws `NoSuchMethodError`.
 
 ## WebRTC / calls
 

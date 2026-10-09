@@ -99,6 +99,7 @@ private val UI_ALLOWED_DATA_IMPORTS = setOf(
     "com.firestream.chat.data.call.CallService",
     "com.firestream.chat.data.call.CallStateHolder",
     "com.firestream.chat.data.call.CallVideoSinks",
+    "com.firestream.chat.data.call.FullScreenIntentAccess",
     "com.firestream.chat.data.local.AppTheme",
     "com.firestream.chat.data.local.AutoDownloadOption",
     "com.firestream.chat.data.local.DictationLanguage",

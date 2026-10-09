@@ -21,6 +21,27 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
+### The prompt for full-screen notifications (2026-10-09)
+
+`docs/plans/video-calls.md` step 5b. JVM tests cover the rule, the access check against a mocked
+`NotificationManager`, the card and the settings row. Nothing ran on a device. On a phone with
+Android 14 or later:
+
+1. Switch *Full screen notifications* off for the app in the system settings and open the app.
+   The card shows above the bottom bar on all three tabs, and the tab's content and its floating
+   button sit above it.
+2. *Open settings* opens the app's *Full screen notifications* page, not the general
+   notification settings. Back returns to the app.
+3. Switch the access on there and return. The card is gone without a restart.
+4. With the access on and the display off, an incoming call wakes the display and shows the call
+   screen. A timer alarm does the same.
+5. With the access off, a call still rings as a notification.
+6. *Not now* takes the card away, and it stays away after the app is killed and reopened.
+7. Settings → Notifications → *Full-screen call alerts* says *Off*, opens the same page, and
+   says *On* after the return.
+8. Open the Lists tab's chat picker while the card shows. The card hides under the picker and
+   comes back when it closes.
+
 ### Calls after the video work moved onto `CallSession` (2026-10-09)
 
 `docs/plans/video-calls.md` step 5a. The video work of steps 1 to 5 now runs in main's
@@ -1036,8 +1057,6 @@ stack is saved, so a rotation mid-crop is a supported path and an untested one.
 ### Timer alarm prominence — insistent ring (`5176172`…`cf98eb2`, 2026-07-25)
 - Unconfirmed on hardware: that `FLAG_INSISTENT` actually loops, and that the 2-minute
   auto-silence cancel stops it.
-- Unconfirmed: whether `USE_FULL_SCREEN_INTENT` is still granted on Android 14+ for this
-  sideloaded app.
 - **Test by upgrading over an existing install, never a clean one** — notification-channel
   sound/vibration is frozen at creation, so channel-freeze bugs are invisible on a fresh
   install.

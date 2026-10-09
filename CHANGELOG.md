@@ -13,6 +13,10 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 - **Calls use their own relay.** When two phones cannot reach each other directly, a call now runs through a Cloudflare relay with a login that the app fetches for each signed-in user, in place of a free public relay with a fixed password. The login is fetched before the call rings and kept for twelve hours. A call that cannot get one still connects wherever a direct path exists. (`cd6a382e`)
 
+### Fixed
+
+- **The app asks for full-screen notifications.** On Android 14 and later an incoming call wakes the display and shows over the lock screen only when the app holds the special access *Full screen notifications*, and an app installed from a file starts without it. The call then rang only as a notification, and so did a timer alarm. The main screen now says so once, with a button that opens the right page in the system settings and a *Not now* that keeps the question away. Settings → Notifications has a new row, *Full-screen call alerts*, that shows whether the access is on and opens the same page.
+
 ## [1.40.4] — 2026-10-09
 
 ### Fixed
