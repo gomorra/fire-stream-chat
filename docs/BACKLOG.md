@@ -21,67 +21,6 @@ It is not a feature gap and not tech debt — it is an unfinished check, and it 
 here because a cloud agent has no other way to learn that the work is not fully done.
 Delete an item once it has been verified (or once a fix for what the check found ships).
 
-### Calls — teardown, ringing, answering and the call log (2026-10-08)
-
-`CallService` runs a call's work on the main thread, disposes the `PeerConnection` and its audio
-module, and records how a call ended on the application scope. The incoming-call channel rings.
-JVM tests cover the call state, the call log, the launch decision, the outgoing setup and the
-notification channel.
-No test runs WebRTC, the foreground service or a notification sound, so none of this has been
-seen on a phone.
-1. Upgrade over an existing install (a fresh one hides channel problems). Locked phone, incoming
-   call: it rings and vibrates until answered, declined or cancelled by the caller, and stops at
-   once in each case. Silent mode: no ring. Vibrate mode: vibration only.
-2. Fresh install on Android 14+, microphone never granted: answer with the green button on the
-   full-screen call screen. The permission prompt appears, and the call connects once allowed.
-3. Connected call, then Wi-Fi and mobile data off on one phone: within about 30 s both phones
-   end the call, and neither app crashes. Then a call where both people hang up at the same moment.
-4. Ten calls in a row: memory does not climb from call to call (Android Studio memory profiler).
-5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
-6. After a call, both phones' chat lists show the call as the chat's last message.
-7. Cancel an outgoing call before it is answered: the other phone shows a missed call, in the
-   chat and in the Calls tab, with a "Missed call" notification and an unread badge on the chat.
-   After an answered or a declined call the other phone shows neither (needs the updated Cloud
-   Functions). Decline a call: both phones show "Declined", in the chat and in the
-   Calls tab, and only the phone that declined shows it in red.
-8. During a call, open another chat and tap call: "You're already in a call", and the call goes
-   on. Rotate right after tapping call: the call still starts. Open a finished call's card from
-   Recents: no new call is placed. During a call press Home, and let the other person hang up:
-   the call's card leaves Recents at once.
-9. With mobile data slowed or briefly off, tap call: the screen shows the name and
-   "Calling..." at once. Press Back before it rings, once straight away and once after turning
-   the phone, and once press Cancel instead: the other phone does not ring, or stops at once
-   and shows a missed call.
-   Tap call twice quickly: it rings once. With no network at all, the screen says the call
-   could not start within about 20 s.
-10. Fresh install: rotate while the microphone prompt is up, then allow. The call starts.
-    Do the same when answering with the green button: the call connects. Take the microphone
-    permission away again, tap call, and while the prompt is up have the other phone call:
-    the incoming call rings.
-11. Hang up, then have the other phone call straight back, twice. Each call rings: the service
-    stops and starts cleanly between calls.
-12. Set the app's battery use to Restricted, lock the phone, and call it. If Android will not let
-    the app start ringing, a ringing notification appears instead. Opening it shows the call
-    screen, which rings, and the call can be answered. Call again and press Decline on the
-    notification: the ring stops, and both phones show "Declined".
-
-### Crop frame above the keyboard (2026-10-08)
-
-`ZoomCropSurface` carries the zoom with `ViewportGeometry.transformAfterResize` on a resize and
-on a new shape. JVM tests cover the arithmetic, and `ZoomCropSurfaceTest` covers when it runs
-under Robolectric. No test runs a real keyboard, so the slide itself has not been seen.
-1. Open a received photo fullscreen, zoom in, set the pill to 1:1, tap Edit, tap the caption:
-   the square keeps its width, stays centred and whole, and does not jitter while the keyboard slides.
-2. Close the keyboard: the zoom is the one you made. Send: the crop is the square you framed.
-3. Repeat from the send preview on a picked photo, at 1x and zoomed, with Free and a portrait shape.
-4. With the keyboard up, tap the pill through every shape: each frame stays whole above the
-   keyboard, and 16:9 comes back to the size you zoomed to. Close the keyboard: your zoom is back.
-   Send: the crop is the last shape, cut from what you framed.
-5. In the fullscreen viewer, zoom in, set the pill to 1:1, swipe to the next photo and back:
-   nothing jumps during the swipe, each photo shows at 1x, and the pill does not zoom it.
-   Then, on a photo just swiped to, before any pinch or pan, set the pill to 1:1: the square is
-   drawn on that photo, not a frame around the whole of it. Tap Edit: the preview opens on the same square.
-
 ### Picker search above the keyboard (2026-10-07)
 
 `ComposerPickerPanel` search layouts. Robolectric covers the strip, the hoisted state and the
@@ -327,30 +266,6 @@ OS actually moves the audio. Needs the phone plus a Bluetooth headset and a wire
   and yanked mid-call. An A2DP-only Bluetooth *headphone* (music profile, no hands-free) correctly
   never appears as a route — the stock dialer cannot use it either.
 
-### The crop-shape pill, the preview rail's sizes, and the flash after an app switch (2026-09-19)
-
-Shipped in 1.34.0 (`9e8c4d0`); nothing has been on hardware. Robolectric drives
-the pill and the transfer into Adjust through Coil on a synthetic JPEG, but not the frame's look
-over a real photo nor the feel of moving the photo under it. Check on a device:
-
-- The crop-shape pill (bottom-left, in the send preview and in the fullscreen viewer of a chat
-  photo): tapping cycles Free → Original → 1:1 → 4:5 → 16:9 → Free, a shape other than Free draws
-  a frame with a dim outside, and panning the zoomed photo moves the photo under the frame. Send
-  with 1:1 chosen → the received photo is square and is the framed part. Choose a shape, then
-  Adjust → the crop tool opens with that frame and that preset selected, Cancel comes back with
-  the frame still pending, Done writes it. Choose a shape in the *viewer* on a received photo,
-  then Edit → the preview opens with the pill on that shape and the frame drawn.
-- The top rail: back arrow, HD, the three editors and Save are all 36 dp circles in 48 dp
-  targets now, the viewer's size, with 8 dp between visuals; on a 360 dp-wide phone the HD pill
-  must not touch the back arrow.
-- The flash after switching apps (2026-09-19 report: zoomed in the preview, swipe to another app
-  and back, the screen flashed until back was pressed). Not reproducible on the JVM. The one
-  mechanism found — the page re-deriving its zoom from the saved frame on every box-size change,
-  which the keyboard and the app-switch animation both cause — is gone: a size change now only
-  clamps the zoom the user has. Re-test exactly that path; if it still flashes, note what flashes
-  (the photo, the keyboard, the whole screen) and whether a caption had been typed.
-
-
 ### "Keep Original Images" (2026-09-18)
 
 The unit tests pin the pipeline (encoding uploaded, input copied, one persist), not what
@@ -542,49 +457,6 @@ failure, so nothing re-queues it — the daily backfill or the next chat open pi
 delivery receipt landing after the open chat had read the message, pre-existing, not step 8) was
 found on this pass and fixed in `69fcfd89` — a receipt never moves a status backwards, on Firestore
 and in Room. Re-check it on the next run: orange ticks must stay orange.
-
-### Image editor — edit from the fullscreen viewer (Phase 6, 2026-09-11)
-
-**Nothing in this phase has been on hardware.** Its risk is the whole path, which no
-Robolectric test runs end to end: tap a sent photo, Edit, fetch, copy, preview, edit,
-send. The ViewModel's state machine and the tray are unit-tested; the hand-offs between
-them are not. **On a device holding real conversations, stop at the send button** — the
-path is verified once the preview shows the right photo, not once a message goes out.
-
-- **All three buttons are on screen from the start.** Open a photo in a chat: Edit,
-  the download button and × sit side by side top-right, with no `<` to unfold them
-  (the folded tray of `5406ef3c` was reversed on the first hardware pass). Open a
-  profile picture from the chat list and confirm it shows only ×.
-- **Edit on a downloaded photo opens the preview straight away**, on that photo, with
-  the viewer gone underneath. Run an adjust and an undo, then confirm Original ⇄ Edited
-  still returns to the photo as received. Back out of the preview and confirm you land
-  in the chat, not back in the viewer.
-- **No blink on the way into the preview.** Open a downloaded photo, tap Edit and watch
-  the photo itself: it must stay put at full brightness, with no dip towards the chat
-  behind it, no flash to black and no spinner scrim (the first hardware pass saw all
-  three; fixed after it). A slow-motion screen recording settles it if the eye cannot.
-  Then swipe to a second photo before tapping Edit and confirm the chat has landed on
-  that photo once you back out of the preview. Also press back within the first
-  half-second of the preview fading in and confirm you land in the chat, not back in
-  the viewer. This timing is the one part of the fix no Robolectric test reaches: the
-  hand-off lives inline in `ChatScreen`.
-- **Edit on a photo not yet on this device shows a spinner, then the preview.** Use a
-  photo received with auto-download off. While the spinner is up, confirm the photo
-  cannot be swiped. Press back mid-fetch and confirm you stay in the viewer and no
-  preview appears when the download would have finished.
-- **Rotate the phone mid-fetch.** The spinner should survive and the preview should
-  still open.
-- **Offline fails visibly.** In airplane mode, Edit an undownloaded photo and confirm
-  the "Couldn't open the photo for editing" snackbar shows *over* the viewer.
-- **Search results.** Search → Photos → open one → Edit. The preview should open, and
-  backing out of it should land in the search grid. Also confirm a save from this
-  gallery now shows its "saved to Downloads" snackbar with a working Open.
-- **No duplicate in the gallery app.** After editing an undownloaded photo, Google
-  Photos should show one copy of it under *FireStream Images*, named by message id — not
-  a second `download_…` file.
-- **The HD pill is honest.** Open the HD sheet on a photo edited this way and judge
-  whether its HD row reads as promising more than the received photo has; the plan
-  (Phase 6, item 10) left the pill in place on that bet.
 
 ### Image editor — the overlay screen and the sticker/text/shape tabs (Phase 5b, 2026-09-10)
 
