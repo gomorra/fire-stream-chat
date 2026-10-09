@@ -4,10 +4,11 @@ Status: **All six phases shipped.** Phase 1 (the toolbar shell, per-image HD and
 download), Phase 2 (the rasterizer, the fit mapper and the live preview-level
 history) and Phase 3 (the adjust screen) landed on 2026-09-09; Phase 4 (the draw
 screen) and Phase 5 (the picker shell and the overlay screen) on 2026-09-10; Phase 6
-(edit from the fullscreen viewer) on 2026-09-11. **Phases 3 to 6 are build- and
-test-verified only — nothing in them has been on hardware**, and every unchecked
-item is listed in `docs/BACKLOG.md` §*Pending on-device verification*. Once those
-passes are run the plan is a candidate for `docs/plans/done/`.
+(edit from the fullscreen viewer) on 2026-09-11. Phase 6 has been checked on a
+device. **Phases 3 to 5 are build- and test-verified only — nothing in them has been
+on hardware**, and every unchecked item is listed in `docs/BACKLOG.md` §*Pending
+on-device verification*. Once those passes are run the plan is a candidate for
+`docs/plans/done/`.
 
 Goal: bring the pre-send preview (`ImagePreviewScreen`) up to WhatsApp's editor —
 download, per-image HD toggle, an adjust screen (rotate/flip/straighten/crop/
