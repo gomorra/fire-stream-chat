@@ -220,6 +220,12 @@ real video view.
 
 ### The Cloudflare relay for calls (2026-10-04)
 
+**Open item, with the owner: the TURN credentials.** Release 1.41.0 ships without the relay.
+`getTurnCredentials` is not deployed, and the project holds neither `CLOUDFLARE_TURN_KEY_ID` nor
+`CLOUDFLARE_TURN_API_TOKEN` (read from the live project on 2026-10-09). The owner provides the
+Cloudflare TURN key later and then runs check 1. Until then every install connects a call only
+where a direct path exists.
+
 `docs/plans/video-calls.md` step 5. A call takes its relay from the `getTurnCredentials` function,
 and the app carries no other relay. **Until that function is deployed with its two secrets, this
 build has no relay at all:** a call connects only where a direct path exists,
