@@ -2,6 +2,8 @@
 
 Status: approved, steps 1 to 4a shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
+> **Steps 1 to 5 are shipped on `plan/video-calls`, on the `CallService` from before main's call rework.** Main runs each call in a `CallSession` (`CallHost`, `CallMedia`, `WebRtcCallMedia`), `CallState` has `Placing`, and `firestore.rules` lists the fields a call may hold, with tests in `firestore-rules-tests/`. Step 5a brings the two together. Steps 6 to 9 build on its result.
+
 ## Context
 
 The app has 1:1 voice calls: WebRTC, signalled through Firestore, woken by a push. `CallService` owns
@@ -40,14 +42,15 @@ picture-in-picture from the docked card, a call card outside the call's chat.
 
 ## What exists today (verified 2026-10-03)
 
-- `data/call/CallService.kt` (735 lines) holds one `PeerConnection`. Offer and answer both set
+- `data/call/CallService.kt` holds one `CallSession` at a time, and its `WebRtcCallMedia` one
+  `PeerConnection`. Offer and answer both set
   `OfferToReceiveVideo = false`. `onTrack` is empty.
 - `data/call/WebRtcPeerConnectionFactory.kt` builds the factory with no video codecs and no `EglBase`.
   Its ICE servers are Google STUN and the public relay `openrelay.metered.ca` with fixed credentials.
 - `FirestoreCallSource` writes `calls/{callId}`: `callerId`, `calleeId`, `status`, `offer`, `answer`,
   and the subcollections `callerCandidates` and `calleeCandidates`.
-- `firestore.rules` lets the caller and callee read and update a call. Any signed-in user can read
-  and create ICE candidates of any call.
+- `firestore.rules` lets only the caller and the callee read and write a call, and lists the
+  fields a call may hold. Each side adds ICE candidates to its own list only.
 - `CallState` names one remote user per state. `CallUiControls` holds mute and the audio route.
 - `ChatScreen.kt:1042` shows the phone icon for 1:1 chats only. The same intent is built again at
   `ChatScreen.kt:1460` and `CallsScreen.kt:451`.
@@ -209,7 +212,7 @@ the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 6 → 7 → 8 ‖ 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a ‖ 6 → 7 → 8 ‖ 9
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -333,6 +336,9 @@ Departures (for sign-off):
   Firestore field `video`, and `sendCallMessage` / `logCallMessage` take it. Bump `AppDatabase` by one.
 - `CallLogEntry.video`, filled in `CallsViewModel.buildEntries`.
 - Tests: `CallsViewModelTest`, the entity mapper, `FirestoreMessageSourceTest` for the field.
+- `firestore.rules`: the create rule lists a call's fields, so `video` joins that list, with a test
+  in `firestore-rules-tests/`. The owner deploys the rules before an app version that writes
+  `video` ships, or every call from it is refused.
 - Docs: `SCHEMA-FIRESTORE.md`, `SCHEMA-ROOM.md`, `DOMAIN-MODELS.md`, `CLOUD-FUNCTIONS.md`.
 
 ### Step 3 — Camera and the video line — skills: code-review; model: max
@@ -817,6 +823,82 @@ Departures (for sign-off):
 `firebase functions:secrets:set` for the key id and the token, deploys the functions, and confirms
 with one call on mobile data that the log names a relay at `turn.cloudflare.com`.
 
+### Step 5a — The video work moves onto `CallSession` — skills: code-review, simplify; model: max; budget: 60
+
+Steps 1 to 5 were built on `plan/video-calls` while main rebuilt the same call code. Both replaced
+`CallService`. This step merges main into the branch and leaves one design. It adds no feature.
+
+What each side holds:
+
+- **Main** runs each call in a `CallSession`. It reaches Android through `CallHost` and the
+  connection through `data/call/CallMedia`, implemented by `WebRtcCallMedia`. Everything runs on
+  the main thread, without locks. `CallState` has `Placing`, and `CallStateHolder.takeOverPlacing`
+  hands a placing over to the service. `FCMService` rings with a notification when Android will not
+  start the service. `EndReason` is typed through the repository. `firestore.rules` lists the
+  fields a call may hold.
+- **The branch** keeps the call in `CallService`, on `Dispatchers.IO` with locks. A `PeerSession`
+  per remote person runs the offer, the answer and the candidates through `PeerSignaling`. It adds
+  the camera, `CallVideoSinks`, `CallMediaPublisher`, `IceServerProvider`, `OutgoingCallPlacer`,
+  the stage, the docked card and the `callVideoLine` capability.
+
+The design after this step:
+
+- **Main's structure is the base.** `CallSession` owns one call: its states, its ring, its timers,
+  the status of the call document, the end reason and the call's chat message. `CallService` is
+  the host and holds no call logic. Nothing of a call lives in `CallService` again.
+- **`PeerSession` is the connection.** `CallSession` opens one per remote person and collects its
+  events on the main thread. `PeerSignaling` carries the pair's offer, answer and candidates, so
+  `CallSession` no longer sequences them itself. `WebRtcCallMedia` goes.
+- **Main's fixes in that sequencing stay.** The answer and `answered` go in one write. The side
+  that answers reads the call document first and closes when it is no longer `ringing`. An answer
+  is applied once. A call that cannot connect ends after the connect timeout, and a lost
+  connection after the reconnect timeout. Each of these keeps its test.
+- **The call's state is confined to the main thread.** `PeerSession` keeps its own three lock
+  rules, because WebRTC calls it on the signalling thread. Every lock, `@Volatile` field and
+  posted block with an identity check that the branch added to `CallService` goes. Teardown never
+  runs on the signalling thread.
+- **`CallSession` stays testable on the JVM.** It reaches the connection, the camera, the local
+  tracks and the video sinks through interfaces that a test fakes, as it does `CallHost` today.
+  The camera switch (wanted, screen visible, permission, video line agreed, a refused foreground
+  type) is a plain class with its own test.
+- **One name per thing.** `domain/model/CallMedia` is a person's live camera and microphone state.
+  Main's `data/call/CallMedia` interface gets another name or goes with `WebRtcCallMedia`.
+- **Placing follows main.** `CallState.Placing` and `takeOverPlacing` stay. `Placing` carries
+  whether the call was started as video. `OutgoingCallPlacer` goes, or shrinks to what main's
+  placing lacks. `CallRepository.createCall(calleeId, video)` still reads the callee's capability
+  and fetches the relay's servers before the call document exists.
+- **`EndReason` stays typed** in `CallRepository`, with the branch's `video` argument beside it.
+- **The fallback ring knows the call's kind.** It says *video call* for one, and its Decline still
+  works without a session.
+- **`firestore.rules` gains the branch's fields.** A call may be created with `video`, and each
+  side may update its own entry under `media`. Each gets a test in `firestore-rules-tests/`. The
+  owner deploys the rules before a build from this branch places a call, or the call is refused.
+- **`AppDatabase` takes the next free number** after main's, with both sides' columns.
+- **`CHANGELOG.md`:** the branch's entries move under main's current `[UNRELEASED]` header. The
+  `changelog-release` skill decides the version.
+
+How to do it:
+
+- `git merge main` in the worktree. The merge commit is this step's code commit. 34 files
+  conflict. Resolve the call code by the design above, not hunk by hunk.
+- Read main's `CallSession.kt`, `CallService.kt`, `CallHost.kt`, `WebRtcCallMedia.kt`,
+  `CallViewModel.kt`, `CallLaunch.kt` and `CallStateHolder.kt` before resolving anything. Read
+  main's `docs/ARCHITECTURE.md` on calls.
+- No test is deleted. Main's `CallSession` tests and the branch's `PeerSession`, `CallVideoSinks`,
+  `LocalCamera`, `CallMediaPublisher` and `IceServerProvider` tests all pass. A test of something
+  that no longer exists is rewritten against its replacement.
+- New tests on `CallSession` with fakes: a call started as video, the video line offered only
+  with the capability, the camera switch, remote `media`, and the end of a call while the camera
+  runs.
+- `ArchitectureTest` passes without a new baseline.
+- Docs: `ARCHITECTURE.md`, `FEATURE-MAP.md`, `DOMAIN-MODELS.md`, `SCHEMA-FIRESTORE.md`,
+  `CLOUD-FUNCTIONS.md`, and the model section of this plan.
+- Rewrite the notes under steps 6 to 9 that name `CallService`, `OutgoingCallPlacer` or a serial
+  dispatcher. The main thread is that dispatcher now. Step 7's mesh lives beside `CallSession`.
+
+Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
+`PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
+
 ### Step 6 — Group calls: model, signalling, rules — skills: code-review; model: max
 
 - `domain/model/GroupCall.kt`: `GroupCall` and `GroupCallMember`, as in the Firestore layout above.
@@ -831,8 +913,8 @@ with one call on mobile data that the log names a relay at `turn.cloudflare.com`
   offer, an answer or a candidate made for another pair of session ids.
 - `firestore.rules`: a group call is created by its `createdBy`, who is in `invited`, with at most
   four entries. Only the invited read it. A member row is written by its own uid. A link and its
-  candidates are read and written by the two uids in its id. The 1:1 candidate subcollections are
-  narrowed to the caller and the callee.
+  candidates are read and written by the two uids in its id. The 1:1 rules check `callerId` and
+  `calleeId`, so they must branch on the call's kind.
 - `firestore.indexes.json` (new, referenced from `firebase.json`) for the live-call query.
 - **(step-4a)** `CallStateHolder.beginCall(callId, participants, chatId)` carries the call's chat,
   and `setChatId(callId, chatId)` drops a lookup that returns after the next call began. A group
@@ -994,6 +1076,10 @@ Rewrite it properly; do not copy it in.
   picture-in-picture; close the small window and confirm the camera pauses. Answer from the lock
   screen. A headset connected during video takes the audio. The call log and the bubble say *video*.
 - **After step 5:** a call on mobile data runs through `turn.cloudflare.com`.
+- **After step 5a, phone and emulator:** everything listed after step 4a, again. A voice call and a
+  video call in both directions. Cancel a call while it is being placed. Let a call ring out. Kill
+  the app on the phone that is called and confirm the fallback ring and its Decline. Call a phone
+  that runs the released app and confirm a voice call with the camera button disabled.
 - **After step 8:** three devices in one call; one leaves and rejoins; one is killed and its tile
   goes within a minute.
 - **After step 9:** a group of five rings only the picked people; a late join from the banner. Three
@@ -1006,7 +1092,7 @@ Rewrite it properly; do not copy it in.
 
 ```bash
 scripts/run-plan.sh docs/plans/video-calls.md --dry-run
-scripts/run-plan.sh docs/plans/video-calls.md --to 4
+scripts/run-plan.sh docs/plans/video-calls.md
 ```
 
-`--to 4` runs steps 1 to 4a and stops at the checkpoint.
+A run stops at every `‖` of the Order line. Run it again to go on.
