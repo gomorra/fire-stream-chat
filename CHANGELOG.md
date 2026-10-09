@@ -7,6 +7,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 ### Fixed
 
 - **A crop shape picked with the keyboard open stays whole above it.** In the send preview, with the keyboard open for the caption, switching to a taller crop shape, such as 4:5 after 1:1, could cut the frame off at the top and bottom until the keyboard moved. The photo now zooms out just enough to show the whole frame. The crop that is sent was never affected. (`61e6e38b`)
+- **A crop shape picked on a photo you just swiped to is drawn on that photo.** In the fullscreen gallery, swiping to another photo and setting the crop pill before any pinch or pan drew the frame around the whole photo instead of the shape you picked, and Edit opened the send preview without the photo's size. Each photo in the gallery now keeps its own size across swipes, while its zoom and shape still start over. The photo that was sent was always cropped right. (`df4b92e1`)
 
 ## [1.40.3] — 2026-10-09
 

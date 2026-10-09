@@ -84,15 +84,15 @@ internal fun ZoomCropSurface(
     var anchor by remember { mutableStateOf<ZoomAnchor?>(null) }
     // The latest crop and callback, read from inside the effects below, which
     // outlive many recompositions. Every write comes back as a new crop, and the
-    // viewer's pager hands a page that has scrolled away a callback that drops
-    // its writes.
+    // viewer's pager hands a page that isn't current a callback that keeps only
+    // the size.
     val currentCrop by rememberUpdatedState(crop)
     val currentOnCropChange by rememberUpdatedState(onCropChange)
 
     // The photo's decoded size goes onto the crop when the photo or the box is
-    // measured, never on a new shape alone. The viewer's pager can hand the
-    // page that becomes current the crop of the page before it for one frame,
-    // and a write from that frame would keep the other photo's crop.
+    // measured, never on a new crop alone. The rule is defensive: no host hands
+    // over a crop made for another photo today, but a write from one would put
+    // this photo's size onto that crop.
     LaunchedEffect(contentSize, boxSize) {
         val content = contentSize ?: return@LaunchedEffect
         if (currentCrop.imageWidth != content.width || currentCrop.imageHeight != content.height) {

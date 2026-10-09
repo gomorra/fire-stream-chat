@@ -34,6 +34,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -133,6 +134,12 @@ internal fun FullscreenImageViewer(
  * and [onEdit] are handed the item currently on screen, not a fixed one; [onEdit]
  * also gets the zoom and crop shape pending on it ([PendingCrop]), which belong
  * to the page on screen and start over on every swipe, as its zoom does.
+ *
+ * Each page keeps its own crop, so the page that becomes current is never
+ * handed another page's. A page that isn't current is handed only its photo's
+ * decoded size, and keeps only that. It stamps the size while it preloads off
+ * screen and keeps it across swipes, so a shape picked the moment a page is
+ * swiped to is cut from that photo.
  */
 @Composable
 internal fun FullscreenImagePager(
@@ -152,7 +159,8 @@ internal fun FullscreenImagePager(
         initialPage = initialIndex.coerceIn(0, items.lastIndex),
     ) { items.size }
     var currentPageZoomed by remember { mutableStateOf(false) }
-    var crop by remember { mutableStateOf(PendingCrop.None) }
+    val crops = remember { mutableStateMapOf<Int, PendingCrop>() }
+    fun cropOf(page: Int): PendingCrop = crops[page] ?: PendingCrop.None
 
     // Fires once on open too (with the initial page), so the host never has to
     // seed the index itself. rememberUpdatedState keeps the effect from holding
@@ -161,7 +169,10 @@ internal fun FullscreenImagePager(
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }
             .collect { page ->
-                crop = PendingCrop.None
+                // Every other page starts over, keeping only its size.
+                for (other in crops.keys.toList()) {
+                    if (other != page) crops[other] = cropOf(other).sizeOnly()
+                }
                 currentOnPageChanged?.invoke(page)
             }
     }
@@ -185,8 +196,8 @@ internal fun FullscreenImagePager(
                 isActive = isActive,
                 onTap = onDismiss,
                 onZoomChange = { zoomed -> if (isActive) currentPageZoomed = zoomed },
-                crop = if (isActive) crop else PendingCrop.None,
-                onCropChange = { if (isActive) crop = it },
+                crop = if (isActive) cropOf(page) else cropOf(page).sizeOnly(),
+                onCropChange = { crops[page] = if (isActive) it else it.sizeOnly() },
             )
         }
         FullscreenOverlayControls(
@@ -195,15 +206,28 @@ internal fun FullscreenImagePager(
                 { items.getOrNull(pagerState.currentPage)?.let(save) }
             },
             onEdit = onEdit?.let { edit ->
-                { items.getOrNull(pagerState.currentPage)?.let { item -> edit(item, crop) } }
+                {
+                    val page = pagerState.currentPage
+                    items.getOrNull(page)?.let { item -> edit(item, cropOf(page)) }
+                }
             },
             snackbarHostState = snackbarHostState,
         )
         if (onEdit != null) {
-            CropShapeCorner(aspect = crop.aspect, onCycle = { crop = crop.cycleAspect() })
+            CropShapeCorner(
+                aspect = cropOf(pagerState.currentPage).aspect,
+                onCycle = {
+                    val page = pagerState.currentPage
+                    crops[page] = cropOf(page).cycleAspect()
+                },
+            )
         }
     }
 }
+
+/** This crop's photo size alone: the whole photo, no shape. */
+private fun PendingCrop.sizeOnly(): PendingCrop =
+    PendingCrop(imageWidth = imageWidth, imageHeight = imageHeight)
 
 /**
  * The zoomable/pannable image surface for one pager page. Zoom/pan lives in the

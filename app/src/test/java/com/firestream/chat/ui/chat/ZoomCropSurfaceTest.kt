@@ -178,11 +178,10 @@ class ZoomCropSurfaceTest {
 
     @Test
     fun `a crop handed over from another photo is not written back`() {
-        // The fullscreen viewer's pager can hand the page that becomes current,
-        // which is at 1x, the crop of the page before it for one frame, then
-        // clears it. A write back from that frame, the size stamped or the zoom
-        // read as a gesture, would land after the clear and keep the other
-        // photo's crop.
+        // No host hands over another photo's crop today, so this guard is
+        // defensive. If one handed a page at 1x such a crop, a write back, the
+        // size stamped or the zoom read as a gesture, would overwrite the
+        // host's crop with this photo's size or zoom.
         crop = PendingCrop(imageWidth = photoWidth, imageHeight = photoHeight)
         setContent(restoredScale = 1f)
         val before = writes
@@ -201,9 +200,10 @@ class ZoomCropSurfaceTest {
 
     @Test
     fun `a page paged away while its crop is cleared forgets the zoom`() {
-        // The viewer's pager clears the crop of a page that scrolls away in the
-        // same frame that resets its zoom. If the cleared crop's shape carried
-        // the zoom first, the reset would change nothing the surface could see.
+        // The viewer's pager hands a page that scrolls away a crop with no
+        // shape, in the same frame that resets its zoom. If the cleared shape
+        // carried the zoom first, the reset would change nothing the surface
+        // could see.
         // The surface would then keep 2x as the zoom to carry, and the next
         // resize would zoom a photo at 1x back in on its own.
         setContent(resetWhenInactive = true)
