@@ -143,7 +143,7 @@ so this is what removes a phone that died.
 4. **The free public relay may not carry video.** Step 1 logs for every call whether it runs direct
    or relayed. The checkpoint after step 4a decides whether step 5 runs.
 5. **Three video encoders at once** in a four-person call may be too much for a phone. Step 7 lowers
-   resolution and bitrate by group size. The checkpoint after step 8 tries it on the owner's phones.
+   resolution and bitrate by group size. The device check after step 9 tries it on the owner's phones.
 6. **Two plans bump `AppDatabase`.** `docs/plans/stickers-and-gifs.md` also goes from 29 to 30.
    Whichever runs second takes the next number.
 7. **Signalling is not authenticated end to end.** Media is encrypted between the phones, relay
@@ -221,7 +221,7 @@ the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a ‖ 6 → 7 → 8 ‖ 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a → 5b ‖ 6 → 7 → 8 → 9
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -964,6 +964,110 @@ How to do it:
 Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
 `PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
 
+What each side holds:
+
+- **Main** runs each call in a `CallSession`. It reaches Android through `CallHost` and the
+  connection through `data/call/CallMedia`, implemented by `WebRtcCallMedia`. Everything runs on
+  the main thread, without locks. `CallState` has `Placing`, and `CallStateHolder.takeOverPlacing`
+  hands a placing over to the service. `FCMService` rings with a notification when Android will not
+  start the service. `EndReason` is typed through the repository. `firestore.rules` lists the
+  fields a call may hold.
+- **The branch** keeps the call in `CallService`, on `Dispatchers.IO` with locks. A `PeerSession`
+  per remote person runs the offer, the answer and the candidates through `PeerSignaling`. It adds
+  the camera, `CallVideoSinks`, `CallMediaPublisher`, `IceServerProvider`, `OutgoingCallPlacer`,
+  the stage, the docked card and the `callVideoLine` capability.
+
+The design after this step:
+
+- **Main's structure is the base.** `CallSession` owns one call: its states, its ring, its timers,
+  the status of the call document, the end reason and the call's chat message. `CallService` is
+  the host and holds no call logic. Nothing of a call lives in `CallService` again.
+- **`PeerSession` is the connection.** `CallSession` opens one per remote person and collects its
+  events on the main thread. `PeerSignaling` carries the pair's offer, answer and candidates, so
+  `CallSession` no longer sequences them itself. `WebRtcCallMedia` goes.
+- **Main's fixes in that sequencing stay.** The answer and `answered` go in one write. The side
+  that answers reads the call document first and closes when it is no longer `ringing`. An answer
+  is applied once. A call that cannot connect ends after the connect timeout, and a lost
+  connection after the reconnect timeout. Each of these keeps its test.
+- **The call's state is confined to the main thread.** `PeerSession` keeps its own three lock
+  rules, because WebRTC calls it on the signalling thread. Every lock, `@Volatile` field and
+  posted block with an identity check that the branch added to `CallService` goes. Teardown never
+  runs on the signalling thread.
+- **`CallSession` stays testable on the JVM.** It reaches the connection, the camera, the local
+  tracks and the video sinks through interfaces that a test fakes, as it does `CallHost` today.
+  The camera switch (wanted, screen visible, permission, video line agreed, a refused foreground
+  type) is a plain class with its own test.
+- **One name per thing.** `domain/model/CallMedia` is a person's live camera and microphone state.
+  Main's `data/call/CallMedia` interface gets another name or goes with `WebRtcCallMedia`.
+- **Placing follows main.** `CallState.Placing` and `takeOverPlacing` stay. `Placing` carries
+  whether the call was started as video. `OutgoingCallPlacer` goes, or shrinks to what main's
+  placing lacks. `CallRepository.createCall(calleeId, video)` still reads the callee's capability
+  and fetches the relay's servers before the call document exists.
+- **`EndReason` stays typed** in `CallRepository`, with the branch's `video` argument beside it.
+- **The fallback ring knows the call's kind.** It says *video call* for one, and its Decline still
+  works without a session.
+- **`firestore.rules` gains the branch's fields.** A call may be created with `video`, and each
+  side may update its own entry under `media`. Each gets a test in `firestore-rules-tests/`. The
+  owner deploys the rules before a build from this branch places a call, or the call is refused.
+- **`AppDatabase` takes the next free number** after main's, with both sides' columns.
+- **`CHANGELOG.md`:** the branch's entries move under main's current `[UNRELEASED]` header. The
+  `changelog-release` skill decides the version.
+
+How to do it:
+
+- `git merge main` in the worktree. The merge commit is this step's code commit. 34 files
+  conflict. Resolve the call code by the design above, not hunk by hunk.
+- Read main's `CallSession.kt`, `CallService.kt`, `CallHost.kt`, `WebRtcCallMedia.kt`,
+  `CallViewModel.kt`, `CallLaunch.kt` and `CallStateHolder.kt` before resolving anything. Read
+  main's `docs/ARCHITECTURE.md` on calls.
+- No test is deleted. Main's `CallSession` tests and the branch's `PeerSession`, `CallVideoSinks`,
+  `LocalCamera`, `CallMediaPublisher` and `IceServerProvider` tests all pass. A test of something
+  that no longer exists is rewritten against its replacement.
+- New tests on `CallSession` with fakes: a call started as video, the video line offered only
+  with the capability, the camera switch, remote `media`, and the end of a call while the camera
+  runs.
+- `ArchitectureTest` passes without a new baseline.
+- Docs: `ARCHITECTURE.md`, `FEATURE-MAP.md`, `DOMAIN-MODELS.md`, `SCHEMA-FIRESTORE.md`,
+  `CLOUD-FUNCTIONS.md`, and the model section of this plan.
+- Rewrite the notes under steps 6 to 9 that name `CallService`, `OutgoingCallPlacer` or a serial
+  dispatcher. The main thread is that dispatcher now. Step 7's mesh lives beside `CallSession`.
+
+Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
+`PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
+
+### Step 5b — The app asks for full-screen notifications — skills: app-ui-design
+
+On Android 14 and later the call screen opens over the lock screen only when the app holds the
+special access *Full screen notifications*. A sideloaded install does not get it: both the owner's
+phone (Android 17) and the emulator (Android 16) had it denied, and the system rejected the
+incoming call's full-screen intent. The phone then shows only the ringing notification, and with
+the display off no call screen appears. The timer alarm uses the same mechanism. The app checks
+the access nowhere. The installer cannot grant it, so the user has to.
+
+- `data/call/FullScreenIntentAccess.kt` (or beside `CallNotificationManager`): `isGranted()` over
+  `NotificationManager.canUseFullScreenIntent()`. Below API 34 it is always true. `settingsIntent()`
+  builds `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` with the app's `package:` uri.
+- A prompt on the main screen when the access is off: one sentence on why (incoming calls and
+  timer alarms can then wake the display and show over the lock screen), a button that opens the
+  settings page, and *Not now*. *Not now* is remembered in DataStore, written on the application
+  scope, and the prompt does not come back by itself.
+- The state is read again every time the app comes to the foreground, so the prompt goes as soon as
+  the user returns from the settings page with the access on.
+- `SettingsScreen`, section *Notifications*: a row **Full-screen call alerts** that shows *On* or
+  *Off* and opens the same settings page. It is hidden below API 34. It is the way back for a user
+  who chose *Not now*.
+- Whether to show the prompt is a pure function of the API level, the access and the remembered
+  *Not now*, with a table test.
+- No change to how a call rings. A call without the access still rings with its notification.
+- Tests: the pure function; a Robolectric test of the prompt (shown, hidden after *Not now*, hidden
+  with the access on) and of the settings row.
+- Docs: `SPEC.md`, `FEATURE-MAP.md`. `docs/GOTCHAS.md`: a sideloaded app starts without this
+  access, and `adb shell appops set --uid <package> USE_FULL_SCREEN_INTENT allow` grants it on a
+  test device. `docs/BACKLOG.md`: drop the timer entry's open question about this access. CHANGELOG
+  `Fixed`.
+
+**‖ Checkpoint.** The device check after steps 5a and 5b, the owner's deploys, and the release.
+
 ### Step 6 — Group calls: model, signalling, rules — skills: code-review; model: max
 
 - `domain/model/GroupCall.kt`: `GroupCall` and `GroupCallMember`, as in the Firestore layout above.
@@ -1073,8 +1177,10 @@ Stop with a decision when a fix of main and a behaviour of the branch cannot bot
 - Tests: the `FCMService` branch and the mute rule.
 - Docs: `CLOUD-FUNCTIONS.md`.
 
-**‖ Checkpoint.** The owner deploys functions, rules and indexes
-(`firebase deploy --only functions,firestore`). Three devices join one call, to answer risk 5.
+**No stop here.** The run goes on to step 9. The owner's deploy of functions, rules and indexes
+(`firebase deploy --only functions,firestore`) and the three-device call that answers risk 5 follow
+step 9, with the real group call screen. If that call shows a phone cannot carry the mesh, step 9's
+cap and layout are reworked.
 
 ### Step 9 — Group call screen, entry and joining late (UI) — skills: app-ui-design
 
@@ -1150,9 +1256,14 @@ Rewrite it properly; do not copy it in.
   video call in both directions. Cancel a call while it is being placed. Let a call ring out. Kill
   the app on the phone that is called and confirm the fallback ring and its Decline. Call a phone
   that runs the released app and confirm a voice call with the camera button disabled.
-- **After step 8:** three devices in one call; one leaves and rejoins; one is killed and its tile
-  goes within a minute.
-- **After step 9:** a group of five rings only the picked people; a late join from the banner. Three
+- **After step 5b, on the phone:** switch *Full screen notifications* off for the app in the
+  system settings and open the app: the prompt appears, its button opens the right page, and the
+  prompt is gone on return with the access on. With the access on and the display off, an incoming
+  call wakes the display and shows the call screen. With it off, the call still rings as a
+  notification. *Not now* keeps the prompt away, and the settings row still leads to the page.
+- **After step 9:** first `firebase deploy --only functions,firestore`. Three devices in one call;
+  one leaves and rejoins; one is killed and its tile goes within a minute. Four devices in one
+  call, to answer risk 5. A group of five rings only the picked people; a late join from the banner. Three
   and four people show the grid, a tap enlarges a tile, and the docked card shows the grid.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): two phones on
   mobile data, a Bluetooth headset during video, heat and battery in a four-person call, a phone with
