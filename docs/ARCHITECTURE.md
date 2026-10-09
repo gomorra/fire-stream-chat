@@ -101,7 +101,7 @@ The concrete implementation resolving the Repository Interfaces.
 - **Remote Sources**: Firebase services. The repository layer typically observes Firestore, writes modifications to Room, and the UI reacts to the Room changes.
 - **Crypto Sources**: `SignalManager` and `SignalProtocolStoreImpl` orchestrate key generation, pre-key bundles, and encryption/decryption cycles transparently to the upper layers.
 - **Media Infrastructure**: `MediaFileManager` (@Singleton) manages local media storage at `filesDir/media/{chatId}/{messageId}.{ext}` and gallery export via MediaStore (`Pictures/FireStream`). `ImageCompressor` (@Singleton) provides EXIF-aware compression with `inSampleSize` for memory-safe decode (1600px/80% JPEG default, full quality opt-in via DataStore). Under the "Keep Original Images" preference `OutboxSender` uploads the encoding but copies the untouched input into the media dir as the message's local file, in one persisted step. `MediaBackfillWorker` (WorkManager) downloads whatever media has no local copy, respecting `AutoDownloadOption` and network constraints — daily as periodic work, on demand from Settings, and as the one-time run `MediaBackfillScheduler` queues when an auto-download fails, so a photo received while offline lands once there is a network again without the chat being opened (the push reconcile, `MessageRepository.reconcileFromPush`, is what gets such a message into Room in the first place).
-- **Call Infrastructure**: `CallService` (foreground service) owns the WebRTC peer connection lifecycle. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
+- **Call Infrastructure**: `CallService` (foreground service) holds one call at a time and runs it in a `CallSession`; `WebRtcCallMedia` owns the call's WebRTC peer connection. `CallStateHolder` (@Singleton) bridges the service to the UI via `StateFlow`. `CallActivity` is a separate Android Activity (not a NavHost destination) for lock-screen support.
 
 ### 3.3 UI / Presentation Layer
 
@@ -188,10 +188,11 @@ sequenceDiagram
 
 ### Call Architecture Details
 
-- **`CallService`** (foreground service): Owns the `PeerConnection` lifecycle, ICE negotiation, and audio stream management.
+- **`CallService`** (foreground service): The Android side of a call: the foreground type and its notification, the audio session, and the WebRTC objects through `WebRtcCallMedia`. It holds one `CallSession` at a time and stops with the latest start id.
+- **`CallSession`**: One call, without Android or WebRTC: its signalling, its timer (ringing, connecting, a lost connection), the states it publishes, and the end-of-call writes. It reaches Android through `CallHost` and the connection through `CallMedia`, so `CallSessionTest` drives it on the JVM.
 - **`CallStateHolder`** (@Singleton): Exposes `StateFlow<CallState>` and `StateFlow<CallUiControls>`. Bridges `CallService` ↔ UI without binding to the service.
 - **`CallActivity`** (separate Activity): Not a NavHost route. Launched via Intent. Supports lock-screen rendering.
-- **`CallState`** (sealed interface): `Idle | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`.
+- **`CallState`** (sealed interface): `Idle | Placing | OutgoingRinging | IncomingRinging | Connecting | Connected | Ended(EndReason)`. `Placing` covers an outgoing call from the moment its setup starts, after the microphone prompt, until the service takes it over. It counts as ongoing.
 - **Audio session** (`startAudioSession()` / `stopAudioSession()` in `CallService`, idempotent and
   mutually exclusive): sets `MODE_IN_COMMUNICATION`, then `CallAudioRouter` picks the route through
   `AudioManager.setCommunicationDevice()`. `CallAudioRoutePolicy` is the pure decision (a headset
@@ -382,7 +383,11 @@ graph TD
 com.firestream.chat/
 ├── data/
 │   ├── call/                    # WebRTC infrastructure
-│   │   ├── CallService.kt       # Foreground service — owns PeerConnection
+│   │   ├── CallService.kt       # Foreground service — Android side of a call, one CallSession at a time
+│   │   ├── CallSession.kt       # One call's transitions, timer and end-of-call writes (JVM-testable)
+│   │   ├── CallHost.kt          # What a CallSession needs from Android
+│   │   ├── CallMedia.kt         # One call's connection as the session sees it
+│   │   ├── WebRtcCallMedia.kt   # CallMedia over a WebRTC PeerConnection
 │   │   ├── CallStateHolder.kt   # @Singleton state bridge (service ↔ UI)
 │   │   ├── CallNotificationManager.kt
 │   │   ├── CallAudioRoutePolicy.kt  # Pure — which route wins, TYPE_* → CallAudioRoute

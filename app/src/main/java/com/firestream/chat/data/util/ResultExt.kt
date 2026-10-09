@@ -23,6 +23,19 @@ internal inline fun <T> resultOf(block: () -> T): Result<T> =
     }
 
 /**
+ * Like [resultOf], but a [CancellationException] propagates instead of becoming a failure. Use it
+ * around suspend calls: a coroutine cancelled while suspended in [block] must stop, not carry on
+ * with a failed [Result].
+ */
+internal inline fun <T> cancellableResultOf(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: Exception) {
+        e.rethrowIfCancellation()
+        Result.failure(e)
+    }
+
+/**
  * Rethrows this throwable if it is a [CancellationException]. Call it first in
  * catch blocks that swallow-and-log an error, so they don't also swallow
  * coroutine cancellation (which must propagate for structured concurrency).

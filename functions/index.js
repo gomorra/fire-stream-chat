@@ -2,6 +2,7 @@ const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/
 const { onValueWritten } = require("firebase-functions/v2/database");
 const admin = require("firebase-admin");
 const { logger } = require("firebase-functions");
+const { callMessagePushData, incomingCallAndroidConfig, unreadUpdates } = require("./callPush");
 
 admin.initializeApp();
 
@@ -87,9 +88,7 @@ exports.sendCallPushNotification = onDocumentCreated(
                     callerName: callerName,
                     callerAvatarUrl: callerAvatarUrl
                 },
-                android: {
-                    priority: "high"
-                }
+                android: incomingCallAndroidConfig()
             };
 
             const response = await admin.messaging().send(payload);
@@ -242,12 +241,12 @@ exports.sendPushNotification = onDocumentCreated(
                 return null;
             }
 
-            // 4. Increment per-user unread counts + send push notifications concurrently
-            const unreadUpdates = {};
-            recipients.forEach(recipientId => {
-                unreadUpdates[`unreadCounts.${recipientId}`] = admin.firestore.FieldValue.increment(1);
-            });
-            const unreadPromise = admin.firestore().collection("chats").doc(chatId).update(unreadUpdates);
+            // 4. Increment per-user unread counts + send push notifications concurrently.
+            // A call message counts as unread only when it was missed.
+            const unread = unreadUpdates(messageData, recipients, admin.firestore.FieldValue.increment(1));
+            const unreadPromise = Object.keys(unread).length > 0
+                ? admin.firestore().collection("chats").doc(chatId).update(unread)
+                : Promise.resolve();
 
             const mentionsStr = Array.isArray(mentions) ? mentions.join(",") : "";
             const pushPromise = Promise.all(recipients.map(async (recipientId) => {
@@ -283,7 +282,10 @@ exports.sendPushNotification = onDocumentCreated(
                             chatName: chatData.name || "",
                             mentions: mentionsStr,
                             messageType: messageData.type || "TEXT",
-                            messageContent: messageData.content || ""
+                            messageContent: messageData.content || "",
+                            // Every call message is pushed, so the callee's app stores it and
+                            // its Calls tab lists the call. The app notifies only a missed one.
+                            ...callMessagePushData(messageData)
                         },
                         android: {
                             priority: "high"

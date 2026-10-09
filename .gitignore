@@ -22,8 +22,10 @@ keystore/
 # Firebase / Cloud Functions
 firebase-debug.log
 firebase-debug.*.log
+firestore-debug.log
 .firebase/
 functions/node_modules/
+firestore-rules-tests/node_modules/
 
 # JVM crash logs
 hs_err_pid*.log

@@ -74,7 +74,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 **The smell.** Two related list-sync bugs shipped in 2026-04-23/24 — `e3c2c9c` (new items colliding on `order` after deletes) and `eed7519` (receiver's live updates clobbered by a race between `observeList`'s metadata listener, its items listener, and `ensureListSyncRunning`'s `observeMyLists` sync). Both were caught by dogfooding, not by tests. The race-condition class in particular can't be reliably reproduced in `runTest` with mocked DAOs: I tried adding a unit test for `eed7519`, found it passed even with the mutex reverted (false negative), and pulled it. The per-list mutex fix is logically correct but has no executable regression guard.
 
 **Why we haven't fixed it.** The gap is two pieces, and neither is a drive-by:
-- No Firebase emulator harness. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
+- No Firebase emulator harness for the app. `firestore-rules-tests/` runs `firestore.rules` in the emulator from Node, but nothing runs the app sources against it. All existing tests stub `FirestoreListSource` / `FirestoreMessageSource` / etc. — they can't surface query-rule regressions, cross-client convergence bugs, or timing-dependent races. Adding an emulator-backed test task means `firebase emulators:start` wiring in Gradle + fakes for `FirebaseAuth` (the emulator supports it) + a separate test source set that runs off CI's default path. Probably a one-evening setup; low ongoing maintenance.
 - No white-box tripwire asserting that `listDao.insert` callers in `ListRepositoryImpl.observeList`'s two listeners and `ensureListSyncRunning` hold `mutexFor(listId)`. A future refactor that accidentally strips one of the three `mutexFor(...).withLock { ... }` blocks would re-introduce `eed7519` silently. Five-minute test, lasts forever.
 
 **When to revisit.** Planned-for-soon, not deferred indefinitely — the user flagged a longer development horizon on 2026-04-24 and asked what coverage was in place. The trigger is the next free half-day: scaffold the emulator task first (`sender + receiver` repository instances against one emulator, asserting Room convergence on list add/toggle/clear, chat send/receive, and shared-list fan-out — ~5–10 tests total, not a full suite), then the tripwire test. Skip property-based / stress tests; they'll only produce the same false-negatives my pulled test did.
@@ -129,7 +129,7 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 **Why we haven't fixed it.** A notification needs the concrete Activity class for its PendingIntent. The clean alternatives (an `Intent` factory bound in `di/`, or routing through `MainActivity` deep-link extras like FCM notifications do) are pure ceremony for one class reference.
 
-**When to revisit.** The next time call-notification code is touched. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation").
+**When to revisit.** With the video-calls plan, which adds to the same intent contract. The fix is a call-screen intent contract in `data/call/`, used by `CallActivity`, `CallLaunch`, `ChatScreen`, `CallsScreen` and `CallNotificationManager`, plus one entry for it in the UI→data allowlist. Then delete the `filterNot` baseline in `ArchitectureTest.kt` ("data layer does not import ui or navigation"). Deferred on 2026-10-08, when the fallback ring added five of `CallActivity`'s extras here: the fix touches about 30 references in five files, outside the call fixes that release carried.
 
 ---
 
@@ -312,24 +312,28 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### Calls — known problems left unfixed
+### Calls — the known limits
 
-**The smell.** These call problems are known and not fixed:
-- `CallService` has no JVM seam. Its threading, its teardown order, how it stops and its end-of-call writes are guarded by review and the on-device checklist in `docs/BACKLOG.md`, not by tests. Extracting the per-call fields and transitions into a plain `CallSession` class would make them testable.
-- `CallRepositoryImpl` wraps every call in `catch (e: Exception)`, which also catches `CancellationException`. A cancelled caller gets `Result.failure` and runs on. `CallService` no longer depends on cancelling a repository call, but the trap stays for the next caller. See `docs/GOTCHAS.md`.
-- A call can wait forever in two places. Nothing times out `Connecting` if ICE never reaches `FAILED`, which continual gathering makes possible. And `createCall` offline queues the call document, so the callee's phone rings whenever the caller next comes online. A transaction would fail fast instead.
-- `firestore.rules`: any signed-in user can read and add ICE candidates to any call whose id they know, and either party can rewrite `callerId`, `calleeId` and `status`. Candidates carry IP addresses.
-- `functions/index.js`: the call push has no TTL, so a phone that comes online hours later still wakes for a dead call. `sendPushNotification` also pushes every call-log message as "New message" and raises the callee's unread count.
-- `FCMService.handleIncomingCall` now survives a refused foreground-service start, but the call is then missed with no notification at all.
-- The pocketbase flavor keeps the call button, and its signalling stub throws `NotImplementedError`, which `catch (e: Exception)` does not catch.
-- The callee runs its own 30 s ring timeout. If it fires before the caller's, the caller sees "ended" and logs the call as `remote_hangup`, not `timeout`. The callee's timer starts only once the push arrives, so it normally fires second.
-- A call that ends while its call screen is in the background leaves the screen in Recents until it is next shown. It then shows "Call Ended" and closes itself.
-- `CallStateHolder` has no state for a call being placed. From `prepareOutgoingCall()` until the service publishes `OutgoingRinging`, the state reads `Idle`. So `CallViewModel` holds its setup open until the service publishes, `failOutgoingCall` replaces only `Idle`, and an incoming call can still ring during the setup, which the service then ends. A `CallState.Placing` that counts as ongoing would replace all three, and would let the screen show "Calling…" instead of a blank screen. A `Placing` that is never cleared would block every call, so it needs a timeout of its own.
-- A call you placed that ended before it connected, other than by a decline or the ring timeout, reads "Outgoing call" in the chat and "No answer" in the Calls tab. Both screens get `CallLogType.OUTGOING` for it, and each keeps its own label for that type. Which label is right is a product decision.
+**The smell.**
+- `CallService` and `WebRtcCallMedia` have no JVM test. `CallSessionTest` covers a call's transitions, its timers and its end-of-call writes. How the service enters and leaves the foreground, how it stops by start id, and how WebRTC's callbacks reach the main thread are guarded by review and the on-device checklist in `docs/BACKLOG.md`.
+- The fallback ring that `FCMService` posts when Android will not start the call service does not know when the caller hangs up. It rings until it is declined or times out with the ring, 30 s at most. Opening it after the call ended shows "Call Ended".
+- The call document's `status` and `endReason` are read as strings. `CallSignalingData` carries them raw, and `CallSession` decodes them where it reads them. Writes go through `EndReason`, so the wire names have one source.
+- An incoming call whose push passed `FCMService`'s busy check a moment before the user started placing a call still rings, and the call being placed ends itself. Refusing it would need the service to enter the foreground only to leave it again, which flashes a ringing notification. If the placed call's document already existed, its callee rang and the chat records nothing. The incoming call replaces the placing with a plain state write, so neither the setup nor a Cancel owns that record.
+- A call that rings in while the microphone prompt for an outgoing call is up, and ends there, closes the call screen 1.5 s later, and the prompt with it. The outgoing call is not placed until the user taps call again. It needs the first call ever, an incoming call, and its end, all within the prompt.
 
-**Why we haven't fixed it.** None of these is a crash or a privacy leak on the firebase flavor today. The ring-timeout race needs unusual timing and changes only the logged reason. The rules and the Cloud Functions need an emulator run and a deploy, which a cloud session cannot do. The `CallSession` extraction is a refactor of a class this sweep just rewrote for threading, and it deserves its own reviewed change.
+**Why we haven't fixed it.** Both adapters are thin layers over Android and WebRTC, which Robolectric cannot run: WebRTC needs its native library, and the foreground-service checks are the platform's. A test there would mostly check its own mocks. The fallback ring is the rare path, and listening to the call document from a push needs a running service, the very thing Android refused. The missed-call push that follows a hang-up could stop the ring, but it does not name the call, so it could stop the ring of the caller's next call. The call document's strings are decoded in one place, and typing them would change the signalling source on both flavors with no change in behaviour.
 
-**When to revisit.** The next change to `CallService`'s per-call state starts with the `CallSession` extraction. The rules and the push TTL go with the next Firebase deploy. The `Connecting` timeout belongs to the first report of a call stuck on "Connecting…". `CallState.Placing` goes with the `CallSession` extraction or the next change to call setup, whichever comes first.
+**When to revisit.** When a bug is traced to either adapter, or when the fallback ring turns out to fire often. Type the call document's fields when it gains a status or a reason, as video calls would.
+
+---
+
+### Repositories other than `CallRepositoryImpl` turn cancellation into a failure
+
+**The smell.** `resultOf` and the hand-written `try { … } catch (e: Exception)` in the other repositories catch `CancellationException`. A coroutine cancelled while suspended in one gets `Result.failure` back and runs on. `cancellableResultOf` (`ResultExt.kt`) lets the cancellation through, and only `CallRepositoryImpl` uses it. `docs/GOTCHAS.md` describes the trap.
+
+**Why we haven't fixed it.** Each call site needs checking that no caller relies on getting a failure when it is cancelled, across about a hundred catch sites in eight repositories. No known bug comes from it today: the callers that cancel check that the work is still wanted.
+
+**When to revisit.** When a bug is traced to a cancelled repository call, or when a repository is next reworked. Move that repository to `cancellableResultOf` then.
 
 ---
 
@@ -749,8 +753,8 @@ and sizes are checked like any manifest's (`StickerManifest`), and no url is tak
 plan accepts for the sticker files too (`docs/plans/stickers-and-gifs.md`, open risk 2). Rules
 cannot tell who minted a random id. The fix changes what a pack's document id is: derive it
 from the owner, `sha256(ownerUid + ":" + localPackId)`, send that id in messages, and let the
-`create` rule recompute it with `hashing.sha256`. That is a change to the pack model, and its
-rule cannot be tested in this repo, which has no rules emulator.
+`create` rule recompute it with `hashing.sha256`. That is a change to the pack model. Its rule
+would get emulator tests in `firestore-rules-tests/`, next to the calls rules.
 
 **When to revisit.** Before the user base stops being closed, or when a pack is found pending
 with a manifest of another owner under its id. Found by `/code-review` on step 6 of the plan.

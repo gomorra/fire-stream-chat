@@ -1,0 +1,54 @@
+name: Firestore rules
+
+# Runs firestore.rules in the Firestore emulator (firestore-rules-tests/).
+# See docs/TESTING.md, "Firestore rules tests".
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firebase.json'
+      - 'firestore-rules-tests/**'
+      - '.github/workflows/firestore-rules.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'firebase.json'
+      - 'firestore-rules-tests/**'
+      - '.github/workflows/firestore-rules.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: firestore-rules-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Firestore emulator is a Java program.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: firestore-rules-tests/package-lock.json
+
+      # firebase-tools downloads the emulator jar on its first run. The jar's
+      # version follows firebase-tools, which the lockfile pins.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('firestore-rules-tests/package-lock.json') }}
+
+      - run: npm ci
+      - run: npm test

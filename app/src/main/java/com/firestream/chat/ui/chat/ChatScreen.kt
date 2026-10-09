@@ -5,6 +5,7 @@ package com.firestream.chat.ui.chat
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import com.firestream.chat.BuildConfig
 import com.firestream.chat.ui.call.CallActivity
 import com.firestream.chat.ui.chat.picker.rememberPickerPanelState
 import android.content.pm.PackageManager
@@ -1099,7 +1100,7 @@ fun ChatScreen(
                     }
                 },
                 actions = {
-                    if (!uiState.session.isGroupChat && !uiState.session.isBroadcast) {
+                    if (BuildConfig.SUPPORTS_CALLS && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                         IconButton(onClick = {
                             val callIntent = Intent(context, CallActivity::class.java).apply {
                                 putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)
@@ -1516,7 +1517,7 @@ fun ChatScreen(
                                                 onReplyPreviewClick = {
                                                     replyToMessage?.id?.let { jumpToSourceMessage(it) }
                                                 },
-                                                onCall = if (message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
+                                                onCall = if (BuildConfig.SUPPORTS_CALLS && message.type == MessageType.CALL && !uiState.session.isGroupChat && !uiState.session.isBroadcast) {
                                                     {
                                                         val callIntent = Intent(context, CallActivity::class.java).apply {
                                                             putExtra(CallActivity.EXTRA_ACTION, CallActivity.ACTION_OUTGOING)

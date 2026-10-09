@@ -109,6 +109,7 @@ android {
             dimension = "backend"
             isDefault = true
             buildConfigField("Boolean", "SUPPORTS_SIGNAL", "true")
+            buildConfigField("Boolean", "SUPPORTS_CALLS", "true")
             buildConfigField("String", "POCKETBASE_URL", "\"\"")
             buildConfigField(
                 "String",
@@ -119,6 +120,8 @@ android {
         create("pocketbase") {
             dimension = "backend"
             buildConfigField("Boolean", "SUPPORTS_SIGNAL", "false")
+            // The PocketBase backend has no call signalling, so the app offers no calls.
+            buildConfigField("Boolean", "SUPPORTS_CALLS", "false")
             // Default targets the emulator's loopback to the host PC. Override
             // for physical-device testing on the same Wi-Fi via either:
             //   ./gradlew assemblePocketbaseDebug -PpocketbaseUrl=http://192.168.x.x:8090

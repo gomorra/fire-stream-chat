@@ -34,24 +34,36 @@ seen on a phone.
    once in each case. Silent mode: no ring. Vibrate mode: vibration only.
 2. Fresh install on Android 14+, microphone never granted: answer with the green button on the
    full-screen call screen. The permission prompt appears, and the call connects once allowed.
-3. Connected call, then Wi-Fi off on one phone: the call ends with an error and neither app
-   crashes. Then a call where both people hang up at the same moment.
+3. Connected call, then Wi-Fi and mobile data off on one phone: within about 30 s both phones
+   end the call, and neither app crashes. Then a call where both people hang up at the same moment.
 4. Ten calls in a row: memory does not climb from call to call (Android Studio memory profiler).
 5. Mute, end the call, start another: the new call shows unmuted and the other side hears you.
 6. After a call, both phones' chat lists show the call as the chat's last message.
 7. Cancel an outgoing call before it is answered: the other phone shows a missed call, in the
-   chat and in the Calls tab. Decline a call: both phones show "Declined", in the chat and in the
+   chat and in the Calls tab, with a "Missed call" notification and an unread badge on the chat.
+   After an answered or a declined call the other phone shows neither (needs the updated Cloud
+   Functions). Decline a call: both phones show "Declined", in the chat and in the
    Calls tab, and only the phone that declined shows it in red.
 8. During a call, open another chat and tap call: "You're already in a call", and the call goes
    on. Rotate right after tapping call: the call still starts. Open a finished call's card from
-   Recents: no new call is placed.
-9. With mobile data slowed or briefly off, tap call and press Back before it rings, once
-   straight away and once after turning the phone: the other phone does not ring, or stops at
-   once. Tap call twice quickly: it rings once.
+   Recents: no new call is placed. During a call press Home, and let the other person hang up:
+   the call's card leaves Recents at once.
+9. With mobile data slowed or briefly off, tap call: the screen shows the name and
+   "Calling..." at once. Press Back before it rings, once straight away and once after turning
+   the phone, and once press Cancel instead: the other phone does not ring, or stops at once
+   and shows a missed call.
+   Tap call twice quickly: it rings once. With no network at all, the screen says the call
+   could not start within about 20 s.
 10. Fresh install: rotate while the microphone prompt is up, then allow. The call starts.
-    Do the same when answering with the green button: the call connects.
+    Do the same when answering with the green button: the call connects. Take the microphone
+    permission away again, tap call, and while the prompt is up have the other phone call:
+    the incoming call rings.
 11. Hang up, then have the other phone call straight back, twice. Each call rings: the service
     stops and starts cleanly between calls.
+12. Set the app's battery use to Restricted, lock the phone, and call it. If Android will not let
+    the app start ringing, a ringing notification appears instead. Opening it shows the call
+    screen, which rings, and the call can be answered. Call again and press Decline on the
+    notification: the ring stops, and both phones show "Declined".
 
 ### Crop frame above the keyboard (2026-10-08)
 
