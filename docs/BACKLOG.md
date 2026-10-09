@@ -79,6 +79,8 @@ under Robolectric. No test runs a real keyboard, so the slide itself has not bee
    Send: the crop is the last shape, cut from what you framed.
 5. In the fullscreen viewer, zoom in, set the pill to 1:1, swipe to the next photo and back:
    nothing jumps during the swipe, each photo shows at 1x, and the pill does not zoom it.
+   Then, on a photo just swiped to, before any pinch or pan, set the pill to 1:1: the square is
+   drawn on that photo, not a frame around the whole of it. Tap Edit: the preview opens on the same square.
 
 ### Picker search above the keyboard (2026-10-07)
 

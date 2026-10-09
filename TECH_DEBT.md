@@ -173,16 +173,13 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
-### `ZoomCropSurface` tells its own zoom changes from gestures by timing, and the viewer's pager shares one crop
+### `ZoomCropSurface` tells its own zoom changes from gestures by timing
 
-**The smell.**
-- `ZoomCropSurface` sees its own `zoom.set` calls and the user's gestures alike, as changes to `ZoomableState`. It skips its own by restarting the effect whose collector drops its first value. So the restore and every carry restart that effect, and a change that lands in the same frame can be missed. Two guards cover the cases known today, and `ZoomCropSurfaceTest` pins both. A new crop shape never writes the decoded size. A page resetting itself on paging away is not carried, which holds only because the surface's effect is composed before `ZoomableBox`'s reset.
-- `FullscreenImagePager` keeps one crop for whichever page is current and clears it after a page change. For one frame, the page that becomes current can be handed the previous page's crop. The first guard exists for that frame.
-- The same pager drops the decoded size a page stamps while it is preloaded off screen. A page reached by swiping has no size until the first pinch or pan, so a shape picked from the pill before then is drawn around the whole photo. Edit hands the send preview that size-less crop, and the preview applies the shape from its own decode, so the photo that is sent is cropped right.
+**The smell.** `ZoomCropSurface` sees its own `zoom.set` calls and the user's gestures alike, as changes to `ZoomableState`. It skips its own by restarting the effect whose collector drops its first value. So the restore and every carry restart that effect, and a change that lands in the same frame can be missed. Two guards cover the cases known today, and `ZoomCropSurfaceTest` pins both. A new crop from the host, a new shape included, never writes the decoded size. A page resetting itself on paging away is not carried, which holds only because the surface's effect is composed before `ZoomableBox`'s reset.
 
-**Why we haven't fixed it.** Each fix reaches past the crop-shape bug these turned up in. `ZoomableBox` could report gestures and resets through a callback, so a programmatic set never echoes back and effect order stops mattering. It has one caller, but every gesture path changes, and the viewer's zoom and page gestures have no UI tests. `FullscreenImagePager` could keep a crop per page. Then no page is handed another page's crop, and a preloaded page keeps its size.
+**Why we haven't fixed it.** The fix reaches past the crop-shape bug this turned up in. `ZoomableBox` could report gestures and resets through a callback, so a programmatic set never echoes back and effect order stops mattering. It has one caller, but every gesture path changes, and the viewer's zoom and page gestures have no UI tests.
 
-**When to revisit.** The per-page crop soon: it fixes the frame drawn around the whole photo in a few lines of `FullscreenImagePager`. The callback with the next change that adds a programmatic `zoom.set` or another key to the surface's effect. Found 2026-10-08, while fixing the crop shape above the keyboard.
+**When to revisit.** With the next change that adds a programmatic `zoom.set` or another key to the surface's effect. Found 2026-10-08, while fixing the crop shape above the keyboard.
 
 ---
 
