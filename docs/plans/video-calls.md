@@ -133,7 +133,7 @@ so this is what removes a phone that died.
 4. **The free public relay may not carry video.** Step 1 logs for every call whether it runs direct
    or relayed. The checkpoint after step 4a decides whether step 5 runs.
 5. **Three video encoders at once** in a four-person call may be too much for a phone. Step 7 lowers
-   resolution and bitrate by group size. The checkpoint after step 8 tries it on the owner's phones.
+   resolution and bitrate by group size. The device check after step 9 tries it on the owner's phones.
 6. **Two plans bump `AppDatabase`.** `docs/plans/stickers-and-gifs.md` also goes from 29 to 30.
    Whichever runs second takes the next number.
 7. **Signalling is not authenticated end to end.** Media is encrypted between the phones, relay
@@ -211,7 +211,7 @@ the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a ‖ 6 → 7 → 8 ‖ 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a ‖ 6 → 7 → 8 → 9
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -544,8 +544,10 @@ Stop with a decision when a fix of main and a behaviour of the branch cannot bot
 - Tests: the `FCMService` branch and the mute rule.
 - Docs: `CLOUD-FUNCTIONS.md`.
 
-**‖ Checkpoint.** The owner deploys functions, rules and indexes
-(`firebase deploy --only functions,firestore`). Three devices join one call, to answer risk 5.
+**No stop here.** The run goes on to step 9. The owner's deploy of functions, rules and indexes
+(`firebase deploy --only functions,firestore`) and the three-device call that answers risk 5 follow
+step 9, with the real group call screen. If that call shows a phone cannot carry the mesh, step 9's
+cap and layout are reworked.
 
 ### Step 9 — Group call screen, entry and joining late (UI) — skills: app-ui-design
 
@@ -591,9 +593,9 @@ Rewrite it properly; do not copy it in.
   video call in both directions. Cancel a call while it is being placed. Let a call ring out. Kill
   the app on the phone that is called and confirm the fallback ring and its Decline. Call a phone
   that runs the released app and confirm a voice call with the camera button disabled.
-- **After step 8:** three devices in one call; one leaves and rejoins; one is killed and its tile
-  goes within a minute.
-- **After step 9:** a group of five rings only the picked people; a late join from the banner. Three
+- **After step 9:** first `firebase deploy --only functions,firestore`. Three devices in one call;
+  one leaves and rejoins; one is killed and its tile goes within a minute. Four devices in one
+  call, to answer risk 5. A group of five rings only the picked people; a late join from the banner. Three
   and four people show the grid, a tap enlarges a tile, and the docked card shows the grid.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): two phones on
   mobile data, a Bluetooth headset during video, heat and battery in a four-person call, a phone with
