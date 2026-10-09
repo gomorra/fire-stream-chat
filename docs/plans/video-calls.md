@@ -221,7 +221,7 @@ the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a → 5b ‖ 6 → 7 → 8 → 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a → 5b ‖ 6 → 7 → 8 → 9 → 10
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -964,77 +964,6 @@ How to do it:
 Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
 `PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
 
-What each side holds:
-
-- **Main** runs each call in a `CallSession`. It reaches Android through `CallHost` and the
-  connection through `data/call/CallMedia`, implemented by `WebRtcCallMedia`. Everything runs on
-  the main thread, without locks. `CallState` has `Placing`, and `CallStateHolder.takeOverPlacing`
-  hands a placing over to the service. `FCMService` rings with a notification when Android will not
-  start the service. `EndReason` is typed through the repository. `firestore.rules` lists the
-  fields a call may hold.
-- **The branch** keeps the call in `CallService`, on `Dispatchers.IO` with locks. A `PeerSession`
-  per remote person runs the offer, the answer and the candidates through `PeerSignaling`. It adds
-  the camera, `CallVideoSinks`, `CallMediaPublisher`, `IceServerProvider`, `OutgoingCallPlacer`,
-  the stage, the docked card and the `callVideoLine` capability.
-
-The design after this step:
-
-- **Main's structure is the base.** `CallSession` owns one call: its states, its ring, its timers,
-  the status of the call document, the end reason and the call's chat message. `CallService` is
-  the host and holds no call logic. Nothing of a call lives in `CallService` again.
-- **`PeerSession` is the connection.** `CallSession` opens one per remote person and collects its
-  events on the main thread. `PeerSignaling` carries the pair's offer, answer and candidates, so
-  `CallSession` no longer sequences them itself. `WebRtcCallMedia` goes.
-- **Main's fixes in that sequencing stay.** The answer and `answered` go in one write. The side
-  that answers reads the call document first and closes when it is no longer `ringing`. An answer
-  is applied once. A call that cannot connect ends after the connect timeout, and a lost
-  connection after the reconnect timeout. Each of these keeps its test.
-- **The call's state is confined to the main thread.** `PeerSession` keeps its own three lock
-  rules, because WebRTC calls it on the signalling thread. Every lock, `@Volatile` field and
-  posted block with an identity check that the branch added to `CallService` goes. Teardown never
-  runs on the signalling thread.
-- **`CallSession` stays testable on the JVM.** It reaches the connection, the camera, the local
-  tracks and the video sinks through interfaces that a test fakes, as it does `CallHost` today.
-  The camera switch (wanted, screen visible, permission, video line agreed, a refused foreground
-  type) is a plain class with its own test.
-- **One name per thing.** `domain/model/CallMedia` is a person's live camera and microphone state.
-  Main's `data/call/CallMedia` interface gets another name or goes with `WebRtcCallMedia`.
-- **Placing follows main.** `CallState.Placing` and `takeOverPlacing` stay. `Placing` carries
-  whether the call was started as video. `OutgoingCallPlacer` goes, or shrinks to what main's
-  placing lacks. `CallRepository.createCall(calleeId, video)` still reads the callee's capability
-  and fetches the relay's servers before the call document exists.
-- **`EndReason` stays typed** in `CallRepository`, with the branch's `video` argument beside it.
-- **The fallback ring knows the call's kind.** It says *video call* for one, and its Decline still
-  works without a session.
-- **`firestore.rules` gains the branch's fields.** A call may be created with `video`, and each
-  side may update its own entry under `media`. Each gets a test in `firestore-rules-tests/`. The
-  owner deploys the rules before a build from this branch places a call, or the call is refused.
-- **`AppDatabase` takes the next free number** after main's, with both sides' columns.
-- **`CHANGELOG.md`:** the branch's entries move under main's current `[UNRELEASED]` header. The
-  `changelog-release` skill decides the version.
-
-How to do it:
-
-- `git merge main` in the worktree. The merge commit is this step's code commit. 34 files
-  conflict. Resolve the call code by the design above, not hunk by hunk.
-- Read main's `CallSession.kt`, `CallService.kt`, `CallHost.kt`, `WebRtcCallMedia.kt`,
-  `CallViewModel.kt`, `CallLaunch.kt` and `CallStateHolder.kt` before resolving anything. Read
-  main's `docs/ARCHITECTURE.md` on calls.
-- No test is deleted. Main's `CallSession` tests and the branch's `PeerSession`, `CallVideoSinks`,
-  `LocalCamera`, `CallMediaPublisher` and `IceServerProvider` tests all pass. A test of something
-  that no longer exists is rewritten against its replacement.
-- New tests on `CallSession` with fakes: a call started as video, the video line offered only
-  with the capability, the camera switch, remote `media`, and the end of a call while the camera
-  runs.
-- `ArchitectureTest` passes without a new baseline.
-- Docs: `ARCHITECTURE.md`, `FEATURE-MAP.md`, `DOMAIN-MODELS.md`, `SCHEMA-FIRESTORE.md`,
-  `CLOUD-FUNCTIONS.md`, and the model section of this plan.
-- Rewrite the notes under steps 6 to 9 that name `CallService`, `OutgoingCallPlacer` or a serial
-  dispatcher. The main thread is that dispatcher now. Step 7's mesh lives beside `CallSession`.
-
-Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
-`PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
-
 ### Step 5b — The app asks for full-screen notifications — skills: app-ui-design
 
 On Android 14 and later the call screen opens over the lock screen only when the app holds the
@@ -1277,6 +1206,62 @@ Rewrite it properly; do not copy it in.
   states, the picker's cap.
 - Docs: `SPEC.md`, `FEATURE-MAP.md`, `BACKLOG.md`, CHANGELOG `Added` — **Group calls**.
 
+### Step 10 — Bug hunt over everything this plan built — model: max; budget: 60
+
+No step of this plan had a correctness review. `/code-review` was the imported standards-and-spec
+skill while the steps ran, and it looks for no bugs (finding MD-1 in
+`docs/reviews/2026-10-08-app-review.md`). This step is that review. It adds no feature.
+
+The run goes from step 9 straight into this step. The owner's deploy and the three-device call
+follow it.
+
+- **Scope from git.** The base is the tag `v1.40.4`, the last release without this plan's code.
+  `git diff --name-only v1.40.4..HEAD -- app/src/main functions firestore.rules firestore.indexes.json`
+  lists the files. Leave out a file that only work from outside this plan changed.
+- **Which review.** When `.claude/skills/code-review` is a directory of this repo and no symlink,
+  it is the project's own correctness review: run it on that range and skip the next bullet. While
+  it is the symlink, hunt as described here.
+- **One reviewer per area.** The diff does not fit one context. Each reviewer runs on this step's
+  tier or below, reads its files whole and follows the calls that leave them.
+  1. The life of a call: `CallService`, `CallSession`, `PeerSession`, `MeshCoordinator`,
+     `CallStateHolder`. Which thread runs what, the order of teardown, an end that races a connect,
+     cancellation, a second call during a call.
+  2. Camera, microphone and video: the local media, the camera switch, the sinks,
+     picture-in-picture. Every way a call ends releases the camera and the microphone. The camera
+     runs only while the call is on screen.
+  3. Signalling and the backend: `PeerSignaling` and its implementations, `CallRepositoryImpl`, the
+     call sources, `IceServerProvider`, `functions/index.js`, `firestore.rules`. Every write the app
+     makes passes the rules. The function and the pushes check who asks. A call with a phone on
+     release 1.40.4, and one with a phone on 1.41.0, still runs.
+  4. The screens: `CallActivity`, the stage, the dock, the grid, `CallViewModel`, the chat's part,
+     the prompt for full-screen notifications, the call notifications. State across rotation and
+     process death, the permission prompts, the back stack, the lock screen.
+- **A finding needs a failure path.** A reviewer reports the input or state, the path through the
+  code with `file:line`, and the wrong outcome. The step session reads each path itself and keeps
+  only what holds. Where a JVM test can show the failure, the test is written first.
+- **Leads to confirm or refute first.** They were read from the code before release 1.41.0 and
+  never confirmed:
+  1. `CallActivity` treats an incoming video ring as video showing once the ring preview runs. The
+     home gesture then puts the ring into picture-in-picture, where no answer button shows, and the
+     camera keeps capturing until the ring times out.
+  2. `CallRepositoryImpl.calleeTakesVideoLine` answers false after its timeout. The call stays
+     voice-only, and both phones say the other side needs the latest app.
+  3. `callVideoLine` is stored per account. An account that is also signed in on a phone with an
+     app from before this plan takes an offer with a video line there.
+  4. `FullScreenIntentAccess.start` catches `ActivityNotFoundException` only. A settings page that
+     refuses the start with a `SecurityException` crashes the tap.
+- **Fix what is confirmed and severe.** A confirmed finding that ends or hangs a call, loses data,
+  leaves the camera or the microphone running, or opens a security hole is fixed in this step. Each
+  fix has a test that fails without it, and all fixes land in the step's one code commit. A fix
+  that would change a decision of this plan, or does not fit this step, is not made: it goes to the
+  owner in the Shipped block. Every other confirmed finding becomes one line in `docs/BACKLOG.md`
+  or `TECH_DEBT.md`.
+- **Record** a `**Bug hunt**` block above the Shipped line: the areas, each reviewer's model, every
+  confirmed finding with its failure path and what became of it, and the leads that did not hold.
+  With no fix, the Shipped line names the commit the hunt read.
+
+Done when: the **Bug hunt** block is committed, and every fix carries its test.
+
 ## Verification
 
 - **Gate, every step:** `./gradlew test` and `./gradlew assembleDebug`. Both flavors must compile,
@@ -1304,6 +1289,7 @@ Rewrite it properly; do not copy it in.
   one leaves and rejoins; one is killed and its tile goes within a minute. Four devices in one
   call, to answer risk 5. A group of five rings only the picked people; a late join from the banner. Three
   and four people show the grid, a tap enlarges a tile, and the docked card shows the grid.
+- **After step 10:** read the **Bug hunt** block: what was fixed, and what waits for the owner.
 - **Owed on hardware** (to `docs/BACKLOG.md` § *Pending on-device verification*): two phones on
   mobile data, a Bluetooth headset during video, heat and battery in a four-person call, a phone with
   an older app version as the partner.
