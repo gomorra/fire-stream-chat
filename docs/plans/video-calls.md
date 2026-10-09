@@ -1,6 +1,6 @@
 # Video calls
 
-Status: approved, steps 1 to 5a shipped. The prototype verdict is in and written into steps 4, 4a and 9.
+Status: approved, steps 1 to 5b shipped. The prototype verdict is in and written into steps 4, 4a and 9.
 
 > **Steps 1 to 5a are shipped on `plan/video-calls`.** Steps 1 to 5 were built on the `CallService` from before main's call rework. Step 5a merged main and moved the video work onto main's structure: each call runs in a `CallSession` behind `CallHost`, a `PeerSession` is its connection, and `firestore.rules` lists the fields a call may hold, with tests in `firestore-rules-tests/`. Steps 6 to 9 build on that. Their notes marked `(step-5a)` say what changed under them.
 
@@ -1044,6 +1044,42 @@ incoming call's full-screen intent. The phone then shows only the ringing notifi
 the display off no call screen appears. The timer alarm uses the same mechanism. The app checks
 the access nowhere. The installer cannot grant it, so the user has to.
 
+**Approach**
+
+1. `domain/util/FullScreenAccessPrompt.kt`: the pure rule, with a table test.
+   `data/call/FullScreenIntentAccess.kt`: `isSupported`, `isGranted()`, `settingsIntent()`, with a
+   Robolectric test. `PreferencesDataStore` gains the remembered *Not now*.
+2. `ui/main/FullScreenAccessViewModel.kt` holds the prompt's state: it combines the access, read
+   again on every resume, with the remembered *Not now*, and writes *Not now* on the application
+   scope. `ui/main/FullScreenAccessPrompt.kt` is a card above the bottom bar of `MainScreen`, not
+   a dialog, so nothing is dismissed by a stray tap.
+3. `SettingsViewModel` and `SettingsUiState` gain the access as `Boolean?` (null hides the row),
+   read again in the existing resume observer. `SettingsScreen` gains the row.
+4. Tests: `FullScreenAccessPromptTest` (table), `FullScreenIntentAccessTest`,
+   `FullScreenAccessViewModelTest` (shown, hidden after *Not now*, hidden with the access on, gone
+   after a resume), `FullScreenAccessPromptUiTest` and `FullScreenAlertsRowUiTest` (Robolectric),
+   two rows in `SettingsViewModelTest`.
+5. The code contradicts the spec in one place. The UI may import a `data/` class only from the
+   allowlist in `ArchitectureTest`. `FullScreenIntentAccess` is a thin platform adapter like
+   `ApkInstaller`, so it joins the allowlist and the `TECH_DEBT.md` entry.
+6. Skills: `app-ui-design` (tagged), `changelog-release` for the entry, and `code-review`, which
+   the driver asks for when two `*ViewModel.kt` files change.
+
+**Shipped** `731d2d9c` (2026-10-09) — tier: mid, tagged mid. skills: app-ui-design, changelog-release, code-review, simplify. Reviewer models: code-review: sonnet, opus; simplify: sonnet, sonnet, sonnet, sonnet.
+Departures (for sign-off):
+- **Nothing ran on a device or an emulator.** `docs/BACKLOG.md` § *The prompt for full-screen notifications* lists eight checks.
+- The prompt is a card above the bottom bar of the main screen, on all three tabs, not a dialog. The app stays usable under it, and only *Not now* sends it away for good. It has the colours and the shape of `ExactAlarmBanner`, the chat's prompt for exact alarms.
+- The card hides while the Lists tab's chat picker is open, because the picker covers the tab.
+- The prompt's state lives in a new `FullScreenAccessViewModel`. `MainScreen` had no view model.
+- The access is read on every resume, as specified, and also when the main screen enters the composition. Coming back from the app's own Settings screen resumes the main screen only after the transition, and a prompt just answered through the settings row would show for that long. /code-review found it.
+- The settings row's *Off* says more: *Off. Incoming calls and timer alarms show only as a notification*.
+- `FullScreenIntentAccess.openSettings()` falls back to the app's notification settings on a device without the access page, and does nothing on a device with neither.
+- `FullScreenIntentAccess` joins the UI→data allowlist in `ArchitectureTest` and the `TECH_DEBT.md` entry, as `ApkInstaller` did. The rule itself is `shouldPromptForFullScreenAccess` in `domain/util/`.
+- The Robolectric test of the prompt drives the card by its `visible` flag. *Shown*, *hidden after Not now* and *hidden with the access on* are cases of `FullScreenAccessViewModelTest`, on the JVM. No test composes `MainScreen`.
+- Robolectric 4.14 has no switch for this access, so `FullScreenIntentAccessTest` puts a mocked `NotificationManager` behind the context. `docs/GOTCHAS.md` has the entry.
+- CHANGELOG: one `Fixed` entry under `[UNRELEASED] [1.41.0]`. The version stays, because the section is already a minor bump.
+- Not done, from /simplify: one shared card for this prompt and `ExactAlarmBanner` (worth it with a third prompt), and a prompt state derived from two flows in place of `refresh()`. The second would bring back the late answer /code-review found.
+
 - `data/call/FullScreenIntentAccess.kt` (or beside `CallNotificationManager`): `isGranted()` over
   `NotificationManager.canUseFullScreenIntent()`. Below API 34 it is always true. `settingsIntent()`
   builds `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` with the app's `package:` uri.
@@ -1172,6 +1208,9 @@ the access nowhere. The installer cannot grant it, so the user has to.
 - `FCMService`: the new type starts a group ring. A muted chat does not ring.
 - My ring stops when I answer or decline, after 30 seconds, or when the call document says `ended`.
 - `CallNotificationManager`: the group's name and the caller's name.
+- **(step-5b)** A group ring opens the call screen through the same full-screen intent as a 1:1
+  ring, so it needs the access *Full screen notifications* too. `FullScreenIntentAccess` and the
+  prompt on the main screen cover it. Nothing more is owed here.
 - Check what an app without this plan does with the new push type, and write the answer in the
   Shipped block.
 - Tests: the `FCMService` branch and the mute rule.

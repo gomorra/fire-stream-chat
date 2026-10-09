@@ -15,7 +15,7 @@ All notable changes to FireStream Chat. Format follows [Keep a Changelog](https:
 
 ### Fixed
 
-- **The app asks for full-screen notifications.** On Android 14 and later an incoming call wakes the display and shows over the lock screen only when the app holds the special access *Full screen notifications*, and an app installed from a file starts without it. The call then rang only as a notification, and so did a timer alarm. The main screen now says so once, with a button that opens the right page in the system settings and a *Not now* that keeps the question away. Settings → Notifications has a new row, *Full-screen call alerts*, that shows whether the access is on and opens the same page.
+- **The app asks for full-screen notifications.** On Android 14 and later an incoming call wakes the display and shows over the lock screen only when the app holds the special access *Full screen notifications*, and an app installed from a file starts without it. The call then rang only as a notification, and so did a timer alarm. The main screen now says so once, with a button that opens the right page in the system settings and a *Not now* that keeps the question away. Settings → Notifications has a new row, *Full-screen call alerts*, that shows whether the access is on and opens the same page. (`731d2d9c`)
 
 ## [1.40.4] — 2026-10-09
 
