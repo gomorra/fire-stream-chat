@@ -211,7 +211,7 @@ the dock, step 9 the grid.
 
 ## Steps
 
-Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a ‖ 6 → 7 → 8 → 9
+Order: 1 → 2 → 3 → 4 → 4a ‖ 5 ‖ 5a → 5b ‖ 6 → 7 → 8 → 9
 
 Every step follows CLAUDE.md's post-step workflow (tests, `./gradlew test`, `./gradlew assembleDebug`,
 review skills, one commit, docs). UI steps load the `app-ui-design` skill. User-visible steps get a
@@ -491,6 +491,39 @@ How to do it:
 Stop with a decision when a fix of main and a behaviour of the branch cannot both hold, or when
 `PeerSession` cannot sit under `CallSession` without changing what steps 6 to 9 build on.
 
+### Step 5b — The app asks for full-screen notifications — skills: app-ui-design
+
+On Android 14 and later the call screen opens over the lock screen only when the app holds the
+special access *Full screen notifications*. A sideloaded install does not get it: both the owner's
+phone (Android 17) and the emulator (Android 16) had it denied, and the system rejected the
+incoming call's full-screen intent. The phone then shows only the ringing notification, and with
+the display off no call screen appears. The timer alarm uses the same mechanism. The app checks
+the access nowhere. The installer cannot grant it, so the user has to.
+
+- `data/call/FullScreenIntentAccess.kt` (or beside `CallNotificationManager`): `isGranted()` over
+  `NotificationManager.canUseFullScreenIntent()`. Below API 34 it is always true. `settingsIntent()`
+  builds `Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT` with the app's `package:` uri.
+- A prompt on the main screen when the access is off: one sentence on why (incoming calls and
+  timer alarms can then wake the display and show over the lock screen), a button that opens the
+  settings page, and *Not now*. *Not now* is remembered in DataStore, written on the application
+  scope, and the prompt does not come back by itself.
+- The state is read again every time the app comes to the foreground, so the prompt goes as soon as
+  the user returns from the settings page with the access on.
+- `SettingsScreen`, section *Notifications*: a row **Full-screen call alerts** that shows *On* or
+  *Off* and opens the same settings page. It is hidden below API 34. It is the way back for a user
+  who chose *Not now*.
+- Whether to show the prompt is a pure function of the API level, the access and the remembered
+  *Not now*, with a table test.
+- No change to how a call rings. A call without the access still rings with its notification.
+- Tests: the pure function; a Robolectric test of the prompt (shown, hidden after *Not now*, hidden
+  with the access on) and of the settings row.
+- Docs: `SPEC.md`, `FEATURE-MAP.md`. `docs/GOTCHAS.md`: a sideloaded app starts without this
+  access, and `adb shell appops set --uid <package> USE_FULL_SCREEN_INTENT allow` grants it on a
+  test device. `docs/BACKLOG.md`: drop the timer entry's open question about this access. CHANGELOG
+  `Fixed`.
+
+**‖ Checkpoint.** The device check after steps 5a and 5b, the owner's deploys, and the release.
+
 ### Step 6 — Group calls: model, signalling, rules — skills: code-review; model: max
 
 - `domain/model/GroupCall.kt`: `GroupCall` and `GroupCallMember`, as in the Firestore layout above.
@@ -593,6 +626,11 @@ Rewrite it properly; do not copy it in.
   video call in both directions. Cancel a call while it is being placed. Let a call ring out. Kill
   the app on the phone that is called and confirm the fallback ring and its Decline. Call a phone
   that runs the released app and confirm a voice call with the camera button disabled.
+- **After step 5b, on the phone:** switch *Full screen notifications* off for the app in the
+  system settings and open the app: the prompt appears, its button opens the right page, and the
+  prompt is gone on return with the access on. With the access on and the display off, an incoming
+  call wakes the display and shows the call screen. With it off, the call still rings as a
+  notification. *Not now* keeps the prompt away, and the settings row still leads to the page.
 - **After step 9:** first `firebase deploy --only functions,firestore`. Three devices in one call;
   one leaves and rejoins; one is killed and its tile goes within a minute. Four devices in one
   call, to answer risk 5. A group of five rings only the picked people; a late join from the banner. Three
