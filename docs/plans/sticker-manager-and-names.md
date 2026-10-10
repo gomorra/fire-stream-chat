@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Step 1 is shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 and 2 are shipped.
 
 ## Context
 
@@ -238,6 +238,29 @@ Departures (for sign-off):
   `StickerPackKind.isNamed` tells a `USER` or `INSTALLED` pack from *Favourites* and *Saved
   stickers*, whose `shownInRow` is always true.
 
+**Approach**
+
+- Order: `StickerLibraryTab.kt` (the shelf model, `stickerShelves`, the grid, the manage button),
+  then `ComposerPickerPanel.kt` (`onManageStickers`), `ChatScreen.kt` and `NavGraph.kt`.
+- `StickerShelf` holds `sections`. A section carries the pack id its picks are sent with, so the
+  *WhatsApp* shelf and a plain pack share one pick path. Recents is one section with no pack id.
+- The four-sticker limit counts what a section shows. A sticker that an earlier grouped pack
+  already shows is taken out first, so a title's count always matches its cells.
+- The empty library's *Import stickers* button and the manage button call the same callback.
+  Both open `Routes.STICKERS`.
+- Tests: `StickerShelvesTest` (pure, the five cases the step lists) and three cases in
+  `ComposerPickerPanelTest` (a pick from a titled section, a pick from *More*, the manage button).
+- Nothing in the code contradicts the spec. Skills beyond the floor: none planned. The diff is
+  UI and one pure function, with no ViewModel, worker or DI change.
+
+**Shipped** `e36497fa` (2026-10-10) — tier: mid. skills: none. Reviewer models: none. CHANGELOG entry (`Changed`, under `[UNRELEASED] [1.42.0]`) is in `e36497fa`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- The four-sticker limit counts what a section shows, after a sticker that an earlier grouped pack already shows is taken out. A pack of four that shares one sticker with an earlier pack therefore goes to *More*.
+- The *WhatsApp* thumbnail is a chat-bubble icon (`Icons.AutoMirrored.Outlined.Chat`). The manage button is a gear with the description *Manage stickers*, after the **+**.
+- `ChatScreen`'s parameter `onImportStickersClick` is renamed to `onManageStickersClick`, with the callbacks field. `SettingsScreen` keeps its own `onImportStickersClick`.
+- A *Favourites* or *Saved stickers* pack stays in the row even when its stored `shownInRow` is false. `stickerShelves` checks `kind.isNamed`.
+- The *WhatsApp* shelf's grid has no title of its own, only the section titles. A shelf of small packs alone shows one *More* section.
+
 **‖ Checkpoint.** The owner installs over the current build, lets the library restore, and looks
 at the row with the real collection.
 
@@ -267,6 +290,10 @@ at the row with the real collection.
   `mergePacks` fails for fewer than two packs. The UI should not offer what fails.
   `deletePack` now remembers every sticker it leaves in no pack, so the *Delete* question should
   say that a WhatsApp import will not bring them back.
+- **(step-2)** The picker's manage button already opens `Routes.STICKERS` (`onManageStickers`).
+  `SettingsScreen` and its `NavGraph` call still use the name `onImportStickersClick`. Rename it
+  with the row. The picker follows the switch with no further code: `stickerShelves` reads
+  `shownInRow` from the packs flow.
 
 ### Step 4 — The manager's *All stickers* tab, and a WhatsApp import that shows what is new (UI)
 
@@ -319,6 +346,9 @@ at the row with the real collection.
 - Tests: `StickerSearchTest` as a table (prefix, two words, umlauts, `ß`, the ranking, a pack-name
   hit, no repeats), `StickerManifestTest`, `StickerRepositoryImplTest`,
   `StickerCreateViewModelTest`, `StickerLibraryViewModelTest`.
+- **(step-2)** In `StickerLibraryTab` a search is one `StickerSection` with the key `results`,
+  built from `matches`, and a pick reads its pack from `foundIn`. The text search only has to
+  replace what fills `matches`. A sticker must come back once, because the grid's key is its id.
 - Docs: `SCHEMA-ROOM.md`, `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`, `FEATURE-MAP.md`, CHANGELOG
   `Added`.
 
@@ -435,6 +465,10 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
   2. The picker and the manager: `StickerLibraryTab`, `StickerLibraryScreen`,
      `StickerLibraryViewModel`, `WhatsAppImportScreen`. A selection whose pack or sticker goes
      away. The pack id a pick is sent with. Grid keys. Rotation and process death.
+     **(step-2)** Also: `stickerShelves`, `StickerShelf.packIdOf` and the saved `activeKey` when
+     the *WhatsApp* shelf appears or goes away while the panel is open. A sticker that sits in a
+     grouped pack and in a pack with a thumbnail is on both shelves, and each sends its own pack.
+     Step 2 had no review skill.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
