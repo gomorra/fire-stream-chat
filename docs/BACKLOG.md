@@ -407,7 +407,7 @@ each sent and arrived. Nothing ran on a phone.
 trim, the outline, the size loop with a stand-in encoder, the repository and the screen's
 states. ML Kit's cutout, the platform's WebP encoder and the pinch never ran. Nothing ran on
 a device.
-1. Settings → Storage → *Import stickers* → *Create*, and the **+** at the end of the Stickers
+1. Settings → Storage → *Stickers* → **+** → *Create*, and the **+** at the end of the Stickers
    tab's pack row, both open the maker, and the photo picker opens with it.
 2. The first cutout on a phone waits for Play services to fetch the model
    (`SubjectCutout`, at most 45 seconds). Check a fresh install: the cutout arrives, or the
@@ -451,7 +451,7 @@ phone was read and drawn in a scratch test. Nothing ran on a device.
 
 `docs/plans/stickers-and-gifs.md` steps 1–2. JVM/Robolectric tests cover the parsers, the import
 and the screen's state. Nothing has run on a device:
-1. Settings → Storage → *Import stickers* → *From WhatsApp*. The folder picker opens inside
+1. Settings → Storage → *Stickers* → **+** → *From WhatsApp*. The folder picker opens inside
    `Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Stickers`, or says why it cannot.
    Android may refuse a grant for a folder under `Android/media`; if it does, the route needs
    another way in.
