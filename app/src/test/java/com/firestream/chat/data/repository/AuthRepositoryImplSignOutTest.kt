@@ -86,7 +86,7 @@ class AuthRepositoryImplSignOutTest {
             stickerSyncScheduler.cancel()
             database.clearAllTables()
             authSource.signOut()
-            preferences.clearRecentStickers()
+            preferences.clearStickerLists()
         }
     }
 }

@@ -5,6 +5,8 @@ import com.firestream.chat.domain.model.StickerPackKind
 import com.firestream.chat.test.fakes.testSticker
 import com.firestream.chat.test.fakes.testStickerPack
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -46,6 +48,17 @@ class StickerSearchTest {
         assertTrue(StickerSearch.byEmojis(packs, emptyList()).isEmpty())
         assertTrue(StickerSearch.byEmojis(packs, listOf("")).isEmpty())
         assertTrue(StickerSearch.byEmojis(packs, listOf("🦊")).isEmpty())
+    }
+
+    @Test
+    fun `taggedWith tests one sticker, and is null when there is nothing to look for`() {
+        val isHeart = StickerSearch.taggedWith(listOf("❤"))!!
+
+        assertTrue(isHeart(cat))
+        assertTrue(isHeart(heart))
+        assertFalse(isHeart(dog))
+        assertFalse(isHeart(untagged))
+        assertNull(StickerSearch.taggedWith(listOf("", " ")))
     }
 
     @Test

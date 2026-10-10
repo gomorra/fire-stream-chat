@@ -341,6 +341,26 @@ Known refactors and code smells that have been consciously deferred or declined.
 
 ---
 
+### The sticker manager deletes a selection one pack at a time
+
+**The smell.** `StickerLibraryViewModel.deleteSelected` calls `StickerRepository.deletePack` once per selected pack. Each call is its own transaction, and each makes `observePacks()` emit the whole library. A selection of thirty packs is thirty emissions, and the list redraws after each. A failure in the middle leaves the earlier packs deleted. The same screen keeps the dropped order of a drag twice: in `PackList`'s local copy, and in the ViewModel's optimistic sort with `observedPacks` for the way back.
+
+**Why we haven't fixed it.** Both came out of `/simplify` on step 3 of `docs/plans/sticker-manager-and-names.md`. A `deletePacks(ids)` is a repository and DAO change, which that UI step did not own. The two copies of the order each cover one case: the local copy the drag itself, the sort the time until Room answers.
+
+**When to revisit.** When a delete of many packs is seen to flicker on a phone, or with the next change to `StickerDao`'s pack deletes. Then add `deletePacks(ids)` as one transaction.
+
+---
+
+### A sticker selection across packs is several repository calls
+
+**The smell.** `StickerLibraryViewModel` runs a selection's action as one call per pack. `moveSelectedTo` calls `moveStickers` per source pack, and `removeSelected` calls `removeStickers` per pack. `newPackFromSelected` calls `createPack` and then `removeStickers` per old pack. Each stops at the first failure, so a failure in the middle leaves the library half changed: a new pack whose stickers are still in some of their old packs. `favouriteSelected` reads the favourites from the screen's state and calls `toggleFavourite` per sticker that has no star, because the repository has no "add" that is safe to repeat. The ViewModel also moves the mark of the last WhatsApp import (`markWhatsAppImported`) after `importFrom` succeeds, so a second caller of the WhatsApp import could forget it.
+
+**Why we haven't fixed it.** It came out of `/simplify` on step 4 of `docs/plans/sticker-manager-and-names.md`, a UI step. One transaction per action is a `StickerRepository` and `StickerDao` change. No state it can leave loses a sticker: the new pack is made first, and a move adds before it removes.
+
+**When to revisit.** With the next change to `StickerDao`'s pack edits, or when a half-done action is seen on a phone. Then add `moveEntries`, `createPackFrom` and `addFavourites` as one transaction each, and let the WhatsApp import move its own mark.
+
+---
+
 ### Calls — the known limits
 
 **The smell.**

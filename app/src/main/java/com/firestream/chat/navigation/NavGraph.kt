@@ -557,7 +557,7 @@ fun FireStreamNavGraph(
                         launchSingleTop = true
                     }
                 },
-                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
+                onManageStickersClick = { navController.navigate(Routes.STICKERS) },
                 onCreateStickerClick = { navController.navigate(Routes.STICKER_CREATE) },
                 fromNotification = fromNotification
             )
@@ -598,7 +598,7 @@ fun FireStreamNavGraph(
                 onStarredMessagesClick = { navController.navigate(Routes.STARRED_MESSAGES) },
                 onScheduledRemindersClick = { navController.navigate(Routes.SCHEDULED_REMINDERS) },
                 onArchivedChatsClick = { navController.navigate(Routes.ARCHIVED_CHATS) },
-                onImportStickersClick = { navController.navigate(Routes.STICKERS) },
+                onStickersClick = { navController.navigate(Routes.STICKERS) },
                 onProfileClick = { userId -> navController.navigate(Routes.userProfile(userId)) },
                 onSignedOut = {
                     navController.navigate(Routes.LOGIN) {

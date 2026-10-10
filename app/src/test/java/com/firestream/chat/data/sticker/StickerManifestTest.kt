@@ -26,9 +26,10 @@ class StickerManifestTest {
         originPackId: String? = null,
         importKey: String? = null,
         stickers: List<RemoteSticker> = emptyList(),
+        shownInRow: Boolean? = null,
     ) = RemoteStickerPack(
         id = "p1", ownerId = "uid1", name = name, publisher = " Ana\u0007 ", kind = kind, originPackId = originPackId,
-        importKey = importKey, sortOrder = 2, createdAt = 3L, updatedAt = 4L, stickers = stickers,
+        importKey = importKey, sortOrder = 2, createdAt = 3L, updatedAt = 4L, stickers = stickers, shownInRow = shownInRow,
     )
 
     private fun remoteSticker(id: String, format: String = "WEBP", width: Int = 512, emojis: List<String> = emptyList()) =
@@ -92,6 +93,32 @@ class StickerManifestTest {
         assertNull(StickerManifest.packOf(remote(importKey = "k".repeat(600))).importKey)
         assertEquals("root-1", StickerManifest.packOf(remote(originPackId = "root-1")).originPackId)
         assertNull(StickerManifest.packOf(remote(originPackId = "packs/../x")).originPackId)
+    }
+
+    @Test
+    fun `a manifest says whether the pack has its own thumbnail, and the row takes it from there`() {
+        val pack = StickerPackEntity("p1", "Cats", null, "USER", null, "wa:cats", 0, 1L, 1L, shownInRow = false)
+
+        assertEquals(false, StickerManifest.of(pack, emptyList(), "uid1").shownInRow)
+        assertEquals(true, StickerManifest.of(pack.copy(shownInRow = true), emptyList(), "uid1").shownInRow)
+        assertFalse(StickerManifest.packOf(remote(shownInRow = false)).shownInRow)
+        assertTrue("the owner gave a WhatsApp pack its own thumbnail", StickerManifest.packOf(remote(importKey = "wa:cats", shownInRow = true)).shownInRow)
+    }
+
+    @Test
+    fun `a manifest without the field gets it from the import key`() {
+        assertFalse(StickerManifest.packOf(remote(importKey = "wa:com.cats\u0000Cats\u0000Ana")).shownInRow)
+        assertFalse(StickerManifest.packOf(remote(importKey = "loose:WhatsApp")).shownInRow)
+        assertTrue(StickerManifest.packOf(remote(importKey = "loose:My stickers")).shownInRow)
+        assertTrue(StickerManifest.packOf(remote(importKey = "archive:Holiday\u0000Cleo")).shownInRow)
+        assertTrue(StickerManifest.packOf(remote(importKey = "installed:root")).shownInRow)
+        assertTrue(StickerManifest.packOf(remote(importKey = null)).shownInRow)
+    }
+
+    @Test
+    fun `the favourites and the loose stickers are in the row whatever a manifest says`() {
+        assertTrue(StickerManifest.packOf(remote(kind = "FAVOURITES", shownInRow = false)).shownInRow)
+        assertTrue(StickerManifest.packOf(remote(kind = "SAVED", shownInRow = false)).shownInRow)
     }
 
     @Test

@@ -38,6 +38,66 @@ Firestore questions. Nothing ran on a device. Check it by upgrading over an inst
 6. Delete a chat that the other person then writes into again. Its history comes back whole.
 7. Read the reads per day in the Firebase console before and after the update.
 
+### The sticker manager's *All stickers* tab and the new-only WhatsApp import (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 4. JVM tests cover the selection, its actions, the
+search and the filter. Nothing ran on a device.
+
+1. *All stickers* shows every sticker under its pack's title, six in a row on the S24 and the
+   S25. With several hundred stickers the grid scrolls without a stutter.
+2. The search finds by an emoji, by a word for one (*cat*, *Katze*) and by a pack's name. The
+   keyboard does not cover the last row of the grid.
+3. A long press starts a selection, and a tap adds a sticker from another pack. The top bar
+   shows the count, *Move to pack*, *Delete from library* and a menu with *New pack from these*
+   and *Add to favourites*. All of it fits on a narrow phone.
+4. *Move to pack* moves stickers from two packs into a third. *New pack from these* makes the
+   pack, and the stickers are gone from their old packs.
+5. *Delete from library* asks once. The stickers leave every pack and the favourites, and a
+   WhatsApp import with *Show all* and *Select all* does not bring them back.
+6. A pack's own grid has the same bar, plus *Remove from pack* in the menu.
+7. Import from WhatsApp, then open *From WhatsApp* again: the grid says *Nothing new*. Receive
+   a sticker in WhatsApp and open it again: only that sticker is shown. *Show all* shows the
+   whole folder.
+8. Close the WhatsApp view without importing and open it again: the same new files are shown.
+9. A debug build opens both grids without a crash (`docs/GOTCHAS.md`, the dex verifier).
+
+### The sticker manager's *Packs* tab (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 3. JVM tests cover the groups, the switch, the
+selection bar and the rule a drag follows. No test drags a row, and nothing ran on a device.
+
+1. Settings → Storage → *Stickers* opens the manager with the tabs *Packs* and *All stickers*.
+2. The **+** in the top bar offers *Create*, *From WhatsApp* and *From files*, and each works.
+3. Switch *Own thumbnail* on for a WhatsApp pack. It moves to *In the picker row*, and the
+   Stickers tab of a chat shows its thumbnail. Switch it off again.
+4. Drag a pack by its handle inside its group. The row stays where it was dropped, also after
+   leaving the screen and coming back. A row cannot be dropped into the other group.
+5. With several dozen packs, drag one to the edge of the list: the list scrolls.
+6. A long press selects a pack, and a tap adds another. *Merge* asks for a name and makes one
+   pack with the stickers of both. *Delete* names the count of stickers and asks once.
+7. *Favourites* and *Saved stickers* have no switch and cannot be selected.
+8. On a narrow phone a pack's name, its switch, the menu and the handle fit in one row, and a
+   tap beside the switch opens the pack.
+9. A debug build opens the manager without a crash. Only a device runs the dex verifier
+   (`docs/GOTCHAS.md`).
+
+### The *WhatsApp* entry of the sticker row (2026-10-10)
+
+`docs/plans/sticker-manager-and-names.md` step 2. JVM tests cover the row's order, the sections and
+the pack id a pick carries. Nothing ran on a device. Install over the build before it, so the
+library restores from the backup:
+
+1. The Stickers tab's row shows Recents, the favourites, one *WhatsApp* entry with a chat-bubble
+   icon, then the packs that were not imported from WhatsApp.
+2. *WhatsApp* opens a grid with a title for every pack of four or more stickers and a *More*
+   section last. It scrolls smoothly with several hundred stickers.
+3. Send a sticker from a titled section and one from *More*. *View pack* on each message shows the
+   sticker's own pack.
+4. A long press on a sticker there adds it to the favourites.
+5. The gear at the end of the row opens the sticker library. Back returns to the chat.
+6. A debug build opens the Stickers tab without a crash. Only a device runs the dex verifier
+   (`docs/GOTCHAS.md`).
+
 ### The prompt for full-screen notifications (2026-10-09)
 
 `docs/plans/video-calls.md` step 5b. JVM tests cover the rule, the access check against a mocked
@@ -453,7 +513,7 @@ run fails, and the packs stay pending.
 and the panel's logic. Nothing ran on a device, and no test draws a real sticker file.
 1. The emoji button opens the panel with an island: *Emoji* and *Stickers*. The search button, the
    island and the backspace key sit left-aligned in that order.
-2. *Stickers* shows Recents, the favourites, then each pack. A tap sends the sticker and it appears
+2. *Stickers* shows Recents, the favourites, the *WhatsApp* entry, then each pack with its own thumbnail. A tap sends the sticker and it appears
    at once, with a clock while offline. An empty library shows *Import stickers*, which opens the library.
 3. Between two accounts: a static and an animated sticker arrive with transparency and animation.
    The chat list and the notification say *Sticker*. Forwarding one works. Nothing new is in the gallery.
@@ -1160,6 +1220,17 @@ Klipy's stickers. The plan is `docs/plans/stickers-and-gifs.md`, and these parts
   Klipy forbids a proxy. Klipy sees the IP and the searches of a user of the GIFs tab or
   the online stickers, and the IP of everyone whose device shows a pick. Everything else is
   fetched from Storage only.
+- **A merged pack can come back small.** A merge keeps the import key of the first pack and
+  frees the keys of the others. A later WhatsApp import of a new sticker from one of those
+  packs makes that pack again, with that one sticker. Keeping the freed keys on the merged
+  pack would need a pack to hold several keys.
+- **The list of deleted stickers does not survive a reinstall.** It is kept on the device
+  (`PreferencesDataStore`, `deleted_sticker_ids`) and not in the backup. After a reinstall,
+  or on a second phone, a full WhatsApp import brings deleted stickers back. Sign-out clears
+  the list too.
+- **A pack made in the app and named *WhatsApp* has no thumbnail of its own.** The sticker
+  maker finds a pack by its name, so that name gives the import key `loose:WhatsApp`, which
+  is the key of the pack a WhatsApp import fills. The made sticker joins that pack.
 - **A GIF on a photo stays impossible.** The editor's pipeline ends at JPEG, and a
   flattened animation is one frame (`docs/plans/image-editor.md` §2.8).
 - **A tap on a GIF opens nothing.** The fullscreen viewer has no animated decoder.

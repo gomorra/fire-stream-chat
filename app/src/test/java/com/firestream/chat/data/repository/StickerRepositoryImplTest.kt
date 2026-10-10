@@ -77,6 +77,9 @@ class StickerRepositoryImplTest {
     private lateinit var repository: StickerRepositoryImpl
 
     private val recentIds = MutableStateFlow(emptyList<String>())
+
+    /** What the device remembers as deleted from the library. */
+    private val deletedIds = mutableSetOf<String>()
     private val preferences = mockk<PreferencesDataStore>()
     private val folder = mockk<WhatsAppStickerFolder>()
     private val objectSource = mockk<StickerObjectSource>()
@@ -95,6 +98,12 @@ class StickerRepositoryImplTest {
         coEvery { preferences.addRecentSticker(any()) } answers {
             recentIds.value = listOf(firstArg<String>()) + (recentIds.value - firstArg<String>())
         }
+        coEvery { preferences.deletedStickerIds() } answers { deletedIds.toSet() }
+        coEvery { preferences.rememberDeletedStickers(any()) } answers {
+            deletedIds += firstArg<Collection<String>>()
+            recentIds.value -= firstArg<Collection<String>>().toSet()
+        }
+        coEvery { preferences.forgetDeletedStickers(any()) } answers { deletedIds -= firstArg<Collection<String>>().toSet() }
         repository = newStickerRepository(
             stickerDao = db.stickerDao(),
             stickerFiles = files,
@@ -106,6 +115,26 @@ class StickerRepositoryImplTest {
             syncScheduler = scheduler,
             stickerMaker = maker,
         )
+    }
+
+    @Test
+    fun `the mark of the last WhatsApp import is kept in the preferences`() = runTest {
+        coEvery { preferences.whatsAppImportedUntil() } returns 200
+        coEvery { preferences.markWhatsAppImported(any()) } returns Unit
+
+        assertEquals(200L, repository.whatsAppImportedUntil())
+        repository.markWhatsAppImported(300)
+
+        coVerify(exactly = 1) { preferences.markWhatsAppImported(300) }
+    }
+
+    @Test
+    fun `a mark that cannot be read or written is no error, and every file counts as new`() = runTest {
+        coEvery { preferences.whatsAppImportedUntil() } throws IOException("disk")
+        coEvery { preferences.markWhatsAppImported(any()) } throws IOException("disk")
+
+        assertEquals(0L, repository.whatsAppImportedUntil())
+        repository.markWhatsAppImported(300)
     }
 
     /** Makes every download answer with [body]. */
@@ -701,6 +730,285 @@ class StickerRepositoryImplTest {
 
         repository.removeStickers(dogs.id, listOf(first)).getOrThrow()
         assertEquals(1, pack("Dogs").stickers.size)
+    }
+
+    // --- A tidied library and the WhatsApp import ---
+
+    /** The three files a WhatsApp folder holds in these tests: two of the Cats pack and one that names no pack. */
+    private fun whatsAppFolder() = listOf(
+        source("1.webp", sticker(1, cats)),
+        source("2.webp", sticker(2, cats)),
+        source("3.webp", sticker(3)),
+    )
+
+    private suspend fun importFromWhatsApp(uris: List<String>): StickerImportResult =
+        repository.importFrom(uris, "WhatsApp", skipKnown = true).getOrThrow()
+
+    /** Every pack's name with the ids of its stickers, in order. */
+    private suspend fun library(): List<Pair<String, List<String>>> = packs().map { pack -> pack.name to pack.stickers.map { it.id } }
+
+    @Test
+    fun `a pack a WhatsApp import made has no thumbnail of its own, and every other pack has one`() = runTest {
+        coEvery { maker.render(any(), any()) } returns sticker(9)
+        importFromWhatsApp(whatsAppFolder())
+        repository.importFrom(listOf(source("4.webp", sticker(4)))).getOrThrow()
+        repository.importFrom(listOf(source("5.webp", sticker(5))), "Holiday").getOrThrow()
+        repository.importFrom(listOf(source("h.wastickers", zip("6.webp" to sticker(6), "title.txt" to "Archive".toByteArray())))).getOrThrow()
+        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "Made").getOrThrow()
+        repository.createPack("By hand", listOf(StickerFiles.sha256Hex(sticker(4)))).getOrThrow()
+
+        val shown = packs().associate { it.label() to it.shownInRow }
+
+        assertEquals(
+            mapOf("Cats" to false, "WhatsApp" to false, "SAVED" to true, "Holiday" to true, "Archive" to true, "Made" to true, "By hand" to true),
+            shown,
+        )
+    }
+
+    private fun StickerPack.label() = name.ifEmpty { kind.name }
+
+    @Test
+    fun `a second WhatsApp import leaves a moved sticker where it is`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val (moved, regrouped) = pack("Cats").stickers.map { it.id }
+        repository.moveStickers(listOf(moved), pack("Cats").id, pack("WhatsApp").id).getOrThrow()
+        val mine = repository.createPack("Mine", listOf(regrouped)).getOrThrow()
+        repository.removeStickers(pack("Cats").id, listOf(regrouped)).getOrThrow()
+        val tidied = library()
+
+        val again = importFromWhatsApp(folder)
+
+        assertEquals(tidied, library())
+        assertEquals(moved, pack("WhatsApp").stickers.last().id)
+        assertEquals(listOf(regrouped), packs().single { it.id == mine }.stickers.map { it.id })
+        assertEquals(emptyList<String>(), pack("Cats").stickers.map { it.id })
+        assertEquals(StickerImportResult(0, 0, 0, emptyList(), alreadyInLibrary = 3, deletedEarlier = 0), again)
+    }
+
+    @Test
+    fun `a deleted sticker leaves every pack and the recents, keeps its file, and stays away`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val (deleted, kept) = pack("Cats").stickers.map { it.id }
+        repository.toggleFavourite(deleted).getOrThrow()
+        repository.markUsed(deleted)
+        repository.markUsed(kept)
+
+        repository.deleteStickers(listOf(deleted)).getOrThrow()
+
+        assertEquals(listOf("Cats" to listOf(kept), "WhatsApp" to pack("WhatsApp").stickers.map { it.id }, "" to emptyList()), library())
+        assertEquals(listOf(kept), recentIds.value)
+        assertEquals("a chat bubble still draws it", 3, storedFiles().size)
+        assertEquals(1, db.stickerDao().getStickers(listOf(deleted)).size)
+
+        val again = importFromWhatsApp(folder)
+
+        assertEquals(StickerImportResult(0, 0, 0, emptyList(), alreadyInLibrary = 2, deletedEarlier = 1), again)
+        assertEquals(listOf(kept), pack("Cats").stickers.map { it.id })
+    }
+
+    @Test
+    fun `a deleted pack stays away, and a sticker another pack still holds is not counted as deleted`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val (first, second) = pack("Cats").stickers.map { it.id }
+        repository.toggleFavourite(second).getOrThrow()
+
+        repository.deletePack(pack("Cats").id).getOrThrow()
+        val again = importFromWhatsApp(folder)
+
+        assertEquals(listOf("WhatsApp", ""), packs().map { it.name })
+        assertEquals(setOf(first), deletedIds)
+        assertEquals(StickerImportResult(0, 0, 0, emptyList(), alreadyInLibrary = 2, deletedEarlier = 1), again)
+    }
+
+    @Test
+    fun `a sticker removed from its last pack stays away too`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val removed = pack("Cats").stickers.first().id
+
+        repository.removeStickers(pack("Cats").id, listOf(removed)).getOrThrow()
+        importFromWhatsApp(folder)
+
+        assertEquals(1, pack("Cats").stickers.size)
+    }
+
+    @Test
+    fun `the files route still adds what was deleted, and it is deleted no longer`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val all = pack("Cats").stickers.map { it.id }
+        repository.deleteStickers(all).getOrThrow()
+
+        val result = repository.importFrom(folder.take(1)).getOrThrow()
+
+        assertEquals(1, result.imported)
+        assertEquals(all.take(1), pack("Cats").stickers.map { it.id })
+        assertEquals(setOf(all.last()), deletedIds)
+    }
+
+    @Test
+    fun `a made sticker, a saved picture and an added pack are deleted no longer`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val (first, second) = pack("Cats").stickers.map { it.id }
+        val loose = pack("WhatsApp").stickers.single().id
+        repository.deleteStickers(listOf(first, second, loose)).getOrThrow()
+        coEvery { packSource.fetchPack("theirs") } returns remotePack("theirs", stickers = listOf(remoteSticker(loose)))
+        coEvery { maker.render(any(), any()) } returns sticker(1, cats)
+
+        repository.createSticker("/draft/a.png", StickerCrop(), emptyList(), null, "Made").getOrThrow()
+        repository.saveSticker(folder[1]).getOrThrow()
+        repository.installPack(repository.viewPack("theirs").getOrThrow()).getOrThrow()
+
+        assertEquals(emptySet<String>(), deletedIds)
+    }
+
+    @Test
+    fun `a deleted sticker that was a favourite for a while still stays away`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        val deleted = pack("Cats").stickers.first().id
+        repository.deleteStickers(listOf(deleted)).getOrThrow()
+
+        repository.toggleFavourite(deleted).getOrThrow()
+        val whileFavourite = importFromWhatsApp(folder)
+        repository.toggleFavourite(deleted).getOrThrow()
+        val afterwards = importFromWhatsApp(folder)
+
+        assertEquals(listOf(3, 0), listOf(whileFavourite.alreadyInLibrary, whileFavourite.deletedEarlier))
+        assertEquals(listOf(2, 1), listOf(afterwards.alreadyInLibrary, afterwards.deletedEarlier))
+        assertEquals(1, pack("Cats").stickers.size)
+    }
+
+    @Test
+    fun `a pack made by hand forgets only the stickers it holds`() = runTest {
+        importFromWhatsApp(whatsAppFolder())
+        val held = pack("Cats").stickers.first().id
+        val ghost = "e".repeat(64)
+        repository.deleteStickers(listOf(held, ghost)).getOrThrow()
+
+        repository.createPack("Back", listOf(held, ghost)).getOrThrow()
+
+        assertEquals(setOf(ghost), deletedIds)
+    }
+
+    @Test
+    fun `a WhatsApp import discards the file it stored for a deleted sticker that has no row`() = runTest {
+        val bytes = sticker(1, cats)
+        deletedIds += StickerFiles.sha256Hex(bytes)
+
+        val result = importFromWhatsApp(listOf(source("1.webp", bytes)))
+
+        assertEquals(1, result.deletedEarlier)
+        assertEquals(emptyList<String>(), storedFiles())
+        assertEquals(emptyList<StickerPack>(), packs())
+    }
+
+    @Test
+    fun `a WhatsApp import still adds what is new, beside what it leaves out`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+
+        val result = importFromWhatsApp(folder + source("4.webp", sticker(4, cats)))
+
+        assertEquals(1, result.imported)
+        assertEquals(3, result.alreadyInLibrary)
+        assertEquals(3, pack("Cats").stickers.size)
+    }
+
+    // --- Merging and making packs ---
+
+    @Test
+    fun `merged packs become the first one, with the stickers of the others after its own and no repeats`() = runTest {
+        repository.importFrom(
+            listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, dogs)), source("3.webp", sticker(3, dogs))),
+        ).getOrThrow()
+        val cats = pack("Cats")
+        val dogs = pack("Dogs")
+        val cat = cats.stickers.single().id
+        val (firstDog, secondDog) = dogs.stickers.map { it.id }
+        // The first dog is in both packs before the merge.
+        repository.createPack("Temp", listOf(firstDog)).getOrThrow()
+        repository.moveStickers(listOf(firstDog), pack("Temp").id, cats.id).getOrThrow()
+        repository.deletePack(pack("Temp").id).getOrThrow()
+
+        repository.mergePacks(listOf(cats.id, dogs.id), " Animals ").getOrThrow()
+
+        val merged = packs().single()
+        assertEquals(listOf(cats.id, "Animals"), listOf(merged.id, merged.name))
+        assertEquals(listOf(cat, firstDog, secondDog), merged.stickers.map { it.id })
+        assertEquals(StickerSyncState.DELETED.name, db.stickerDao().getPackRow(dogs.id)!!.syncState)
+        assertEquals("nothing left the library", emptySet<String>(), deletedIds)
+    }
+
+    @Test
+    fun `a second WhatsApp import changes nothing in a merged library`() = runTest {
+        val folder = whatsAppFolder()
+        importFromWhatsApp(folder)
+        repository.mergePacks(listOf(pack("WhatsApp").id, pack("Cats").id), "Everything").getOrThrow()
+        val tidied = library()
+
+        importFromWhatsApp(folder)
+
+        assertEquals(tidied, library())
+    }
+
+    @Test
+    fun `a merge is refused for the favourites, the loose stickers, one pack, a pack that is gone and no name`() = runTest {
+        repository.importFrom(
+            listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, dogs)), source("3.webp", sticker(3))),
+        ).getOrThrow()
+        val cats = pack("Cats").id
+        val dogs = pack("Dogs").id
+        val saved = packs().single { it.kind == StickerPackKind.SAVED }.id
+        repository.toggleFavourite(pack("Cats").stickers.single().id).getOrThrow()
+        val favourites = packs().single { it.kind == StickerPackKind.FAVOURITES }.id
+        val before = library()
+
+        assertTrue(repository.mergePacks(listOf(cats, favourites), "All").isFailure)
+        assertTrue(repository.mergePacks(listOf(saved, cats), "All").isFailure)
+        assertTrue(repository.mergePacks(listOf(cats, cats), "All").isFailure)
+        assertTrue(repository.mergePacks(listOf(cats, "no such pack"), "All").isFailure)
+        assertTrue(repository.mergePacks(listOf(cats, dogs), "  ").isFailure)
+
+        assertEquals(before, library())
+    }
+
+    @Test
+    fun `a pack made by hand holds the given stickers, which stay where they were`() = runTest {
+        repository.importFrom(listOf(source("1.webp", sticker(1, cats)), source("2.webp", sticker(2, cats)))).getOrThrow()
+        val (first, second) = pack("Cats").stickers.map { it.id }
+
+        val id = repository.createPack(" Best ", listOf(second, first)).getOrThrow()
+
+        val made = packs().last()
+        assertEquals(listOf(id, "Best", StickerPackKind.USER), listOf(made.id, made.name, made.kind))
+        assertEquals(listOf(second, first), made.stickers.map { it.id })
+        assertNull(db.stickerDao().getPack(id)!!.importKey)
+        assertEquals(2, pack("Cats").stickers.size)
+        assertTrue(repository.createPack("  ", listOf(first)).isFailure)
+        assertTrue(repository.createPack("Ghosts", listOf("e".repeat(64))).isFailure)
+        assertEquals(2, packs().size)
+    }
+
+    @Test
+    fun `a pack's own thumbnail is switched on and off, but not for the loose stickers`() = runTest {
+        importFromWhatsApp(whatsAppFolder())
+        repository.importFrom(listOf(source("4.webp", sticker(4)))).getOrThrow()
+        val cats = pack("Cats").id
+        val saved = packs().single { it.kind == StickerPackKind.SAVED }.id
+
+        repository.setPackShownInRow(cats, true).getOrThrow()
+        assertTrue(pack("Cats").shownInRow)
+        repository.setPackShownInRow(cats, false).getOrThrow()
+        assertFalse(pack("Cats").shownInRow)
+
+        assertTrue(repository.setPackShownInRow(saved, false).isFailure)
+        assertTrue(repository.setPackShownInRow("no such pack", false).isFailure)
+        assertTrue(packs().single { it.kind == StickerPackKind.SAVED }.shownInRow)
     }
 
     // --- A made sticker ---

@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. No step has run.
+Status: approved by the owner on 2026-10-10. Steps 1 to 4 are shipped.
 
 ## Context
 
@@ -184,6 +184,35 @@ skill. User-visible steps get a CHANGELOG entry and a bump through the `changelo
 Done when: the gate is green and a second import with every file selected changes nothing in a
 library that was tidied.
 
+**Approach**
+
+- Order: `StickerPackEntity` / `StickerPack` / `RemoteStickerPack` and the `AppDatabase` bump,
+  then `StickerManifest` and `FirestoreStickerPackSource`, then `StickerDao`,
+  `PreferencesDataStore`, `StickerRepository` + `StickerRepositoryImpl`, and last
+  `StickerLibraryViewModel` and `StickerLabels`.
+- The default of `shownInRow` is one function of the import key
+  (`StickerPackEntity.shownInRowByDefault`). `newPack` and `StickerManifest.packOf` both call it,
+  so a new pack and a restored old manifest cannot disagree.
+- The spec contradicts itself in one place. `deletePack` remembers nothing, so a deleted WhatsApp
+  pack would come back with the next import, and the step's own test says it stays away. A
+  sticker that `deletePack` or `removeStickers` leaves in no pack is therefore remembered like one
+  that `deleteStickers` took out. This changes no §0 decision: it is what *Tidying and import* asks for.
+- The remembered ids are cleared at sign-out, like the recents. They belong to the user who leaves.
+- Tests: the cases the step lists, in `StickerRepositoryImplTest`, `StickerDaoTest`,
+  `StickerManifestTest` and `FirestoreStickerPackSourceTest`, plus the summary line and the
+  `skipKnown` argument in `StickerLibraryViewModelTest`.
+- Skills: `code-review` (tagged), and `simplify` when the diff passes 600 lines, which it will.
+
+**Shipped** `28a3b8e6` (2026-10-10) — tier: strong. skills: simplify, code-review. Reviewer models: simplify: opus, opus, opus, opus; code-review: opus, opus. CHANGELOG entry (`Changed`, under `[UNRELEASED] [1.42.0]`) is in `28a3b8e6`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- `deletePack` and `removeStickers` also remember a sticker they leave in no pack, and take it out of the recents. Without this a deleted WhatsApp pack came back with the next import.
+- `toggleFavourite` does not forget a remembered id. A favourite is skipped by the import anyway while it is one. With the forget, a deleted sticker that was starred and unstarred came back (found by `/code-review`).
+- `createPack` forgets the ids it holds, like the other adds on purpose. It returns the new pack's id.
+- Sign-out clears the remembered ids, with the recents (`PreferencesDataStore.clearStickerLists`). Signing out and in again as the same user therefore loses the list. Recorded in `docs/BACKLOG.md`.
+- `StickerImportResult.duplicates` still counts repeats inside one import. `importSummary` adds it to `alreadyInLibrary` for the one line *already in the library*.
+- A manifest cannot take *Favourites* or *Saved stickers* out of the row: `StickerManifest.packOf` forces `shownInRow` for them.
+- Not done, from `/simplify`: one home for all import-key formats, and a file of its own for the remembered ids. A pack made in the app and named *WhatsApp* shares the key `loose:WhatsApp` (`docs/BACKLOG.md`).
+
 ### Step 2 — One *WhatsApp* thumbnail in the picker, and a way into the manager (UI + state)
 
 - `stickerShelves` (`StickerLibraryTab.kt`) builds the row as: *Recents*, *Favourites*, one
@@ -204,6 +233,33 @@ library that was tidied.
   shape of `ui/chatlist/ChatListItemUiTest.kt` that a pick from a section carries its pack's id.
 - Docs: `FEATURE-MAP.md` (*Emoji / Sticker Picker* and *Stickers & GIFs*), a `docs/BACKLOG.md`
   device checklist, CHANGELOG `Changed`.
+- **(step-1)** `StickerPack.shownInRow` has the default `true`, so `testStickerPack` and every
+  older fixture is a pack in the row. A test of the *WhatsApp* shelf has to pass `false`.
+  `StickerPackKind.isNamed` tells a `USER` or `INSTALLED` pack from *Favourites* and *Saved
+  stickers*, whose `shownInRow` is always true.
+
+**Approach**
+
+- Order: `StickerLibraryTab.kt` (the shelf model, `stickerShelves`, the grid, the manage button),
+  then `ComposerPickerPanel.kt` (`onManageStickers`), `ChatScreen.kt` and `NavGraph.kt`.
+- `StickerShelf` holds `sections`. A section carries the pack id its picks are sent with, so the
+  *WhatsApp* shelf and a plain pack share one pick path. Recents is one section with no pack id.
+- The four-sticker limit counts what a section shows. A sticker that an earlier grouped pack
+  already shows is taken out first, so a title's count always matches its cells.
+- The empty library's *Import stickers* button and the manage button call the same callback.
+  Both open `Routes.STICKERS`.
+- Tests: `StickerShelvesTest` (pure, the five cases the step lists) and three cases in
+  `ComposerPickerPanelTest` (a pick from a titled section, a pick from *More*, the manage button).
+- Nothing in the code contradicts the spec. Skills beyond the floor: none planned. The diff is
+  UI and one pure function, with no ViewModel, worker or DI change.
+
+**Shipped** `e36497fa` (2026-10-10) — tier: mid. skills: none. Reviewer models: none. CHANGELOG entry (`Changed`, under `[UNRELEASED] [1.42.0]`) is in `e36497fa`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- The four-sticker limit counts what a section shows, after a sticker that an earlier grouped pack already shows is taken out. A pack of four that shares one sticker with an earlier pack therefore goes to *More*.
+- The *WhatsApp* thumbnail is a chat-bubble icon (`Icons.AutoMirrored.Outlined.Chat`). The manage button is a gear with the description *Manage stickers*, after the **+**.
+- `ChatScreen`'s parameter `onImportStickersClick` is renamed to `onManageStickersClick`, with the callbacks field. `SettingsScreen` keeps its own `onImportStickersClick`.
+- A *Favourites* or *Saved stickers* pack stays in the row even when its stored `shownInRow` is false. `stickerShelves` checks `kind.isNamed`.
+- The *WhatsApp* shelf's grid has no title of its own, only the section titles. A shelf of small packs alone shows one *More* section.
 
 **‖ Checkpoint.** The owner installs over the current build, lets the library restore, and looks
 at the row with the real collection.
@@ -230,6 +286,47 @@ at the row with the real collection.
 - Tests: `StickerLibraryViewModelTest` (merge, the switch, a selection that loses a pack),
   `StickerLibraryScreenTest` (the two groups, the selection bar).
 - Docs: `FEATURE-MAP.md`, `SPEC.md`, the `docs/BACKLOG.md` checklist, CHANGELOG `Added`.
+- **(step-1)** `setPackShownInRow` and `mergePacks` fail for *Favourites* and *Saved stickers*, and
+  `mergePacks` fails for fewer than two packs. The UI should not offer what fails.
+  `deletePack` now remembers every sticker it leaves in no pack, so the *Delete* question should
+  say that a WhatsApp import will not bring them back.
+- **(step-2)** The picker's manage button already opens `Routes.STICKERS` (`onManageStickers`).
+  `SettingsScreen` and its `NavGraph` call still use the name `onImportStickersClick`. Rename it
+  with the row. The picker follows the switch with no further code: `stickerShelves` reads
+  `shownInRow` from the packs flow.
+
+**Approach**
+
+- Order: `StickerLibraryViewModel.kt` (the tab, the pack selection, merge, delete, the switch, the
+  drop), then `StickerLibraryScreen.kt` (tabs, the **+** menu, the two groups, the drag, the
+  selection bar and its two dialogs), then `SettingsScreen.kt` and `NavGraph.kt` for the row's name.
+- The two groups are two filters over one list in the owner's order. A drag moves a pack inside
+  its group only, and the drop writes the whole order with `reorderPacks`. The switch is the one
+  way between the groups.
+- The ViewModel shows a dropped order at once and takes it back when the write fails. Without
+  that the row jumps back until Room answers.
+- Only a `USER` or `INSTALLED` pack can be selected, since `mergePacks` refuses the other two.
+  *Favourites* and *Saved stickers* keep *Delete* in their row menu.
+- `movePack` and its tests go, with *Move up* and *Move down*.
+- Tests: `StickerLibraryViewModelTest` (merge in the shown order, delete of a selection, the
+  switch, a selection that loses a pack, the drop and a failed drop) and `StickerLibraryScreenTest`
+  (the two groups, the **+** menu, the selection bar, no switch on *Favourites*).
+- Nothing in the code contradicts the spec. Skills beyond the floor: `simplify` if the diff passes
+  600 lines. One ViewModel changes, and no worker, DI or crypto file.
+
+**Shipped** `5b7dfccb` (2026-10-10) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.42.0]`) is in `5b7dfccb`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- Only a `USER` or `INSTALLED` pack can be selected. *Favourites* and *Saved stickers* keep *Delete* in their row menu, and a long press on one opens it like a tap.
+- A drag moves a pack inside its group only. The drop writes the whole order with `reorderPacks`. The ViewModel shows the dropped order at once and takes it back when the write fails.
+- The switch sits in the row's second line, beside the words *Own thumbnail*. With the menu and the handle at the row's end, the switch is in the middle of a narrow row.
+- The row menu keeps *Rename* and *Delete*. The delete question of one pack also says that a WhatsApp import will not bring its stickers back.
+- The three entries of the **+** menu have no second line any more. The file types *From files* takes are no longer named on the screen.
+- *Delete* of a selection calls `deletePack` once per pack and stops at the first failure (`TECH_DEBT.md`).
+- The Settings row's subtitle is new too. `SettingsScreen`'s parameter is `onStickersClick`.
+- `StickerPack.hasOwnThumbnail` is new on the domain model. The picker's `stickerShelves` reads it in place of its own rule (from `/simplify`).
+- `StickerLibraryUiState.selectedPacks` and `canMerge` are derived. The state has no list per group: the screen splits the list it shows.
+- No test drags a row. `StickerLibraryScreenTest` covers the rule a drag follows (`movedWithinGroup`), and the drag itself is on the `docs/BACKLOG.md` checklist.
+- Not done, from `/simplify`: one `deletePacks(ids)` in the repository, and one copy of the dropped order in place of two (`TECH_DEBT.md`).
 
 ### Step 4 — The manager's *All stickers* tab, and a WhatsApp import that shows what is new (UI)
 
@@ -247,6 +344,58 @@ at the row with the real collection.
 - Tests: `StickerLibraryViewModelTest` (a selection across packs, each action, the new-only filter
   and when its mark moves), `StickerLibraryScreenTest`.
 - Docs: `FEATURE-MAP.md`, the `docs/BACKLOG.md` checklist, CHANGELOG `Added`.
+- **(step-1)** `createPack` succeeds with the new pack's id. For *New pack from these*, call it
+  first and `removeStickers` per old pack after it: a sticker is then never in no pack, so it is
+  not remembered as deleted. `removeStickers` remembers a sticker it takes out of its last pack,
+  which makes the existing *Remove* in `PackGrid` a delete from the library for such a sticker.
+  `StickerImportResult` has no count of what was new in the folder. The new-only filter needs
+  its own mark, as this step says.
+- **(step-3)** `StickerLibraryContent` draws the second tab as an empty `Box` with the tag
+  `ALL_STICKERS_TAB_TAG`. Replace it. `StickerLibraryUiState.selectedStickerIds` belongs to the
+  open pack: the packs collector drops every id that is not in `openPack`, and `editSelection`
+  reads `openPackId`. A selection across packs needs its own entries. The top bar's `when` already
+  tells a sticker selection from a pack selection (`selectedPackIds`), and `selectTab` ends a pack
+  selection. `PackNameDialog` asks for a pack's name and serves *New pack from these*. In a
+  Robolectric test the middle of a pack's row is its switch, so tap a row at its start.
+
+**Approach**
+
+- Order: `PreferencesDataStore` and `StickerRepository` + `StickerRepositoryImpl` (the import mark),
+  `StickerSearch` (one test for "tagged with"), then `StickerLibraryViewModel.kt`, a new
+  `AllStickersTab.kt`, `StickerLibraryScreen.kt` and `WhatsAppImportScreen.kt`.
+- One selection serves both grids. `selectedStickers` holds entries of a pack id and a sticker id,
+  and replaces `selectedStickerIds`. In an open pack every entry names that pack. The four actions
+  group the entries by pack, so the pack grid and *All stickers* share one bar and one code path.
+- The pack grid keeps *Remove from pack* beside the four new actions. It is how a star is taken off
+  in *Favourites*.
+- The ViewModel sees `StickerRepository` only, so the mark crosses it:
+  `whatsAppImportedUntil()` and `markWhatsAppImported(lastModified)`. The ViewModel moves it after a
+  WhatsApp import that succeeded, to the newest `lastModified` of the listing. Sign-out clears it
+  with the other sticker lists.
+- The search is a pure function, `allStickerSections(packs, query)`. A pack whose name holds the
+  query shows whole. Any other pack shows its stickers tagged with an emoji the query names.
+- Tests: `StickerLibraryViewModelTest` (a selection across packs, each action, a selection that
+  loses a sticker, the filter, *Show all*, when the mark moves), `AllStickerSectionsTest` (pure),
+  `StickerLibraryScreenTest` (the grid's titles, the bar, the delete question),
+  `WhatsAppImportScreenTest` (the switch), `StickerSearchTest`, `StickerRepositoryImplTest`.
+- Nothing in the code contradicts the spec. Skills beyond the floor: `simplify` when the diff passes
+  600 lines, which it will. One ViewModel changes, and no worker, DI or crypto file.
+
+**Shipped** `0567f9e8` (2026-10-10) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.42.0]`) is in `0567f9e8`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- One selection serves both grids. `StickerLibraryUiState.selectedStickers` holds `StickerEntry` (a pack id and a sticker id) and replaces `selectedStickerIds`.
+- The top bar of a sticker selection shows *Move to pack* and *Delete from library* as icons. *New pack from these* and *Add to favourites* are in a menu beside them, because four icons and the count do not fit a narrow phone.
+- A pack's own grid keeps *Remove from pack*, in that menu. It is how a star is taken off in *Favourites*.
+- A sticker that two packs hold is shown under both titles. A sticker picked in two packs counts once in the delete question.
+- *New pack from these* and *Move to pack* take a sticker out of the pack it was picked in, *Favourites* included. *Favourites* is no move target.
+- *Add to favourites* skips a sticker that has a star, because the repository only has a toggle.
+- The cells are 56 dp at least, not 64. That gives six in a row on a phone 360 dp wide, which both of the owner's phones are.
+- The search finds a pack by the name the screen shows, so *Favourites* and *Saved stickers* are found too. A pack whose name matches shows whole.
+- The mark crosses the repository: `StickerRepository.whatsAppImportedUntil()` and `markWhatsAppImported(lastModified)`. The ViewModel moves it after a WhatsApp import that succeeded. Sign-out clears it with the recents and the deleted ids.
+- An import of some of the new files moves the mark past all of them. The rest are then behind *Show all*.
+- Before the first import there is no *Show all* switch, and every file is shown. Switching *Show all* off takes a file that is hidden again out of the selection.
+- A file whose provider reports no `lastModified` counts as old after the first import.
+- Not done, from `/simplify`: one repository transaction per selection action, an `addFavourites`, and a WhatsApp import that moves its own mark (`TECH_DEBT.md`). The search stays in `ui/stickers` until step 5 replaces it. It runs on every keystroke in composition.
 
 **‖ Checkpoint.** The owner tidies the real library on the phone and imports from WhatsApp again.
 
@@ -276,6 +425,18 @@ at the row with the real collection.
 - Tests: `StickerSearchTest` as a table (prefix, two words, umlauts, `ß`, the ranking, a pack-name
   hit, no repeats), `StickerManifestTest`, `StickerRepositoryImplTest`,
   `StickerCreateViewModelTest`, `StickerLibraryViewModelTest`.
+- **(step-2)** In `StickerLibraryTab` a search is one `StickerSection` with the key `results`,
+  built from `matches`, and a pick reads its pack from `foundIn`. The text search only has to
+  replace what fills `matches`. A sticker must come back once, because the grid's key is its id.
+- **(step-4)** The manager's search is `allStickerSections(packs, query)` in
+  `ui/stickers/AllStickersTab.kt`, with `AllStickerSectionsTest`. It returns sections per pack, and
+  a sticker that two packs hold is in both: the grid's key is the pack id and the sticker id. The
+  text search has to keep that shape there, so move the function into `StickerSearch` beside the
+  picker's. `StickerSearch.taggedWith` is the emoji test both use. The field's placeholder says
+  *Search by emoji or pack*. A selection is `StickerLibraryUiState.selectedStickers`, a set of
+  `StickerEntry`. *Edit* is offered when `selectedStickerCount` is 1, and belongs in
+  `StickerSelectionActions` (`StickerLibraryScreen.kt`), whose questions are `SelectionDialog`.
+  `StickerCell` takes `isSmall` and `tag` for the grid of every sticker.
 - Docs: `SCHEMA-ROOM.md`, `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`, `FEATURE-MAP.md`, CHANGELOG
   `Added`.
 
@@ -313,6 +474,10 @@ at the row with the real collection.
   copies the automatic name and words into `names` and switches automatic naming off for the
   sticker.
 - *All stickers* gets two filters: *No name* and *Named automatically*.
+  **(step-4)** The tab is `AllStickersTab`, and its sections come from one function
+  (`allStickerSections`, wherever step 5 left it). A filter is one more argument there. *Name now*
+  and *Do not name automatically* go into the menu of `StickerSelectionActions`. The ViewModel runs
+  them through `editSelection`, which hands over the sticker ids by pack id.
 - A refused request (`PERMISSION_DENIED`) switches nothing off. The manager says that naming is
   not available.
 - Tests: `StickerNameSyncTest` as a table of who is asked for (each of the six conditions alone),
@@ -384,9 +549,35 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
   1. The library: `StickerRepositoryImpl`, `StickerDao`, `StickerManifest`, `StickerLibrarySync`,
      the pack sources. A second import after every kind of tidying. A merge or a delete that races
      a backup or a restore. A manifest from an older build. A sticker that sits in two packs.
+     **(step-1)** Also: the remembered ids are written to `PreferencesDataStore` outside the
+     `StickerDao` transaction and outside `importLock`, so look at a delete that runs beside an
+     import, and at a process that dies between the two writes. A restore from a second phone
+     can put a remembered sticker back into a pack. Step 1 had no correctness review: its
+     `/code-review` was the standards-and-spec skill.
   2. The picker and the manager: `StickerLibraryTab`, `StickerLibraryScreen`,
      `StickerLibraryViewModel`, `WhatsAppImportScreen`. A selection whose pack or sticker goes
      away. The pack id a pick is sent with. Grid keys. Rotation and process death.
+     **(step-2)** Also: `stickerShelves`, `StickerShelf.packIdOf` and the saved `activeKey` when
+     the *WhatsApp* shelf appears or goes away while the panel is open. A sticker that sits in a
+     grouped pack and in a pack with a thumbnail is on both shelves, and each sends its own pack.
+     Step 2 had no review skill.
+     **(step-3)** Also: the drag in `PackList`. It keeps a local copy of the packs (`shown`) and a
+     `dragged` flag, and one `LaunchedEffect` both sends the drop and takes over new packs.
+     `StickerLibraryViewModel.reorderPacks` sorts the state at once and puts `observedPacks` back
+     when the write fails. Look at a write that fails at once, where the screen may never see the
+     state change, at packs that arrive during a drag, and at a pack whose switch is flipped while
+     another is dragged. `deleteSelected` stops at the first failure with the earlier packs gone.
+     Step 3 had `/simplify` only, and no test drags a row.
+     **(step-4)** Also: a selection's action is several repository calls
+     (`StickerLibraryViewModel.editSelection`, `untilFailure`), and the selection is cleared
+     before they finish. Look at a call that fails in the middle, at `newPackFromSelected` when
+     `createPack` succeeds and a `removeStickers` fails, and at `favouriteSelected`, which reads the
+     favourites from the state and then toggles. A selection stays while a search hides its
+     cells, and an action still takes the hidden ones. The mark of the WhatsApp import moves in
+     `viewModelScope` after `importFrom`: look at a screen left during the import, at an import
+     of a part of the new files, at a file with `lastModified` 0, and at a phone whose clock or
+     whose folder was restored. `WhatsAppImportState.shownFiles` and `setShowAllWhatsApp` decide
+     what an import can take. Step 4 had `/simplify` only.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes

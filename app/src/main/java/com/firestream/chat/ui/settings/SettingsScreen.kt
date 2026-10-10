@@ -117,7 +117,7 @@ fun SettingsScreen(
     onStarredMessagesClick: () -> Unit,
     onScheduledRemindersClick: () -> Unit = {},
     onArchivedChatsClick: () -> Unit = {},
-    onImportStickersClick: () -> Unit = {},
+    onStickersClick: () -> Unit = {},
     onProfileClick: (userId: String) -> Unit,
     onSignedOut: () -> Unit = {},
     focusUpdate: Boolean = false,
@@ -423,9 +423,9 @@ fun SettingsScreen(
 
             SettingsItem(
                 icon = Icons.Default.EmojiEmotions,
-                title = "Import stickers",
-                subtitle = "Bring stickers over from WhatsApp or from files, and manage your packs",
-                onClick = onImportStickersClick
+                title = "Stickers",
+                subtitle = "Manage your packs, make a sticker, or import from WhatsApp or from files",
+                onClick = onStickersClick
             )
 
             SettingsToggleItem(

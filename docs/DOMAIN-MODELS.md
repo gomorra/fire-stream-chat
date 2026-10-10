@@ -176,7 +176,8 @@ data class StickerPack(
     val originPackId: String?,        // the source pack of an INSTALLED one
     val stickers: List<Sticker>,      // in pack order
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val shownInRow: Boolean = true    // own thumbnail in the picker's row; false for a pack a WhatsApp import made
 )
 
 data class StickerPackPreview(        // a pack someone shared, as it is offered for adding
@@ -192,7 +193,9 @@ data class StickerImportResult(
     val imported: Int,                // stickers added to a pack
     val duplicates: Int,              // stickers the target pack already held
     val rejected: Int,                // unreadable, not a sticker, too large; a refused archive counts once
-    val packIds: List<String>         // packs that gained a sticker
+    val packIds: List<String>,        // packs that gained a sticker
+    val alreadyInLibrary: Int = 0,    // skipKnown only: left out because some pack holds the sticker
+    val deletedEarlier: Int = 0       // skipKnown only: left out because it was deleted from the library
 )
 
 data class WhatsAppStickerFile(val uri: String, val name: String, val sizeBytes: Long, val lastModified: Long)

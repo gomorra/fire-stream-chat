@@ -13,6 +13,15 @@ enum class StickerPackKind {
 
     /** The one pack of loose stickers that came with no pack of their own. */
     SAVED,
+    ;
+
+    /**
+     * Whether a pack of this kind is one of the user's named packs. Only those
+     * can be renamed and merged, and can give up their own thumbnail in the
+     * picker's row.
+     */
+    val isNamed: Boolean
+        get() = this == USER || this == INSTALLED
 }
 
 /**
@@ -20,6 +29,10 @@ enum class StickerPackKind {
  *
  * The [FAVOURITES][StickerPackKind.FAVOURITES] and [SAVED][StickerPackKind.SAVED]
  * packs have an empty [name]. A screen labels them by [kind].
+ *
+ * [shownInRow] says the pack has its own thumbnail in the picker's row. It is
+ * false for a pack a WhatsApp import made, until its owner switches it on.
+ * Those two unnamed packs are always in the row.
  */
 data class StickerPack(
     val id: String,
@@ -30,7 +43,16 @@ data class StickerPack(
     val stickers: List<Sticker>,
     val createdAt: Long,
     val updatedAt: Long,
-)
+    val shownInRow: Boolean = true,
+) {
+    /**
+     * Whether the pack has a thumbnail of its own in the picker's row. The two
+     * unnamed packs always have one, whatever their stored [shownInRow] says.
+     * A pack without one shares the *WhatsApp* thumbnail.
+     */
+    val hasOwnThumbnail: Boolean
+        get() = !kind.isNamed || shownInRow
+}
 
 /**
  * A pack someone else may own, as it is offered for adding to the library.
@@ -79,10 +101,17 @@ data class WhatsAppStickerFile(
  * target pack already held. [rejected] counts inputs that were refused: a file
  * that could not be read, is not a sticker or is too large, and an archive that
  * broke a cap counts once. [packIds] are the packs that gained a sticker.
+ *
+ * The last two are counted only by an import that skips what the library
+ * knows. [alreadyInLibrary] counts stickers left out because some pack holds
+ * them. [deletedEarlier] counts stickers left out because they were deleted
+ * from the library.
  */
 data class StickerImportResult(
     val imported: Int,
     val duplicates: Int,
     val rejected: Int,
     val packIds: List<String>,
+    val alreadyInLibrary: Int = 0,
+    val deletedEarlier: Int = 0,
 )

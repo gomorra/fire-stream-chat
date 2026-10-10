@@ -7,11 +7,18 @@
 //   title, else the caller's loose pack or SAVED); the import key that lets a
 //   second import find the same pack, and the one an installed copy is found by;
 //   the import counts; the fetch of a sticker's file when its row came first.
-//   One import runs at a time.
+//   One import runs at a time. Whether a new pack has its own thumbnail in the
+//   picker's row (StickerPackEntity.shownInRowByDefault). What "deleted from the
+//   library" means: a sticker that deleteStickers, deletePack or removeStickers
+//   leaves in no pack is remembered on the device, an import with skipKnown
+//   leaves it out, and an add on purpose forgets it again (an import without
+//   skipKnown, saveSticker, installPack, createSticker, createPack). A favourite
+//   does not: the star can come off again.
 // Collaborators: StickerDao (rows, and every multi-statement write as one
 //   transaction), StickerFiles (the content-addressed files), StickerPackArchive
 //   and WaStickerMetadata (untrusted input), WhatsAppStickerFolder (the folder
-//   listing), PreferencesDataStore (recents, device-only), StickerSyncScheduler
+//   listing), PreferencesDataStore (recents and the ids of deleted stickers,
+//   both device-only), StickerSyncScheduler
 //   (the backup run), StickerLibrarySync (the restore), StickerPackSource and
 //   StickerManifest (a viewed pack), StickerObjectSource and StickerDownloads
 //   (a missing file, found by its id and checked against it), StickerMaker
@@ -43,6 +50,7 @@ import com.firestream.chat.data.sticker.StoredSticker
 import com.firestream.chat.data.sticker.WaStickerMetadata
 import com.firestream.chat.data.sticker.WhatsAppStickerFolder
 import com.firestream.chat.data.sticker.cleanStickerText
+import com.firestream.chat.data.util.parseStickerPackKind
 import com.firestream.chat.data.util.rethrowIfCancellation
 import com.firestream.chat.data.util.resultOf
 import com.firestream.chat.data.worker.StickerSyncScheduler
@@ -132,14 +140,33 @@ class StickerRepositoryImpl @Inject constructor(
     override suspend fun listWhatsAppFolder(treeUri: String): Result<List<WhatsAppStickerFile>> =
         resultOf { whatsAppFolder.list(treeUri) }
 
-    override suspend fun importFrom(uris: List<String>, loosePackName: String?): Result<StickerImportResult> =
-        resultOf {
-            withContext(Dispatchers.IO) {
-                importLock.withLock { import(uris.distinct(), loosePackName?.let(::cleanStickerText)) }
-            }.also { syncScheduler.syncIfPending() }
-        }
+    // Neither throws. Without the mark every file of the folder is shown, which is the screen before the first import.
+    override suspend fun whatsAppImportedUntil(): Long = try {
+        preferences.whatsAppImportedUntil()
+    } catch (e: Exception) {
+        e.rethrowIfCancellation()
+        0L
+    }
 
-    private suspend fun import(uris: List<String>, loosePackName: String?): StickerImportResult {
+    override suspend fun markWhatsAppImported(lastModified: Long) {
+        try {
+            preferences.markWhatsAppImported(lastModified)
+        } catch (e: Exception) {
+            e.rethrowIfCancellation()
+        }
+    }
+
+    override suspend fun importFrom(
+        uris: List<String>,
+        loosePackName: String?,
+        skipKnown: Boolean,
+    ): Result<StickerImportResult> = resultOf {
+        withContext(Dispatchers.IO) {
+            importLock.withLock { import(uris.distinct(), loosePackName?.let(::cleanStickerText), skipKnown) }
+        }.also { syncScheduler.syncIfPending() }
+    }
+
+    private suspend fun import(uris: List<String>, loosePackName: String?, skipKnown: Boolean): StickerImportResult {
         val now = System.currentTimeMillis()
         val found = mutableListOf<Found>()
         var rejected = 0
@@ -160,16 +187,48 @@ class StickerRepositoryImpl @Inject constructor(
             }
         }
 
+        var alreadyInLibrary = 0
+        var deletedEarlier = 0
+        val joining = if (!skipKnown) {
+            found
+        } else {
+            val inLibrary = stickerDao.getStickerIdsInPacks(found.map { it.entity.id }).toSet()
+            val deleted = preferences.deletedStickerIds()
+            val (known, fresh) = found.partition { it.entity.id in inLibrary || it.entity.id in deleted }
+            alreadyInLibrary = known.count { it.entity.id in inLibrary }
+            deletedEarlier = known.size - alreadyInLibrary
+            discardUnused(known)
+            fresh
+        }
+
         var imported = 0
         var duplicates = 0
         val packIds = mutableListOf<String>()
-        found.groupBy { it.target.importKey }.values.forEach { group ->
+        joining.groupBy { it.target.importKey }.values.forEach { group ->
             val (packId, added) = stickerDao.importInto(newPack(group.first().target, now), group.map { it.entity }, now)
             imported += added
             duplicates += group.size - added
             if (added > 0) packIds += packId
         }
-        return StickerImportResult(imported, duplicates, rejected, packIds)
+        // An import that skips nothing is an add on purpose.
+        if (!skipKnown) preferences.forgetDeletedStickers(found.map { it.entity.id })
+        return StickerImportResult(imported, duplicates, rejected, packIds, alreadyInLibrary, deletedEarlier)
+    }
+
+    /**
+     * Deletes the files among [stored] that this import wrote and no row uses.
+     *
+     * Under the row lock: a sticker received meanwhile (StickerDownloads) may have
+     * found one of these files already there. Its row is written under the same
+     * lock, so it is either seen here or the file it stores comes after this delete.
+     */
+    private suspend fun discardUnused(stored: List<Found>) {
+        val fresh = stored.filter { it.isNew }
+        if (fresh.isEmpty()) return
+        stickerFiles.rowLock.withLock {
+            val known = stickerDao.getStickers(fresh.map { it.entity.id }).mapTo(HashSet()) { it.id }
+            fresh.filterNot { it.entity.id in known }.forEach { stickerFiles.discard(it.entity.id, it.format) }
+        }
     }
 
     /**
@@ -192,14 +251,7 @@ class StickerRepositoryImpl @Inject constructor(
                 if (sticker == null) refused++ else stored += found(sticker, loosePackName, now)
             }
         } catch (e: Exception) {
-            val fresh = stored.filter { it.isNew }
-            // Under the row lock: a sticker received meanwhile (StickerDownloads) may have
-            // found one of these files already there. Its row is written under the same
-            // lock, so it is either seen here or the file it stores comes after this delete.
-            stickerFiles.rowLock.withLock {
-                val known = stickerDao.getStickers(fresh.map { it.entity.id }).mapTo(HashSet()) { it.id }
-                fresh.filterNot { it.entity.id in known }.forEach { stickerFiles.discard(it.entity.id, it.format) }
-            }
+            discardUnused(stored)
             throw e
         }
         val archivePack = summary.title?.let { Target.archive(it, summary.author) }
@@ -243,6 +295,7 @@ class StickerRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         val sticker = StickerEntity.of(stored, stored.metadata?.emojis.orEmpty(), now)
         stickerDao.importInto(newPack(Target.SAVED, now), listOf(sticker), now)
+        preferences.forgetDeletedStickers(listOf(stored.id))
         stored.id
     }
 
@@ -250,16 +303,15 @@ class StickerRepositoryImpl @Inject constructor(
         val now = System.currentTimeMillis()
         val isFavourite = stickerDao.toggleFavourite(newPack(Target.FAVOURITES, now), stickerId, now)
             ?: throw NoSuchElementException("That sticker is not in the library")
+        // A favourite of a deleted sticker stays remembered as deleted. The import leaves it alone while a
+        // pack holds it, and taking the star off again must not let the next WhatsApp import bring it back.
         syncScheduler.syncIfPending()
         isFavourite
     }
 
     override suspend fun renamePack(packId: String, name: String): Result<Unit> = resultOf {
-        val cleaned = requireNotNull(cleanStickerText(name)) { "A pack needs a name" }
-        val pack = requirePack(packId)
-        require(pack.kind == StickerPackKind.USER.name || pack.kind == StickerPackKind.INSTALLED.name) {
-            "This pack cannot be renamed"
-        }
+        val cleaned = requirePackName(name)
+        require(requirePack(packId).isNamed) { "This pack cannot be renamed" }
         stickerDao.renamePack(packId, cleaned, System.currentTimeMillis())
         syncScheduler.syncIfPending()
     }
@@ -270,9 +322,39 @@ class StickerRepositoryImpl @Inject constructor(
     }
 
     override suspend fun deletePack(packId: String): Result<Unit> = resultOf {
-        // The tombstone is what tells the backup to delete its copy. Without a backup nothing would collect it.
-        if (packSource.isSupported) stickerDao.deletePack(packId, System.currentTimeMillis()) else stickerDao.deletePackNow(packId)
+        val orphaned = stickerDao.deletePackLocally(packId, keepTombstones, System.currentTimeMillis())
+        preferences.rememberDeletedStickers(orphaned)
         syncScheduler.syncIfPending()
+    }
+
+    /** The tombstone is what tells the backup to delete its copy. Without a backup nothing would collect it. */
+    private val keepTombstones: Boolean get() = packSource.isSupported
+
+    override suspend fun setPackShownInRow(packId: String, shown: Boolean): Result<Unit> = resultOf {
+        require(requirePack(packId).isNamed) { "This pack is always in the row" }
+        stickerDao.setShownInRow(packId, shown, System.currentTimeMillis())
+        syncScheduler.syncIfPending()
+    }
+
+    override suspend fun mergePacks(packIds: List<String>, name: String): Result<Unit> = resultOf {
+        val cleaned = requirePackName(name)
+        val merging = packIds.distinct()
+        require(merging.size >= 2) { "Pick at least two packs to merge" }
+        // A pack's kind never changes, so this holds inside the transaction too.
+        merging.forEach { require(requirePack(it).isNamed) { "This pack cannot be merged" } }
+        if (!stickerDao.mergePacks(merging, cleaned, keepTombstones, System.currentTimeMillis())) {
+            throw NoSuchElementException(PACK_GONE)
+        }
+        syncScheduler.syncIfPending()
+    }
+
+    override suspend fun createPack(name: String, stickerIds: List<String>): Result<String> = resultOf {
+        val pack = newPack(Target.made(requirePackName(name)), System.currentTimeMillis())
+        val held = stickerDao.createPack(pack, stickerIds)
+        if (held.isEmpty()) throw NoSuchElementException("Those stickers are not in the library")
+        preferences.forgetDeletedStickers(held)
+        syncScheduler.syncIfPending()
+        pack.id
     }
 
     override suspend fun moveStickers(stickerIds: List<String>, fromPackId: String, toPackId: String): Result<Unit> =
@@ -285,7 +367,16 @@ class StickerRepositoryImpl @Inject constructor(
         }
 
     override suspend fun removeStickers(packId: String, stickerIds: List<String>): Result<Unit> = resultOf {
-        stickerDao.removeFromPack(packId, stickerIds, System.currentTimeMillis())
+        val orphaned = stickerDao.removeFromPack(packId, stickerIds, System.currentTimeMillis())
+        preferences.rememberDeletedStickers(orphaned)
+        syncScheduler.syncIfPending()
+    }
+
+    override suspend fun deleteStickers(stickerIds: List<String>): Result<Unit> = resultOf {
+        val deleting = stickerIds.filter(StickerFiles::isValidId).distinct()
+        // Remembered first: stopped between the two, the stickers are still there and can be deleted again.
+        preferences.rememberDeletedStickers(deleting)
+        stickerDao.removeFromEveryPack(deleting, System.currentTimeMillis())
         syncScheduler.syncIfPending()
     }
 
@@ -367,7 +458,10 @@ class StickerRepositoryImpl @Inject constructor(
             )
         }
         // False: a copy is there already, which is what the caller wanted.
-        if (stickerDao.installPack(pack, stickers)) syncScheduler.syncIfPending()
+        if (stickerDao.installPack(pack, stickers)) {
+            preferences.forgetDeletedStickers(stickers.map { it.id })
+            syncScheduler.syncIfPending()
+        }
     }
 
     override suspend fun prepareStickerDraft(sourceUri: String): Result<StickerDraft> =
@@ -382,7 +476,7 @@ class StickerRepositoryImpl @Inject constructor(
     ): Result<String> = resultOf {
         // The pack is checked before anything is rendered or stored, so a refusal leaves no file behind.
         val newPackTarget = if (packId == null) {
-            Target.loose(requireNotNull(cleanStickerText(packName)) { "A pack needs a name" })
+            Target.loose(requirePackName(packName))
         } else {
             require(requirePack(packId).kind == StickerPackKind.USER.name) { "Stickers cannot be added to this pack" }
             null
@@ -400,6 +494,7 @@ class StickerRepositoryImpl @Inject constructor(
                 } else if (!stickerDao.addMadeSticker(packId!!, sticker, now)) {
                     throw NoSuchElementException(PACK_GONE)
                 }
+                preferences.forgetDeletedStickers(listOf(stored.id))
                 stored.id
             }
         }.also { syncScheduler.syncIfPending() }
@@ -407,6 +502,12 @@ class StickerRepositoryImpl @Inject constructor(
 
     private suspend fun requirePack(packId: String): StickerPackEntity =
         stickerDao.getPack(packId) ?: throw NoSuchElementException(PACK_GONE)
+
+    /** [name] cleaned like an imported one. Throws for a name that is blank after that. */
+    private fun requirePackName(name: String): String = requireNotNull(cleanStickerText(name)) { "A pack needs a name" }
+
+    /** Whether the pack is one of the user's named packs, and not the favourites or the loose stickers. */
+    private val StickerPackEntity.isNamed: Boolean get() = parseStickerPackKind(kind).isNamed
 
     /** `null` for a row whose id is not a hash, which no import writes and no path may be built from. */
     private fun StickerEntity.toSticker(): Sticker? {
@@ -424,14 +525,16 @@ class StickerRepositoryImpl @Inject constructor(
         sortOrder = 0,
         createdAt = now,
         updatedAt = now,
+        shownInRow = StickerPackEntity.shownInRowByDefault(target.importKey),
     )
 
     /**
      * The pack a sticker is headed for. [importKey] is what finds the pack again,
-     * and it is stored: the formats below must not change once packs exist.
+     * and it is stored: the formats below must not change once packs exist. A
+     * pack made by hand has none, and is never found again.
      */
     private data class Target(
-        val importKey: String,
+        val importKey: String?,
         val kind: StickerPackKind,
         val name: String,
         val publisher: String?,
@@ -447,7 +550,7 @@ class StickerRepositoryImpl @Inject constructor(
              * WhatsApp's own Lottie stickers name a pack by a readable id alone (`SchoolDays`), which then serves as the name.
              */
             fun whatsApp(packId: String?, packName: String?, publisher: String?) = Target(
-                importKey = "wa:" + listOf(packId, packName, publisher).joinToString(SEPARATOR) { it.orEmpty() },
+                importKey = StickerPackEntity.WHATSAPP_KEY_PREFIX + listOf(packId, packName, publisher).joinToString(SEPARATOR) { it.orEmpty() },
                 kind = StickerPackKind.USER,
                 name = packName ?: packId.orEmpty(),
                 publisher = publisher,
@@ -456,7 +559,10 @@ class StickerRepositoryImpl @Inject constructor(
             fun archive(title: String, author: String?) =
                 Target("archive:$title$SEPARATOR${author.orEmpty()}", StickerPackKind.USER, title, author)
 
-            fun loose(name: String) = Target("loose:$name", StickerPackKind.USER, name, null)
+            fun loose(name: String) = Target(StickerPackEntity.LOOSE_KEY_PREFIX + name, StickerPackKind.USER, name, null)
+
+            /** A pack the user makes by hand in the manager. */
+            fun made(name: String) = Target(null, StickerPackKind.USER, name, null)
         }
     }
 

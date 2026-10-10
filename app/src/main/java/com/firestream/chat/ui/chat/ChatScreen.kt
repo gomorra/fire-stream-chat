@@ -241,9 +241,9 @@ fun ChatScreen(
     onGroupSettingsClick: () -> Unit = {},
     onSharedListsClick: () -> Unit = {},
     onListClick: (listId: String) -> Unit = {},
-    // Opens the sticker library screen, from the Stickers tab of an empty library.
-    onImportStickersClick: () -> Unit = {},
-    // Opens the sticker maker, from the + that ends the Stickers tab's pack row.
+    // Opens the sticker library screen, from the manage button of the Stickers tab's pack row.
+    onManageStickersClick: () -> Unit = {},
+    // Opens the sticker maker, from the + in the Stickers tab's pack row.
     onCreateStickerClick: () -> Unit = {},
     fromNotification: Boolean = false,
     // Invoked once when the message list (or the empty state of a fresh chat)
@@ -418,7 +418,7 @@ fun ChatScreen(
             endPickerSearch()
         },
         onToggleStickerFavourite = { viewModel.toggleStickerFavourite(it) },
-        onImportStickers = onImportStickersClick,
+        onManageStickers = onManageStickersClick,
         onCreateSticker = onCreateStickerClick,
     )
 

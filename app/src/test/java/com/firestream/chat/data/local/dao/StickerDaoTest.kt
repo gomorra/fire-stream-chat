@@ -182,6 +182,110 @@ class StickerDaoTest {
         assertEquals(1, dao.getStickers(listOf("a")).size)
     }
 
+    // --- Tidying ---
+
+    @Test
+    fun `a merge keeps the first pack, appends the others in order without repeats, and deletes them`() = runTest {
+        dao.insertPack(pack("first", importKey = "wa:first", sortOrder = 0))
+        dao.insertPack(pack("second", importKey = "wa:second", sortOrder = 1))
+        dao.insertPack(pack("third", kind = "INSTALLED", sortOrder = 2))
+        dao.addToPack("first", listOf("a", "b"), atFront = false, now = 5L)
+        dao.addToPack("second", listOf("c", "a"), atFront = false, now = 5L)
+        dao.addToPack("third", listOf("d", "c"), atFront = false, now = 5L)
+
+        assertEquals(true, dao.mergePacks(listOf("first", "third", "second", "third"), "All", keepTombstones = true, now = 9L))
+
+        assertEquals(listOf("first"), dao.getPackIds())
+        assertEquals(listOf("a", "b", "d", "c"), dao.getStickerIds("first"))
+        val merged = dao.getPack("first")!!
+        assertEquals(listOf("All", "wa:first", StickerSyncState.PENDING.name), listOf(merged.name, merged.importKey, merged.syncState))
+        assertEquals(StickerSyncState.DELETED.name, dao.getPackRow("second")!!.syncState)
+        assertNull("the key of a merged pack is free again", dao.getPackByImportKey("wa:second"))
+    }
+
+    @Test
+    fun `a merge without a backup leaves no tombstone`() = runTest {
+        dao.insertPack(pack("first"))
+        dao.insertPack(pack("second"))
+
+        dao.mergePacks(listOf("first", "second"), "All", keepTombstones = false, now = 9L)
+
+        assertNull(dao.getPackRow("second"))
+    }
+
+    @Test
+    fun `a merge with a pack that is gone changes nothing`() = runTest {
+        dao.insertPack(pack("mine"))
+        dao.insertPack(pack("other"))
+        dao.addToPack("other", listOf("a"), atFront = false, now = 5L)
+
+        assertEquals(false, dao.mergePacks(listOf("mine", "other", "gone"), "All", keepTombstones = true, now = 9L))
+
+        assertEquals(setOf("mine", "other"), dao.getPackIds().toSet())
+        assertEquals("mine", dao.getPack("mine")!!.name)
+        assertEquals(listOf("a"), dao.getStickerIds("other"))
+    }
+
+    @Test
+    fun `a new pack holds the stickers the library knows, in order, after every other pack`() = runTest {
+        dao.insertStickers(listOf(sticker("a"), sticker("b")))
+        dao.insertPack(pack("old", sortOrder = 4))
+
+        assertEquals(listOf("b", "a"), dao.createPack(pack("new"), listOf("b", "ghost", "a", "b")))
+        assertEquals(emptyList<String>(), dao.createPack(pack("empty"), listOf("ghost")))
+
+        assertEquals(listOf("old", "new"), dao.getPackIds())
+        assertEquals(listOf("b", "a"), dao.getStickerIds("new"))
+        assertNull(dao.getPackRow("empty"))
+    }
+
+    @Test
+    fun `stickers are taken out of every pack that holds them, and only those packs are marked`() = runTest {
+        listOf("one", "two", "other").forEach { dao.insertPack(pack(it)) }
+        dao.addToPack("one", listOf("a", "b"), atFront = false, now = 5L)
+        dao.addToPack("two", listOf("b", "c"), atFront = false, now = 5L)
+        dao.addToPack("other", listOf("d"), atFront = false, now = 5L)
+        listOf("one", "two", "other").forEach { dao.markSynced(it, dao.getPack(it)!!.updatedAt) }
+
+        dao.removeFromEveryPack(listOf("b", "c"), now = 9L)
+
+        assertEquals(listOf(listOf("a"), emptyList(), listOf("d")), listOf("one", "two", "other").map { dao.getStickerIds(it) })
+        assertEquals(
+            listOf(StickerSyncState.PENDING.name, StickerSyncState.PENDING.name, StickerSyncState.SYNCED.name),
+            listOf("one", "two", "other").map { syncState(it) },
+        )
+    }
+
+    @Test
+    fun `a removal and a pack delete report the stickers that are left in no pack`() = runTest {
+        dao.insertPack(pack("one"))
+        dao.insertPack(pack("two"))
+        dao.addToPack("one", listOf("a", "b", "c"), atFront = false, now = 5L)
+        dao.addToPack("two", listOf("b"), atFront = false, now = 5L)
+
+        assertEquals(listOf("a"), dao.removeFromPack("one", listOf("a", "b", "stranger"), now = 6L))
+        assertEquals(emptyList<String>(), dao.removeFromPack("one", listOf("stranger"), now = 6L))
+        dao.addToPack("one", listOf("b"), atFront = false, now = 7L)
+        assertEquals(listOf("c"), dao.deletePackLocally("one", keepTombstone = true, now = 8L))
+        assertEquals(listOf("b"), dao.deletePackLocally("two", keepTombstone = false, now = 8L))
+    }
+
+    @Test
+    fun `the row flag marks the pack for sync only when it changes, and never a tombstone`() = runTest {
+        dao.insertPack(pack("p"))
+        dao.insertPack(pack("gone"))
+        dao.deletePack("gone", now = 2L)
+
+        dao.setShownInRow("p", true, now = 9L)
+        assertEquals(StickerSyncState.SYNCED.name, syncState("p"))
+
+        dao.setShownInRow("p", false, now = 9L)
+        dao.setShownInRow("gone", false, now = 9L)
+
+        assertEquals(listOf(false, true), listOf(dao.getPack("p")!!.shownInRow, dao.getPackRow("gone")!!.shownInRow))
+        assertEquals(StickerSyncState.PENDING.name, syncState("p"))
+    }
+
     // --- Tombstones ---
 
     @Test

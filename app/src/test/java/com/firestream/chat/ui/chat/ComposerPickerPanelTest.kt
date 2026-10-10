@@ -72,7 +72,7 @@ class ComposerPickerPanelTest {
                         onRecentEmojiUsed = {},
                         onSticker = { picks += it },
                         onToggleStickerFavourite = { favourites += it },
-                        onImportStickers = { imports++ },
+                        onManageStickers = { imports++ },
                         onCreateSticker = { creates++ },
                     ),
                     modifier = Modifier.height(360.dp),
@@ -147,6 +147,48 @@ class ComposerPickerPanelTest {
 
         assertEquals(
             listOf(PickerSelection.Sticker("dog", null), PickerSelection.Sticker("cat", "animals")),
+            picks,
+        )
+    }
+
+    @Test
+    fun `the manage button at the end of the pack row opens the library`() {
+        setPanel(packs = listOf(pack("animals", StickerPackKind.USER, cat)))
+        openStickers()
+
+        composeTestRule.onNodeWithContentDescription("Manage stickers").performClick()
+
+        assertEquals(1, imports)
+    }
+
+    @Test
+    fun `a pick from the WhatsApp shelf carries the id of the sticker's own pack`() {
+        val big = listOf("a", "b", "c", "d").map { testSticker(it) }.toTypedArray()
+        setPanel(
+            packs = listOf(
+                pack("zoo", StickerPackKind.USER, *big).copy(shownInRow = false),
+                pack("pets", StickerPackKind.USER, cat).copy(shownInRow = false),
+                pack("wild", StickerPackKind.USER, fox).copy(shownInRow = false),
+            ),
+        )
+        openStickers()
+
+        // The three packs share one entry of the row, and none has its own.
+        composeTestRule.onNodeWithContentDescription("WhatsApp").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("zoo").assertDoesNotExist()
+        composeTestRule.onNodeWithText("zoo · 4").assertIsDisplayed()
+        composeTestRule.onNodeWithText("More · 2").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag(stickerCellTag("b")).performClick()
+        composeTestRule.onNodeWithTag(stickerCellTag("fox")).performClick()
+        composeTestRule.onNodeWithTag(stickerCellTag("cat")).performClick()
+
+        assertEquals(
+            listOf(
+                PickerSelection.Sticker("b", "zoo"),
+                PickerSelection.Sticker("fox", "wild"),
+                PickerSelection.Sticker("cat", "pets"),
+            ),
             picks,
         )
     }

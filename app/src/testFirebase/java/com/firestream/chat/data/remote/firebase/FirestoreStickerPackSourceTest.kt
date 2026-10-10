@@ -84,6 +84,16 @@ class FirestoreStickerPackSourceTest {
         assertEquals(pack, stickerPackFromDocument("p1", asRead(written)))
     }
 
+    @Test
+    fun `whether a pack has its own thumbnail is written, and reads as unknown from a document without it`() {
+        val hidden = pack.copy(shownInRow = false)
+
+        assertEquals(false, stickerPackToDocument(hidden)["shownInRow"])
+        assertEquals(hidden, stickerPackFromDocument("p1", asRead(stickerPackToDocument(hidden))))
+        assertNull(stickerPackFromDocument("p1", mapOf("ownerId" to "uid1"))!!.shownInRow)
+        assertNull(stickerPackFromDocument("p1", mapOf("ownerId" to "uid1", "shownInRow" to "yes"))!!.shownInRow)
+    }
+
     // The separator of an import key is U+0000, which a stored string does not carry.
     @Test
     fun `an import key is written without its control characters and read back with them`() {

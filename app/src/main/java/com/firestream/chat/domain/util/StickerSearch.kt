@@ -26,18 +26,26 @@ object StickerSearch {
      * A sticker held by several packs is returned once, for the first of them.
      */
     fun byEmojis(packs: List<StickerPack>, emojis: Collection<String>): List<StickerMatch> {
-        val wanted = emojis.mapTo(HashSet()) { it.normalised() }
-        wanted.remove("")
-        if (wanted.isEmpty()) return emptyList()
+        val isTagged = taggedWith(emojis) ?: return emptyList()
         val seen = HashSet<String>()
         return buildList {
             for (pack in packs) {
                 for (sticker in pack.stickers) {
-                    if (sticker.emojis.none { it.normalised() in wanted }) continue
-                    if (seen.add(sticker.id)) add(StickerMatch(sticker, pack.id))
+                    if (isTagged(sticker) && seen.add(sticker.id)) add(StickerMatch(sticker, pack.id))
                 }
             }
         }
+    }
+
+    /**
+     * A test for "tagged with one of [emojis]", or `null` when [emojis] names
+     * nothing to look for. For a caller that filters each pack by itself.
+     */
+    fun taggedWith(emojis: Collection<String>): ((Sticker) -> Boolean)? {
+        val wanted = emojis.mapTo(HashSet()) { it.normalised() }
+        wanted.remove("")
+        if (wanted.isEmpty()) return null
+        return { sticker -> sticker.emojis.any { it.normalised() in wanted } }
     }
 
     /**

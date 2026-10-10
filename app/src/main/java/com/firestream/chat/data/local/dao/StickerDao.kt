@@ -70,6 +70,13 @@ interface StickerDao {
     )
     suspend fun getPackStickers(packId: String): List<StickerEntity>
 
+    /** The ids of [stickerIds] that some pack holds. A tombstone has no items, so it holds none. */
+    @Query("SELECT DISTINCT stickerId FROM sticker_pack_items WHERE stickerId IN (:stickerIds)")
+    suspend fun getStickerIdsInPacks(stickerIds: List<String>): List<String>
+
+    @Query("SELECT DISTINCT packId FROM sticker_pack_items WHERE stickerId IN (:stickerIds)")
+    suspend fun getPackIdsHolding(stickerIds: List<String>): List<String>
+
     /** The packs whose state the backend does not have: changed packs and tombstones. */
     @Query("SELECT * FROM sticker_packs WHERE syncState != 'SYNCED' ORDER BY sortOrder ASC, createdAt ASC")
     suspend fun getUnsyncedPacks(): List<StickerPackEntity>
@@ -114,10 +121,13 @@ interface StickerDao {
     @Query("DELETE FROM sticker_pack_items WHERE packId = :packId")
     suspend fun deleteItemsOf(packId: String)
 
+    @Query("DELETE FROM sticker_pack_items WHERE stickerId IN (:stickerIds)")
+    suspend fun deleteItemsOfStickers(stickerIds: List<String>)
+
     @Query("DELETE FROM sticker_packs WHERE id = :packId")
     suspend fun deletePackRow(packId: String)
 
-    // The three writes below move `updatedAt` strictly forward, so two changes in
+    // The writes below, up to markDeleted, move `updatedAt` strictly forward, so two changes in
     // one millisecond are still two values. None of them touches a tombstone,
     // which would bring a deleted pack back as a pending one.
 
@@ -138,6 +148,12 @@ interface StickerDao {
             "WHERE id = :packId AND sortOrder != :sortOrder AND syncState != 'DELETED'"
     )
     suspend fun setSortOrder(packId: String, sortOrder: Int, now: Long)
+
+    @Query(
+        "UPDATE sticker_packs SET shownInRow = :shown, updatedAt = MAX(:now, updatedAt + 1), syncState = 'PENDING' " +
+            "WHERE id = :packId AND shownInRow != :shown AND syncState != 'DELETED'"
+    )
+    suspend fun setShownInRow(packId: String, shown: Boolean, now: Long)
 
     /** Turns the row into a tombstone. Its import key is given up, so a new pack can take it. */
     @Query(
@@ -241,9 +257,67 @@ interface StickerDao {
         return true
     }
 
+    /** Returns the stickers it took out that no pack holds afterwards. */
     @Transaction
-    suspend fun removeFromPack(packId: String, stickerIds: List<String>, now: Long) {
-        if (deleteItems(packId, stickerIds) > 0) touchPack(packId, now)
+    suspend fun removeFromPack(packId: String, stickerIds: List<String>, now: Long): List<String> {
+        val held = getStickerIds(packId).toSet()
+        val removing = stickerIds.distinct().filter { it in held }
+        if (removing.isEmpty()) return emptyList()
+        deleteItems(packId, removing)
+        touchPack(packId, now)
+        return inNoPack(removing)
+    }
+
+    /** The ids of [stickerIds] that no pack holds, in the order given. */
+    suspend fun inNoPack(stickerIds: List<String>): List<String> {
+        val held = getStickerIdsInPacks(stickerIds).toSet()
+        return stickerIds.distinct().filterNot { it in held }
+    }
+
+    /** Takes [stickerIds] out of every pack that holds one of them. Their rows in `stickers` stay. */
+    @Transaction
+    suspend fun removeFromEveryPack(stickerIds: List<String>, now: Long) {
+        val packIds = getPackIdsHolding(stickerIds)
+        deleteItemsOfStickers(stickerIds)
+        packIds.forEach { touchPack(it, now) }
+    }
+
+    /**
+     * A new pack holding the stickers of [stickerIds] the library has a row for,
+     * in the given order, after every other pack. Returns the stickers it
+     * holds. When the library has a row for none of them, that is none, and
+     * nothing is written.
+     */
+    @Transaction
+    suspend fun createPack(pack: StickerPackEntity, stickerIds: List<String>): List<String> {
+        val known = getStickers(stickerIds).mapTo(HashSet()) { it.id }
+        val held = stickerIds.distinct().filter { it in known }
+        if (held.isEmpty()) return held
+        // Without an import key, so it is always inserted.
+        getOrCreatePack(pack)
+        insertItems(held.mapIndexed { index, id -> StickerPackItemEntity(pack.id, id, index) })
+        return held
+    }
+
+    /**
+     * Makes one pack of [packIds]. The first keeps its row and takes [name]. The
+     * stickers of the others are appended in the order of [packIds], each once,
+     * and the others are deleted: as tombstones when [keepTombstones], else outright.
+     * Which kinds of pack may be merged is the caller's rule.
+     *
+     * Returns false, and writes nothing, when one of the packs is gone.
+     */
+    @Transaction
+    suspend fun mergePacks(packIds: List<String>, name: String, keepTombstones: Boolean, now: Long): Boolean {
+        val merging = packIds.distinct()
+        if (merging.any { getPack(it) == null }) return false
+        val target = merging.first()
+        renamePack(target, name, now)
+        merging.drop(1).forEach { merged ->
+            addToPack(target, getStickerIds(merged), atFront = false, now = now)
+            if (keepTombstones) deletePack(merged, now) else deletePackNow(merged)
+        }
+        return true
     }
 
     /**
@@ -257,7 +331,8 @@ interface StickerDao {
         val moving = stickerIds.filter { it in held }
         if (moving.isEmpty()) return true
         addToPack(toPackId, moving, atFront = false, now = now)
-        removeFromPack(fromPackId, moving, now)
+        deleteItems(fromPackId, moving)
+        touchPack(fromPackId, now)
         return true
     }
 
@@ -286,7 +361,8 @@ interface StickerDao {
     suspend fun toggleFavourite(candidate: StickerPackEntity, stickerId: String, now: Long): Boolean? {
         val favourites = candidate.importKey?.let { getPackByImportKey(it) }
         if (favourites != null && stickerId in getStickerIds(favourites.id)) {
-            removeFromPack(favourites.id, listOf(stickerId), now)
+            deleteItems(favourites.id, listOf(stickerId))
+            touchPack(favourites.id, now)
             return false
         }
         return if (addFavourite(candidate, stickerId, now)) true else null
@@ -312,6 +388,17 @@ interface StickerDao {
     suspend fun deletePackNow(packId: String) {
         deleteItemsOf(packId)
         deletePackRow(packId)
+    }
+
+    /**
+     * Deletes a pack the user deleted: as a tombstone when [keepTombstone], else
+     * outright. Returns the stickers it held that no pack holds afterwards.
+     */
+    @Transaction
+    suspend fun deletePackLocally(packId: String, keepTombstone: Boolean, now: Long): List<String> {
+        val stickerIds = getStickerIds(packId)
+        if (keepTombstone) deletePack(packId, now) else deletePackNow(packId)
+        return inNoPack(stickerIds)
     }
 
     // --- Sync ---
