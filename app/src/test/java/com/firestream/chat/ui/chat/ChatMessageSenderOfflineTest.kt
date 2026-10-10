@@ -61,6 +61,7 @@ class ChatMessageSenderOfflineTest {
         chatRepository.typingGate = CompletableDeferred()
         val sender = ChatMessageSender("chat-1", chatRepository, messageRepository, emptyStickerRepository(), uiState, backgroundScope)
 
+        sender.onTyping("hello")
         sender.sendMessage("hello")
         runCurrent()
 

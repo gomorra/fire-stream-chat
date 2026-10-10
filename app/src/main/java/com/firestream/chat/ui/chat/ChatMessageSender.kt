@@ -17,6 +17,16 @@ import com.firestream.chat.domain.repository.MessageRepository
 import com.firestream.chat.domain.repository.StickerRepository
 import com.firestream.chat.domain.util.MentionParser
 
+/**
+ * How often a continuous typist re-announces itself. It must stay well under
+ * the reader's ten-second expiry (`TYPING_TTL_MS` in `FirestoreChatSource`),
+ * because the reader compares the writer's clock with its own.
+ */
+internal const val TYPING_REFRESH_MS = 3_000L
+
+/** How long after the last keystroke the typing indicator is withdrawn. */
+internal const val TYPING_IDLE_MS = 4_000L
+
 internal class ChatMessageSender(
     private val chatId: String,
     private val chatRepository: ChatRepository,
@@ -26,25 +36,55 @@ internal class ChatMessageSender(
     private val scope: CoroutineScope
 ) {
 
-    private var typingDebounceJob: Job? = null
+    private var typingIdleJob: Job? = null
 
+    /** Active while the last typing-on write is still fresh. Keystrokes inside it write nothing. */
+    private var typingFreshJob: Job? = null
+
+    /** True between a typing-on write and the typing-off write that ends it. */
+    private var typingAnnounced = false
+
+    /**
+     * Tells the other members that this user is typing.
+     *
+     * A typing write changes the chat document, and every member's chat and
+     * chat-list listener is billed a read for it. A burst of typing therefore
+     * costs one typing-on write per [TYPING_REFRESH_MS] and one typing-off
+     * write when it ends, not one write per keystroke.
+     */
     fun onTyping(text: String) {
-        if (text.isNotBlank()) {
-            scope.launch { chatRepository.setTyping(chatId, true) }
-            typingDebounceJob?.cancel()
-            typingDebounceJob = scope.launch {
-                delay(4_000)
-                chatRepository.setTyping(chatId, false)
-            }
-        } else {
-            typingDebounceJob?.cancel()
-            scope.launch { chatRepository.setTyping(chatId, false) }
+        if (text.isBlank()) {
+            stopTyping()
+            return
         }
+        if (typingFreshJob?.isActive != true) {
+            typingAnnounced = true
+            scope.launch { chatRepository.setTyping(chatId, true) }
+            typingFreshJob = scope.launch { delay(TYPING_REFRESH_MS) }
+        }
+        typingIdleJob?.cancel()
+        typingIdleJob = scope.launch {
+            delay(TYPING_IDLE_MS)
+            typingFreshJob?.cancel()
+            typingAnnounced = false
+            chatRepository.setTyping(chatId, false)
+        }
+    }
+
+    /**
+     * Ends the typing indicator. Writes nothing when no typing-on write is
+     * outstanding. The write runs in [writeScope] and is never awaited by the caller.
+     */
+    private fun stopTyping(writeScope: CoroutineScope = scope) {
+        typingIdleJob?.cancel()
+        typingFreshJob?.cancel()
+        if (!typingAnnounced) return
+        typingAnnounced = false
+        writeScope.launch { chatRepository.setTyping(chatId, false) }
     }
 
     fun sendMessage(content: String, emojiSizes: Map<Int, Float> = emptyMap()) {
         if (content.isBlank()) return
-        typingDebounceJob?.cancel()
         val state = _uiState.value
         // Typing-off is a backend write that is awaited until the server acks;
         // with no (or a bad) connection it does not return for as long as the
@@ -52,7 +92,7 @@ internal class ChatMessageSender(
         // of it: awaiting it here held the message back from the repository, so
         // the bubble never appeared while offline and leaving the screen
         // cancelled the coroutine before the message was ever written to Room.
-        scope.launch { chatRepository.setTyping(chatId, false) }
+        stopTyping()
         scope.launch {
             // Deliberately no `isSending = true` here: it gates the send button
             // (ChatScreen), and a text send is local-first — the optimistic
@@ -249,9 +289,6 @@ internal class ChatMessageSender(
     }
 
     fun onCleared() {
-        typingDebounceJob?.cancel()
-        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            chatRepository.setTyping(chatId, false)
-        }
+        stopTyping(CoroutineScope(SupervisorJob() + Dispatchers.IO))
     }
 }
