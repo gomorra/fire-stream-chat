@@ -1,6 +1,6 @@
 # Sticker manager and sticker names
 
-Status: approved by the owner on 2026-10-10. Steps 1 to 3 are shipped.
+Status: approved by the owner on 2026-10-10. Steps 1 to 4 are shipped.
 
 ## Context
 
@@ -358,6 +358,45 @@ Departures (for sign-off):
   selection. `PackNameDialog` asks for a pack's name and serves *New pack from these*. In a
   Robolectric test the middle of a pack's row is its switch, so tap a row at its start.
 
+**Approach**
+
+- Order: `PreferencesDataStore` and `StickerRepository` + `StickerRepositoryImpl` (the import mark),
+  `StickerSearch` (one test for "tagged with"), then `StickerLibraryViewModel.kt`, a new
+  `AllStickersTab.kt`, `StickerLibraryScreen.kt` and `WhatsAppImportScreen.kt`.
+- One selection serves both grids. `selectedStickers` holds entries of a pack id and a sticker id,
+  and replaces `selectedStickerIds`. In an open pack every entry names that pack. The four actions
+  group the entries by pack, so the pack grid and *All stickers* share one bar and one code path.
+- The pack grid keeps *Remove from pack* beside the four new actions. It is how a star is taken off
+  in *Favourites*.
+- The ViewModel sees `StickerRepository` only, so the mark crosses it:
+  `whatsAppImportedUntil()` and `markWhatsAppImported(lastModified)`. The ViewModel moves it after a
+  WhatsApp import that succeeded, to the newest `lastModified` of the listing. Sign-out clears it
+  with the other sticker lists.
+- The search is a pure function, `allStickerSections(packs, query)`. A pack whose name holds the
+  query shows whole. Any other pack shows its stickers tagged with an emoji the query names.
+- Tests: `StickerLibraryViewModelTest` (a selection across packs, each action, a selection that
+  loses a sticker, the filter, *Show all*, when the mark moves), `AllStickerSectionsTest` (pure),
+  `StickerLibraryScreenTest` (the grid's titles, the bar, the delete question),
+  `WhatsAppImportScreenTest` (the switch), `StickerSearchTest`, `StickerRepositoryImplTest`.
+- Nothing in the code contradicts the spec. Skills beyond the floor: `simplify` when the diff passes
+  600 lines, which it will. One ViewModel changes, and no worker, DI or crypto file.
+
+**Shipped** `0567f9e8` (2026-10-10) — tier: mid. skills: simplify. Reviewer models: simplify: sonnet, sonnet, sonnet, sonnet. CHANGELOG entry (`Added`, under `[UNRELEASED] [1.42.0]`) is in `0567f9e8`, and its hash was added in the `docs(plan):` commit.
+Departures (for sign-off):
+- One selection serves both grids. `StickerLibraryUiState.selectedStickers` holds `StickerEntry` (a pack id and a sticker id) and replaces `selectedStickerIds`.
+- The top bar of a sticker selection shows *Move to pack* and *Delete from library* as icons. *New pack from these* and *Add to favourites* are in a menu beside them, because four icons and the count do not fit a narrow phone.
+- A pack's own grid keeps *Remove from pack*, in that menu. It is how a star is taken off in *Favourites*.
+- A sticker that two packs hold is shown under both titles. A sticker picked in two packs counts once in the delete question.
+- *New pack from these* and *Move to pack* take a sticker out of the pack it was picked in, *Favourites* included. *Favourites* is no move target.
+- *Add to favourites* skips a sticker that has a star, because the repository only has a toggle.
+- The cells are 56 dp at least, not 64. That gives six in a row on a phone 360 dp wide, which both of the owner's phones are.
+- The search finds a pack by the name the screen shows, so *Favourites* and *Saved stickers* are found too. A pack whose name matches shows whole.
+- The mark crosses the repository: `StickerRepository.whatsAppImportedUntil()` and `markWhatsAppImported(lastModified)`. The ViewModel moves it after a WhatsApp import that succeeded. Sign-out clears it with the recents and the deleted ids.
+- An import of some of the new files moves the mark past all of them. The rest are then behind *Show all*.
+- Before the first import there is no *Show all* switch, and every file is shown. Switching *Show all* off takes a file that is hidden again out of the selection.
+- A file whose provider reports no `lastModified` counts as old after the first import.
+- Not done, from `/simplify`: one repository transaction per selection action, an `addFavourites`, and a WhatsApp import that moves its own mark (`TECH_DEBT.md`). The search stays in `ui/stickers` until step 5 replaces it. It runs on every keystroke in composition.
+
 **‖ Checkpoint.** The owner tidies the real library on the phone and imports from WhatsApp again.
 
 ### Step 5 — Names: the fields, the search, and typing them by hand — skills: code-review; model: strong
@@ -389,6 +428,15 @@ Departures (for sign-off):
 - **(step-2)** In `StickerLibraryTab` a search is one `StickerSection` with the key `results`,
   built from `matches`, and a pick reads its pack from `foundIn`. The text search only has to
   replace what fills `matches`. A sticker must come back once, because the grid's key is its id.
+- **(step-4)** The manager's search is `allStickerSections(packs, query)` in
+  `ui/stickers/AllStickersTab.kt`, with `AllStickerSectionsTest`. It returns sections per pack, and
+  a sticker that two packs hold is in both: the grid's key is the pack id and the sticker id. The
+  text search has to keep that shape there, so move the function into `StickerSearch` beside the
+  picker's. `StickerSearch.taggedWith` is the emoji test both use. The field's placeholder says
+  *Search by emoji or pack*. A selection is `StickerLibraryUiState.selectedStickers`, a set of
+  `StickerEntry`. *Edit* is offered when `selectedStickerCount` is 1, and belongs in
+  `StickerSelectionActions` (`StickerLibraryScreen.kt`), whose questions are `SelectionDialog`.
+  `StickerCell` takes `isSmall` and `tag` for the grid of every sticker.
 - Docs: `SCHEMA-ROOM.md`, `SCHEMA-FIRESTORE.md`, `DOMAIN-MODELS.md`, `FEATURE-MAP.md`, CHANGELOG
   `Added`.
 
@@ -426,6 +474,10 @@ Departures (for sign-off):
   copies the automatic name and words into `names` and switches automatic naming off for the
   sticker.
 - *All stickers* gets two filters: *No name* and *Named automatically*.
+  **(step-4)** The tab is `AllStickersTab`, and its sections come from one function
+  (`allStickerSections`, wherever step 5 left it). A filter is one more argument there. *Name now*
+  and *Do not name automatically* go into the menu of `StickerSelectionActions`. The ViewModel runs
+  them through `editSelection`, which hands over the sticker ids by pack id.
 - A refused request (`PERMISSION_DENIED`) switches nothing off. The manager says that naming is
   not available.
 - Tests: `StickerNameSyncTest` as a table of who is asked for (each of the six conditions alone),
@@ -516,6 +568,16 @@ and it looks for no bugs. This step is the correctness review. It adds no featur
      state change, at packs that arrive during a drag, and at a pack whose switch is flipped while
      another is dragged. `deleteSelected` stops at the first failure with the earlier packs gone.
      Step 3 had `/simplify` only, and no test drags a row.
+     **(step-4)** Also: a selection's action is several repository calls
+     (`StickerLibraryViewModel.editSelection`, `untilFailure`), and the selection is cleared
+     before they finish. Look at a call that fails in the middle, at `newPackFromSelected` when
+     `createPack` succeeds and a `removeStickers` fails, and at `favouriteSelected`, which reads the
+     favourites from the state and then toggles. A selection stays while a search hides its
+     cells, and an action still takes the hidden ones. The mark of the WhatsApp import moves in
+     `viewModelScope` after `importFrom`: look at a screen left during the import, at an import
+     of a part of the new files, at a file with `lastModified` 0, and at a phone whose clock or
+     whose folder was restored. `WhatsAppImportState.shownFiles` and `setShowAllWhatsApp` decide
+     what an import can take. Step 4 had `/simplify` only.
   3. Names in the app: `StickerSearch`, `StickerNameSync`, `StickerNameWorker`, the name sources,
      `firestore.rules`. Nothing is asked for while the switch is off. A made sticker, a pack that
      is switched off and a sticker that is switched off are never asked for. No answer changes
